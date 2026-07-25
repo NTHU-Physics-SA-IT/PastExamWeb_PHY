@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from enum import Enum as PyEnum
 from typing import Any, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -18,6 +18,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
+
+from app.utils.passwords import validate_api_password
 
 
 class CourseCategory(str, PyEnum):
@@ -894,9 +896,13 @@ class UserCreate(BaseModel):
     password: str
     is_admin: bool = False
 
+    _validate_password = field_validator("password")(validate_api_password)
+
 
 class UserPasswordResetRequest(BaseModel):
     new_password: str
+
+    _validate_password = field_validator("new_password")(validate_api_password)
 
 
 class UserUpdate(BaseModel):
@@ -904,6 +910,8 @@ class UserUpdate(BaseModel):
     email: Optional[str] = None
     password: Optional[str] = None
     is_admin: Optional[bool] = None
+
+    _validate_password = field_validator("password")(validate_api_password)
 
 
 class UserNicknameUpdate(BaseModel):

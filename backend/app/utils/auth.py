@@ -4,7 +4,6 @@ import redis
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -12,19 +11,23 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.session import get_session
 from app.models.models import User, UserRoles
+from app.utils.passwords import (
+    hash_password,
+    password_hash_needs_update,
+    verify_password_hash,
+)
 
-pwd_context = CryptContext(schemes=["bcrypt_sha256", "bcrypt"], deprecated=["bcrypt"])
 redis_client = redis.from_url(settings.REDIS_URL)
 
 oauth2_scheme = HTTPBearer()
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    return hash_password(password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    return verify_password_hash(plain_password, hashed_password)
 
 
 def blacklist_token(token: str, expire_seconds: int = 7200):
@@ -53,6 +56,9 @@ async def authenticate_user(name: str, password: str, db: AsyncSession) -> User 
         return None
     if not verify_password(password, user.password_hash):
         return None
+
+    if password_hash_needs_update(user.password_hash):
+        user.password_hash = get_password_hash(password)
 
     return user
 
