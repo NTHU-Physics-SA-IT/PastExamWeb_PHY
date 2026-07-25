@@ -5,6 +5,7 @@ import pytest
 from app.core.config import settings
 from app.db import init_db
 from app.models.models import Course, CourseCategory, CourseCategoryConfig, Meme, User
+from app.utils.auth import verify_password
 
 
 class FakeScalarResult:
@@ -147,6 +148,10 @@ async def test_init_db_creates_admin_and_seeds(monkeypatch):
 
     assert fake_session.admin is not None
     assert fake_session.admin.email == settings.DEFAULT_ADMIN_EMAIL
+    assert verify_password(
+        settings.DEFAULT_ADMIN_PASSWORD,
+        fake_session.admin.password_hash,
+    )
     assert len(fake_session.added_courses) == 2
     assert {course.name for course in fake_session.added_courses} == {
         "Seed Course A",

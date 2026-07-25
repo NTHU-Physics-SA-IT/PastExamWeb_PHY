@@ -9,6 +9,10 @@ from app.models.models import User, UserRoles
 from app.utils.auth import get_current_user
 from app.api.services import auth as auth_service
 
+LEGACY_BCRYPT_HASH = (
+    "$2b$04$abcdefghijklmnopqrstuOFeWHo6yW/rrUEe9j8D8ueOhu.9wpWwO"
+)
+
 
 @pytest.mark.asyncio
 async def test_local_login_success(client, make_user):
@@ -35,6 +39,60 @@ async def test_local_login_failure(client):
     )
     assert response.status_code == 401
     assert response.json()["detail"] == "Invalid credentials"
+
+
+@pytest.mark.asyncio
+async def test_local_login_supports_password_longer_than_bcrypt_limit(
+    client,
+    make_user,
+):
+    password = "密" * 25
+    user = await make_user(password=password)
+
+    response = await client.post(
+        "/auth/login",
+        data={"username": user.name, "password": password},
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_local_login_rejects_password_over_server_limit_without_500(
+    client,
+    make_user,
+):
+    user = await make_user()
+
+    response = await client.post(
+        "/auth/login",
+        data={"username": user.name, "password": "a" * 257},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid credentials"
+
+
+@pytest.mark.asyncio
+async def test_local_login_upgrades_legacy_bcrypt_hash(
+    client,
+    make_user,
+    session_maker,
+):
+    user = await make_user(
+        password="LegacyPass123!",
+        password_hash=LEGACY_BCRYPT_HASH,
+    )
+
+    response = await client.post(
+        "/auth/login",
+        data={"username": user.name, "password": user.password},
+    )
+
+    assert response.status_code == 200
+    async with session_maker() as session:
+        upgraded = await session.get(User, user.id)
+        assert upgraded.password_hash.startswith("$bcrypt-sha256$v=2,t=2b,r=12$")
 
 
 @pytest.mark.asyncio

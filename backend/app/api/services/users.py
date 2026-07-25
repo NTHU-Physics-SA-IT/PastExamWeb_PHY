@@ -40,7 +40,6 @@ from app.core.config import settings
 router = APIRouter()
 
 NICKNAME_MAX_LENGTH = 15
-USER_PASSWORD_MIN_LENGTH = 8
 ONLINE_RANGE_CONFIG = {
     "24h": (10, 144),
     "48h": (20, 144),
@@ -471,12 +470,6 @@ async def reset_user_password(
 
     if not new_password:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="新密碼不可為空")
-
-    if len(new_password) < USER_PASSWORD_MIN_LENGTH:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"新密碼長度至少 {USER_PASSWORD_MIN_LENGTH} 字",
-        )
 
     user.password_hash = get_password_hash(new_password)
     await db.commit()
