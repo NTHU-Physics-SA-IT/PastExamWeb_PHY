@@ -1,6 +1,6 @@
 <div align="center">
   <img
-    src="./frontend/public/physics-symbol.jpeg"
+    src="./frontend/public/physics-symbol.png"
     alt="清大物理考古系統標誌"
     width="180"
   />
@@ -127,4 +127,5 @@ docker compose -f docker/docker-compose.dev.yml down
 ## 授權
 
 本專案依 [MIT License](LICENSE) 授權，並保留上游專案的著作權聲明。
+
 目前的更新與維護由清大物理系系學會資訊組持續進行。
