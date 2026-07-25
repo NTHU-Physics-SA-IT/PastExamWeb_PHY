@@ -1,10 +1,12 @@
 import json
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete
 from sqlmodel import select
+from starlette.websockets import WebSocketDisconnect
 
 from app.main import app
 from app.models.models import (
@@ -27,6 +29,19 @@ def _override_user(user_id: int, *, is_admin: bool = False):
         return UserRoles(user_id=user_id, is_admin=is_admin)
 
     return _get_current_user
+
+
+def test_discussion_ws_rejects_unauthenticated_connection(monkeypatch):
+    monkeypatch.setattr("app.main.init_db", AsyncMock())
+
+    with TestClient(app) as ws_client:
+        with pytest.raises(WebSocketDisconnect) as exc_info:
+            with ws_client.websocket_connect(
+                "/courses/1/archives/1/discussion/ws"
+            ) as websocket:
+                websocket.receive_text()
+
+    assert exc_info.value.code == 4401
 
 
 @pytest.mark.asyncio
