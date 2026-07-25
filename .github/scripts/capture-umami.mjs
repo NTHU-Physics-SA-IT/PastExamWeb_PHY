@@ -192,11 +192,7 @@ async function capture(theme, output) {
     const bottom =
       Math.max(kpiBox.y + kpiBox.height, chartBox.y + chartBox.height) +
       bottomPadding;
-    const right =
-      Math.max(kpiBox.x + kpiBox.width, chartBox.x + chartBox.width) + padding;
-    const bottom =
-      Math.max(kpiBox.y + kpiBox.height, chartBox.y + chartBox.height) +
-      padding;
+
     const viewport = page.viewportSize();
     if (!viewport) throw new Error("Browser viewport is unavailable.");
 
