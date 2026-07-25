@@ -21,6 +21,8 @@ if (
 targetUrl.searchParams.set("date", "90day");
 
 const outputDirectory = "dist/umami-assets";
+const deviceScaleFactor = 2;
+
 await mkdir(outputDirectory, { recursive: true });
 
 const browser = await chromium.launch();
@@ -91,7 +93,7 @@ async function findKpiBox(page, chartBox) {
 async function capture(theme, output) {
   const context = await browser.newContext({
     viewport: { width: 1600, height: 1400 },
-    deviceScaleFactor: 2,
+    deviceScaleFactor,
     colorScheme: theme,
   });
 
