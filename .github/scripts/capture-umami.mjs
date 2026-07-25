@@ -213,10 +213,8 @@ async function capture(theme, output) {
       clip,
       type: "png",
     });
-    const missingTopPadding = Math.max(
-      0,
-      (horizontalPadding - topPadding) * deviceScaleFactor,
-    );
+    const missingTopPadding =
+      (horizontalPadding - topPadding) * deviceScaleFactor;
 
     const { data: backgroundPixel, info: backgroundInfo } = await sharp(
       rawScreenshot,
