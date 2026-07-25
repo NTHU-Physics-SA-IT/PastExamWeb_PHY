@@ -177,9 +177,21 @@ async function capture(theme, output) {
       throw new Error("Unable to locate the Umami KPI summary safely.");
     }
 
-    const padding = 16;
-    const x = Math.max(0, Math.min(kpiBox.x, chartBox.x) - padding);
-    const y = Math.max(0, Math.min(kpiBox.y, chartBox.y) - padding);
+    const horizontalPadding = 16;
+    const topPadding = 2;
+    const bottomPadding = 16;
+
+    const x = Math.max(0, Math.min(kpiBox.x, chartBox.x) - horizontalPadding);
+
+    const y = Math.max(0, Math.min(kpiBox.y, chartBox.y) - topPadding);
+
+    const right =
+      Math.max(kpiBox.x + kpiBox.width, chartBox.x + chartBox.width) +
+      horizontalPadding;
+
+    const bottom =
+      Math.max(kpiBox.y + kpiBox.height, chartBox.y + chartBox.height) +
+      bottomPadding;
     const right =
       Math.max(kpiBox.x + kpiBox.width, chartBox.x + chartBox.width) + padding;
     const bottom =
