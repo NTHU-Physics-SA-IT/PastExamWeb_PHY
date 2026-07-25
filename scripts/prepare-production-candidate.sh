@@ -13,8 +13,8 @@ archive="${ARCHIVE_PATH:?Set ARCHIVE_PATH}"
 
 releases_root="${RELEASES_ROOT:-/opt/pastexam-releases}"
 production_config_root="${PRODUCTION_CONFIG_ROOT:-/opt/PastExamWeb_PHY}"
-frontend_repository="${FRONTEND_IMAGE_REPOSITORY:-ghcr.io/pingscientist/pastexam}"
-backend_repository="${BACKEND_IMAGE_REPOSITORY:-ghcr.io/pingscientist/pastexam}"
+frontend_repository="${FRONTEND_IMAGE_REPOSITORY:-ghcr.io/nthu-physics-sa-it/pastexam}"
+backend_repository="${BACKEND_IMAGE_REPOSITORY:-ghcr.io/nthu-physics-sa-it/pastexam}"
 
 if command -v sha256sum >/dev/null 2>&1; then
   checksum_command=(env LC_ALL=C LANG=C sha256sum)

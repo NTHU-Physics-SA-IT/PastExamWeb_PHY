@@ -9,7 +9,7 @@
         <div class="report-section__actions">
           <Button
             as="a"
-            href="https://github.com/PingScientist/PastExamWeb_PHY/issues"
+            href="https://github.com/NTHU-Physics-SA-IT/PastExamWeb_PHY/issues"
             target="_blank"
             rel="noopener noreferrer"
             label="前往專案 Issues"

@@ -4,6 +4,7 @@
 
 .DS_Store
 
+.codex/skills/
 node_modules/
 backup/
 frontend/playwright/.auth

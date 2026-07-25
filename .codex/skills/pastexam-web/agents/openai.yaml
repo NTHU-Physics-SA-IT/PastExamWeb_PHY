@@ -1,4 +1,0 @@
-interface:
-  display_name: "PastExamWeb Full-Stack"
-  short_description: "Efficient, consistent Vue and FastAPI delivery"
-  default_prompt: "Use $pastexam-web to implement this PastExamWeb_PHY change with risk-based validation."

@@ -2,7 +2,7 @@ name: pastexam
 
 services:
   frontend:
-    image: ${FRONTEND_IMAGE:-ghcr.io/pingscientist/pastexam:frontend}
+    image: ${FRONTEND_IMAGE:-ghcr.io/nthu-physics-sa-it/pastexam:frontend}
     container_name: pastexam-frontend
     restart: always
     # ports:
@@ -13,7 +13,7 @@ services:
           - frontend
 
   backend:
-    image: ${BACKEND_IMAGE:-ghcr.io/pingscientist/pastexam:backend}
+    image: ${BACKEND_IMAGE:-ghcr.io/nthu-physics-sa-it/pastexam:backend}
     container_name: pastexam-backend
     restart: always
     depends_on:

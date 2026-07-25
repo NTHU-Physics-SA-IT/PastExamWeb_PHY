@@ -53,6 +53,10 @@
 
 ## Migration Management Commands
 
+Read the repository [migration safety runbook](../docs/migration-safety.md)
+before operating on an existing database. `migrate.py upgrade` performs a
+read-only, fail-closed preflight and never stamps or repairs a ledger.
+
 ```bash
 cd backend
 
@@ -60,7 +64,11 @@ cd backend
 uv run migrate.py create "Your migration message"
 
 # Apply all pending migrations
+uv run migrate.py preflight
 uv run migrate.py upgrade
+
+# Read-only assessment for a non-empty database with a missing ledger
+uv run migrate.py reconcile --check
 
 # Show the current database revision
 uv run migrate.py current

@@ -436,7 +436,7 @@ async def test_system_issue_read_state_is_explicit_global_and_survives_restore(
             report = await session.get(SystemIssueReport, report_id)
             report.github_issue_number = 123
             report.github_issue_url = (
-                "https://github.com/PingScientist/PastExamWeb_PHY/issues/123"
+                "https://github.com/NTHU-Physics-SA-IT/PastExamWeb_PHY/issues/123"
             )
             session.add(report)
             await session.commit()
@@ -789,7 +789,7 @@ async def test_admin_moves_report_records_to_independent_trash_and_restores_them
             system_report = await session.get(SystemIssueReport, system_id)
             system_report.github_issue_number = 321
             system_report.github_issue_url = (
-                "https://github.com/PingScientist/PastExamWeb_PHY/issues/321"
+                "https://github.com/NTHU-Physics-SA-IT/PastExamWeb_PHY/issues/321"
             )
             session.add(system_report)
             await session.commit()

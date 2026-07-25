@@ -50,7 +50,7 @@ REPORT_REASON_LABELS = {
 }
 SYSTEM_ISSUE_TYPES = {"bug", "enhancement", "performance", "ui-ux", "question"}
 GITHUB_ISSUE_URL_PATTERN = re.compile(
-    r"^https://github\.com/PingScientist/PastExamWeb_PHY/issues/(?P<number>[1-9][0-9]*)$"
+    r"^https://github\.com/(?:PingScientist|NTHU-Physics-SA-IT)/PastExamWeb_PHY/issues/(?P<number>[1-9][0-9]*)$"
 )
 
 

@@ -2,12 +2,19 @@ name: Lint
 
 on:
   workflow_call:
+    inputs:
+      run_checks:
+        description: Run the expensive CI jobs
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
 jobs:
   frontend:
+    if: ${{ inputs.run_checks }}
     runs-on: ubuntu-latest
 
     steps:
@@ -34,6 +41,7 @@ jobs:
         working-directory: ./frontend
 
   backend:
+    if: ${{ inputs.run_checks }}
     runs-on: ubuntu-latest
 
     steps:
