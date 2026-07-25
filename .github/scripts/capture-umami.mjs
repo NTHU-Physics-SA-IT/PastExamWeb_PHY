@@ -213,7 +213,35 @@ async function capture(theme, output) {
       clip,
       type: "png",
     });
+    const missingTopPadding = Math.max(
+      0,
+      (horizontalPadding - topPadding) * deviceScaleFactor,
+    );
+
+    const { data: backgroundPixel, info: backgroundInfo } = await sharp(
+      rawScreenshot,
+    )
+      .extract({
+        left: 0,
+        top: 0,
+        width: 1,
+        height: 1,
+      })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const background = {
+      r: backgroundPixel[0],
+      g: backgroundPixel[1],
+      b: backgroundPixel[2],
+      alpha: backgroundInfo.channels === 4 ? backgroundPixel[3] / 255 : 1,
+    };
+
     await sharp(rawScreenshot)
+      .extend({
+        top: missingTopPadding,
+        background,
+      })
       .png({ compressionLevel: 9, adaptiveFiltering: true })
       .toFile(output);
 
