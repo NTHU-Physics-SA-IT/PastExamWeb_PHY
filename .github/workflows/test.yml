@@ -2,12 +2,95 @@ name: Test
 
 on:
   workflow_call:
+    inputs:
+      run_checks:
+        description: Run the expensive CI jobs
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
 jobs:
+  migration-safety:
+    if: ${{ inputs.run_checks }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15.14-alpine3.22
+        env:
+          POSTGRES_USER: migration_test
+          POSTGRES_PASSWORD: migration_test_password
+          POSTGRES_DB: migration_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U migration_test -d migration_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_USER: migration_test
+      DB_PASSWORD: migration_test_password
+      DB_NAME: migration_test
+      SECRET_KEY: migration-test-secret
+      FRONTEND_URL: http://localhost
+      MINIO_ENDPOINT: localhost:9000
+      MINIO_ROOT_USER: test
+      MINIO_ROOT_PASSWORD: test-password
+      MINIO_BUCKET_NAME: test
+      EXTERNAL_ENDPOINT: http://localhost:9000
+      REDIS_URL: redis://localhost:6379/0
+      DEFAULT_ADMIN_NAME: admin
+      DEFAULT_ADMIN_PASSWORD: test-password
+      DEFAULT_ADMIN_EMAIL: admin@example.invalid
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: uv sync --locked
+
+      - name: Create isolated pytest database
+        working-directory: backend
+        run: |
+          uv run python - <<'PY'
+          import os
+
+          import psycopg2
+
+          connection = psycopg2.connect(
+              host=os.environ["DB_HOST"],
+              port=os.environ["DB_PORT"],
+              user=os.environ["DB_USER"],
+              password=os.environ["DB_PASSWORD"],
+              dbname=os.environ["DB_NAME"],
+          )
+          connection.autocommit = True
+          try:
+              with connection.cursor() as cursor:
+                  cursor.execute("CREATE DATABASE test_migration_guard")
+          finally:
+              connection.close()
+          PY
+
+      - name: Run isolated migration safety scenarios
+        working-directory: backend
+        run: |
+          export TEST_DATABASE_URL="postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/test_migration_guard"
+          uv run python -m pytest -q tests/integration/test_migration_safety.py
+
   backend:
+    if: ${{ inputs.run_checks }}
     runs-on: ubuntu-latest
 
     steps:
@@ -18,9 +101,10 @@ jobs:
         run: |
           cp backend/.env.example backend/.env
           cat <<'EOF' >> backend/.env
-          SECRET_KEY=${{ secrets.BACKEND_SECRET_KEY }}
-          OAUTH_CLIENT_ID=${{ secrets.BACKEND_OAUTH_CLIENT_ID }}
-          OAUTH_CLIENT_SECRET=${{ secrets.BACKEND_OAUTH_CLIENT_SECRET }}
+          # CI-only isolated test credentials. Never use these values for deployment.
+          SECRET_KEY=ci-only-secret-key-not-for-production-use
+          OAUTH_CLIENT_ID=ci-test-client
+          OAUTH_CLIENT_SECRET=ci-test-secret
           EOF
 
       - name: Prepare frontend env
@@ -79,7 +163,7 @@ jobs:
         run: |
           docker compose -f docker/docker-compose.dev.yml run --rm \
             -e DB_NAME=test_archive_db \
-            backend uv run alembic upgrade head
+            backend uv run python migrate.py upgrade
 
       - name: Seed database
         run: |
@@ -106,6 +190,7 @@ jobs:
         run: docker compose -f docker/docker-compose.dev.yml down --volumes --remove-orphans
 
   frontend-unit:
+    if: ${{ inputs.run_checks }}
     runs-on: ubuntu-latest
 
     steps:
@@ -140,6 +225,7 @@ jobs:
           if-no-files-found: warn
 
   frontend-e2e:
+    if: ${{ inputs.run_checks }}
     runs-on: ubuntu-latest
     needs: [backend, frontend-unit]
 
@@ -162,21 +248,53 @@ jobs:
         working-directory: ./frontend
         run: pnpm install --frozen-lockfile
 
-      - name: Install Playwright browsers
+      - name: Resolve Playwright Docker image
+        id: playwright-image
         working-directory: ./frontend
-        run: pnpm exec playwright install --with-deps
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(
+            node -p \
+              "require('./node_modules/@playwright/test/package.json').version"
+          )"
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid Playwright version: $version" >&2
+            exit 1
+          fi
+
+          image="mcr.microsoft.com/playwright:v${version}-noble"
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "Using Playwright image: $image"
+
+      - name: Pull Playwright image
+        env:
+          PLAYWRIGHT_IMAGE: ${{ steps.playwright-image.outputs.image }}
+        run: |
+          set -euo pipefail
+          docker pull "$PLAYWRIGHT_IMAGE"
 
       - name: Prepare backend env
         run: |
           cp backend/.env.example backend/.env
           cat <<'EOF' >> backend/.env
-          SECRET_KEY=${{ secrets.BACKEND_SECRET_KEY }}
-          OAUTH_CLIENT_ID=${{ secrets.BACKEND_OAUTH_CLIENT_ID }}
-          OAUTH_CLIENT_SECRET=${{ secrets.BACKEND_OAUTH_CLIENT_SECRET }}
+          # CI-only isolated test credentials. Never use these values for deployment.
+          SECRET_KEY=ci-only-secret-key-not-for-production-use
+          OAUTH_CLIENT_ID=ci-test-client
+          OAUTH_CLIENT_SECRET=ci-test-secret
           EOF
 
       - name: Prepare frontend env
-        run: cp frontend/.env.example frontend/.env
+        run: |
+          cp frontend/.env.example frontend/.env
+          sed -i \
+            "s#^VITE_API_BASE_URL=.*#VITE_API_BASE_URL=http://nginx:8080/api#" \
+            frontend/.env
+          echo "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=nginx" >> frontend/.env
 
       - name: Prepare docker env
         run: cp docker/.env.example docker/.env
@@ -184,10 +302,41 @@ jobs:
       - name: Start application stack
         run: docker compose -f docker/docker-compose.dev.yml up -d
 
+      - name: Proxy Vite HMR through nginx
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          hmr_config="$RUNNER_TEMP/playwright-hmr.conf"
+          printf '%s\n' \
+            'events {}' \
+            'http {' \
+            '  server {' \
+            '    listen 24678;' \
+            '    location / {' \
+            '      proxy_pass http://frontend:24678;' \
+            '      proxy_http_version 1.1;' \
+            '      proxy_set_header Host $host;' \
+            '      proxy_set_header Upgrade $http_upgrade;' \
+            '      proxy_set_header Connection "upgrade";' \
+            '    }' \
+            '  }' \
+            '}' > "$hmr_config"
+
+          docker cp \
+            "$hmr_config" \
+            pastexam-dev-nginx:/tmp/playwright-hmr.conf
+          docker exec \
+            pastexam-dev-nginx \
+            nginx \
+            -c /tmp/playwright-hmr.conf \
+            -g "pid /tmp/playwright-hmr.pid;"
+
       - name: Wait for API readiness
         run: |
           for i in {1..40}; do
-            if curl -fsS http://127.0.0.1:8080/api/statistics > /dev/null; then
+            if curl -fsS http://127.0.0.1:8080/api/statistics > /dev/null &&
+              curl -fsS http://127.0.0.1:8080/ > /dev/null; then
               exit 0
             fi
             sleep 3
@@ -198,10 +347,30 @@ jobs:
           exit 1
 
       - name: Run frontend E2E tests
-        working-directory: ./frontend
         env:
-          PLAYWRIGHT_START_SERVER: "false"
-        run: pnpm exec playwright test
+          PLAYWRIGHT_IMAGE: ${{ steps.playwright-image.outputs.image }}
+        run: |
+          set -euo pipefail
+
+          docker network inspect pastexam-dev-network >/dev/null
+
+          docker run \
+            --rm \
+            --init \
+            --ipc=host \
+            --user "$(id -u):$(id -g)" \
+            --network pastexam-dev-network \
+            -e HOME=/tmp/playwright-home \
+            -e CI=true \
+            -e PLAYWRIGHT_START_SERVER=false \
+            -e PLAYWRIGHT_BASE_URL=http://nginx:8080 \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -w /work/frontend \
+            "$PLAYWRIGHT_IMAGE" \
+            bash -lc '
+              mkdir -p "$HOME"
+              ./node_modules/.bin/playwright test
+            '
 
       - name: Upload Playwright HTML report
         if: always()
