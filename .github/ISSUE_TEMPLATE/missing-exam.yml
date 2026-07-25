@@ -1,37 +1,79 @@
-name: 交大資工考古題系統 考古題缺失回報
-description: 回報新版考古題系統中缺失的考古題
-title: "[考古題缺失] <課程名稱> - <教授>"
+name: 清大物理考古系統 考古題缺失回報
+description: 回報系統中遺漏、無法開啟或資料不正確的物理系考古題
+title: "[考古題缺失] <課程名稱> - <授課教師>"
 labels: ["missing-exam"]
 body:
   - type: markdown
     attributes:
       value: |
-        ## 交大資工考古題系統 考古題缺失回報
+        ## 清大物理考古系統 考古題缺失回報
 
-        近期有同學反映新版考古題系統中部分考古題資料有遺漏或缺失的情況。  
-        若你在新版系統中發現資料遺漏、檔案缺失或與舊版不符的情況，請協助在下方填寫。  
+        若你發現考古題遺漏、檔案無法開啟，或課程、教師、學期與考試類型等資料不正確，請填寫下列資訊。
 
-        我們會在確認後，於此 Issue 回覆對應的 **Google Drive 檔案連結**，  
-        若可行，也請將補件轉為 **PDF** 並上傳至新版考古題系統。  
+        若你持有可補充的題目或解答 PDF，也可登入系統使用投稿功能上傳，並於備註附上投稿資訊。
 
-        一起維護並完善考古題系統，讓學弟妹擁有更完整的學習資源！  
+        > 標題範例：`[考古題缺失] 電磁學(一) - 王小明`
 
-        🔗 [舊版考古題系統資料](https://docs.google.com/spreadsheets/d/1D2ikOt6OPi-Y-Ujscqlcn4mMReSWTHyfp77bOX1H6uI/edit?usp=sharing)
+  - type: input
+    id: course
+    attributes:
+      label: 課程名稱
+      placeholder: 例如：電磁學(一)
+    validations:
+      required: true
 
-        > 標題格式請依照課程名稱及授課教授更改，例如：  
-        > `[考古題缺失] 微積分(一) - 余啟哲`
+  - type: input
+    id: professor
+    attributes:
+      label: 授課教師
+      placeholder: 例如：王小明
+    validations:
+      required: true
+
+  - type: dropdown
+    id: academic_term
+    attributes:
+      label: 學期
+      description: 請選擇資料所屬學期；若不確定可選擇「不確定」並在備註補充。
+      options:
+        - 上學期
+        - 下學期
+        - 不確定
+    validations:
+      required: true
+
+  - type: input
+    id: academic_year
+    attributes:
+      label: 學年度
+      description: 請使用民國學年度。
+      placeholder: 例如：114
+    validations:
+      required: true
+
+  - type: dropdown
+    id: exam_type
+    attributes:
+      label: 考試類型
+      options:
+        - 期中考
+        - 期末考
+        - 小考
+        - 其他或不確定
+    validations:
+      required: true
 
   - type: textarea
-    id: readable_filename
+    id: problem
     attributes:
-      label: 檔名 Readable Filename
-      description: 請依據舊版考古題系統資料中的 `readable_filename` 欄位填寫缺失的檔案名稱。若有多個檔案，請分行列出。
-      placeholder: 例如：2979__微積分(一)__王夏聲__2018__other__Calculus-王夏聲-Autumn2018.zip
+      label: 缺失或錯誤情況
+      description: 請說明缺少的題目或解答、無法開啟的檔案，或需要修正的資料。
+      placeholder: 例如：114 上學期第一次期中考缺少解答 PDF。
     validations:
       required: true
 
   - type: textarea
     id: notes
     attributes:
-      label: 備註 Notes
-      description: 若有補充資訊可在此提供。
+      label: 備註
+      description: 可補充投稿編號、可公開的資料來源或其他協助查找的資訊；請勿填入帳號或敏感資訊。

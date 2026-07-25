@@ -51,8 +51,8 @@ describe('API service wrappers', () => {
     courseService.getAllCourses()
     expect(getMock).toHaveBeenCalledWith('/courses/admin/courses')
 
-    courseService.createCourse({ name: 'Algorithms' })
-    expect(postMock).toHaveBeenCalledWith('/courses/admin/courses', { name: 'Algorithms' })
+    courseService.createCourse({ name: '普通物理' })
+    expect(postMock).toHaveBeenCalledWith('/courses/admin/courses', { name: '普通物理' })
 
     courseService.updateCourse('course-1', { name: 'Updated' })
     expect(putMock).toHaveBeenCalledWith('/courses/admin/courses/course-1', { name: 'Updated' })

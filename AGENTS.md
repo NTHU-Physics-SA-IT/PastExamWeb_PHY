@@ -55,7 +55,9 @@
 - Use a focused Conventional Commit message that describes the user-visible or maintenance outcome.
 - Never push, merge, rebase published history, amend an unrelated commit, or bypass hooks unless the user explicitly requests it.
 
-## Project Skill
+## Optional user-level Skills
 
-- For PastExamWeb_PHY implementation, architecture, UI, API, database, testing, or workflow tasks, use `.codex/skills/pastexam-web/SKILL.md` and load only the reference section relevant to the task.
-- For substantial UI design or review, `.codex/skills/ui-ux-pro-max` may provide local advisory searches. Existing project patterns and the rules above take precedence.
+- Codex may use compatible user-installed Skills for implementation or UI review when available.
+- User-level Skills are advisory and must not override this repository's `AGENTS.md`, established project patterns, or the current user request.
+- Collaborators do not need any private Skill installation to build, test, deploy, or understand the project.
+- Local Codex configuration and Skills are development aids, not application runtime dependencies.

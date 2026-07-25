@@ -1,0 +1,96 @@
+name: Update Umami dashboard screenshots
+
+on:
+  schedule:
+    # 23:30 UTC = 07:30 Asia/Taipei on the following day.
+    - cron: "30 23 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: umami-dashboard-screenshots
+  cancel-in-progress: false
+
+jobs:
+  update:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+
+      - name: Check Umami share URL
+        id: preflight
+        env:
+          UMAMI_SHARE_URL: ${{ secrets.UMAMI_SHARE_URL }}
+        run: node .github/scripts/umami-preflight.mjs
+
+      - name: Cache Playwright
+        if: steps.preflight.outputs.enabled == 'true'
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.npm
+            ~/.cache/ms-playwright
+          key: ${{ runner.os }}-umami-playwright-1.61.1
+
+      - name: Install Playwright
+        if: steps.preflight.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          runner_dir="${RUNNER_TEMP}/umami-capture"
+          mkdir -p "$runner_dir"
+          npm install --prefix "$runner_dir" --no-save --no-package-lock @playwright/test@1.61.1 sharp@0.34.3
+          cp .github/scripts/capture-umami.mjs "$runner_dir/"
+          "$runner_dir/node_modules/.bin/playwright" install --with-deps chromium
+
+      - name: Run screenshot script
+        if: steps.preflight.outputs.enabled == 'true'
+        env:
+          UMAMI_SHARE_URL: ${{ secrets.UMAMI_SHARE_URL }}
+        run: node "${RUNNER_TEMP}/umami-capture/capture-umami.mjs"
+
+      - name: Commit screenshots to analytics-assets
+        if: steps.preflight.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          asset_staging="$(mktemp -d)"
+          cp dist/umami-assets/umami-overview-light.png "$asset_staging/"
+          cp dist/umami-assets/umami-overview-dark.png "$asset_staging/"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --heads origin refs/heads/analytics-assets >/dev/null 2>&1; then
+            git fetch --depth=1 origin analytics-assets
+            git switch --create analytics-assets FETCH_HEAD
+          else
+            git switch --orphan analytics-assets
+            git rm -rf --ignore-unmatch .
+          fi
+
+          cp "$asset_staging/umami-overview-light.png" .
+          cp "$asset_staging/umami-overview-dark.png" .
+          git add -- umami-overview-light.png umami-overview-dark.png
+
+          if git diff --cached --quiet; then
+            echo "Umami screenshots are unchanged; no commit created."
+            exit 0
+          fi
+
+          git commit -m "chore: update Umami dashboard screenshots"
+          git push origin analytics-assets

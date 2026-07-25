@@ -649,7 +649,7 @@ describe('ReportManagementPanel', () => {
     expect(reportManagementSource).toContain('@container report-section (max-width: 25rem)')
     expect(reportManagementSource).toContain('@click="refreshAll"')
     expect(reportManagementSource).toContain(
-      'href="https://github.com/PingScientist/PastExamWeb_PHY/issues"'
+      'href="https://github.com/NTHU-Physics-SA-IT/PastExamWeb_PHY/issues"'
     )
   })
 

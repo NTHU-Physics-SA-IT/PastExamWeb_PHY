@@ -149,184 +149,184 @@ courses:
 memes:
   - content: |-
       #!/bin/bash
-      
-      # Finals Week
+
+      # 實驗報告截止前
       while true; do
-        if [ "$(coffee_level)" -lt 50 ]; then
-          echo "CRITICAL: Coffee low!"
-          make_coffee
+        if [ "$(measurement_count)" -lt 50 ]; then
+          echo "WARNING: 樣本數不足"
+          repeat_experiment
         fi
       done
     language: bash
   - content: |-
-      while (!coffee) {
-        printf("Need more C0FF33\n");
-        productivity--;
-        stress++;
+      while (!normalized) {
+        printf("波函數還沒歸一化\n");
+        integrate_again();
+        uncertainty++;
       }
     language: c
   - content: |-
-      # Python developers be like
-      import solution
-      from stackoverflow import code
-      
-      def actual_work():
-          pass  # TODO: Implement later
+      # 量子力學作業進度
+      from sympy import integrate
+      from notes import boundary_conditions
+
+      def solve_wavefunction():
+          return integrate(boundary_conditions)
     language: python
   - content: |-
       try {
-        life();
+        measure(state);
       } catch (err) {
-        coffee.drink();
-        life.retry();
+        calibrate(apparatus);
+        measure(state);
       }
     language: javascript
   - content: |-
-      /* CSS: The blessing and curse */
-      #submit-button {
-        display: block;
-        margin: 0 auto;
-        position: relative !important;
-        z-index: 999; /* Please work */
+      /* 光譜線：理論值與實驗值 */
+      .theory-line {
+        left: 486.1nm;
+      }
+      .measured-line {
+        left: calc(486.1nm + var(--experimental-error));
       }
     language: css
   - content: |-
-      // 99 bugs in the code
-      // Take one down, patch it around
-      // 127 bugs in the code
+      // 99 sources of uncertainty
+      // Reduce one systematic error
+      // 127 statistical fluctuations remain
     language: javascript
   - content: |-
-      def time_estimate(task):
-          """Estimates completion time"""
-          realistic = calculate_hours(task)
-          return realistic * 3  # Developer's constant
+      def uncertainty(measurements):
+          """估計實驗不確定度"""
+          statistical = standard_error(measurements)
+          return combine(statistical, systematic_error)
     language: python
   - content: |-
-      if (brain.available()) {
-        code.write();
+      if (apparatus.calibrated()) {
+        data.collect();
       } else {
-        coffee.consume();
+        labManual.read();
       }
     language: javascript
   - content: |-
       class Student {
         constructor() {
-          this.sleep = 0;
-          this.stress = 100;
+          this.problemSets = 5;
+          this.boundaryConditions = 0;
         }
       }
     language: javascript
   - content: |-
-      SELECT motivation
-      FROM student
-      WHERE deadline < CURRENT_DATE
-      AND hours_slept > 3
+      SELECT stable_measurement
+      FROM experiment
+      WHERE temperature_variation < 0.1
+      AND sample_count > 3
       -- Returns empty set
     language: sql
   - content: |-
       const examTime = () => {
-        panic();
-        cram();
-        return "Somehow passed";
+        derive();
+        checkUnits();
+        return "答案至少量綱正確";
       };
     language: javascript
   - content: |-
       fn main() {
-          let mut code_quality = 100;
-          let deadline = true;
-      
-          if deadline {
-              println!("Who needs clean code anyway?");
-              code_quality -= 80;
+          let mut significant_figures = 8;
+          let lab_report_due = true;
+
+          if lab_report_due {
+              println!("誤差只能留兩位有效數字");
+              significant_figures = 2;
           }
       }
     language: rust
   - content: |-
       switch (mood) {
-        case "happy":
-          code.works();
+        case "eigenstate":
+          measurement.repeat();
           break;
-        default: // 99% of the time
-          code.breaks();
+        default:
+          wavefunction.collapse();
       }
     language: javascript
   - content: |-
       class MyCat < Pet
         def initialize
-          @helps_coding = false
+          @observed = false
         end
-      
-        def sit_on_keyboard
-          puts "kjasdhIHDIhaoiy87yh" # Commit this
+
+        def open_box
+          @observed = true
+          puts "state collapsed"
         end
       end
     language: ruby
   - content: |-
-      function sleep() {
+      function exactSolution() {
         return new Promise((resolve) => {
-          // Never resolves for CS students
+          // Never resolves for a nonlinear three-body system
         });
       }
     language: javascript
   - content: |-
-      <!-- Types of HTML elements -->
-      <div>What I wanted</div>
+      <!-- 實驗紀錄的三種版本 -->
+      <div>理論預測</div>
       <div style="position:absolute;top:-500px;">
-        What the designer wanted
+        儀器讀值
       </div>
-      <marquee>What the client asked for</marquee>
+      <marquee>報告中的擬合曲線</marquee>
     language: html
   - content: |-
       #include <iostream>
-      
-      void debugCode() {
-        std::cout << "This should work..." << std::endl;
-        std::cout << "WHY doesn't it work?" << std::endl;
-        std::cout << "Oh, semicolon missing" << std::endl;
+
+      void checkDimensions() {
+        std::cout << "左邊單位：焦耳" << std::endl;
+        std::cout << "右邊單位：焦耳" << std::endl;
+        std::cout << "通過量綱檢查" << std::endl;
       }
     language: cpp
   - content: |-
       <?php
-      // The official debugging technique
-      @$result = dangerous_function();
-      echo $result ?? "It broke again!";
-      // Add more @ symbols until it works
+      // 實驗數據的基本檢查
+      $result = fit_spectrum($measurements);
+      echo $result ?? "需要重新校正儀器";
       ?>
     language: php
   - content: |-
-      // Types of errors:
-      // 1. Syntax errors
-      // 2. Logic errors
-      // 3. "It worked on my machine" errors
+      // 實驗誤差來源：
+      // 1. 統計誤差
+      // 2. 系統誤差
+      // 3. 忘記記錄儀器刻度
     language: javascript
   - content: |-
       fun main() {
-          val states = listOf("It works!", "It doesn't work", "WHY doesn't it work??")
-          println("Current: ${states.random()}")
+          val states = listOf("|0>", "|1>")
+          println("Measured: ${states.random()}")
       }
     language: kotlin
   - content: |-
-      // Found in production code:
-      // Dear future me,
-      // I am sorry.
-      // Sincerely, past me.
+      // 寫在實驗紀錄本最後一頁：
+      // 給下週的我，
+      // 記得先校正零點。
+      // 上週的我
     language: javascript
   - content: |-
-      let motivation = new Promise((resolve) => {
+      let exactSolution = new Promise((resolve) => {
         setTimeout(resolve, Infinity);
-        // Pending since 2020
+        // 三體問題持續等待中
       });
     language: javascript
   - content: |-
-      -- SQL: Debugging in production
+      -- 整理重複量測
       BEGIN TRANSACTION;
-      UPDATE users SET admin = TRUE;
-      -- TODO: Add WHERE clause
-      -- ...forgot to add it
+      UPDATE measurements
+      SET corrected_value = raw_value - zero_offset
+      WHERE apparatus_id = 42;
       COMMIT;
     language: sql
   - content: |-
-      function estimateProjectTime(hours) {
-        return hours * 3; // The developer's constant
+      function estimateLabReportTime(hours) {
+        return hours * 3; // 寫圖表與誤差分析總比預期久
       }
     language: javascript

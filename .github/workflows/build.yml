@@ -3,6 +3,11 @@ name: Build Images
 on:
   workflow_call:
     inputs:
+      run_checks:
+        description: Run the expensive CI jobs
+        required: false
+        type: boolean
+        default: true
       push_images:
         description: Push images to GHCR after a successful build
         required: false
@@ -22,6 +27,7 @@ permissions:
 
 jobs:
   frontend:
+    if: ${{ inputs.run_checks }}
     runs-on: ubuntu-latest
     outputs:
       digest: ${{ steps.build.outputs.digest }}
@@ -41,6 +47,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Validate production frontend configuration
+        if: inputs.push_images
+        shell: bash
+        env:
+          FRONTEND_API_BASE_URL: ${{ secrets.FRONTEND_API_BASE_URL }}
+          FRONTEND_SITE_HOSTNAME: ${{ secrets.FRONTEND_SITE_HOSTNAME }}
+        run: |
+          set -euo pipefail
+
+          missing=()
+          for name in \
+            FRONTEND_API_BASE_URL \
+            FRONTEND_SITE_HOSTNAME
+          do
+            if [ -z "${!name:-}" ]; then
+              missing+=("$name")
+            fi
+          done
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            printf 'Missing required Secret: %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+
       - name: Build Frontend Docker image
         id: build
         uses: docker/build-push-action@v7
@@ -50,8 +80,8 @@ jobs:
           push: ${{ inputs.push_images }}
           platforms: linux/amd64
           tags: |
-            ghcr.io/pingscientist/pastexam:frontend
-            ghcr.io/pingscientist/pastexam:frontend-${{ github.sha }}
+            ghcr.io/nthu-physics-sa-it/pastexam:frontend
+            ghcr.io/nthu-physics-sa-it/pastexam:frontend-${{ github.sha }}
           build-args: |
             VITE_API_BASE_URL=${{ secrets.FRONTEND_API_BASE_URL }}
             VITE_SITE_HOSTNAME=${{ secrets.FRONTEND_SITE_HOSTNAME }}
@@ -61,6 +91,7 @@ jobs:
           cache-to: type=gha,scope=frontend,mode=max
 
   backend:
+    if: ${{ inputs.run_checks }}
     runs-on: ubuntu-latest
     outputs:
       digest: ${{ steps.build.outputs.digest }}
@@ -89,7 +120,7 @@ jobs:
           push: ${{ inputs.push_images }}
           platforms: linux/amd64
           tags: |
-            ghcr.io/pingscientist/pastexam:backend
-            ghcr.io/pingscientist/pastexam:backend-${{ github.sha }}
+            ghcr.io/nthu-physics-sa-it/pastexam:backend
+            ghcr.io/nthu-physics-sa-it/pastexam:backend-${{ github.sha }}
           cache-from: type=gha,scope=backend
           cache-to: type=gha,scope=backend,mode=max
