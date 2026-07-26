@@ -181,6 +181,10 @@ async def run_cleanup(
     confirmed_database_name: str | None = None,
     confirmed_bucket_name: str | None = None,
 ) -> dict[str, Any]:
+    if apply and settings.RECOVERY_REVIEW_MODE:
+        raise RuntimeError(
+            "Recovery Review is read-only; MinIO cleanup is disabled"
+        )
     if apply:
         if confirmed_database_name != settings.DB_NAME:
             raise RuntimeError(

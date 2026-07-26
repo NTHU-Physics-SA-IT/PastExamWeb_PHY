@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     DEFAULT_ADMIN_PASSWORD: str
     DEFAULT_ADMIN_EMAIL: str
     ALLOW_DATABASE_BOOTSTRAP: bool = False
+    RECOVERY_REVIEW_MODE: bool = False
+    RECOVERY_REVIEW_ADMIN_NAME: str = ""
 
     class Config:
         env_file = ".env"

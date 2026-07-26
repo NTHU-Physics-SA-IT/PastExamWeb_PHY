@@ -14,7 +14,10 @@ def get_minio_client() -> Minio:
             secret_key=settings.MINIO_ROOT_PASSWORD,
             secure=False,
         )
-        if not _minio_client.bucket_exists(settings.MINIO_BUCKET_NAME):
+        if (
+            not settings.RECOVERY_REVIEW_MODE
+            and not _minio_client.bucket_exists(settings.MINIO_BUCKET_NAME)
+        ):
             _minio_client.make_bucket(settings.MINIO_BUCKET_NAME)
     return _minio_client
 
