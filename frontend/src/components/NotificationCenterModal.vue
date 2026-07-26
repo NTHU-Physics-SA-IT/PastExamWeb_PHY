@@ -92,7 +92,7 @@
           <TabPanel value="personal">
             <div class="personal-toolbar">
               <span class="text-sm text-500">{{ counts.personal_notifications }} 則未讀</span>
-              <div class="personal-toolbar__actions">
+              <div v-if="!readOnly" class="personal-toolbar__actions">
                 <Button
                   label="全部標記為已讀"
                   icon="pi pi-check-circle"
@@ -159,6 +159,7 @@
                           @click="openPersonal(item)"
                         />
                         <Button
+                          v-if="!readOnly"
                           icon="pi pi-trash"
                           severity="danger"
                           size="small"
@@ -223,6 +224,7 @@ const props = defineProps({
   deletingAllPersonal: Boolean,
   focusType: { type: String, default: null },
   focusId: { type: Number, default: null },
+  readOnly: Boolean,
 })
 const emit = defineEmits([
   'update:visible',
@@ -275,10 +277,10 @@ function openAnnouncement(item) {
   selectedType.value = 'announcement'
   selectedItem.value = item
   detailVisible.value = true
-  if (!item.is_read) emit('mark-announcement-read', item.id)
+  if (!props.readOnly && !item.is_read) emit('mark-announcement-read', item.id)
 }
 function openPersonal(item) {
-  if (!item.read_at) emit('mark-personal-read', item.id)
+  if (!props.readOnly && !item.read_at) emit('mark-personal-read', item.id)
   if (
     item.source_available &&
     ['archive_discussion_thread', 'archive_submission'].includes(item.source_type)

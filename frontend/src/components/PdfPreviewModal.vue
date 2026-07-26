@@ -65,8 +65,10 @@
             class="flex-1 flex flex-column align-items-center justify-content-center gap-4"
           >
             <i class="pi pi-exclamation-circle text-6xl text-red-500" />
-            <div class="text-xl">無法載入預覽</div>
-            <div class="text-sm text-gray-600">請嘗試下載檔案查看</div>
+            <div class="text-xl">{{ errorMessage }}</div>
+            <div v-if="errorMessage === '無法載入預覽'" class="text-sm text-gray-600">
+              請嘗試下載檔案查看
+            </div>
           </div>
 
           <div v-else-if="currentPdf && renderPdf" class="flex-1 pdf-container">
@@ -224,6 +226,10 @@ const props = defineProps({
   error: {
     type: Boolean,
     default: false,
+  },
+  errorMessage: {
+    type: String,
+    default: '無法載入預覽',
   },
   showDownload: {
     type: Boolean,

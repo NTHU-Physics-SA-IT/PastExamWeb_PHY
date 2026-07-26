@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
+from minio.error import S3Error
 from sqlalchemy import BigInteger, and_, cast, func, or_, text
 from sqlalchemy.orm import aliased
 from sqlmodel import select
@@ -894,11 +895,24 @@ async def get_archive_submission_preview_file(
         data = response.read()
         response.close()
         response.release_conn()
+    except S3Error as exc:
+        if exc.code in {"NoSuchKey", "NoSuchObject", "NoSuchBucket"}:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": "archive_file_missing",
+                    "message": "此筆恢復資料的 PDF 檔案缺失，無法預覽或下載。",
+                },
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to load submission preview file from object storage",
+        ) from exc
     except Exception as exc:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to load submission preview file: {exc}",
-        )
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to load submission preview file from object storage",
+        ) from exc
 
     return StreamingResponse(
         iter([data]),

@@ -162,6 +162,28 @@ describe('PdfPreviewModal', () => {
     wrapper.unmount()
   })
 
+  it('顯示明確的舊檔案缺失訊息', async () => {
+    const wrapper = mount(PdfPreviewModal, {
+      props: {
+        visible: true,
+        previewUrl: '',
+        error: true,
+        errorMessage: '檔案缺失：Recovery Review 找不到這份舊檔案。',
+      },
+      global: {
+        stubs: {
+          Dialog: stubComponent,
+          ProgressSpinner: stubComponent,
+          Button: stubComponent,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('檔案缺失')
+    expect(wrapper.text()).toContain('Recovery Review')
+    wrapper.unmount()
+  })
+
   it('renders discussion panel when enabled and ids present', async () => {
     const wrapper = mount(PdfPreviewModal, {
       props: {

@@ -6,7 +6,7 @@
     >
       <div class="font-semibold">討論區</div>
       <Button
-        v-if="showSettings"
+        v-if="showSettings && !isRecoveryReview"
         icon="pi pi-cog"
         severity="secondary"
         text
@@ -43,6 +43,7 @@
           :report-reason="reportReason"
           :report-custom-message="reportCustomMessage"
           :report-loading="reportSubmitting"
+          :read-only="isRecoveryReview"
           @reply="startReply"
           @like="toggleLike"
           @pin="togglePin"
@@ -90,6 +91,7 @@
             :report-reason="reportReason"
             :report-custom-message="reportCustomMessage"
             :report-loading="reportSubmitting"
+            :read-only="isRecoveryReview"
             @reply="startReply"
             @like="toggleLike"
             @report="toggleReport"
@@ -103,7 +105,7 @@
         </div>
 
         <form
-          v-if="replyTarget?.rootId === message.id"
+          v-if="replyTarget?.rootId === message.id && !isRecoveryReview"
           class="discussion-reply-editor"
           @submit.prevent="sendReply"
         >
@@ -148,7 +150,10 @@
       </section>
     </div>
 
-    <form class="discussion-footer" @submit.prevent="sendMessage">
+    <div v-if="isRecoveryReview" class="discussion-read-only-note">
+      Recovery Review 僅供檢視，無法新增、回覆或變更留言。
+    </div>
+    <form v-else class="discussion-footer" @submit.prevent="sendMessage">
       <div class="discussion-composer">
         <Textarea
           name="discussion-message"
@@ -259,6 +264,7 @@ import { getBooleanPreference, setBooleanPreference } from '../utils/usePreferen
 import { STORAGE_KEYS } from '../utils/storage'
 import { loadContributorLevelSettings } from '../utils/submissionLevel'
 import DiscussionMessageCard from './DiscussionMessageCard.vue'
+import { isRecoveryReview } from '../utils/environment'
 
 const DESKTOP_DEFAULT_OPEN_KEY = STORAGE_KEYS.local.DISCUSSION_DESKTOP_DEFAULT_OPEN
 const MESSAGE_MAX_LENGTH = 200
@@ -296,8 +302,10 @@ const likeLoadingById = ref({})
 const deleteLoadingById = ref({})
 const reconnectAttempts = ref(0)
 const currentUser = computed(() => getCurrentUser())
-const canSend = computed(() => props.enabled && connected.value && Boolean(currentUser.value))
-const canPin = computed(() => Boolean(currentUser.value?.is_admin))
+const canSend = computed(
+  () => !isRecoveryReview && props.enabled && connected.value && Boolean(currentUser.value)
+)
+const canPin = computed(() => !isRecoveryReview && Boolean(currentUser.value?.is_admin))
 const messagesRef = ref(null)
 
 const profile = ref({ nickname: '', name: '', showLevelTitle: true })
@@ -878,6 +886,16 @@ onBeforeUnmount(closeSocket)
 </script>
 
 <style scoped>
+.discussion-read-only-note {
+  flex: 0 0 auto;
+  padding: 0.75rem;
+  border-top: 1px solid var(--border-color);
+  background: color-mix(in srgb, #f7c948 12%, var(--bg-secondary));
+  color: var(--text-secondary);
+  font-size: var(--app-font-size-sm);
+  text-align: center;
+}
+
 .discussion-panel {
   container-type: inline-size;
   display: flex;

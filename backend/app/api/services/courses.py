@@ -13,6 +13,7 @@ from fastapi import (
 )
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
+from minio.error import S3Error
 from sqlalchemy import and_, delete, exists, func, or_, update as sql_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
@@ -81,6 +82,10 @@ router = APIRouter()
 # In-memory connection registry (single-process broadcast).
 _discussion_connections_by_archive: dict[int, set[WebSocket]] = {}
 DISCUSSION_MESSAGE_MAX_LENGTH = 200
+ARCHIVE_FILE_MISSING_DETAIL = {
+    "code": "archive_file_missing",
+    "message": "此筆恢復資料的 PDF 檔案缺失，無法預覽或下載。",
+}
 DEFAULT_CATEGORIES = [
     (category.key, category.name, category.label, category.icon)
     for category in CANONICAL_COURSE_CATEGORIES
@@ -703,6 +708,19 @@ async def get_archive_preview_url(
             status_code=status.HTTP_404_NOT_FOUND, detail="Archive not found"
         )
 
+    try:
+        get_minio_client().stat_object(
+            settings.MINIO_BUCKET_NAME,
+            archive.object_name,
+        )
+    except S3Error as exc:
+        if exc.code in {"NoSuchKey", "NoSuchObject", "NoSuchBucket"}:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ARCHIVE_FILE_MISSING_DETAIL,
+            ) from exc
+        raise
+
     return {
         "url": presigned_get_url(archive.object_name, expires=timedelta(minutes=30))
     }
@@ -738,11 +756,21 @@ async def get_archive_preview_file(
         data = response.read()
         response.close()
         response.release_conn()
+    except S3Error as exc:
+        if exc.code in {"NoSuchKey", "NoSuchObject", "NoSuchBucket"}:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ARCHIVE_FILE_MISSING_DETAIL,
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to load preview file from object storage",
+        ) from exc
     except Exception as exc:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to load preview file: {exc}",
-        )
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to load preview file from object storage",
+        ) from exc
 
     return StreamingResponse(
         iter([data]),
@@ -776,9 +804,23 @@ async def get_archive_download_url(
             status_code=status.HTTP_404_NOT_FOUND, detail="Archive not found"
         )
 
-    archive.download_count += 1
-    await db.commit()
-    await db.refresh(archive)
+    try:
+        get_minio_client().stat_object(
+            settings.MINIO_BUCKET_NAME,
+            archive.object_name,
+        )
+    except S3Error as exc:
+        if exc.code in {"NoSuchKey", "NoSuchObject", "NoSuchBucket"}:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ARCHIVE_FILE_MISSING_DETAIL,
+            ) from exc
+        raise
+
+    if not settings.RECOVERY_REVIEW_MODE:
+        archive.download_count += 1
+        await db.commit()
+        await db.refresh(archive)
 
     return {"url": presigned_get_url(archive.object_name, expires=timedelta(hours=1))}
 
@@ -1074,6 +1116,15 @@ async def archive_discussion_ws(
 
             msg_type = str(data.get("type") or "").strip().lower()
             if msg_type != "send":
+                continue
+            if settings.RECOVERY_REVIEW_MODE:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": "recovery_review_read_only",
+                        "detail": "Recovery Review 是唯讀環境，不能新增留言。",
+                    }
+                )
                 continue
 
             raw_content = str(data.get("content") or "")

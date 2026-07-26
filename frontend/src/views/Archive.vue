@@ -59,7 +59,7 @@
           </div>
 
           <!-- Fixed upload section for desktop -->
-          <div v-if="isAuthenticatedRef" class="upload-section p-3">
+          <div v-if="isAuthenticatedRef && !isRecoveryReview" class="upload-section p-3">
             <div class="upload-actions">
               <Button
                 icon="pi pi-cloud-upload"
@@ -154,7 +154,10 @@
             <PanelMenu v-else :model="mobileMenuItems" multiple class="w-full" />
           </div>
 
-          <div v-if="isAuthenticatedRef" class="upload-section mobile-upload-section">
+          <div
+            v-if="isAuthenticatedRef && !isRecoveryReview"
+            class="upload-section mobile-upload-section"
+          >
             <div class="upload-actions">
               <Button
                 icon="pi pi-cloud-upload"
@@ -320,7 +323,7 @@
                                 class="archive-action-download"
                               />
                               <Button
-                                v-if="canEditArchive(data)"
+                                v-if="canEditArchive(data) && !isRecoveryReview"
                                 icon="pi pi-pencil"
                                 @click="openEditDialog(data)"
                                 size="small"
@@ -332,7 +335,7 @@
                                 class="archive-action-edit"
                               />
                               <Button
-                                v-if="canDeleteArchive(data)"
+                                v-if="canDeleteArchive(data) && !isRecoveryReview"
                                 icon="pi pi-trash"
                                 @click="confirmDelete(data)"
                                 size="small"
@@ -388,12 +391,14 @@
             :professorName="selectedArchive?.professor || ''"
             :loading="previewLoading"
             :error="previewError"
+            :errorMessage="previewErrorMessage"
             @hide="closePreview"
             @error="handlePreviewError"
             @download="handlePreviewDownload"
           />
 
           <UploadArchiveDialog
+            v-if="!isRecoveryReview"
             v-model="showUploadDialog"
             :coursesList="coursesList"
             :courseCategories="courseCategories"
@@ -764,6 +769,7 @@ import { useTheme } from '../utils/useTheme'
 import { trackEvent, EVENTS } from '../utils/analytics'
 import { isUnauthorizedError } from '../utils/http'
 import { formatCourseDisplayName, normalizeCourseSearchText } from '../utils/courseText'
+import { isRecoveryReview } from '../utils/environment'
 import {
   getContributorLevelPalette,
   loadContributorLevelSettings,
@@ -1606,7 +1612,7 @@ async function downloadArchive(archive) {
     toast.add({
       severity: 'error',
       summary: '下載失敗',
-      detail: '無法取得下載連結',
+      detail: error.response?.status === 404 ? '此筆恢復資料的 PDF 檔案缺失' : '無法取得下載連結',
       life: 3000,
     })
   } finally {
@@ -1616,11 +1622,13 @@ async function downloadArchive(archive) {
 
 const previewLoading = ref(false)
 const previewError = ref(false)
+const previewErrorMessage = ref('無法載入預覽')
 
 async function previewArchive(archive) {
   try {
     previewLoading.value = true
     previewError.value = false
+    previewErrorMessage.value = '無法載入預覽'
     showPreview.value = true
 
     const { data } = await archiveService.getArchivePreviewFile(selectedCourse.value, archive.id)
@@ -1641,13 +1649,15 @@ async function previewArchive(archive) {
   } catch (error) {
     console.error('Preview error:', error)
     previewError.value = true
+    const isMissingFile = error.response?.status === 404
+    previewErrorMessage.value = isMissingFile ? '檔案缺失' : '無法載入預覽'
     if (isUnauthorizedError(error)) {
       return
     }
     toast.add({
       severity: 'error',
       summary: '預覽失敗',
-      detail: '無法取得預覽連結',
+      detail: isMissingFile ? '此筆恢復資料的 PDF 檔案缺失' : '無法取得預覽連結',
       life: 3000,
     })
   } finally {
@@ -2083,7 +2093,7 @@ async function handlePreviewDownload(onComplete) {
     toast.add({
       severity: 'error',
       summary: '下載失敗',
-      detail: '無法取得下載連結',
+      detail: error.response?.status === 404 ? '此筆恢復資料的 PDF 檔案缺失' : '無法取得下載連結',
       life: 3000,
     })
   } finally {
