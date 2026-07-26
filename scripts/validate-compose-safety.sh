@@ -11,7 +11,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 production_json="$temporary_directory/production.json"
-clean_json="$temporary_directory/clean.json"
+local_json="$temporary_directory/local.json"
 acceptance_json="$temporary_directory/acceptance.json"
 
 PRODUCTION_BACKEND_ENV_FILE="$repository_root/backend/.env.production.runtime.example" \
@@ -22,10 +22,10 @@ docker compose \
   config --format json >"$production_json"
 
 docker compose \
-  --env-file "$repository_root/docker/clean-dev.env.example" \
-  --file "$repository_root/docker/docker-compose.clean-dev.yml" \
+  --env-file "$repository_root/docker/.env.example" \
+  --file "$repository_root/docker/docker-compose.local.yml" \
   --profile bootstrap \
-  config --format json >"$clean_json"
+  config --format json >"$local_json"
 
 docker compose \
   --env-file "$repository_root/docker/acceptance.env.example" \
@@ -34,19 +34,19 @@ docker compose \
 
 python3 - \
   "$production_json" \
-  "$clean_json" \
+  "$local_json" \
   "$acceptance_json" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 
-production, clean, acceptance = (
+production, local, acceptance = (
     json.loads(Path(path).read_text(encoding="utf-8"))
     for path in sys.argv[1:]
 )
 
-for compose in (production, clean, acceptance):
+for compose in (production, local, acceptance):
     migrate = compose["services"]["migrate"]
     assert migrate["restart"] == "no"
     assert migrate["command"] == ["python", "migrate.py", "upgrade"]
@@ -61,7 +61,7 @@ assert (
     production["services"]["backend"]["environment"]["DB_USER"]
     != production["services"]["migrate"]["environment"]["DB_USER"]
 )
-assert clean["services"]["bootstrap"]["profiles"] == ["bootstrap"]
+assert local["services"]["bootstrap"]["profiles"] == ["bootstrap"]
 assert (
     acceptance["services"]["backend"]["depends_on"]["migrate"]["condition"]
     == "service_completed_successfully"

@@ -1,9 +1,6 @@
 .vscode
 .env*
 !.env.example
-docker/clean-dev.env
-docker/recovery-review.env
-
 .DS_Store
 
 .codex/skills/
