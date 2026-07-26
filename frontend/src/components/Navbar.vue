@@ -694,10 +694,20 @@ export default {
       } catch (error) {
         console.error('Login failed:', error)
         trackEvent(EVENTS.LOGIN_LOCAL, { success: false })
+
+        let detail = '無法連線至後端，請確認服務是否正常'
+        if (error.isInvalidCredentials || error.response?.status === 401) {
+          detail = '帳號或密碼錯誤'
+        } else if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+          detail = '伺服器回應逾時，請稍後再試'
+        } else if (error.response?.status >= 500) {
+          detail = '伺服器發生錯誤，請稍後再試'
+        }
+
         this.toast.add({
           severity: 'error',
           summary: '登入失敗',
-          detail: '帳號或密碼錯誤',
+          detail,
           life: 3000,
         })
       } finally {

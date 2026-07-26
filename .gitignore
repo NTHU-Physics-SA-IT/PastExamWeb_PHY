@@ -1,6 +1,7 @@
 .vscode
 .env*
 !.env.example
+docker/clean-dev.env
 
 .DS_Store
 

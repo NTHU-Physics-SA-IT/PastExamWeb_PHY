@@ -87,6 +87,14 @@ describe('api client interceptors', () => {
     expect(requestSuccess(configWithToken).headers.Authorization).toBe('Bearer token-xyz')
   })
 
+  it('uses a finite request timeout', () => {
+    expect(axiosCreateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timeout: 15_000,
+      })
+    )
+  })
+
   it('propagates request errors', async () => {
     const error = new Error('request failed')
     await expect(requestError(error)).rejects.toThrow('request failed')

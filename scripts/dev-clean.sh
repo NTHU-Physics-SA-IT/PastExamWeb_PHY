@@ -42,6 +42,13 @@ load_identity() {
   MINIO_BUCKET_NAME="$(
     sed -n 's/^MINIO_BUCKET_NAME=//p' "${env_file}" | tail -1
   )"
+  CLEAN_DEV_HTTP_PORT="$(
+    sed -n 's/^CLEAN_DEV_HTTP_PORT=//p' "${env_file}" | tail -1
+  )"
+  DEFAULT_ADMIN_NAME="$(
+    sed -n 's/^DEFAULT_ADMIN_NAME=//p' "${env_file}" | tail -1
+  )"
+  CLEAN_DEV_HTTP_PORT="${CLEAN_DEV_HTTP_PORT:-18081}"
 
   [[ "${COMPOSE_PROJECT_NAME}" == pastexam-dev-clean-* ]] \
     || fail "COMPOSE_PROJECT_NAME must start with pastexam-dev-clean-"
@@ -51,10 +58,25 @@ load_identity() {
     || fail "MINIO_BUCKET_NAME must be an isolated dev-clean bucket"
   [[ "${POSTGRES_DB}" != "archive_db" ]] || fail "normal archive_db is forbidden"
   [[ "${MINIO_BUCKET_NAME}" != "archive-bucket" ]] || fail "normal archive-bucket is forbidden"
+  [[ "${CLEAN_DEV_HTTP_PORT}" =~ ^[0-9]+$ ]] \
+    || fail "CLEAN_DEV_HTTP_PORT must be numeric"
+  [[ -n "${DEFAULT_ADMIN_NAME}" ]] || fail "DEFAULT_ADMIN_NAME must be set"
 }
 
 compose() {
   docker compose --env-file "${env_file}" -f "${compose_file}" "$@"
+}
+
+print_manual_environment() {
+  local running_services
+  running_services="$(compose ps --status running --services | paste -sd, -)"
+  printf 'project=%s\n' "${COMPOSE_PROJECT_NAME}"
+  printf 'url=http://127.0.0.1:%s\n' "${CLEAN_DEV_HTTP_PORT}"
+  printf 'alternate_url=http://localhost:%s\n' "${CLEAN_DEV_HTTP_PORT}"
+  printf 'database=%s\n' "${POSTGRES_DB}"
+  printf 'bucket=%s\n' "${MINIO_BUCKET_NAME}"
+  printf 'admin_username=%s\n' "${DEFAULT_ADMIN_NAME}"
+  printf 'running_services=%s\n' "${running_services:-<none>}"
 }
 
 preflight() {
@@ -64,16 +86,27 @@ preflight() {
   "${repo_root}/scripts/validate-compose-safety.sh"
   compose config --quiet
 
-  local other_workdirs
+  local compose_dir other_workdirs other_config_files
+  compose_dir="$(dirname "${compose_file}")"
   other_workdirs="$(
     docker ps -a \
       --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME}" \
       --format '{{.Label "com.docker.compose.project.working_dir"}}' |
       sort -u |
-      grep -Fvx "${repo_root}" || true
+      grep -Fvx "${compose_dir}" || true
   )"
   [[ -z "${other_workdirs}" ]] \
     || fail "project ${COMPOSE_PROJECT_NAME} already belongs to another checkout: ${other_workdirs}"
+
+  other_config_files="$(
+    docker ps -a \
+      --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME}" \
+      --format '{{.Label "com.docker.compose.project.config_files"}}' |
+      sort -u |
+      grep -Fvx "${compose_file}" || true
+  )"
+  [[ -z "${other_config_files}" ]] \
+    || fail "project ${COMPOSE_PROJECT_NAME} uses another compose file: ${other_config_files}"
 
   printf 'project=%s\n' "${COMPOSE_PROJECT_NAME}"
   printf 'database=%s\n' "${POSTGRES_DB}"
@@ -92,6 +125,7 @@ case "${command}" in
     compose up --build migrate
     compose up minio-init
     compose up -d --build backend frontend nginx
+    print_manual_environment
     ;;
   bootstrap)
     preflight
@@ -100,6 +134,7 @@ case "${command}" in
   status)
     preflight
     compose ps -a
+    print_manual_environment
     ;;
   logs)
     preflight
