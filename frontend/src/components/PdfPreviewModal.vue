@@ -18,13 +18,24 @@
     <template #maximizebutton="{ maximized, maximizeCallback }">
       <Button
         v-if="discussionEnabled"
+        icon="pi pi-flag"
+        :severity="sidePanelMode === 'report' ? 'warn' : 'secondary'"
+        text
+        rounded
+        aria-label="回報考古題"
+        title="回報考古題"
+        style="width: 2.5rem; height: 2.5rem; padding: 0"
+        @click="openArchiveReport"
+      />
+      <Button
+        v-if="discussionEnabled"
         :icon="discussionOpen ? 'pi pi-comments' : 'pi pi-comment'"
         severity="secondary"
         text
         rounded
         :aria-label="isMobile ? '開啟討論區' : discussionOpen ? '關閉討論區' : '開啟討論區'"
         style="width: 2.5rem; height: 2.5rem; padding: 0"
-        @click="handleDiscussionClick"
+        @click="openDiscussion"
       />
       <Button
         :icon="maximized ? 'pi pi-window-minimize' : 'pi pi-window-maximize'"
@@ -96,7 +107,18 @@
           class="discussion-wrapper"
           :class="{ 'is-open': discussionOpen, 'is-closed': !discussionOpen }"
         >
+          <ArchiveReportPanel
+            v-if="sidePanelMode === 'report'"
+            :courseId="courseId"
+            :archiveId="archiveId"
+            :courseName="courseName"
+            :title="title"
+            :academicYear="academicYear"
+            :professorName="professorName"
+            @back="showDiscussionPanel"
+          />
           <ArchiveDiscussionPanel
+            v-else
             :courseId="courseId"
             :archiveId="archiveId"
             width="100%"
@@ -132,12 +154,17 @@
   >
     <template #header>
       <div class="flex align-items-center gap-2.5">
-        <i class="pi pi-comments text-2xl" />
-        <div class="text-xl leading-tight">討論區</div>
+        <i
+          :class="sidePanelMode === 'report' ? 'pi pi-flag text-2xl' : 'pi pi-comments text-2xl'"
+        />
+        <div class="text-xl leading-tight">
+          {{ sidePanelMode === 'report' ? '回報考古題' : '討論區' }}
+        </div>
       </div>
     </template>
     <template #closebutton="{ closeCallback }">
       <Button
+        v-if="sidePanelMode === 'discussion'"
         icon="pi pi-cog"
         severity="secondary"
         text
@@ -157,7 +184,18 @@
       />
     </template>
     <div class="h-full min-h-0">
+      <ArchiveReportPanel
+        v-if="sidePanelMode === 'report'"
+        :courseId="courseId"
+        :archiveId="archiveId"
+        :courseName="courseName"
+        :title="title"
+        :academicYear="academicYear"
+        :professorName="professorName"
+        @back="showDiscussionPanel"
+      />
       <ArchiveDiscussionPanel
+        v-else
         ref="discussionPanelRef"
         :courseId="courseId"
         :archiveId="archiveId"
@@ -175,6 +213,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useUnauthorizedEvent } from '../utils/useUnauthorizedEvent'
 import ArchiveDiscussionPanel from './ArchiveDiscussionPanel.vue'
+import ArchiveReportPanel from './ArchiveReportPanel.vue'
 import { getBooleanPreference } from '../utils/usePreferences'
 import { STORAGE_KEYS } from '../utils/storage'
 
@@ -251,6 +290,7 @@ const isMobile = ref(false)
 const discussionOpen = ref(false)
 const discussionModalVisible = ref(false)
 const discussionPanelRef = ref(null)
+const sidePanelMode = ref('discussion')
 const discussionEnabled = computed(
   () => props.showDiscussion && Boolean(props.courseId) && Boolean(props.archiveId)
 )
@@ -326,6 +366,7 @@ function onHide() {
     ? false
     : getBooleanPreference(DESKTOP_DEFAULT_OPEN_KEY, true)
   discussionModalVisible.value = false
+  sidePanelMode.value = 'discussion'
   emit('hide')
 }
 
@@ -347,6 +388,29 @@ function handleDiscussionClick() {
     return
   }
   toggleDiscussion()
+}
+
+function showDiscussionPanel() {
+  sidePanelMode.value = 'discussion'
+}
+
+function openDiscussion() {
+  if (sidePanelMode.value === 'report') {
+    sidePanelMode.value = 'discussion'
+    if (isMobile.value) discussionModalVisible.value = true
+    else discussionOpen.value = true
+    return
+  }
+  handleDiscussionClick()
+}
+
+function openArchiveReport() {
+  sidePanelMode.value = 'report'
+  if (isMobile.value) {
+    discussionModalVisible.value = true
+    return
+  }
+  discussionOpen.value = true
 }
 
 function openDiscussionSettings() {

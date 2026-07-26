@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
   listComments: vi.fn(),
   getComment: vi.fn(),
   reviewComment: vi.fn(),
+  listArchives: vi.fn(),
+  getArchive: vi.fn(),
+  reviewArchive: vi.fn(),
   deleteSystem: vi.fn(),
   deleteComment: vi.fn(),
   confirm: vi.fn((options) => options.accept?.()),
@@ -27,6 +30,9 @@ vi.mock('@/api', () => ({
     listCommentReports: mocks.listComments,
     getCommentReport: mocks.getComment,
     reviewCommentReport: mocks.reviewComment,
+    listArchiveReports: mocks.listArchives,
+    getArchiveReport: mocks.getArchive,
+    reviewArchiveReport: mocks.reviewArchive,
     deleteSystemIssue: mocks.deleteSystem,
     deleteCommentReport: mocks.deleteComment,
   },
@@ -105,6 +111,7 @@ describe('ReportManagementPanel', () => {
     mocks.getSystem.mockResolvedValue({ data: { id: 1, is_read: false } })
     mocks.updateSystemReadState.mockResolvedValue({ data: { id: 1, is_read: true } })
     mocks.listComments.mockResolvedValue({ data: { items: [], total: 0 } })
+    mocks.listArchives.mockResolvedValue({ data: { items: [], total: 0 } })
     mocks.deleteSystem.mockResolvedValue({ data: { success: true } })
     mocks.deleteComment.mockResolvedValue({ data: { success: true } })
     mocks.confirm.mockImplementation((options) => options.accept?.())
@@ -116,9 +123,11 @@ describe('ReportManagementPanel', () => {
 
     expect(wrapper.text()).toContain('系統問題回報')
     expect(wrapper.text()).toContain('留言回報')
-    expect(wrapper.text()).toContain('考古題回報功能尚未開放')
+    expect(wrapper.text()).toContain('考古題回報')
+    expect(wrapper.text()).toContain('選擇性下架')
     expect(mocks.listSystem).toHaveBeenCalled()
     expect(mocks.listComments).toHaveBeenCalled()
+    expect(mocks.listArchives).toHaveBeenCalled()
     expect(wrapper.findAll('.report-section')).toHaveLength(3)
     expect(wrapper.find('.report-management__header').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('檢視系統問題摘要並審核留言回報')
@@ -147,7 +156,8 @@ describe('ReportManagementPanel', () => {
     }
     expect(wrapper.text()).not.toContain('回報編號')
     expect(wrapper.vm.activeTab).toBeUndefined()
-    expect(wrapper.vm.archiveListState).toMatchObject({ first: 0, total: 0, loading: false })
+    expect(wrapper.vm.archivePage).toMatchObject({ first: 0, rows: 10, sortField: 'status' })
+    expect(wrapper.vm.archiveTotal).toBe(0)
     expect(wrapper.vm.formatDateTime('2020-07-20T13:37:00Z', true)).toBe('2020/07/20 21:37')
     expect(wrapper.vm.formatDateTime('2020-07-20T13:37:00Z', true)).not.toMatch(/上午|下午/)
     expect(wrapper.vm.formatDateTime(new Date(Date.now() - 5 * 60_000).toISOString())).toBe(
@@ -275,7 +285,7 @@ describe('ReportManagementPanel', () => {
     expect(
       reportManagementSource.match(/v-if="!isCardLayout" class="report-desktop-actions"/g)
     ).toHaveLength(2)
-    expect(reportManagementSource.match(/class="report-mobile-card__footer"/g)).toHaveLength(2)
+    expect(reportManagementSource.match(/class="report-mobile-card__footer"/g)).toHaveLength(3)
     expect(reportManagementSource).toContain(
       'headerClass="report-actions-column report-actions-column--system"'
     )
@@ -291,7 +301,7 @@ describe('ReportManagementPanel', () => {
       ':deep(.report-management__table .p-datatable-tbody > tr > td:last-child)'
     )
     expect(reportManagementSource).not.toContain('justify-content: flex-end;\n  flex-wrap: nowrap')
-    expect(reportManagementSource.match(/breakpoint="1399px"/g)).toHaveLength(2)
+    expect(reportManagementSource.match(/breakpoint="1399px"/g)).toHaveLength(3)
   })
 
   it('keeps pagination and server sorting independent for each report list', async () => {
@@ -354,7 +364,7 @@ describe('ReportManagementPanel', () => {
     expect(ADMIN_PAGE_SIZE_OPTIONS).toEqual([5, 10, 15, 25, 50])
     expect(
       reportManagementSource.match(/:rowsPerPageOptions="ADMIN_PAGE_SIZE_OPTIONS"/g)
-    ).toHaveLength(2)
+    ).toHaveLength(3)
     expect(wrapper.vm.systemPage).toMatchObject({ first: 0, rows: 10 })
     expect(wrapper.vm.commentPage).toMatchObject({ first: 0, rows: 10 })
 
@@ -612,8 +622,72 @@ describe('ReportManagementPanel', () => {
     expect(reportManagementSource).toContain('v-if="!isFinal(selectedReport.status)"')
   })
 
+  it('keeps archive report filters independent and submits optional takedown review', async () => {
+    const report = {
+      id: 31,
+      reporter_name: '考古回報者',
+      reason: 'privacy_information',
+      custom_message: '檔案含有個人資料',
+      course_name: '量子力學',
+      archive_name: '期末考',
+      academic_year: 2025,
+      professor: '王老師',
+      status: 'pending',
+      admin_response: null,
+      reviewer_name: null,
+      reviewed_at: null,
+      source_state: 'available',
+      source_exists: true,
+      can_take_down: true,
+      archive_taken_down: false,
+      course_id: 7,
+      archive_id: 9,
+      created_at: '2026-07-26T08:00:00Z',
+    }
+    mocks.getArchive.mockResolvedValue({ data: report })
+    mocks.reviewArchive.mockResolvedValue({
+      data: {
+        ...report,
+        status: 'upheld',
+        archive_taken_down: true,
+        source_state: 'taken_down',
+        can_take_down: false,
+      },
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    wrapper.vm.archiveFilters.search = '量子'
+    wrapper.vm.archiveFilters.status = 'pending'
+    wrapper.vm.archiveFilters.reason = 'privacy_information'
+    await wrapper.vm.applyArchiveFilters()
+    expect(mocks.listArchives).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        search: '量子',
+        status: 'pending',
+        reason: 'privacy_information',
+        offset: 0,
+      })
+    )
+    expect(wrapper.vm.commentFilters.search).toBe('')
+
+    await wrapper.vm.openArchiveReport(report.id)
+    wrapper.vm.archiveReviewForm.status = 'upheld'
+    wrapper.vm.archiveReviewForm.admin_response = '確認含有個資'
+    wrapper.vm.archiveReviewForm.take_down_archive = true
+    wrapper.vm.confirmSaveArchiveReview()
+    await flushPromises()
+
+    expect(mocks.reviewArchive).toHaveBeenCalledWith(report.id, {
+      status: 'upheld',
+      admin_response: '確認含有個資',
+      take_down_archive: true,
+    })
+    expect(wrapper.vm.selectedArchiveReport.archive_taken_down).toBe(true)
+  })
+
   it('scopes personalized font tokens across report lists, controls, and dialogs', () => {
-    expect(reportManagementSource.match(/class="report-management-dialog"/g)).toHaveLength(2)
+    expect(reportManagementSource.match(/class="report-management-dialog"/g)).toHaveLength(3)
     expect(reportManagementSource).toMatch(
       /\.report-management :deep\(\.p-inputtext\)[\s\S]*?font-size:\s*var\(--app-font-size-sm\) !important;/
     )
@@ -654,7 +728,7 @@ describe('ReportManagementPanel', () => {
   })
 
   it('scales source and finalized review messages through their PrimeVue text nodes', () => {
-    expect(reportManagementSource.match(/class="report-review__message"/g)).toHaveLength(2)
+    expect(reportManagementSource.match(/class="report-review__message"/g)).toHaveLength(4)
     expect(reportManagementSource).toMatch(
       /:global\(\.report-management-dialog \.report-review__message \.p-message-text\)\s*\{[^}]*font-size:\s*var\(--app-font-size-sm\) !important;[^}]*line-height:\s*1\.4;/
     )
@@ -667,17 +741,17 @@ describe('ReportManagementPanel', () => {
   })
 
   it('uses responsive filter grids and dedicated full-width mobile summaries', () => {
-    expect(reportManagementSource.match(/breakpoint="1399px"/g)).toHaveLength(2)
+    expect(reportManagementSource.match(/breakpoint="1399px"/g)).toHaveLength(3)
     expect(reportManagementSource).toContain('@media (max-width: 1399px)')
     expect(reportManagementSource).not.toContain('@media (max-width: 899px)')
-    expect(reportManagementSource.match(/class="report-filter-search"/g)).toHaveLength(2)
+    expect(reportManagementSource.match(/class="report-filter-search"/g)).toHaveLength(3)
     expect(
       reportManagementSource.match(/class="report-filter-select report-filter-select--primary"/g)
-    ).toHaveLength(2)
+    ).toHaveLength(3)
     expect(
       reportManagementSource.match(/class="report-filter-select report-filter-select--secondary"/g)
-    ).toHaveLength(2)
-    expect(reportManagementSource.match(/class="report-filter-submit"/g)).toHaveLength(2)
+    ).toHaveLength(3)
+    expect(reportManagementSource.match(/class="report-filter-submit"/g)).toHaveLength(3)
     expect(reportManagementSource).toContain('container-name: report-section;')
     expect(reportManagementSource).toContain(
       "grid-template-areas: 'search primary secondary submit';"
@@ -690,16 +764,16 @@ describe('ReportManagementPanel', () => {
     )
     expect(
       reportManagementSource.match(/class="report-mobile-card report-mobile-card-content"/g)
-    ).toHaveLength(2)
+    ).toHaveLength(3)
     expect(
       reportManagementSource.match(/class="report-mobile-card__header report-mobile-card-header"/g)
-    ).toHaveLength(2)
+    ).toHaveLength(3)
     expect(reportManagementSource).toContain('class="report-mobile-card-badges"')
     expect(
       reportManagementSource.match(
         /class="report-mobile-card__summary report-mobile-summary-preview"/g
       )
-    ).toHaveLength(2)
+    ).toHaveLength(3)
     expect(reportManagementSource).toContain('class="report-mobile-summary-preview__label"')
     expect(reportManagementSource).toContain("data.description || '未提供詳細描述'")
     expect(reportManagementSource).toContain("data.comment_content_snapshot || '無留言摘要'")
@@ -728,7 +802,7 @@ describe('ReportManagementPanel', () => {
       /\.report-management__table \.p-datatable-tbody > tr > td\)\s*\{[^}]*display:\s*none !important;[^}]*min-height:\s*0;/
     )
     expect(reportManagementSource).toMatch(
-      /\.report-management__comment-table \.p-datatable-tbody > tr > td:nth-child\(2\)\)\s*\{[^}]*display:\s*flex !important;/
+      /\.report-management__comment-table \.p-datatable-tbody > tr > td:nth-child\(2\)\)[\s\S]*?\{[^}]*display:\s*flex !important;/
     )
     expect(reportManagementSource).toMatch(
       /\.report-mobile-card__header\s*\{[^}]*grid-area:\s*header;[^}]*min-height:\s*0;[^}]*margin-top:\s*0;[^}]*align-self:\s*start;/

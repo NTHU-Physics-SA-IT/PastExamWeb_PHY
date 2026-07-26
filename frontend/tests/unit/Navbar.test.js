@@ -306,6 +306,16 @@ describe('Navbar methods', () => {
     })
 
     await Navbar.methods.handlePersonalNotificationSource.call(ctx, {
+      source_type: 'archive_report',
+      source_id: 18,
+      metadata: { course_id: 5, archive_id: 6 },
+    })
+    expect(push).toHaveBeenLastCalledWith({
+      path: '/archive',
+      query: { courseId: 5, archiveId: 6 },
+    })
+
+    await Navbar.methods.handlePersonalNotificationSource.call(ctx, {
       source_type: 'archive_discussion_thread',
       source_id: 7,
       metadata: { course_id: 2, archive_id: 3, thread_id: 7, message_id: 9 },

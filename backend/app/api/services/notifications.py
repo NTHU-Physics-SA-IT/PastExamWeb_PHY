@@ -20,11 +20,14 @@ from app.models.models import (
     NotificationUpdate,
     PersonalNotification,
     PersonalNotificationRead,
+    Archive,
+    ArchiveReport,
     ArchiveDiscussionMessage,
     CommentReport,
     User,
     UserRoles,
 )
+from app.services.archive_visibility import public_archive_conditions
 from app.utils.auth import get_current_user
 
 router = APIRouter()
@@ -144,8 +147,31 @@ async def _list_personal_notifications(
             .scalars()
             .all()
         )
+    archive_report_source_ids = {
+        item.source_id
+        for item in items
+        if item.source_type == "archive_report" and item.source_id is not None
+    }
+    available_archive_report_ids: set[int] = set()
+    if archive_report_source_ids:
+        available_archive_report_ids = set(
+            (
+                await db.execute(
+                    select(ArchiveReport.id)
+                    .join(Archive, Archive.id == ArchiveReport.archive_id)
+                    .where(
+                        ArchiveReport.id.in_(archive_report_source_ids),
+                        *public_archive_conditions(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
 
     def source_is_available(item: PersonalNotification) -> bool:
+        if item.source_type == "archive_report":
+            return item.source_id in available_archive_report_ids
         if item.source_type == "comment_report":
             return bool(
                 item.source_id in available_comment_report_ids

@@ -64,6 +64,7 @@ from app.utils.course_text import (
     normalized_course_text_expr,
 )
 from app.core.config import settings
+from app.services.archive_visibility import public_archive_conditions
 from app.services.personal_notifications import enqueue_personal_notification
 from app.services.discussions import soft_delete_discussion_message
 
@@ -231,31 +232,6 @@ async def _find_submissions_related_to_course(
         result.append(submission)
 
     return result
-
-
-def _public_archive_conditions(course_id: int | None = None, archive_id: int | None = None) -> list:
-    trashed_submission_exists = exists().where(
-        ArchiveSubmission.created_archive_id == Archive.id,
-        or_(
-            ArchiveSubmission.deleted_at.is_not(None),
-            ArchiveSubmission.status == SubmissionStatus.DELETED,
-        ),
-    )
-    non_public_submission_exists = exists().where(
-        ArchiveSubmission.created_archive_id == Archive.id,
-        ArchiveSubmission.deleted_at.is_(None),
-        ArchiveSubmission.status != SubmissionStatus.APPROVED,
-    )
-    conditions = [
-        Archive.deleted_at.is_(None),
-        ~trashed_submission_exists,
-        ~non_public_submission_exists,
-    ]
-    if course_id is not None:
-        conditions.append(Archive.course_id == course_id)
-    if archive_id is not None:
-        conditions.append(Archive.id == archive_id)
-    return conditions
 
 
 async def _category_order_map(db: AsyncSession) -> dict[str, int]:
@@ -608,7 +584,7 @@ async def get_course_archives(
 
     query = (
         select(Archive)
-        .where(*_public_archive_conditions(course_id=course_id))
+        .where(*public_archive_conditions(course_id=course_id))
         .order_by(Archive.created_at.desc())
     )
     result = await db.execute(query)
@@ -656,7 +632,7 @@ async def get_archive_preview_url(
     Get presigned URL for previewing an archive (30 minutes expiry)
     """
     query = select(Archive).where(
-        *_public_archive_conditions(course_id=course_id, archive_id=archive_id)
+        *public_archive_conditions(course_id=course_id, archive_id=archive_id)
     )
     result = await db.execute(query)
     archive = result.scalar_one_or_none()
@@ -683,7 +659,7 @@ async def get_archive_preview_file(
     edge cases in PDF.js while keeping the normal download endpoint unchanged.
     """
     query = select(Archive).where(
-        *_public_archive_conditions(course_id=course_id, archive_id=archive_id)
+        *public_archive_conditions(course_id=course_id, archive_id=archive_id)
     )
     result = await db.execute(query)
     archive = result.scalar_one_or_none()
@@ -729,7 +705,7 @@ async def get_archive_download_url(
     This endpoint increments the download coun
     """
     query = select(Archive).where(
-        *_public_archive_conditions(course_id=course_id, archive_id=archive_id)
+        *public_archive_conditions(course_id=course_id, archive_id=archive_id)
     )
     result = await db.execute(query)
     archive = result.scalar_one_or_none()
@@ -750,7 +726,7 @@ async def _ensure_archive_exists_for_discussion(
     course_id: int, archive_id: int, db: AsyncSession
 ) -> Archive:
     query = select(Archive).where(
-        *_public_archive_conditions(course_id=course_id, archive_id=archive_id)
+        *public_archive_conditions(course_id=course_id, archive_id=archive_id)
     )
     archive = (await db.execute(query)).scalar_one_or_none()
     if not archive:

@@ -13,6 +13,13 @@ from app.db.session import get_session
 from app.models.models import (
     Archive,
     ArchiveDiscussionMessage,
+    ArchiveReport,
+    ArchiveReportAdminUpdate,
+    ArchiveReportCreate,
+    ArchiveReportListRead,
+    ArchiveReportRead,
+    ArchiveReportReason,
+    ArchiveSubmission,
     CommentReport,
     CommentReportAdminUpdate,
     CommentReportCreate,
@@ -22,6 +29,7 @@ from app.models.models import (
     CommentReportStatus,
     Course,
     PersonalNotificationType,
+    SubmissionStatus,
     SystemIssueReport,
     SystemIssueReportCreate,
     SystemIssueReportListRead,
@@ -31,6 +39,11 @@ from app.models.models import (
     UserRoles,
 )
 from app.services.discussions import soft_delete_discussion_message
+from app.services.archive_submission_status import (
+    normalize_submission_status,
+    take_down_archive_submission,
+)
+from app.services.archive_visibility import public_archive_conditions
 from app.services.personal_notifications import enqueue_personal_notification
 from app.utils.auth import get_current_user
 
@@ -47,6 +60,18 @@ REPORT_REASON_LABELS = {
     CommentReportReason.PRIVACY_VIOLATION.value: "洩漏個人資料或隱私",
     CommentReportReason.MISINFORMATION.value: "錯誤或誤導資訊",
     CommentReportReason.OTHER.value: "其他",
+}
+ARCHIVE_REPORT_REASON_LABELS = {
+    ArchiveReportReason.FILE_UNAVAILABLE.value: "檔案無法開啟或下載",
+    ArchiveReportReason.FILE_QUALITY_OR_CONTENT.value: "檔案內容錯誤、不完整或畫質不清",
+    ArchiveReportReason.METADATA_INCORRECT.value: "課程、學期、授課教師或考試名稱等資訊錯誤",
+    ArchiveReportReason.ANSWER_OR_ATTACHMENT_MISMATCH.value: "答案、附件或檔案標示不符",
+    ArchiveReportReason.DUPLICATE_OR_MISPLACED.value: "重複上傳或考古題放置錯誤",
+    ArchiveReportReason.PRIVACY_INFORMATION.value: "含有個人資料或隱私資訊",
+    ArchiveReportReason.INAPPROPRIATE_COPYRIGHT_OR_OTHER_CONCERN.value: (
+        "不當內容、版權或其他疑慮"
+    ),
+    ArchiveReportReason.OTHER.value: "其他",
 }
 SYSTEM_ISSUE_TYPES = {"bug", "enhancement", "performance", "ui-ux", "question"}
 GITHUB_ISSUE_URL_PATTERN = re.compile(
@@ -142,6 +167,111 @@ async def _read_report(db: AsyncSession, report_id: int) -> CommentReportRead:
             status_code=status.HTTP_404_NOT_FOUND, detail="Comment report not found"
         )
     return _serialize_report(row)
+
+
+def _archive_report_select():
+    reporter = aliased(User)
+    reviewer = aliased(User)
+    statement = (
+        select(
+            ArchiveReport,
+            reporter.nickname,
+            reporter.name,
+            reviewer.nickname,
+            reviewer.name,
+            Archive.id,
+            Archive.deleted_at,
+            Course.id,
+            Course.deleted_at,
+            ArchiveSubmission.id,
+            ArchiveSubmission.status,
+            ArchiveSubmission.deleted_at,
+        )
+        .join(reporter, reporter.id == ArchiveReport.reporter_user_id)
+        .outerjoin(reviewer, reviewer.id == ArchiveReport.reviewed_by)
+        .outerjoin(Archive, Archive.id == ArchiveReport.archive_id)
+        .outerjoin(Course, Course.id == ArchiveReport.course_id)
+        .outerjoin(
+            ArchiveSubmission,
+            ArchiveSubmission.id == ArchiveReport.archive_submission_id,
+        )
+    )
+    return statement, reporter, reviewer
+
+
+def _serialize_archive_report(row) -> ArchiveReportRead:
+    report = row[0]
+    live_archive_id = row[5]
+    archive_deleted_at = row[6]
+    live_course_id = row[7]
+    course_deleted_at = row[8]
+    live_submission_id = row[9]
+    submission_status = normalize_submission_status(row[10])
+    submission_deleted_at = row[11]
+    source_exists = bool(
+        live_archive_id
+        and live_course_id
+        and archive_deleted_at is None
+        and course_deleted_at is None
+    )
+    if not source_exists:
+        source_state = "missing"
+    elif live_submission_id is None:
+        source_state = "not_managed"
+    elif submission_deleted_at is not None or submission_status == SubmissionStatus.DELETED:
+        source_state = "deleted"
+    elif submission_status == SubmissionStatus.TAKEDOWN:
+        source_state = "taken_down"
+    elif submission_status != SubmissionStatus.APPROVED:
+        source_state = "unavailable"
+    else:
+        source_state = "available"
+    can_take_down = source_state == "available"
+    return ArchiveReportRead(
+        id=report.id,
+        reporter_user_id=report.reporter_user_id,
+        reporter_name=_display_name(report.reporter_user_id, row[1], row[2]),
+        archive_id=report.archive_id,
+        course_id=report.course_id,
+        archive_submission_id=report.archive_submission_id,
+        reason=report.reason,
+        custom_message=report.custom_message,
+        archive_name=report.archive_name_snapshot,
+        course_name=report.course_name_snapshot,
+        academic_year=report.academic_year_snapshot,
+        archive_type=report.archive_type_snapshot,
+        professor=report.professor_snapshot,
+        status=report.status,
+        admin_response=report.admin_response,
+        reviewed_by=report.reviewed_by,
+        reviewer_name=(
+            _display_name(report.reviewed_by, row[3], row[4])
+            if report.reviewed_by
+            else None
+        ),
+        reviewed_at=report.reviewed_at,
+        archive_taken_down=report.archive_taken_down,
+        source_exists=source_exists,
+        source_state=source_state,
+        can_take_down=can_take_down,
+        created_at=report.created_at,
+        updated_at=report.updated_at,
+    )
+
+
+async def _read_archive_report(
+    db: AsyncSession, report_id: int
+) -> ArchiveReportRead:
+    statement, _, _ = _archive_report_select()
+    row = (
+        await db.execute(statement.where(ArchiveReport.id == report_id))
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Archive report not found",
+        )
+    return _serialize_archive_report(row)
 
 
 def _safe_github_issue_url(report: SystemIssueReport) -> str | None:
@@ -723,3 +853,330 @@ async def review_comment_report(
     )
     await db.commit()
     return await _read_report(db, report.id)
+
+
+@router.post(
+    "/courses/{course_id}/archives/{archive_id}",
+    response_model=ArchiveReportRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_archive_report(
+    course_id: int,
+    archive_id: int,
+    payload: ArchiveReportCreate,
+    current_user: UserRoles = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    custom_message = (payload.custom_message or "").strip()
+    if payload.report_reason == ArchiveReportReason.OTHER and not custom_message:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Custom message is required for the other reason",
+        )
+
+    row = (
+        await db.execute(
+            select(Archive, Course)
+            .join(Course, Course.id == Archive.course_id)
+            .where(
+                *public_archive_conditions(
+                    course_id=course_id, archive_id=archive_id
+                ),
+                Course.id == course_id,
+                Course.deleted_at.is_(None),
+            )
+        )
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Archive not found",
+        )
+    archive, course = row
+    reason = payload.report_reason.value
+    duplicate = await db.scalar(
+        select(ArchiveReport.id).where(
+            ArchiveReport.reporter_user_id == current_user.user_id,
+            ArchiveReport.archive_id == archive_id,
+            ArchiveReport.reason == reason,
+            ArchiveReport.status == CommentReportStatus.PENDING.value,
+        )
+    )
+    if duplicate is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You already have an active report for this archive and reason",
+        )
+
+    source_submission = (
+        await db.execute(
+            select(ArchiveSubmission)
+            .where(
+                ArchiveSubmission.created_archive_id == archive.id,
+                ArchiveSubmission.deleted_at.is_(None),
+                ArchiveSubmission.status == SubmissionStatus.APPROVED,
+            )
+            .order_by(ArchiveSubmission.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    archive_type = getattr(archive.archive_type, "value", archive.archive_type)
+    report = ArchiveReport(
+        reporter_user_id=current_user.user_id,
+        archive_id=archive.id,
+        course_id=course.id,
+        archive_submission_id=source_submission.id if source_submission else None,
+        reason=reason,
+        custom_message=custom_message or None,
+        archive_name_snapshot=archive.name,
+        course_name_snapshot=course.name,
+        academic_year_snapshot=archive.academic_year,
+        archive_type_snapshot=str(archive_type),
+        professor_snapshot=archive.professor,
+    )
+    db.add(report)
+    try:
+        await db.flush()
+    except IntegrityError as error:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="You already have an active report for this archive and reason",
+        ) from error
+
+    await enqueue_personal_notification(
+        db,
+        user_id=current_user.user_id,
+        notification_type=PersonalNotificationType.ARCHIVE_REPORT_SUBMITTED,
+        title="已收到考古回報",
+        message=(
+            f"{course.name}－{archive.name} 的考古回報 #{report.id} 已收到，"
+            "目前狀態為待審核。"
+        ),
+        source_type="archive_report",
+        source_id=report.id,
+        metadata={
+            "report_id": report.id,
+            "course_id": course.id,
+            "archive_id": archive.id,
+            "course_name": course.name,
+            "archive_name": archive.name,
+            "reason": reason,
+            "status": report.status,
+            "destination": "archive",
+        },
+        dedupe_key=f"archive_report_submitted:{report.id}",
+    )
+    await db.commit()
+    return await _read_archive_report(db, report.id)
+
+
+@router.get("/admin/archives", response_model=ArchiveReportListRead)
+async def list_archive_reports(
+    report_status: CommentReportStatus | None = Query(default=None, alias="status"),
+    reason: ArchiveReportReason | None = None,
+    search: str | None = Query(default=None, max_length=100),
+    sort_by: str = Query(default="status"),
+    sort_order: str = Query(default="asc", pattern="^(asc|desc)$"),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    current_user: UserRoles = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    _require_admin(current_user)
+    statement, reporter, reviewer = _archive_report_select()
+    filters = []
+    if report_status:
+        filters.append(ArchiveReport.status == report_status.value)
+    if reason:
+        filters.append(ArchiveReport.reason == reason.value)
+    normalized_search = (search or "").strip()
+    if normalized_search:
+        pattern = f"%{normalized_search}%"
+        search_conditions = [
+            ArchiveReport.custom_message.ilike(pattern),
+            ArchiveReport.course_name_snapshot.ilike(pattern),
+            ArchiveReport.archive_name_snapshot.ilike(pattern),
+            ArchiveReport.professor_snapshot.ilike(pattern),
+            reporter.name.ilike(pattern),
+            reporter.nickname.ilike(pattern),
+        ]
+        if normalized_search.isdigit():
+            search_conditions.append(ArchiveReport.id == int(normalized_search))
+        filters.append(or_(*search_conditions))
+    if filters:
+        statement = statement.where(*filters)
+    total = int(
+        await db.scalar(select(func.count()).select_from(statement.subquery())) or 0
+    )
+    status_rank = case(
+        (ArchiveReport.status == CommentReportStatus.PENDING.value, 0),
+        (ArchiveReport.status == CommentReportStatus.UPHELD.value, 1),
+        (ArchiveReport.status == CommentReportStatus.DISMISSED.value, 2),
+        else_=3,
+    )
+    sort_fields = {
+        "created_at": ArchiveReport.created_at,
+        "status": status_rank,
+        "reason": ArchiveReport.reason,
+        "reporter": func.coalesce(reporter.nickname, reporter.name, ""),
+        "course_archive": func.coalesce(ArchiveReport.course_name_snapshot, ""),
+        "reviewer": func.coalesce(reviewer.nickname, reviewer.name, ""),
+        "reviewed_at": ArchiveReport.reviewed_at,
+    }
+    sort_column = sort_fields.get(sort_by)
+    if sort_column is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid archive report sort field",
+        )
+    ordering = sort_column.asc() if sort_order == "asc" else sort_column.desc()
+    secondary_ordering = (
+        (ArchiveReport.created_at.desc(), ArchiveReport.id.desc())
+        if sort_by == "status"
+        else (ArchiveReport.id.desc(),)
+    )
+    rows = (
+        await db.execute(
+            statement.order_by(ordering, *secondary_ordering)
+            .offset(offset)
+            .limit(limit)
+        )
+    ).all()
+    return ArchiveReportListRead(
+        items=[_serialize_archive_report(row) for row in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/admin/archives/{report_id}", response_model=ArchiveReportRead)
+async def get_archive_report(
+    report_id: int,
+    current_user: UserRoles = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    _require_admin(current_user)
+    return await _read_archive_report(db, report_id)
+
+
+@router.patch("/admin/archives/{report_id}", response_model=ArchiveReportRead)
+async def review_archive_report(
+    report_id: int,
+    payload: ArchiveReportAdminUpdate,
+    current_user: UserRoles = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    _require_admin(current_user)
+    report = (
+        await db.execute(
+            select(ArchiveReport)
+            .where(ArchiveReport.id == report_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if report is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Archive report not found",
+        )
+    if report.status in FINAL_REPORT_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A finalized report cannot be changed",
+        )
+    new_status = payload.status.value
+    if new_status not in FINAL_REPORT_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="A pending report must be finalized as upheld or dismissed",
+        )
+    if (
+        payload.take_down_archive
+        and new_status != CommentReportStatus.UPHELD.value
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Only an upheld report can take down the source archive",
+        )
+
+    response = (payload.admin_response or "").strip()
+    now = datetime.now(timezone.utc)
+    if payload.take_down_archive:
+        if report.archive_submission_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This archive is not managed by an active submission",
+            )
+        submission = (
+            await db.execute(
+                select(ArchiveSubmission)
+                .where(
+                    ArchiveSubmission.id == report.archive_submission_id,
+                    ArchiveSubmission.created_archive_id == report.archive_id,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if submission is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The source archive submission no longer exists",
+            )
+        if normalize_submission_status(submission.status) != SubmissionStatus.APPROVED:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The source archive is no longer publicly available",
+            )
+        await take_down_archive_submission(
+            db,
+            submission,
+            reviewer_id=current_user.user_id,
+            note=f"考古回報 #{report.id} 成立",
+        )
+        report.archive_taken_down = True
+
+    report.status = new_status
+    report.admin_response = response or None
+    report.reviewed_by = current_user.user_id
+    report.reviewed_at = now
+    report.updated_at = now
+    db.add(report)
+    result_label = (
+        "回報成立"
+        if new_status == CommentReportStatus.UPHELD.value
+        else "回報不成立"
+    )
+    response_label = response or "未提供答覆"
+    disposition = (
+        "該考古題已下架，資料與檔案仍保留。"
+        if report.archive_taken_down
+        else "該考古題未因本次審核下架。"
+    )
+    await enqueue_personal_notification(
+        db,
+        user_id=report.reporter_user_id,
+        notification_type=PersonalNotificationType.ARCHIVE_REPORT_RESULT,
+        title="考古回報審核完成",
+        message=(
+            f"考古回報 #{report.id}：{result_label}。"
+            f"管理員答覆：{response_label}。{disposition}"
+        ),
+        source_type="archive_report",
+        source_id=report.id,
+        metadata={
+            "report_id": report.id,
+            "course_id": report.course_id,
+            "archive_id": report.archive_id,
+            "course_name": report.course_name_snapshot,
+            "archive_name": report.archive_name_snapshot,
+            "status": new_status,
+            "archive_taken_down": report.archive_taken_down,
+            "reviewed_at": now.isoformat(),
+            "destination": "archive",
+        },
+        dedupe_key=f"archive_report_result:{report.id}",
+    )
+    await db.commit()
+    return await _read_archive_report(db, report.id)

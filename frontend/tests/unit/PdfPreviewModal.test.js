@@ -184,4 +184,36 @@ describe('PdfPreviewModal', () => {
     expect(wrapper.find('.discussion-panel-stub').exists()).toBe(true)
     wrapper.unmount()
   })
+
+  it('switches the existing side panel between discussion and archive report content', async () => {
+    const wrapper = mount(PdfPreviewModal, {
+      props: {
+        visible: true,
+        previewUrl: '',
+        courseId: 1,
+        archiveId: 2,
+        showDiscussion: true,
+      },
+      global: {
+        stubs: {
+          Dialog: stubComponent,
+          ProgressSpinner: stubComponent,
+          Button: stubComponent,
+          ArchiveDiscussionPanel: { template: '<div class="discussion-panel-stub"></div>' },
+          ArchiveReportPanel: { template: '<div class="archive-report-panel-stub"></div>' },
+        },
+      },
+    })
+
+    wrapper.vm.openArchiveReport()
+    await nextTick()
+    expect(wrapper.vm.sidePanelMode).toBe('report')
+    expect(wrapper.vm.discussionOpen).toBe(true)
+    expect(wrapper.find('.archive-report-panel-stub').exists()).toBe(true)
+
+    wrapper.vm.showDiscussionPanel()
+    await nextTick()
+    expect(wrapper.find('.discussion-panel-stub').exists()).toBe(true)
+    wrapper.unmount()
+  })
 })

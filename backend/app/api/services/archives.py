@@ -27,7 +27,6 @@ from app.models.models import (
     CourseCategoryConfig,
     SubmissionDecision,
     SubmissionStatus,
-    PersonalNotificationType,
     User,
 )
 from app.api.services.archive_submission_lifecycle import (
@@ -49,54 +48,13 @@ from app.api.services.submission_statistics import (
     get_submission_statistics_window,
     record_submission_event,
 )
-from app.services.personal_notifications import enqueue_personal_notification
+from app.services.archive_submission_status import (
+    enqueue_submission_status_notification,
+    take_down_archive_submission,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-_SUBMISSION_NOTIFICATION_COPY = {
-    SubmissionStatus.APPROVED: ("考古題審核通過", "已通過審核"),
-    SubmissionStatus.REJECTED: ("考古題投稿已退回", "已退回"),
-    SubmissionStatus.TAKEDOWN: ("考古題已下架", "已下架"),
-}
-
-
-async def _enqueue_submission_status_notification(
-    db: AsyncSession,
-    submission: ArchiveSubmission,
-    new_status: SubmissionStatus,
-) -> None:
-    title, status_label = _SUBMISSION_NOTIFICATION_COPY[new_status]
-    type_by_status = {
-        SubmissionStatus.APPROVED: PersonalNotificationType.ARCHIVE_SUBMISSION_APPROVED,
-        SubmissionStatus.REJECTED: PersonalNotificationType.ARCHIVE_SUBMISSION_REJECTED,
-        SubmissionStatus.TAKEDOWN: PersonalNotificationType.ARCHIVE_SUBMISSION_TAKEDOWN,
-    }
-    course_name = format_course_display_name(
-        submission.requested_course_name or submission.subject
-    )
-    await enqueue_personal_notification(
-        db,
-        user_id=submission.requester_id,
-        notification_type=type_by_status[new_status],
-        title=title,
-        message=(
-            f"{course_name}－{submission.name}（投稿編號 #{submission.id}）{status_label}。"
-            "請前往「我的投稿狀態」查看詳情。"
-        ),
-        source_type="archive_submission",
-        source_id=submission.id,
-        metadata={
-            "submission_id": submission.id,
-            "archive_id": submission.created_archive_id,
-            "course_name": course_name,
-            "archive_name": submission.name,
-            "status": new_status.value,
-            "destination": "my_submission_status",
-        },
-        dedupe_key=f"archive_submission_status:{submission.id}:{new_status.value}",
-    )
-
 
 async def _ensure_category(db: AsyncSession, category_key: str) -> None:
     result = await db.execute(
@@ -1103,7 +1061,7 @@ async def approve_archive_submission(
     submission.review_note = decision.note if decision else None
     submission.created_archive_id = archive.id
     submission.reviewed_at = datetime.now(timezone.utc)
-    await _enqueue_submission_status_notification(db, submission, SubmissionStatus.APPROVED)
+    await enqueue_submission_status_notification(db, submission, SubmissionStatus.APPROVED)
     await db.commit()
     await db.refresh(submission)
     return submission
@@ -1128,7 +1086,7 @@ async def reject_archive_submission(
     submission.reviewer_id = current_user.user_id
     submission.review_note = decision.note if decision else None
     submission.reviewed_at = datetime.now(timezone.utc)
-    await _enqueue_submission_status_notification(db, submission, SubmissionStatus.REJECTED)
+    await enqueue_submission_status_notification(db, submission, SubmissionStatus.REJECTED)
     await db.commit()
     await db.refresh(submission)
     return submission
@@ -1156,11 +1114,12 @@ async def takedown_archive_submission(
             detail="Submission cannot be taken down from its current status",
         )
 
-    submission.status = SubmissionStatus.TAKEDOWN
-    submission.reviewer_id = current_user.user_id
-    submission.review_note = decision.note if decision else submission.review_note
-    submission.reviewed_at = datetime.now(timezone.utc)
-    await _enqueue_submission_status_notification(db, submission, SubmissionStatus.TAKEDOWN)
+    await take_down_archive_submission(
+        db,
+        submission,
+        reviewer_id=current_user.user_id,
+        note=decision.note if decision else None,
+    )
     await db.commit()
     await db.refresh(submission)
     return submission

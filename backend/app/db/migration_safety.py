@@ -204,6 +204,25 @@ def head_metadata() -> MetaData:
             index.dialect_options["postgresql"]["where"] = text(
                 "((status)::text = 'pending'::text)"
             )
+    archive_reports = metadata.tables["archive_reports"]
+    for constraint in list(archive_reports.constraints):
+        if (
+            isinstance(constraint, CheckConstraint)
+            and constraint.name == "ck_archive_reports_status"
+        ):
+            archive_reports.constraints.remove(constraint)
+    CheckConstraint(
+        "status::text = ANY "
+        "(ARRAY['pending'::character varying, 'upheld'::character varying, "
+        "'dismissed'::character varying]::text[])",
+        name="ck_archive_reports_status",
+        table=archive_reports,
+    )
+    for index in archive_reports.indexes:
+        if index.name == "uq_archive_reports_active_reporter_archive_reason":
+            index.dialect_options["postgresql"]["where"] = text(
+                "((status)::text = 'pending'::text)"
+            )
 
     # These model indexes were not introduced by the immutable migration chain.
     for table_name in ("courses", "course_submissions", "archive_submissions"):
