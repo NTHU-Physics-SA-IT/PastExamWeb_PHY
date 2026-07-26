@@ -8,11 +8,14 @@ import json
 import sys
 
 from alembic import command
+from sqlalchemy import create_engine
 
 from app.db.migration_safety import (
     MigrationReport,
     alembic_config,
+    database_url,
     inspect_database,
+    migration_advisory_lock,
     redact_text,
     safe_error,
 )
@@ -69,15 +72,21 @@ def print_report(report: MigrationReport, *, json_output: bool) -> None:
     print(f"Alembic revisions: {report.alembic_versions}")
     print(f"Current revision known: {'YES' if report.current_revision_known else 'NO'}")
     print(f"Repository heads: {report.repository_heads}")
+    print(f"Reviewed manifests: {report.reviewed_manifest_revisions}")
     print(f"Multiple repository heads: {'YES' if report.multiple_heads else 'NO'}")
     print(
         "Head schema candidate: "
         f"{report.schema_candidate_revision or 'NONE'}"
     )
-    for check in report.schema_checks:
+    passed_checks = sum(check.passed for check in report.schema_checks)
+    print(
+        "Schema checks: "
+        f"{passed_checks}/{len(report.schema_checks)} passed"
+    )
+    for check in (item for item in report.schema_checks if not item.passed):
         print(
             f"Schema [{check.name}]: "
-            f"{'PASS' if check.passed else 'FAIL'} - {redact_text(check.message)}"
+            f"FAIL - {redact_text(check.message)}"
         )
     print(f"Schema matches head: {'YES' if report.schema_matches_head else 'NO'}")
     print(f"Upgrade allowed: {'YES' if report.upgrade_allowed else 'NO'}")
@@ -94,22 +103,34 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "create":
             command.revision(config, message=args.message, autogenerate=True)
         elif args.command == "upgrade":
-            report = inspect_database()
-            print_report(report, json_output=args.json)
-            if not report.upgrade_allowed:
-                return 2
-            command.upgrade(config, "head")
-            upgraded = inspect_database()
-            if (
-                not upgraded.upgrade_allowed
-                or upgraded.current_revision not in upgraded.repository_heads
-                or not upgraded.schema_matches_head
-            ):
-                print(
-                    "Migration completed but post-upgrade schema validation failed",
-                    file=sys.stderr,
-                )
-                return 2
+            engine = create_engine(database_url(), pool_pre_ping=True)
+            try:
+                with migration_advisory_lock(engine) as locked_database:
+                    report = inspect_database(engine)
+                    print_report(report, json_output=args.json)
+                    if report.database_name != locked_database:
+                        raise RuntimeError(
+                            "Migration lock and preflight targeted different databases"
+                        )
+                    if not report.upgrade_allowed:
+                        return 2
+                    if report.current_revision not in report.repository_heads:
+                        command.upgrade(config, "head")
+                    upgraded = inspect_database(engine)
+                    if (
+                        upgraded.database_name != locked_database
+                        or not upgraded.upgrade_allowed
+                        or upgraded.current_revision not in upgraded.repository_heads
+                        or not upgraded.schema_matches_head
+                    ):
+                        print(
+                            "Migration completed but post-upgrade schema "
+                            "validation failed",
+                            file=sys.stderr,
+                        )
+                        return 2
+            finally:
+                engine.dispose()
         elif args.command == "downgrade":
             command.downgrade(config, args.revision)
         elif args.command == "current":

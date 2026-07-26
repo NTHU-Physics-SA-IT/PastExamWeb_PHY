@@ -14,6 +14,7 @@ from typing import Any
 from minio.error import S3Error
 
 from app.core.config import settings
+from app.db.init_db import validate_database_ready
 from app.db.session import AsyncSessionLocal
 from app.models.models import Archive, ArchiveSubmission, SubmissionStatus
 from app.utils.storage import get_minio_client
@@ -172,7 +173,25 @@ async def run_audit() -> dict[str, Any]:
     }
 
 
-async def run_cleanup(*, max_orphans: int = 200, max_orphan_bytes: int = SIZE_1GB, apply: bool = False) -> dict[str, Any]:
+async def run_cleanup(
+    *,
+    max_orphans: int = 200,
+    max_orphan_bytes: int = SIZE_1GB,
+    apply: bool = False,
+    confirmed_database_name: str | None = None,
+    confirmed_bucket_name: str | None = None,
+) -> dict[str, Any]:
+    if apply:
+        if confirmed_database_name != settings.DB_NAME:
+            raise RuntimeError(
+                "Object cleanup database confirmation does not match"
+            )
+        if confirmed_bucket_name != settings.MINIO_BUCKET_NAME:
+            raise RuntimeError("Object cleanup bucket confirmation does not match")
+        # A missing ledger, revision mismatch, or schema drift must stop object
+        # deletion before the candidate list is even evaluated.
+        await asyncio.to_thread(validate_database_ready)
+
     audit = await run_audit()
     candidate = [item for item in audit["orphan_objects"] if item.get("key")]
     candidate_with_reason = [
@@ -245,6 +264,14 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Audit/cleanup orphan objects in MinIO.")
     parser.add_argument("--dry-run", action="store_true", help="Only audit, do not delete")
     parser.add_argument("--apply", action="store_true", help="Delete confirmed orphan objects")
+    parser.add_argument(
+        "--confirm-database-name",
+        help="Required with --apply; must exactly match DB_NAME",
+    )
+    parser.add_argument(
+        "--confirm-bucket-name",
+        help="Required with --apply; must exactly match MINIO_BUCKET_NAME",
+    )
     parser.add_argument("--max-orphans", type=int, default=200, help="Safety threshold for number of candidates")
     parser.add_argument("--max-orphan-bytes", type=int, default=SIZE_1GB, help="Safety threshold for total orphan bytes")
     parser.add_argument("--out", type=str, default="/tmp/pastexam-minio-audit-before.json", help="Audit report output path")
@@ -255,7 +282,13 @@ def _parse_args() -> argparse.Namespace:
 async def main() -> None:
     args = _parse_args()
     if args.apply:
-        result = await run_cleanup(max_orphans=args.max_orphans, max_orphan_bytes=args.max_orphan_bytes, apply=True)
+        result = await run_cleanup(
+            max_orphans=args.max_orphans,
+            max_orphan_bytes=args.max_orphan_bytes,
+            apply=True,
+            confirmed_database_name=args.confirm_database_name,
+            confirmed_bucket_name=args.confirm_bucket_name,
+        )
         _dump(args.out, result)
         _dump(
             args.manifest,

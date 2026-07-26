@@ -15,11 +15,31 @@ from app.db.course_categories import (
 )
 from app.db.migration_safety import MigrationReport, inspect_database
 from app.db.session import AsyncSessionLocal
-from app.models.models import Course, CourseCategory, CourseCategoryConfig, Meme, User
+from app.models.models import (
+    Archive,
+    ArchiveDiscussionMessage,
+    ArchiveSubmission,
+    CommentReport,
+    Course,
+    CourseCategory,
+    CourseCategoryConfig,
+    CourseSubmission,
+    Meme,
+    Notification,
+    PersonalNotification,
+    SystemIssueReport,
+    SystemSetting,
+    User,
+)
 from app.utils.auth import get_password_hash
 from app.utils.course_text import format_course_display_name
 
 SEED_DATA_PATH = Path(__file__).with_name("seed_data.yaml")
+BOOTSTRAP_MARKER_KEY = "database.explicit_bootstrap.v1"
+ALLOWED_BOOTSTRAP_DATABASE_PREFIXES = (
+    "archive_db_dev_",
+    "pastexam_test_",
+)
 
 
 @lru_cache(maxsize=1)
@@ -33,7 +53,7 @@ def _seed_course_key(course: Course) -> tuple[str, str]:
     return (str(category), format_course_display_name(course.name))
 
 
-async def sync_course_catalog(session):
+async def sync_course_catalog(session, *, commit: bool = True):
     seed_courses = [
         (
             course["category"],
@@ -100,11 +120,11 @@ async def sync_course_catalog(session):
         )
         changed = True
 
-    if changed:
+    if changed and commit:
         await session.commit()
 
 
-async def sync_course_categories(session):
+async def sync_course_categories(session, *, commit: bool = True):
     result = await session.execute(select(CourseCategoryConfig))
     existing_categories = result.scalars().all()
     legacy_keys = sorted(
@@ -151,7 +171,7 @@ async def sync_course_categories(session):
         )
         changed = True
 
-    if changed:
+    if changed and commit:
         await session.commit()
 
 
@@ -195,6 +215,69 @@ async def init_db() -> None:
     await asyncio.to_thread(validate_database_ready)
 
 
+def _is_allowed_bootstrap_database_name(database_name: str) -> bool:
+    normalized = database_name.strip().lower()
+    return any(
+        normalized.startswith(prefix)
+        for prefix in ALLOWED_BOOTSTRAP_DATABASE_PREFIXES
+    ) and all(
+        forbidden not in normalized
+        for forbidden in ("production", "prod")
+    )
+
+
+async def _validate_bootstrap_contents(session) -> bool:
+    marker = (
+        await session.execute(
+            select(SystemSetting).where(
+                SystemSetting.key == BOOTSTRAP_MARKER_KEY
+            )
+        )
+    ).scalar_one_or_none()
+    if marker is not None:
+        return False
+
+    category_rows = (
+        await session.execute(select(CourseCategoryConfig))
+    ).scalars().all()
+    category_keys = {item.key for item in category_rows}
+    canonical_keys = {
+        item.key for item in CANONICAL_COURSE_CATEGORIES
+    }
+    if len(category_rows) != len(canonical_keys) or category_keys != canonical_keys:
+        raise RuntimeError(
+            "First bootstrap requires only the six migration-created "
+            "canonical course categories"
+        )
+
+    protected_models = (
+        User,
+        Course,
+        CourseSubmission,
+        ArchiveSubmission,
+        Archive,
+        ArchiveDiscussionMessage,
+        Notification,
+        PersonalNotification,
+        SystemIssueReport,
+        CommentReport,
+        Meme,
+    )
+    nonempty_tables = []
+    for model in protected_models:
+        count = (
+            await session.execute(select(func.count()).select_from(model))
+        ).scalar()
+        if count:
+            nonempty_tables.append(model.__tablename__)
+    if nonempty_tables:
+        raise RuntimeError(
+            "First bootstrap requires an empty application database; "
+            f"found data in {', '.join(nonempty_tables)}"
+        )
+    return True
+
+
 async def bootstrap_db(*, confirmed_database_name: str) -> None:
     """Explicitly seed an already-migrated database; never called at startup."""
     if not settings.ALLOW_DATABASE_BOOTSTRAP:
@@ -206,9 +289,14 @@ async def bootstrap_db(*, confirmed_database_name: str) -> None:
         raise RuntimeError(
             "Explicit bootstrap confirmation does not match the configured database"
         )
+    if not _is_allowed_bootstrap_database_name(settings.DB_NAME):
+        raise RuntimeError(
+            "Database bootstrap is allowed only for explicit dev/test names"
+        )
     await asyncio.to_thread(validate_database_ready)
 
     async with AsyncSessionLocal() as session:
+        is_first_bootstrap = await _validate_bootstrap_contents(session)
         result = await session.execute(
             select(User).where(User.name == settings.DEFAULT_ADMIN_NAME)
         )
@@ -221,8 +309,6 @@ async def bootstrap_db(*, confirmed_database_name: str) -> None:
             )
             admin_user.is_local = True
             admin_user.is_admin = True
-            await session.commit()
-            await session.refresh(admin_user)
         elif not admin_user:
             admin_user = User(
                 name=settings.DEFAULT_ADMIN_NAME,
@@ -232,11 +318,9 @@ async def bootstrap_db(*, confirmed_database_name: str) -> None:
                 is_admin=True,
             )
             session.add(admin_user)
-            await session.commit()
-            await session.refresh(admin_user)
 
-        await sync_course_categories(session)
-        await sync_course_catalog(session)
+        await sync_course_categories(session, commit=False)
+        await sync_course_catalog(session, commit=False)
 
         result = await session.execute(select(func.count()).select_from(Meme))
         count = result.scalar()
@@ -250,7 +334,17 @@ async def bootstrap_db(*, confirmed_database_name: str) -> None:
                 for meme in seed_data.get("memes", [])
             ]
             session.add_all(initial_memes)
-            await session.commit()
+        if is_first_bootstrap:
+            session.add(
+                SystemSetting(
+                    key=BOOTSTRAP_MARKER_KEY,
+                    value={
+                        "kind": "explicit_dev_test",
+                        "version": 1,
+                    },
+                )
+            )
+        await session.commit()
 
 
 async def get_session():

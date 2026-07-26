@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import re
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from typing import Any
 from urllib.parse import quote, quote_plus
@@ -10,12 +13,8 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import (
     CheckConstraint,
-    Column,
-    DateTime,
-    DefaultClause,
     Index,
     MetaData,
-    String,
     UniqueConstraint,
     create_engine,
     inspect,
@@ -25,27 +24,20 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.url import URL
 
 from app.core.config import settings
+from app.db.schema_manifests import (
+    HEAD_SCHEMA_REVISION,
+    ManifestSpec,
+    get_manifest_spec,
+    reviewed_manifest_revisions,
+)
 from app.models import models as models_module
 
 
 LEDGER_TABLE = "alembic_version"
-CANONICAL_CATEGORY_SOURCE_REVISION = "a4c7e9d2f6b1"
+MIGRATION_LOCK_CLASS_ID = 1_438_970_421
 CANONICAL_CATEGORY_NAME_INDEX = "uq_course_category_configs_normalized_name"
 CANONICAL_CATEGORY_KEY_INDEX = "uq_course_category_configs_normalized_key"
 CANONICAL_CATEGORY_LEGACY_CHECK = "ck_course_category_configs_no_legacy_key"
-RETAINED_ENUMS = {
-    # b6f1e2d9a4c7 converted category columns to varchar but intentionally
-    # retained the historical PostgreSQL type.
-    "coursecategory": {
-        "FRESHMAN",
-        "SOPHOMORE",
-        "JUNIOR",
-        "SENIOR",
-        "GRADUATE",
-        "INTERDISCIPLINARY",
-        "GENERAL",
-    },
-}
 
 
 @dataclass
@@ -68,6 +60,7 @@ class MigrationReport:
     repository_heads: list[str] = field(default_factory=list)
     multiple_heads: bool = False
     schema_candidate_revision: str | None = None
+    reviewed_manifest_revisions: list[str] = field(default_factory=list)
     schema_checks: list[CheckResult] = field(default_factory=list)
     upgrade_allowed: bool = False
     warnings: list[str] = field(default_factory=list)
@@ -152,6 +145,46 @@ def safe_error(exc: Exception) -> str:
     return redact_text(f"{exc.__class__.__name__}: {exc}")
 
 
+@contextmanager
+def migration_advisory_lock(engine: Engine):
+    """Hold a database-scoped PostgreSQL advisory lock for one migration run."""
+    with engine.connect() as connection:
+        database_name, database_oid = connection.execute(
+            text(
+                "SELECT current_database(), oid::integer "
+                "FROM pg_database WHERE datname = current_database()"
+            )
+        ).one()
+        acquired = bool(
+            connection.scalar(
+                text("SELECT pg_try_advisory_lock(:class_id, :database_oid)"),
+                {
+                    "class_id": MIGRATION_LOCK_CLASS_ID,
+                    "database_oid": database_oid,
+                },
+            )
+        )
+        if not acquired:
+            raise RuntimeError(
+                "Another migration process holds the advisory lock for "
+                f"database {database_name!r}"
+            )
+        try:
+            yield database_name
+        finally:
+            released = bool(
+                connection.scalar(
+                    text("SELECT pg_advisory_unlock(:class_id, :database_oid)"),
+                    {
+                        "class_id": MIGRATION_LOCK_CLASS_ID,
+                        "database_oid": database_oid,
+                    },
+                )
+            )
+            if not released:
+                raise RuntimeError("Migration advisory lock could not be released")
+
+
 def revision_graph(
     config: Config | None = None,
 ) -> tuple[ScriptDirectory, list[str]]:
@@ -171,11 +204,35 @@ def is_revision_ancestor(
     }
 
 
-def metadata_for_revision(revision: str) -> MetaData | None:
-    """Return a reviewed schema manifest for an explicitly supported source."""
-    if revision != CANONICAL_CATEGORY_SOURCE_REVISION:
-        return None
+def head_metadata() -> MetaData:
+    """Copy the SQLModel contract used by the reviewed head manifest."""
+    metadata = MetaData()
+    for table in models_module.SQLModel.metadata.sorted_tables:
+        table.to_metadata(metadata)
+    return metadata
+
+
+def _metadata_for_variant(variant: str) -> MetaData:
     metadata = head_metadata()
+    if variant == "head":
+        return metadata
+    if variant not in {
+        "pre_metadata_alignment",
+        "pre_category_canonicalization",
+    }:
+        raise ValueError(f"Unknown schema metadata variant: {variant}")
+
+    # e3b7c1d9f5a2 adds these indexes and drops the no-longer-referenced enum.
+    for table_name in ("courses", "course_submissions", "archive_submissions"):
+        table = metadata.tables[table_name]
+        for index in list(table.indexes):
+            if tuple(index.columns.keys()) == ("category",):
+                table.indexes.remove(index)
+
+    if variant == "pre_metadata_alignment":
+        return metadata
+
+    # c9e4f1a7b2d6 introduced only these category integrity constraints.
     category_config = metadata.tables["course_category_configs"]
     for index in list(category_config.indexes):
         if index.name in {
@@ -192,122 +249,31 @@ def metadata_for_revision(revision: str) -> MetaData | None:
     return metadata
 
 
-def head_metadata() -> MetaData:
-    """Return the explicit head-schema manifest used by reconciliation checks."""
-    metadata = MetaData()
-    for table in models_module.SQLModel.metadata.sorted_tables:
-        table.to_metadata(metadata)
-
-    # This migration was intentionally restored after its application models
-    # were reverted. Keep the resulting database contract explicit here.
-    system_issue_reports = metadata.tables["system_issue_reports"]
-    migration_only_columns = (
-        Column("github_issue_state", String(20), nullable=True),
-        Column("github_linked_at", DateTime(timezone=True), nullable=True),
-        Column(
-            "github_sync_status",
-            String(20),
-            nullable=False,
-            server_default="pending",
-        ),
-        Column("github_sync_error", String(300), nullable=True),
-    )
-    for column in migration_only_columns:
-        system_issue_reports.append_column(column)
-    Index(
-        "ix_system_issue_reports_github_sync_status",
-        system_issue_reports.c.github_sync_status,
-    )
-    discussion_messages = metadata.tables["archive_discussion_messages"]
-    Index(
-        "ix_archive_discussion_messages_archive_parent",
-        discussion_messages.c.archive_id,
-        discussion_messages.c.parent_id,
-    )
-
-    # PostgreSQL reflects these predicates in a cast-expanded form. Preserve
-    # that canonical database representation in the explicit manifest.
-    comment_reports = metadata.tables["comment_reports"]
-    for constraint in list(comment_reports.constraints):
-        if (
-            isinstance(constraint, CheckConstraint)
-            and constraint.name == "ck_comment_reports_status"
-        ):
-            comment_reports.constraints.remove(constraint)
-    CheckConstraint(
-        "status::text = ANY "
-        "(ARRAY['pending'::character varying, 'upheld'::character varying, "
-        "'dismissed'::character varying]::text[])",
-        name="ck_comment_reports_status",
-        table=comment_reports,
-    )
-    for index in comment_reports.indexes:
-        if index.name == "uq_comment_reports_active_reporter_comment_reason":
-            index.dialect_options["postgresql"]["where"] = text(
-                "((status)::text = 'pending'::text)"
-            )
-
-    category_config = metadata.tables["course_category_configs"]
-    for constraint in list(category_config.constraints):
-        if (
-            isinstance(constraint, CheckConstraint)
-            and constraint.name == CANONICAL_CATEGORY_LEGACY_CHECK
-        ):
-            category_config.constraints.remove(constraint)
-    CheckConstraint(
-        "lower(btrim(key::text)) <> ALL "
-        "(ARRAY['freshman'::text, 'sophomore'::text, 'junior'::text, "
-        "'senior'::text, 'interdisciplinary'::text])",
-        name=CANONICAL_CATEGORY_LEGACY_CHECK,
-        table=category_config,
-    )
-
-    # These model indexes were not introduced by the immutable migration chain.
-    for table_name in ("courses", "course_submissions", "archive_submissions"):
-        table = metadata.tables[table_name]
-        for index in list(table.indexes):
-            if tuple(index.columns.keys()) == ("category",):
-                table.indexes.remove(index)
-
-    # Defaults retained by the migration chain but absent from model metadata.
-    defaults = {
-        ("archive_submissions", "is_admin_upload"): "false",
-        ("comment_reports", "comment_deleted"): "false",
-        ("comment_reports", "created_at"): "now()",
-        ("comment_reports", "status"): "pending",
-        ("comment_reports", "updated_at"): "now()",
-        ("course_category_configs", "badge_color"): "blue",
-        ("course_category_configs", "created_at"): "now()",
-        ("course_category_configs", "icon"): "pi pi-fw pi-book",
-        ("course_category_configs", "is_active"): "true",
-        ("course_category_configs", "label"): "",
-        ("course_category_configs", "order_index"): "0",
-        ("course_category_configs", "updated_at"): "now()",
-        ("personal_notifications", "created_at"): "now()",
-        ("personal_notifications", "metadata"): "'{}'::jsonb",
-        ("system_issue_reports", "created_at"): "now()",
-        ("system_issue_reports", "github_sync_status"): "pending",
-        ("system_issue_reports", "metadata"): "'{}'::jsonb",
-        ("system_issue_reports", "status"): "local_only",
-        ("system_issue_reports", "updated_at"): "now()",
-        ("system_settings", "created_at"): "CURRENT_TIMESTAMP",
-        ("system_settings", "updated_at"): "CURRENT_TIMESTAMP",
-        ("users", "show_level_title"): "true",
+def _retained_enums(spec: ManifestSpec) -> dict[str, set[str]]:
+    return {
+        enum_name: set(values)
+        for enum_name, values in spec.retained_enums
     }
-    for (table_name, column_name), value in defaults.items():
-        metadata.tables[table_name].c[column_name].server_default = DefaultClause(
-            text(value)
-        )
 
-    # Match constraints/indexes that exist in the immutable chain.
-    UniqueConstraint(category_config.c.key)
-    system_settings = metadata.tables["system_settings"]
-    for index in list(system_settings.indexes):
-        if tuple(index.columns.keys()) == ("key",):
-            system_settings.indexes.remove(index)
-    UniqueConstraint(system_settings.c.key)
-    Index("ix_system_settings_key", system_settings.c.key, unique=False)
-    return metadata
+
+def metadata_for_revision(revision: str) -> MetaData | None:
+    """Return model-derived metadata for a reviewed revision, when applicable."""
+    spec = get_manifest_spec(revision)
+    if spec is None or spec.metadata_variant is None:
+        return None
+    return _metadata_for_variant(spec.metadata_variant)
+
+
+def _load_snapshot_manifest(spec: ManifestSpec) -> dict[str, Any]:
+    path = spec.snapshot_path
+    if path is None:
+        raise ValueError(f"Revision {spec.revision} has no snapshot manifest")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("manifest_version") != 1:
+        raise ValueError(f"Unsupported schema manifest version for {spec.revision}")
+    if payload.get("revision") != spec.revision:
+        raise ValueError(f"Schema manifest revision mismatch for {spec.revision}")
+    return payload["schema"]
 
 
 def _normalize_type(value: Any, dialect: Any) -> str:
@@ -327,7 +293,39 @@ def _normalize_default(value: Any) -> str | None:
 def _normalize_predicate(value: Any) -> str | None:
     if value is None:
         return None
-    return " ".join(str(value).replace('"', "").lower().split())
+    normalized = " ".join(str(value).replace('"', "").lower().split())
+    normalized = normalized.replace("::character varying", "")
+    normalized = normalized.replace("::text[]", "")
+    normalized = normalized.replace("::text", "")
+    normalized = re.sub(r"\(\(([^()]*)\)\)", r"(\1)", normalized)
+    normalized = re.sub(r"^\((.*)\)$", r"\1", normalized)
+    normalized = re.sub(
+        r"^\(([\w.]+)\)(?=\s*(?:=|<>|in|not))",
+        r"\1",
+        normalized,
+    )
+
+    # PostgreSQL reflects IN/NOT IN checks as = ANY / <> ALL array
+    # expressions. Canonicalize both forms without changing their meaning.
+    any_match = re.fullmatch(
+        r"(?P<column>[\w().]+) = any \(array\[(?P<values>.*)\]\)",
+        normalized,
+    )
+    if any_match:
+        normalized = (
+            f"{any_match.group('column')} in "
+            f"({any_match.group('values')})"
+        )
+    all_match = re.fullmatch(
+        r"(?P<column>[\w().]+) <> all \(array\[(?P<values>.*)\]\)",
+        normalized,
+    )
+    if all_match:
+        normalized = (
+            f"{all_match.group('column')} not in "
+            f"({all_match.group('values')})"
+        )
+    return normalized
 
 
 def _normalize_index_expression(value: Any) -> str | None:
@@ -381,8 +379,169 @@ def _actual_index_signature(index: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
+def capture_live_schema(connection: Connection) -> dict[str, Any]:
+    """Capture the normalized public-schema contract for a reviewed manifest."""
+    inspector = inspect(connection)
+    table_names = sorted(
+        set(inspector.get_table_names(schema="public")) - {LEDGER_TABLE}
+    )
+    tables: dict[str, Any] = {}
+    for table_name in table_names:
+        columns = {
+            column["name"]: {
+                "type": _normalize_type(column["type"], connection.dialect),
+                "nullable": bool(column["nullable"]),
+                "server_default": _normalize_default(column.get("default")),
+            }
+            for column in inspector.get_columns(table_name, schema="public")
+        }
+        primary_key = sorted(
+            (inspector.get_pk_constraint(table_name, schema="public") or {}).get(
+                "constrained_columns"
+            )
+            or []
+        )
+        foreign_keys = sorted(
+            [
+                {
+                    "columns": list(item.get("constrained_columns") or []),
+                    "referred_table": item.get("referred_table"),
+                    "referred_columns": list(item.get("referred_columns") or []),
+                    "ondelete": str(
+                        (item.get("options") or {}).get("ondelete") or ""
+                    ).upper(),
+                }
+                for item in inspector.get_foreign_keys(
+                    table_name,
+                    schema="public",
+                )
+            ],
+            key=lambda item: json.dumps(item, sort_keys=True),
+        )
+        unique_constraints = sorted(
+            [
+                sorted(item.get("column_names") or [])
+                for item in inspector.get_unique_constraints(
+                    table_name,
+                    schema="public",
+                )
+            ]
+        )
+        check_constraints = sorted(
+            filter(
+                None,
+                (
+                    _normalize_predicate(item.get("sqltext"))
+                    for item in inspector.get_check_constraints(
+                        table_name,
+                        schema="public",
+                    )
+                ),
+            )
+        )
+        indexes = sorted(
+            [
+                {
+                    "signature": [
+                        list(_actual_index_signature(item)[0]),
+                        _actual_index_signature(item)[1],
+                        _actual_index_signature(item)[2],
+                    ],
+                    "name": item.get("name"),
+                }
+                for item in inspector.get_indexes(
+                    table_name,
+                    schema="public",
+                )
+                if not item.get("duplicates_constraint")
+            ],
+            key=lambda item: json.dumps(item, sort_keys=True),
+        )
+        tables[table_name] = {
+            "columns": columns,
+            "primary_key": primary_key,
+            "foreign_keys": foreign_keys,
+            "unique_constraints": unique_constraints,
+            "check_constraints": check_constraints,
+            "indexes": indexes,
+        }
+
+    enums = {
+        item["name"]: sorted(item["labels"])
+        for item in inspector.get_enums(schema="public")
+    }
+    return {
+        "tables": tables,
+        "enums": dict(sorted(enums.items())),
+    }
+
+
+def _snapshot_check(name: str, expected: Any, actual: Any) -> CheckResult:
+    passed = expected == actual
+    return CheckResult(
+        name=name,
+        passed=passed,
+        message="OK" if passed else "schema manifest mismatch",
+        details={} if passed else {"expected": expected, "actual": actual},
+    )
+
+
+def compare_snapshot_schema(
+    connection: Connection,
+    expected: dict[str, Any],
+) -> list[CheckResult]:
+    """Compare a live database with a committed snapshot manifest."""
+    actual = capture_live_schema(connection)
+    expected_tables = expected.get("tables", {})
+    actual_tables = actual.get("tables", {})
+    checks = [
+        _snapshot_check(
+            "tables",
+            sorted(expected_tables),
+            sorted(actual_tables),
+        )
+    ]
+    for table_name in sorted(set(expected_tables) & set(actual_tables)):
+        for feature in (
+            "columns",
+            "primary_key",
+            "foreign_keys",
+            "unique_constraints",
+            "check_constraints",
+            "indexes",
+        ):
+            checks.append(
+                _snapshot_check(
+                    f"{table_name}.{feature}",
+                    expected_tables[table_name].get(feature),
+                    actual_tables[table_name].get(feature),
+                )
+            )
+    checks.append(
+        _snapshot_check(
+            "enum.types",
+            sorted(expected.get("enums", {})),
+            sorted(actual.get("enums", {})),
+        )
+    )
+    for enum_name in sorted(
+        set(expected.get("enums", {})) & set(actual.get("enums", {}))
+    ):
+        checks.append(
+            _snapshot_check(
+                f"enum.{enum_name}.values",
+                expected["enums"][enum_name],
+                actual["enums"][enum_name],
+            )
+        )
+    return checks
+
+
 def compare_head_schema(
-    connection: Connection, metadata: MetaData | None = None
+    connection: Connection,
+    metadata: MetaData | None = None,
+    *,
+    retained_enums: dict[str, set[str]] | None = None,
 ) -> list[CheckResult]:
     """Compare all supported public-schema features with the head manifest."""
     metadata = metadata or head_metadata()
@@ -535,7 +694,7 @@ def compare_head_schema(
             enum_name = getattr(column.type, "name", None)
             if enum_values and enum_name:
                 expected_enums[enum_name] = set(enum_values)
-    expected_enums.update(RETAINED_ENUMS)
+    expected_enums.update(retained_enums or {})
     actual_enums = {
         item["name"]: set(item["labels"])
         for item in inspector.get_enums(schema="public")
@@ -555,12 +714,18 @@ def inspect_database(
 ) -> MigrationReport:
     """Inspect without changing schema, data, or the Alembic ledger."""
     report = MigrationReport()
+    report.reviewed_manifest_revisions = list(reviewed_manifest_revisions())
     script, heads = revision_graph()
     report.repository_heads = heads
     report.multiple_heads = len(heads) != 1
     if report.multiple_heads:
         report.errors.append(
             f"Repository must have exactly one head; found {len(heads)}"
+        )
+    elif heads[0] != HEAD_SCHEMA_REVISION or get_manifest_spec(heads[0]) is None:
+        report.errors.append(
+            "Repository head has no reviewed schema manifest: "
+            f"{heads[0]}"
         )
 
     owned_engine = engine is None
@@ -596,11 +761,11 @@ def inspect_database(
             ledger_missing = (
                 not report.alembic_version_exists or not report.alembic_versions
             )
-            source_metadata: MetaData | None = None
+            manifest_spec: ManifestSpec | None = None
             if (
                 report.database_empty
                 and ledger_missing
-                and not report.multiple_heads
+                and not report.errors
             ):
                 report.upgrade_allowed = True
                 return report
@@ -614,27 +779,23 @@ def inspect_database(
                     "Database revision does not exist in this repository"
                 )
             elif len(report.alembic_versions) == 1 and heads:
-                if (
-                    report.current_revision != heads[0]
-                ):
-                    source_metadata = metadata_for_revision(
-                        report.current_revision
+                manifest_spec = get_manifest_spec(report.current_revision)
+                if manifest_spec is None:
+                    report.errors.append(
+                        "Known revision has no reviewed schema manifest: "
+                        f"{report.current_revision}"
                     )
-                    if source_metadata is None:
-                        report.errors.append(
-                            "Known non-head revision has no reviewed schema "
-                            "manifest; automatic upgrade is blocked"
-                        )
-                    elif not is_revision_ancestor(
+                elif (
+                    report.current_revision != heads[0]
+                    and not is_revision_ancestor(
                         script,
                         revision=report.current_revision,
                         head=heads[0],
-                    ):
-                        report.errors.append(
-                            "Database revision is not an ancestor of repository head"
-                        )
-                else:
-                    source_metadata = None
+                    )
+                ):
+                    report.errors.append(
+                        "Database revision is not an ancestor of repository head"
+                    )
 
             should_compare = (
                 compare_schema
@@ -644,24 +805,33 @@ def inspect_database(
                     ledger_missing
                     or (
                         len(report.alembic_versions) == 1
-                        and (
-                            report.current_revision == heads[0]
-                            or source_metadata is not None
-                        )
+                        and manifest_spec is not None
                     )
                 )
             )
             if should_compare:
-                report.schema_checks = compare_head_schema(
-                    connection,
-                    metadata=source_metadata,
-                )
-                if report.schema_matches_head:
-                    report.schema_candidate_revision = (
-                        report.current_revision
-                        if source_metadata is not None
-                        else heads[0]
+                comparison_spec = manifest_spec
+                if ledger_missing:
+                    comparison_spec = get_manifest_spec(heads[0])
+                if comparison_spec is None:
+                    report.errors.append(
+                        "No reviewed schema manifest is available for comparison"
                     )
+                elif comparison_spec.snapshot_file is not None:
+                    report.schema_checks = compare_snapshot_schema(
+                        connection,
+                        _load_snapshot_manifest(comparison_spec),
+                    )
+                elif comparison_spec.metadata_variant is not None:
+                    report.schema_checks = compare_head_schema(
+                        connection,
+                        metadata=_metadata_for_variant(
+                            comparison_spec.metadata_variant
+                        ),
+                        retained_enums=_retained_enums(comparison_spec),
+                    )
+                if report.schema_matches_head:
+                    report.schema_candidate_revision = comparison_spec.revision
 
             report.upgrade_allowed = bool(
                 not report.errors
@@ -674,7 +844,7 @@ def inspect_database(
                     )
                     or (
                         report.current_revision != heads[0]
-                        and source_metadata is not None
+                        and manifest_spec is not None
                         and report.schema_matches_head
                     )
                 )
@@ -693,6 +863,15 @@ def inspect_database(
             ):
                 report.errors.append(
                     "Database ledger is at repository head but schema drift was found"
+                )
+            if (
+                len(report.alembic_versions) == 1
+                and report.current_revision != heads[0]
+                and manifest_spec is not None
+                and not report.schema_matches_head
+            ):
+                report.errors.append(
+                    "Database source schema does not match its reviewed manifest"
                 )
             if ledger_missing and report.schema_matches_head:
                 report.warnings.append(

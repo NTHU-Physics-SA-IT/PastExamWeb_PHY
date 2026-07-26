@@ -98,7 +98,14 @@ class User(SQLModel, table=True):
     email: str = Field(unique=True, index=True)
     name: str = Field(unique=True, index=True)
     nickname: Optional[str] = Field(default=None, index=True)
-    show_level_title: bool = Field(default=True)
+    show_level_title: bool = Field(
+        default=True,
+        sa_column=Column(
+            Boolean,
+            nullable=False,
+            server_default=text("true"),
+        ),
+    )
     is_admin: bool = Field(default=False)
     password_hash: Optional[str] = Field(default=None)
     is_local: bool = Field(default=False)
@@ -160,6 +167,8 @@ class UserPresenceSession(SQLModel, table=True):
 class CourseCategoryConfig(SQLModel, table=True):
     __tablename__ = "course_category_configs"
     __table_args__ = (
+        UniqueConstraint("key"),
+        Index("ix_course_category_configs_key", "key", unique=True),
         Index(
             "uq_course_category_configs_normalized_name",
             text("lower(btrim(name))"),
@@ -177,21 +186,48 @@ class CourseCategoryConfig(SQLModel, table=True):
         ),
     )
     id: Optional[int] = Field(default=None, primary_key=True)
-    key: str = Field(unique=True, index=True)
+    key: str = Field(sa_column=Column(String, nullable=False))
     name: str = Field(index=True)
-    label: str = Field(default="")
-    icon: str = Field(default="pi pi-fw pi-book")
+    label: str = Field(
+        default="",
+        sa_column=Column(String, nullable=False, server_default=text("''")),
+    )
+    icon: str = Field(
+        default="pi pi-fw pi-book",
+        sa_column=Column(
+            String,
+            nullable=False,
+            server_default=text("'pi pi-fw pi-book'"),
+        ),
+    )
     badge_color: str = Field(
         default="blue",
         sa_column=Column(String, nullable=False, server_default="blue"),
     )
-    order_index: int = Field(default=0, index=True)
-    is_active: bool = Field(default=True, index=True)
+    order_index: int = Field(
+        default=0,
+        sa_column=Column(
+            Integer,
+            nullable=False,
+            index=True,
+            server_default=text("0"),
+        ),
+    )
+    is_active: bool = Field(
+        default=True,
+        sa_column=Column(
+            Boolean,
+            nullable=False,
+            index=True,
+            server_default=text("true"),
+        ),
+    )
     created_at: datetime = Field(
         sa_column=Column(
             DateTime(timezone=True),
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
+            server_default=text("now()"),
         )
     )
     updated_at: datetime = Field(
@@ -199,6 +235,7 @@ class CourseCategoryConfig(SQLModel, table=True):
             DateTime(timezone=True),
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
+            server_default=text("now()"),
         )
     )
     deleted_at: Optional[datetime] = Field(
@@ -213,9 +250,13 @@ class CourseCategoryConfig(SQLModel, table=True):
 
 class SystemSetting(SQLModel, table=True):
     __tablename__ = "system_settings"
+    __table_args__ = (
+        UniqueConstraint("key", name="uq_system_settings_key"),
+        Index("ix_system_settings_key", "key"),
+    )
     id: Optional[int] = Field(default=None, primary_key=True)
     key: str = Field(
-        sa_column=Column(String(128), nullable=False, unique=True, index=True)
+        sa_column=Column(String(128), nullable=False)
     )
     value: Any = Field(sa_column=Column(JSONB, nullable=False))
     created_at: datetime = Field(
@@ -223,6 +264,7 @@ class SystemSetting(SQLModel, table=True):
             DateTime(timezone=True),
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
         )
     )
     updated_at: datetime = Field(
@@ -230,6 +272,7 @@ class SystemSetting(SQLModel, table=True):
             DateTime(timezone=True),
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
         )
     )
     updated_by_id: Optional[int] = Field(
@@ -347,7 +390,14 @@ class ArchiveSubmission(SQLModel, table=True):
     owner_id: Optional[int] = Field(default=None)
     reviewer_id: Optional[int] = Field(default=None, foreign_key="users.id")
     review_note: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
-    is_admin_upload: bool = Field(default=False)
+    is_admin_upload: bool = Field(
+        default=False,
+        sa_column=Column(
+            Boolean,
+            nullable=False,
+            server_default=text("false"),
+        ),
+    )
     lifecycle_reason: Optional[str] = Field(default=None, sa_column=Column(String, nullable=True))
     created_archive_id: Optional[int] = Field(default=None, foreign_key="archives.id")
     deleted_at: Optional[datetime] = Field(
@@ -388,6 +438,13 @@ class ArchiveSubmissionEvent(SQLModel, table=True):
 
 class ArchiveDiscussionMessage(SQLModel, table=True):
     __tablename__ = "archive_discussion_messages"
+    __table_args__ = (
+        Index(
+            "ix_archive_discussion_messages_archive_parent",
+            "archive_id",
+            "parent_id",
+        ),
+    )
     id: Optional[int] = Field(default=None, primary_key=True)
     archive_id: int = Field(foreign_key="archives.id", index=True)
     user_id: int = Field(foreign_key="users.id", index=True)
@@ -593,7 +650,12 @@ class PersonalNotification(SQLModel, table=True):
     )
     metadata_json: dict[str, Any] = Field(
         default_factory=dict,
-        sa_column=Column("metadata", JSONB, nullable=False),
+        sa_column=Column(
+            "metadata",
+            JSONB,
+            nullable=False,
+            server_default=text("'{}'::jsonb"),
+        ),
     )
     dedupe_key: str = Field(sa_column=Column(String(160), nullable=False))
     read_at: Optional[datetime] = Field(
@@ -606,6 +668,7 @@ class PersonalNotification(SQLModel, table=True):
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
             index=True,
+            server_default=text("now()"),
         )
     )
 
@@ -674,7 +737,12 @@ class CommentReport(SQLModel, table=True):
     course_name_snapshot: str = Field(sa_column=Column(String(200), nullable=False))
     status: str = Field(
         default=CommentReportStatus.PENDING.value,
-        sa_column=Column(String(30), nullable=False, index=True),
+        sa_column=Column(
+            String(30),
+            nullable=False,
+            index=True,
+            server_default=text("'pending'"),
+        ),
     )
     admin_response: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
     reviewed_by: Optional[int] = Field(
@@ -696,6 +764,7 @@ class CommentReport(SQLModel, table=True):
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
             index=True,
+            server_default=text("now()"),
         )
     )
     updated_at: datetime = Field(
@@ -703,6 +772,7 @@ class CommentReport(SQLModel, table=True):
             DateTime(timezone=True),
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
+            server_default=text("now()"),
         )
     )
     deleted_at: Optional[datetime] = Field(
@@ -725,6 +795,10 @@ class SystemIssueReport(SQLModel, table=True):
     __table_args__ = (
         Index("ix_system_issue_reports_status_created", "status", "created_at"),
         Index("ix_system_issue_reports_read_at_created", "read_at", "created_at"),
+        Index(
+            "ix_system_issue_reports_github_sync_status",
+            "github_sync_status",
+        ),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -740,11 +814,36 @@ class SystemIssueReport(SQLModel, table=True):
     contact: Optional[str] = Field(default=None, sa_column=Column(String(200), nullable=True))
     status: str = Field(
         default="local_only",
-        sa_column=Column(String(30), nullable=False, index=True),
+        sa_column=Column(
+            String(30),
+            nullable=False,
+            index=True,
+            server_default=text("'local_only'"),
+        ),
     )
     github_issue_number: Optional[int] = Field(default=None, index=True)
     github_issue_url: Optional[str] = Field(
         default=None, sa_column=Column(String(500), nullable=True)
+    )
+    github_issue_state: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String(20), nullable=True),
+    )
+    github_linked_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    github_sync_status: str = Field(
+        default="pending",
+        sa_column=Column(
+            String(20),
+            nullable=False,
+            server_default=text("'pending'"),
+        ),
+    )
+    github_sync_error: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String(300), nullable=True),
     )
     read_at: Optional[datetime] = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
@@ -759,7 +858,12 @@ class SystemIssueReport(SQLModel, table=True):
     )
     metadata_json: dict[str, Any] = Field(
         default_factory=dict,
-        sa_column=Column("metadata", JSONB, nullable=False),
+        sa_column=Column(
+            "metadata",
+            JSONB,
+            nullable=False,
+            server_default=text("'{}'::jsonb"),
+        ),
     )
     created_at: datetime = Field(
         sa_column=Column(
@@ -767,6 +871,7 @@ class SystemIssueReport(SQLModel, table=True):
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
             index=True,
+            server_default=text("now()"),
         )
     )
     updated_at: datetime = Field(
@@ -774,6 +879,7 @@ class SystemIssueReport(SQLModel, table=True):
             DateTime(timezone=True),
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
+            server_default=text("now()"),
         )
     )
     deleted_at: Optional[datetime] = Field(
