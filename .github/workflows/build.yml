@@ -51,8 +51,8 @@ jobs:
         if: inputs.push_images
         shell: bash
         env:
-          FRONTEND_API_BASE_URL: ${{ secrets.FRONTEND_API_BASE_URL }}
-          FRONTEND_SITE_HOSTNAME: ${{ secrets.FRONTEND_SITE_HOSTNAME }}
+          FRONTEND_API_BASE_URL: ${{ vars.FRONTEND_API_BASE_URL }}
+          FRONTEND_SITE_HOSTNAME: ${{ vars.FRONTEND_SITE_HOSTNAME }}
         run: |
           set -euo pipefail
 
@@ -67,7 +67,30 @@ jobs:
           done
 
           if [ "${#missing[@]}" -gt 0 ]; then
-            printf 'Missing required Secret: %s\n' "${missing[@]}" >&2
+            printf 'Missing required Variable: %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+
+          if [ "$FRONTEND_API_BASE_URL" != "/api" ]; then
+            echo \
+              "FRONTEND_API_BASE_URL must be exactly /api for production." \
+              >&2
+            exit 1
+          fi
+
+          if [ "$FRONTEND_SITE_HOSTNAME" != "https://physarchive.com" ]; then
+            echo \
+              "FRONTEND_SITE_HOSTNAME must be https://physarchive.com." \
+              >&2
+            exit 1
+          fi
+
+          if [[ "$FRONTEND_API_BASE_URL" == *localhost* ]] ||
+             [[ "$FRONTEND_API_BASE_URL" == *127.0.0.1* ]]
+          then
+            echo \
+              "Production frontend must not use localhost." \
+              >&2
             exit 1
           fi
 
@@ -83,10 +106,10 @@ jobs:
             ghcr.io/nthu-physics-sa-it/pastexam:frontend
             ghcr.io/nthu-physics-sa-it/pastexam:frontend-${{ github.sha }}
           build-args: |
-            VITE_API_BASE_URL=${{ secrets.FRONTEND_API_BASE_URL }}
-            VITE_SITE_HOSTNAME=${{ secrets.FRONTEND_SITE_HOSTNAME }}
-            VITE_UMAMI_SCRIPT_URL=${{ secrets.FRONTEND_UMAMI_SCRIPT_URL }}
-            VITE_UMAMI_WEBSITE_ID=${{ secrets.FRONTEND_UMAMI_WEBSITE_ID }}
+            VITE_API_BASE_URL=${{ vars.FRONTEND_API_BASE_URL }}
+            VITE_SITE_HOSTNAME=${{ vars.FRONTEND_SITE_HOSTNAME }}
+            VITE_UMAMI_SCRIPT_URL=${{ vars.FRONTEND_UMAMI_SCRIPT_URL }}
+            VITE_UMAMI_WEBSITE_ID=${{ vars.FRONTEND_UMAMI_WEBSITE_ID }}
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,scope=frontend,mode=max
 
