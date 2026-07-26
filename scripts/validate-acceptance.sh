@@ -48,6 +48,30 @@ postgres_user="$(
   sed -n 's/^POSTGRES_USER=//p' "$env_file" |
     tail -n 1
 )"
+migrator_user="$(
+  sed -n 's/^MIGRATOR_DB_USER=//p' "$env_file" |
+    tail -n 1
+)"
+migrator_password="$(
+  sed -n 's/^MIGRATOR_DB_PASSWORD=//p' "$env_file" |
+    tail -n 1
+)"
+runtime_user="$(
+  sed -n 's/^APP_DB_USER=//p' "$env_file" |
+    tail -n 1
+)"
+runtime_password="$(
+  sed -n 's/^APP_DB_PASSWORD=//p' "$env_file" |
+    tail -n 1
+)"
+test_user="$(
+  sed -n 's/^TEST_DB_USER=//p' "$env_file" |
+    tail -n 1
+)"
+test_password="$(
+  sed -n 's/^TEST_DB_PASSWORD=//p' "$env_file" |
+    tail -n 1
+)"
 empty_database="$(
   sed -n 's/^POSTGRES_DB=//p' "$env_file" |
     tail -n 1
@@ -67,6 +91,12 @@ http_port="$(
 
 for required_value in \
   "$postgres_user" \
+  "$migrator_user" \
+  "$migrator_password" \
+  "$runtime_user" \
+  "$runtime_password" \
+  "$test_user" \
+  "$test_password" \
   "$empty_database" \
   "$upgrade_database" \
   "$test_database" \
@@ -119,11 +149,13 @@ cleanup_acceptance() {
 
   if [ "$keep_acceptance" = "1" ]; then
     echo "Keeping acceptance resources for diagnostics: $project_name"
-  elif ! "${compose[@]}" down --volumes --remove-orphans; then
+  elif ! "${compose[@]}" down --remove-orphans; then
     echo "Failed to clean acceptance resources: $project_name" >&2
     if [ "$exit_status" -eq 0 ]; then
       exit_status=1
     fi
+  else
+    echo "Acceptance volumes were preserved intentionally: $project_name"
   fi
 
   exit "$exit_status"
@@ -163,31 +195,31 @@ fi
 "${compose[@]}" run --rm migrate alembic current
 "${compose[@]}" run --rm migrate
 
-echo "Validating migration path from 3a7e9c1d5b42 to head..."
+echo "Validating migration path from reviewed baseline a4c7e9d2f6b1 to head..."
 "${compose[@]}" exec -T db sh -eu -c '
   database_name="$1"
   if ! psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc \
     "SELECT 1 FROM pg_database WHERE datname = '\''$database_name'\''" |
     grep -Fxq 1
   then
-    createdb -U "$POSTGRES_USER" "$database_name"
+    createdb -U "$POSTGRES_USER" -O "$2" "$database_name"
   fi
-' sh "$upgrade_database"
+' sh "$upgrade_database" "$migrator_user"
 "${compose[@]}" run --rm \
   -e "DB_NAME=$upgrade_database" \
-  migrate alembic upgrade 3a7e9c1d5b42
+  migrate alembic upgrade a4c7e9d2f6b1
+"${compose[@]}" run --rm \
+  -e "DB_NAME=$upgrade_database" \
+  migrate python migrate.py preflight
+"${compose[@]}" run --rm \
+  -e "DB_NAME=$upgrade_database" \
+  migrate python migrate.py upgrade
 "${compose[@]}" run --rm \
   -e "DB_NAME=$upgrade_database" \
   migrate alembic current
 "${compose[@]}" run --rm \
   -e "DB_NAME=$upgrade_database" \
-  migrate alembic upgrade head
-"${compose[@]}" run --rm \
-  -e "DB_NAME=$upgrade_database" \
-  migrate alembic current
-"${compose[@]}" run --rm \
-  -e "DB_NAME=$upgrade_database" \
-  migrate alembic upgrade head
+  migrate python migrate.py upgrade
 
 echo "Running backend tests against a third isolated database..."
 "${compose[@]}" exec -T db sh -eu -c '
@@ -196,18 +228,35 @@ echo "Running backend tests against a third isolated database..."
     "SELECT 1 FROM pg_database WHERE datname = '\''$database_name'\''" |
     grep -Fxq 1
   then
-    createdb -U "$POSTGRES_USER" "$database_name"
+    createdb -U "$POSTGRES_USER" -O "$2" "$database_name"
   fi
-' sh "$test_database"
+' sh "$test_database" "$test_user"
 "${compose[@]}" run --rm \
   -e "DB_NAME=$test_database" \
-  migrate alembic upgrade head
+  -e "DB_USER=$test_user" \
+  -e "DB_PASSWORD=$test_password" \
+  migrate python migrate.py upgrade
 "${compose[@]}" run --rm \
   -e "DB_NAME=$test_database" \
+  -e "DB_USER=$test_user" \
+  -e "DB_PASSWORD=$test_password" \
   -e "ALLOW_DATABASE_BOOTSTRAP=true" \
   migrate python -m app.scripts.seed_db \
   --confirm-database-name "$test_database"
 "${compose[@]}" --profile tests run --rm backend-tests
+
+echo "Confirming the application runtime role cannot execute DDL..."
+if PGPASSWORD="$runtime_password" "${compose[@]}" exec -T \
+  -e PGPASSWORD \
+  db psql \
+  -U "$runtime_user" \
+  -d "$empty_database" \
+  -v ON_ERROR_STOP=1 \
+  -c "CREATE TABLE runtime_role_must_not_create (id integer)"
+then
+  echo "Runtime database role unexpectedly executed DDL." >&2
+  exit 1
+fi
 
 compose_up backend frontend nginx
 

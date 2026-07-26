@@ -10,6 +10,10 @@ from sqlalchemy.engine import Engine, make_url
 from app.core.config import settings
 from app.db.course_categories import CANONICAL_COURSE_CATEGORIES
 from app.db.migration_safety import alembic_config
+from app.db.test_database_guard import (
+    validate_connected_test_database,
+    validate_test_database_target,
+)
 
 
 PREVIOUS_REVISION = "a4c7e9d2f6b1"
@@ -18,23 +22,71 @@ PREVIOUS_REVISION = "a4c7e9d2f6b1"
 @pytest.fixture()
 def migration_engine(monkeypatch: pytest.MonkeyPatch) -> Engine:
     test_url = make_url(os.environ["TEST_DATABASE_URL"])
-    database_name = test_url.database or ""
-    assert database_name != "archive_db"
-    assert database_name.startswith("test_") or database_name.endswith("_test")
+    runtime_url = alembic_config().get_main_option("sqlalchemy.url")
+    target = validate_test_database_target(
+        test_database_url=os.environ["TEST_DATABASE_URL"],
+        runtime_database_url=runtime_url,
+        isolation_confirmed=os.environ.get("PASTEXAM_TEST_DATABASE_ISOLATED"),
+        allowed_hosts=os.environ.get(
+            "TEST_DATABASE_ALLOWED_HOSTS",
+            "127.0.0.1,localhost,db",
+        ).split(","),
+    )
     monkeypatch.setattr(settings, "DB_HOST", test_url.host)
     monkeypatch.setattr(settings, "DB_PORT", test_url.port)
     monkeypatch.setattr(settings, "DB_USER", test_url.username)
     monkeypatch.setattr(settings, "DB_PASSWORD", test_url.password)
-    monkeypatch.setattr(settings, "DB_NAME", database_name)
+    monkeypatch.setattr(settings, "DB_NAME", target.database_name)
+    cleanup_database_settings = {
+        "DB_HOST": settings.DB_HOST,
+        "DB_PORT": settings.DB_PORT,
+        "DB_USER": settings.DB_USER,
+        "DB_PASSWORD": settings.DB_PASSWORD,
+        "DB_NAME": settings.DB_NAME,
+    }
 
-    engine = create_engine(alembic_config().get_main_option("sqlalchemy.url"))
+    cleanup_config = alembic_config()
+    engine = create_engine(cleanup_config.get_main_option("sqlalchemy.url"))
     with engine.begin() as connection:
-        assert connection.scalar(text("SELECT current_database()")) == database_name
+        (
+            actual_database_name,
+            actual_user_name,
+            actual_database_owner,
+            is_superuser,
+            can_create_database,
+            can_create_role,
+        ) = connection.execute(
+            text(
+                "SELECT current_database(), current_user, "
+                "pg_get_userbyid(database.datdba), "
+                "role.rolsuper, role.rolcreatedb, role.rolcreaterole "
+                "FROM pg_database AS database "
+                "JOIN pg_roles AS role ON role.rolname = current_user "
+                "WHERE database.datname = current_database()"
+            )
+        ).one()
+        validate_connected_test_database(
+            actual_database_name=actual_database_name,
+            actual_user_name=actual_user_name,
+            actual_database_owner=actual_database_owner,
+            is_superuser=is_superuser,
+            can_create_database=can_create_database,
+            can_create_role=can_create_role,
+            target=target,
+        )
         connection.execute(text("DROP SCHEMA public CASCADE"))
         connection.execute(text("CREATE SCHEMA public"))
     command.upgrade(alembic_config(), PREVIOUS_REVISION)
-    yield engine
-    engine.dispose()
+    try:
+        yield engine
+    finally:
+        for setting_name, setting_value in cleanup_database_settings.items():
+            setattr(settings, setting_name, setting_value)
+        with engine.begin() as connection:
+            connection.execute(text("DROP SCHEMA public CASCADE"))
+            connection.execute(text("CREATE SCHEMA public"))
+        command.upgrade(cleanup_config, "head")
+        engine.dispose()
 
 
 def _replace_categories(

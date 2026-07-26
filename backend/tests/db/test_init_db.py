@@ -144,6 +144,16 @@ async def test_explicit_bootstrap_creates_admin_and_canonical_seed(monkeypatch):
     monkeypatch.setattr(init_db, "load_seed_data", lambda: seed_payload)
     monkeypatch.setattr(init_db, "AsyncSessionLocal", fake_session_factory)
     monkeypatch.setattr(settings, "ALLOW_DATABASE_BOOTSTRAP", True)
+    monkeypatch.setattr(settings, "DB_NAME", "archive_db_dev_unit")
+
+    async def empty_database(_session):
+        return True
+
+    monkeypatch.setattr(
+        init_db,
+        "_validate_bootstrap_contents",
+        empty_database,
+    )
 
     await init_db.bootstrap_db(
         confirmed_database_name=settings.DB_NAME,
@@ -201,3 +211,16 @@ async def test_bootstrap_requires_explicit_flag_and_exact_database_confirmation(
         await init_db.bootstrap_db(
             confirmed_database_name=f"{settings.DB_NAME}_wrong",
         )
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_rejects_normal_and_production_database_names(
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "ALLOW_DATABASE_BOOTSTRAP", True)
+    for database_name in ("archive_db", "archive_db_production"):
+        monkeypatch.setattr(settings, "DB_NAME", database_name)
+        with pytest.raises(RuntimeError, match="dev/test"):
+            await init_db.bootstrap_db(
+                confirmed_database_name=database_name,
+            )

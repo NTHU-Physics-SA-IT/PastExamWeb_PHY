@@ -11,10 +11,15 @@ from sqlalchemy.engine import Engine, make_url
 
 import migrate
 from app.core.config import settings
+from app.db.test_database_guard import (
+    validate_connected_test_database,
+    validate_test_database_target,
+)
 from app.db.migration_safety import (
     alembic_config,
     database_url,
     inspect_database,
+    migration_advisory_lock,
     revision_graph,
     safe_error,
 )
@@ -24,25 +29,71 @@ from app.db.migration_safety import (
 def clean_public_schema(monkeypatch: pytest.MonkeyPatch) -> Engine:
     test_database_url = os.environ["TEST_DATABASE_URL"]
     test_url = make_url(test_database_url)
-    test_database_name = test_url.database or ""
-    assert test_database_name.startswith("test_") or test_database_name.endswith(
-        "_test"
+    runtime_url = database_url().render_as_string(hide_password=False)
+    target = validate_test_database_target(
+        test_database_url=test_database_url,
+        runtime_database_url=runtime_url,
+        isolation_confirmed=os.environ.get("PASTEXAM_TEST_DATABASE_ISOLATED"),
+        allowed_hosts=os.environ.get(
+            "TEST_DATABASE_ALLOWED_HOSTS",
+            "127.0.0.1,localhost,db",
+        ).split(","),
     )
-    assert test_database_name != "archive_db"
 
     monkeypatch.setattr(settings, "DB_HOST", test_url.host)
     monkeypatch.setattr(settings, "DB_PORT", test_url.port)
     monkeypatch.setattr(settings, "DB_USER", test_url.username)
     monkeypatch.setattr(settings, "DB_PASSWORD", test_url.password)
-    monkeypatch.setattr(settings, "DB_NAME", test_database_name)
+    monkeypatch.setattr(settings, "DB_NAME", target.database_name)
+    cleanup_database_settings = {
+        "DB_HOST": settings.DB_HOST,
+        "DB_PORT": settings.DB_PORT,
+        "DB_USER": settings.DB_USER,
+        "DB_PASSWORD": settings.DB_PASSWORD,
+        "DB_NAME": settings.DB_NAME,
+    }
 
-    engine = create_engine(alembic_config().get_main_option("sqlalchemy.url"))
+    cleanup_config = alembic_config()
+    engine = create_engine(cleanup_config.get_main_option("sqlalchemy.url"))
     with engine.begin() as connection:
-        assert connection.scalar(text("SELECT current_database()")) == test_database_name
+        (
+            actual_database_name,
+            actual_user_name,
+            actual_database_owner,
+            is_superuser,
+            can_create_database,
+            can_create_role,
+        ) = connection.execute(
+            text(
+                "SELECT current_database(), current_user, "
+                "pg_get_userbyid(database.datdba), "
+                "role.rolsuper, role.rolcreatedb, role.rolcreaterole "
+                "FROM pg_database AS database "
+                "JOIN pg_roles AS role ON role.rolname = current_user "
+                "WHERE database.datname = current_database()"
+            )
+        ).one()
+        validate_connected_test_database(
+            actual_database_name=actual_database_name,
+            actual_user_name=actual_user_name,
+            actual_database_owner=actual_database_owner,
+            is_superuser=is_superuser,
+            can_create_database=can_create_database,
+            can_create_role=can_create_role,
+            target=target,
+        )
         connection.execute(text("DROP SCHEMA public CASCADE"))
         connection.execute(text("CREATE SCHEMA public"))
-    yield engine
-    engine.dispose()
+    try:
+        yield engine
+    finally:
+        for setting_name, setting_value in cleanup_database_settings.items():
+            setattr(settings, setting_name, setting_value)
+        with engine.begin() as connection:
+            connection.execute(text("DROP SCHEMA public CASCADE"))
+            connection.execute(text("CREATE SCHEMA public"))
+        command.upgrade(cleanup_config, "head")
+        engine.dispose()
 
 
 def upgrade(revision: str = "head") -> None:
@@ -98,6 +149,12 @@ def test_head_database_preflight_is_read_only(clean_public_schema: Engine) -> No
             text("SELECT count(*) FROM courses WHERE id = :course_id"),
             {"course_id": course_id},
         ) == 1
+
+
+def test_head_schema_matches_sqlmodel_autogenerate_contract() -> None:
+    upgrade()
+
+    command.check(alembic_config())
 
 
 def test_missing_ledger_reports_candidate_but_never_stamps(
@@ -189,6 +246,62 @@ def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
     after = inspect_database()
     assert after.current_revision == head_revision()
     assert after.schema_matches_head is True
+
+
+def test_known_revision_without_manifest_is_blocked() -> None:
+    upgrade("d1e6c8a4f2b9")
+
+    report = inspect_database()
+
+    assert report.current_revision == "d1e6c8a4f2b9"
+    assert report.upgrade_allowed is False
+    assert any(
+        "no reviewed schema manifest" in error
+        and "d1e6c8a4f2b9" in error
+        for error in report.errors
+    )
+    assert migrate.main(["upgrade", "--json"]) == 2
+
+
+def test_reviewed_source_schema_drift_is_blocked(
+    clean_public_schema: Engine,
+) -> None:
+    upgrade("c9e4f1a7b2d6")
+    with clean_public_schema.begin() as connection:
+        connection.execute(text("DROP INDEX ix_users_deleted_by_id"))
+
+    report = inspect_database()
+
+    assert report.current_revision == "c9e4f1a7b2d6"
+    assert report.upgrade_allowed is False
+    assert any("source schema" in error.lower() for error in report.errors)
+
+
+def test_head_schema_drift_is_blocked(clean_public_schema: Engine) -> None:
+    upgrade()
+    with clean_public_schema.begin() as connection:
+        connection.execute(text("DROP INDEX ix_courses_category"))
+
+    report = inspect_database()
+
+    assert report.current_revision == head_revision()
+    assert report.upgrade_allowed is False
+    assert any("head" in error.lower() for error in report.errors)
+
+
+def test_concurrent_migration_advisory_lock_fails_closed(
+    clean_public_schema: Engine,
+) -> None:
+    second_engine = create_engine(
+        alembic_config().get_main_option("sqlalchemy.url")
+    )
+    try:
+        with migration_advisory_lock(clean_public_schema):
+            with pytest.raises(RuntimeError, match="advisory lock"):
+                with migration_advisory_lock(second_engine):
+                    pass
+    finally:
+        second_engine.dispose()
 
 
 def test_multiple_repository_heads_fail_closed(
