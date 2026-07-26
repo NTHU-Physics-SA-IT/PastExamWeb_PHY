@@ -35,6 +35,7 @@ from app.api.services.archive_submission_lifecycle import (
     collect_archive_submission_group,
     hard_delete_archive_submission_group,
     is_archive_submission_trashed,
+    delete_archive_submission_events,
     mark_linked_submissions_archive_permanently_deleted,
     restore_archive_with_temporary_submissions,
     restore_archive_submission_group,
@@ -921,6 +922,7 @@ async def _hard_delete_submission_archive_pair(
     for item in submissions_to_delete:
         item.created_archive_id = None
         await db.delete(item)
+    deleted_events = await delete_archive_submission_events(db, set(submission_ids))
     await db.flush()
     await db.delete(archive)
     return {
@@ -931,6 +933,7 @@ async def _hard_delete_submission_archive_pair(
             "archives": 1,
             "linkedSubmissionsDeleted": len(submissions_to_delete),
             "linkedSubmissionsMarkedDeleted": marked_unrecoverable,
+            "submissionEvents": deleted_events,
             "comments": len(messages),
             "files": deleted_objects,
         },

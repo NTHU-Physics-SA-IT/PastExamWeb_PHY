@@ -3,11 +3,17 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from minio.error import S3Error
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
 from app.core.config import settings
-from app.models.models import Archive, ArchiveDiscussionMessage, ArchiveSubmission, SubmissionStatus
+from app.models.models import (
+    Archive,
+    ArchiveDiscussionMessage,
+    ArchiveSubmission,
+    ArchiveSubmissionEvent,
+    SubmissionStatus,
+)
 from app.utils.storage import get_minio_client
 
 LIFECYCLE_ARCHIVE_TRASHED = "archive_trashed"
@@ -86,6 +92,22 @@ class ArchiveSubmissionGroup:
 
 def is_archive_submission_trashed(submission: ArchiveSubmission) -> bool:
     return submission.deleted_at is not None or submission.status == SubmissionStatus.DELETED
+
+
+async def delete_archive_submission_events(
+    db: SQLModelAsyncSession,
+    submission_ids: set[int],
+) -> int:
+    """Remove immutable ledger rows when their submissions are permanently deleted."""
+    if not submission_ids:
+        return 0
+
+    result = await db.execute(
+        delete(ArchiveSubmissionEvent).where(
+            ArchiveSubmissionEvent.submission_id.in_(submission_ids)
+        )
+    )
+    return int(result.rowcount or 0)
 
 
 async def _resolve_linked_archive(
@@ -516,6 +538,7 @@ async def hard_delete_archive_submission_group(
 
     for item in group.submissions:
         await db.delete(item)
+    deleted_events = await delete_archive_submission_events(db, submission_ids)
     for message in messages:
         await db.delete(message)
     await db.flush()
@@ -532,6 +555,7 @@ async def hard_delete_archive_submission_group(
         "deletedChildren": {
             "archives": archive_count,
             "linkedSubmissionsDeleted": submission_count,
+            "submissionEvents": deleted_events,
             "comments": len(messages),
             "files": deleted_objects,
         },
