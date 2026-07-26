@@ -21,6 +21,8 @@ if (
 targetUrl.searchParams.set("date", "90day");
 
 const outputDirectory = "dist/umami-assets";
+const deviceScaleFactor = 2;
+
 await mkdir(outputDirectory, { recursive: true });
 
 const browser = await chromium.launch();
@@ -91,7 +93,7 @@ async function findKpiBox(page, chartBox) {
 async function capture(theme, output) {
   const context = await browser.newContext({
     viewport: { width: 1600, height: 1400 },
-    deviceScaleFactor: 2,
+    deviceScaleFactor,
     colorScheme: theme,
   });
 
@@ -177,14 +179,22 @@ async function capture(theme, output) {
       throw new Error("Unable to locate the Umami KPI summary safely.");
     }
 
-    const padding = 16;
-    const x = Math.max(0, Math.min(kpiBox.x, chartBox.x) - padding);
-    const y = Math.max(0, Math.min(kpiBox.y, chartBox.y) - padding);
+    const horizontalPadding = 16;
+    const topPadding = 2;
+    const bottomPadding = 16;
+
+    const x = Math.max(0, Math.min(kpiBox.x, chartBox.x) - horizontalPadding);
+
+    const y = Math.max(0, Math.min(kpiBox.y, chartBox.y) - topPadding);
+
     const right =
-      Math.max(kpiBox.x + kpiBox.width, chartBox.x + chartBox.width) + padding;
+      Math.max(kpiBox.x + kpiBox.width, chartBox.x + chartBox.width) +
+      horizontalPadding;
+
     const bottom =
       Math.max(kpiBox.y + kpiBox.height, chartBox.y + chartBox.height) +
-      padding;
+      bottomPadding;
+
     const viewport = page.viewportSize();
     if (!viewport) throw new Error("Browser viewport is unavailable.");
 
@@ -203,7 +213,33 @@ async function capture(theme, output) {
       clip,
       type: "png",
     });
+    const missingTopPadding =
+      (horizontalPadding - topPadding) * deviceScaleFactor;
+
+    const { data: backgroundPixel, info: backgroundInfo } = await sharp(
+      rawScreenshot,
+    )
+      .extract({
+        left: 0,
+        top: 0,
+        width: 1,
+        height: 1,
+      })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    const background = {
+      r: backgroundPixel[0],
+      g: backgroundPixel[1],
+      b: backgroundPixel[2],
+      alpha: backgroundInfo.channels === 4 ? backgroundPixel[3] / 255 : 1,
+    };
+
     await sharp(rawScreenshot)
+      .extend({
+        top: missingTopPadding,
+        background,
+      })
       .png({ compressionLevel: 9, adaptiveFiltering: true })
       .toFile(output);
 

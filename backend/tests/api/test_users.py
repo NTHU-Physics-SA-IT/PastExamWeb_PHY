@@ -48,6 +48,60 @@ async def test_admin_can_create_and_delete_user(client, make_user):
 
 
 @pytest.mark.asyncio
+async def test_admin_can_create_user_with_password_longer_than_bcrypt_limit(
+    client,
+    make_user,
+):
+    admin = await make_user(is_admin=True)
+    unique_suffix = uuid.uuid4().hex[:8]
+    app.dependency_overrides[get_current_user] = lambda: UserRoles(
+        user_id=admin.id,
+        is_admin=True,
+    )
+
+    try:
+        response = await client.post(
+            ADMIN_PATH,
+            json={
+                "name": f"long-password-{unique_suffix}",
+                "email": f"long-password-{unique_suffix}@example.com",
+                "password": "密" * 25,
+                "is_admin": False,
+            },
+        )
+
+        assert response.status_code == 200
+        await client.delete(f"{ADMIN_PATH}/{response.json()['id']}")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
+async def test_admin_create_rejects_password_over_server_limit(client, make_user):
+    admin = await make_user(is_admin=True)
+    app.dependency_overrides[get_current_user] = lambda: UserRoles(
+        user_id=admin.id,
+        is_admin=True,
+    )
+
+    try:
+        response = await client.post(
+            ADMIN_PATH,
+            json={
+                "name": "too-long-password",
+                "email": "too-long-password@example.com",
+                "password": "a" * 257,
+                "is_admin": False,
+            },
+        )
+
+        assert response.status_code == 422
+        assert "256 UTF-8 bytes" in response.text
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
 async def test_non_admin_cannot_access_admin_user_routes(client):
     app.dependency_overrides[get_current_user] = lambda: UserRoles(
         user_id=2,
