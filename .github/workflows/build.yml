@@ -78,9 +78,9 @@ jobs:
             exit 1
           fi
 
-          if [ "$FRONTEND_SITE_HOSTNAME" != "physarchive.com" ]; then
+          if [ "$FRONTEND_SITE_HOSTNAME" != "https://physarchive.com" ]; then
             echo \
-              "FRONTEND_SITE_HOSTNAME must be physarchive.com." \
+              "FRONTEND_SITE_HOSTNAME must be https://physarchive.com." \
               >&2
             exit 1
           fi
