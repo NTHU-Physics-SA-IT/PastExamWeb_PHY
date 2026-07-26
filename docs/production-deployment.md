@@ -23,20 +23,66 @@ until candidate evidence has been reviewed. Candidate preparation never runs
 
 ## Production configuration boundary
 
-The production Compose contract currently requires exactly two secret-bearing
-files:
+The production Compose contract reads secret-bearing configuration outside
+the release checkout:
 
-- a root `.env` for PostgreSQL and MinIO Compose interpolation; and
-- `backend/.env` for the backend container.
+- `/opt/pastexam-config/.env` for Compose interpolation;
+- `/opt/pastexam-config/backend.env` for the restricted runtime role; and
+- `/opt/pastexam-config/migrator.env` for the one-shot migration role.
 
-Candidate preparation copies only those two files with mode `0600`. It does not
-copy the active repository, its uncommitted source files, or any data volume.
-Secret values must never be logged or committed.
+All three files must be root-owned deployment inputs with mode `0600`.
+Secrets are neither copied into an immutable release nor printed. Runtime and
+migrator credentials must be different.
 
-The active server currently stores these files under the dirty
-`/opt/PastExamWeb_PHY` checkout. Moving them to an independent, root-only
-configuration directory (for example `/opt/pastexam-config`) and updating the
-activation procedure to reference that directory is a blocker before a
-production traffic switch. Candidate preparation may be validated before that
-migration, but production activation must not proceed while it depends on the
-active checkout for configuration.
+## Migration and activation order
+
+`docker/docker-compose.yml` defines a non-restarting one-shot `migrate`
+service with migrator credentials. The backend depends on its successful
+completion and therefore cannot start after a failed preflight, migration, or
+postflight. Runtime credentials have DML and sequence access but no schema
+ownership or DDL privilege.
+
+The activation skeleton is deliberately disabled unless all of the following
+are supplied outside Git:
+
+- `PRODUCTION_DEPLOY_ENABLED=true`;
+- the exact activation confirmation phrase;
+- an immutable release directory and verified manifest checksum;
+- external `0600` configuration;
+- an external health URL.
+
+It then acquires a host deployment lock and performs:
+
+1. logical PostgreSQL custom-format backup plus validation;
+2. read-only MinIO manifest;
+3. migration preflight;
+4. one-shot safe migration and postflight;
+5. backend/frontend/nginx start;
+6. internal and external health checks;
+7. an activation marker written only after success.
+
+There is no automatic database rollback. Any failure stops the sequence and
+does not mark the release activated.
+
+The workflow file exposing this skeleton is manual-only, uses the protected
+`production` environment, and also requires a repository-variable gate. It
+must not be dispatched until production revision discovery, role creation,
+external configuration, backup destinations, and approval rules have been
+reviewed in a separately authorized production change.
+
+## Backup and restore
+
+`scripts/postgres-logical-backup.sh` produces a custom-format `pg_dump`,
+metadata, and SHA-256 file in an absolute directory outside the repository.
+It records the database identity, PostgreSQL version, application commit,
+repository head, and the single Alembic revision, and validates the archive
+with `pg_restore --list`.
+
+`scripts/postgres-logical-restore.sh` restores only to a previously absent
+database named `pastexam_restore_*`. It preserves a failed target for
+diagnosis, then runs read-only migration preflight. It never overwrites,
+stamps, migrates, or switches services.
+
+MinIO backup is intentionally separate. The read-only manifest tool records
+object metadata without moving, replacing, or deleting objects. PostgreSQL
+restore never triggers MinIO restore or orphan cleanup.

@@ -12,28 +12,44 @@ still be missing.
 Run from `backend/`:
 
 ```bash
-uv run migrate.py preflight
-uv run migrate.py preflight --json
-uv run migrate.py upgrade
-uv run migrate.py reconcile --check
-uv run migrate.py reconcile --check --json
+uv run python migrate.py preflight
+uv run python migrate.py preflight --json
+uv run python migrate.py upgrade
+uv run python migrate.py reconcile --check
+uv run python migrate.py reconcile --check --json
 ```
 
-All preflight and reconciliation checks are read-only. This repository
-provides no stamp or repair command.
+All preflight and reconciliation checks are read-only. Production-style
+upgrades must use this CLI rather than invoking Alembic directly. The CLI
+holds a PostgreSQL advisory lock across preflight, upgrade, and postflight,
+and verifies that every phase targets the same database. A concurrent
+migration fails without entering Alembic. This repository provides no stamp
+or repair command.
 
 `upgrade` is allowed only when:
 
-- the database has no application tables and has no ledger revision; or
+- the database is truly empty and has no ledger revision;
 - the repository has exactly one head, the database ledger contains exactly
-  that known head, and the complete supported head-schema comparison passes.
+  that head, and the complete head-schema comparison passes; or
 - the database is at an explicitly reviewed forward-migration source revision
   and its complete revision-specific schema manifest passes.
 
-All other known non-head revisions remain blocked. The repository does not
-store a reviewed schema manifest for every historical revision, so preflight
-cannot prove that an arbitrary older live schema is consistent with its
-ledger.
+Known ancestors without a reviewed manifest, unknown revisions, multiple
+ledger rows, multiple repository heads, a non-empty database without a
+ledger, source drift, and head drift all fail closed. A migration or
+postflight error exits non-zero.
+
+Reviewed manifests currently cover:
+
+- `c4d8e2f1a6b9`: the July 12 recovery dump schema, captured from the
+  read-only restored database;
+- `a4c7e9d2f6b1`: the reviewed pre-canonicalization test baseline;
+- `c9e4f1a7b2d6`: the canonical-category schema before metadata alignment;
+- `e3b7c1d9f5a2`: the current SQLModel/head contract.
+
+These are not claims about a live production revision. An unrecognized
+production revision must remain blocked until a separately authorized,
+read-only inspection produces a reviewed manifest.
 
 ## What is compared
 
@@ -63,15 +79,35 @@ Recovery requires a separately reviewed procedure and verified backup outside
 this automation. Do not add `stamp`, repair logic, or reconciliation to a
 container startup command.
 
-## Compose and deployment boundaries
+## Startup, bootstrap, and Compose boundaries
 
-The isolated acceptance Compose project has a one-shot `migrate` service. It
-runs `python migrate.py upgrade`, and dependent services start only after it
-completes successfully. It does not seed data.
+Normal backend startup calls only the read-only readiness check. It never
+runs Alembic, `create_all`, seed synchronization, bootstrap, or stamp. Missing
+or drifting schema makes the process fail fast.
 
-The production Compose file, production deployment workflows, backup scripts,
-restore scripts, production hosts, and production databases are outside this
-change. `PRODUCTION_DEPLOY_ENABLED` must remain unset or false.
+Fresh isolated development/test databases may be seeded only with the
+explicit bootstrap command:
+
+```bash
+ALLOW_DATABASE_BOOTSTRAP=true \
+uv run python -m app.scripts.seed_db \
+  --confirm-database-name archive_db_dev_example
+```
+
+The database name must use an approved dev/test prefix, migration and
+postflight must already pass, and the first run permits only the six
+migration-created canonical categories with otherwise empty application
+tables. A durable marker makes later explicit runs idempotent.
+
+Acceptance, clean-development, and production Compose definitions use a
+one-shot `migrate` service running `python migrate.py upgrade`. Backend
+startup depends on `service_completed_successfully`; the migrate service has
+no seed command, fixed container name, or restart loop.
+
+Destructive tests additionally require an explicit `TEST_DATABASE_URL`, an
+isolation marker, approved host/database/role prefixes, a database owned by
+the connected non-superuser test role, and a target distinct from runtime
+configuration. They never fall back to `DATABASE_URL` or `archive_db`.
 
 ## Migration-chain rule
 
