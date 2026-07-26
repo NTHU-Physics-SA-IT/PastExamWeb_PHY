@@ -159,6 +159,23 @@ class UserPresenceSession(SQLModel, table=True):
 
 class CourseCategoryConfig(SQLModel, table=True):
     __tablename__ = "course_category_configs"
+    __table_args__ = (
+        Index(
+            "uq_course_category_configs_normalized_name",
+            text("lower(btrim(name))"),
+            unique=True,
+        ),
+        Index(
+            "uq_course_category_configs_normalized_key",
+            text("lower(btrim(key))"),
+            unique=True,
+        ),
+        CheckConstraint(
+            "lower(btrim(key)) NOT IN "
+            "('freshman', 'sophomore', 'junior', 'senior', 'interdisciplinary')",
+            name="ck_course_category_configs_no_legacy_key",
+        ),
+    )
     id: Optional[int] = Field(default=None, primary_key=True)
     key: str = Field(unique=True, index=True)
     name: str = Field(index=True)

@@ -9,6 +9,8 @@ from sqlmodel import select
 
 from app.api.services.courses import (
     create_course,
+    create_course_category,
+    create_course_request,
     delete_archive,
     delete_course,
     get_archive_download_url,
@@ -28,7 +30,10 @@ from app.models.models import (
     ArchiveUpdateCourse,
     Course,
     CourseCategory,
+    CourseCategoryCreate,
     CourseCreate,
+    CourseSubmission,
+    CourseSubmissionCreate,
     CourseUpdate,
     SubmissionStatus,
     UserRoles,
@@ -128,6 +133,28 @@ def _override_user(user):
         return UserRoles(user_id=user.id, is_admin=user.is_admin)
 
     return _get_current_user
+
+
+@pytest.mark.asyncio
+async def test_course_request_canonicalizes_legacy_category_alias(
+    session_maker,
+    make_user,
+):
+    user = await make_user()
+    async with session_maker() as session:
+        submission = await create_course_request(
+            course_data=CourseSubmissionCreate(
+                name=f"Legacy alias request {uuid.uuid4().hex[:8]}",
+                category="freshman",
+            ),
+            current_user=UserRoles(user_id=user.id, is_admin=False),
+            db=session,
+        )
+        assert submission.category == "fundamental"
+        await session.execute(
+            delete(CourseSubmission).where(CourseSubmission.id == submission.id)
+        )
+        await session.commit()
 
 
 @pytest.mark.asyncio
@@ -1071,6 +1098,40 @@ async def test_create_course_duplicate_rejected(
     async with session_maker() as session:
         await session.execute(delete(Course).where(Course.id == course.id))
         await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_category_create_rejects_legacy_key_and_duplicate_normalized_name(
+    session_maker,
+    make_user,
+):
+    admin = await make_user(is_admin=True)
+    current_user = UserRoles(user_id=admin.id, is_admin=True)
+
+    async with session_maker() as session:
+        with pytest.raises(HTTPException) as legacy_error:
+            await create_course_category(
+                category_data=CourseCategoryCreate(
+                    key="freshman",
+                    name="Legacy category",
+                ),
+                current_user=current_user,
+                db=session,
+            )
+        assert legacy_error.value.status_code == 400
+        assert "Legacy" in legacy_error.value.detail
+
+        with pytest.raises(HTTPException) as name_error:
+            await create_course_category(
+                category_data=CourseCategoryCreate(
+                    key="duplicate-fundamental",
+                    name=" 基礎必修 ",
+                ),
+                current_user=current_user,
+                db=session,
+            )
+        assert name_error.value.status_code == 400
+        assert "name already exists" in name_error.value.detail
 
 
 @pytest.mark.asyncio

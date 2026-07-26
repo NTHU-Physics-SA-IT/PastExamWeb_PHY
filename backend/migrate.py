@@ -99,6 +99,17 @@ def main(argv: list[str] | None = None) -> int:
             if not report.upgrade_allowed:
                 return 2
             command.upgrade(config, "head")
+            upgraded = inspect_database()
+            if (
+                not upgraded.upgrade_allowed
+                or upgraded.current_revision not in upgraded.repository_heads
+                or not upgraded.schema_matches_head
+            ):
+                print(
+                    "Migration completed but post-upgrade schema validation failed",
+                    file=sys.stderr,
+                )
+                return 2
         elif args.command == "downgrade":
             command.downgrade(config, args.revision)
         elif args.command == "current":

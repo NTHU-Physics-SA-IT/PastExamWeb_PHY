@@ -1,9 +1,11 @@
-import subprocess
 from contextlib import asynccontextmanager
 
 import pytest
+
 from app.core.config import settings
 from app.db import init_db
+from app.db.course_categories import CANONICAL_COURSE_CATEGORIES
+from app.db.migration_safety import CheckResult, MigrationReport
 from app.models.models import Course, CourseCategory, CourseCategoryConfig, Meme, User
 from app.utils.auth import verify_password
 
@@ -28,6 +30,7 @@ class FakeScalarResult:
 class FakeSession:
     def __init__(
         self,
+        *,
         admin_exists=False,
         category_configs=None,
         courses=None,
@@ -41,8 +44,8 @@ class FakeSession:
             if admin_exists
             else None
         )
-        self.category_configs = category_configs or []
-        self.courses = courses or []
+        self.category_configs = list(category_configs or [])
+        self.courses = list(courses or [])
         self.meme_count = meme_count
         self.added_courses: list[Course] = []
         self.added_category_configs: list[CourseCategoryConfig] = []
@@ -57,19 +60,17 @@ class FakeSession:
         return False
 
     async def execute(self, _query):
-        if self.execute_step == 0:
-            self.execute_step += 1
-            return FakeScalarResult(self.admin)
-        if self.execute_step == 1:
-            self.execute_step += 1
-            return FakeScalarResult(self.category_configs)
-        if self.execute_step == 2:
-            self.execute_step += 1
-            return FakeScalarResult(self.courses)
-        if self.execute_step == 3:
-            self.execute_step += 1
-            return FakeScalarResult(self.meme_count)
-        raise AssertionError("Unexpected execute call")
+        values = (
+            self.admin,
+            self.category_configs,
+            self.courses,
+            self.meme_count,
+        )
+        if self.execute_step >= len(values):
+            raise AssertionError("Unexpected execute call")
+        value = values[self.execute_step]
+        self.execute_step += 1
+        return FakeScalarResult(value)
 
     def add(self, obj):
         if isinstance(obj, User):
@@ -78,6 +79,7 @@ class FakeSession:
             self.added_courses.append(obj)
         elif isinstance(obj, CourseCategoryConfig):
             self.added_category_configs.append(obj)
+            self.category_configs.append(obj)
 
     def add_all(self, objs):
         for obj in objs:
@@ -93,32 +95,44 @@ class FakeSession:
         return None
 
 
-@pytest.mark.asyncio
-async def test_init_db_creates_admin_and_seeds(monkeypatch):
-    original_loader = init_db.load_seed_data
-    original_loader.cache_clear()
+def ready_report() -> MigrationReport:
+    return MigrationReport(
+        database_connected=True,
+        database_empty=False,
+        alembic_version_exists=True,
+        alembic_versions=["head"],
+        current_revision="head",
+        current_revision_known=True,
+        repository_heads=["head"],
+        schema_checks=[CheckResult("schema", True, "OK")],
+        upgrade_allowed=True,
+    )
 
+
+@pytest.mark.asyncio
+async def test_startup_fails_fast_when_migration_is_missing(monkeypatch):
+    report = MigrationReport(
+        database_connected=True,
+        database_empty=True,
+        alembic_version_exists=False,
+        repository_heads=["head"],
+        upgrade_allowed=True,
+    )
+    monkeypatch.setattr(init_db, "inspect_database", lambda: report)
+
+    with pytest.raises(RuntimeError, match="Alembic ledger is missing"):
+        await init_db.init_db()
+
+
+@pytest.mark.asyncio
+async def test_explicit_bootstrap_creates_admin_and_canonical_seed(monkeypatch):
     seed_payload = {
         "courses": [
-            {
-                "name": "Seed Course A",
-                "category": CourseCategory.FRESHMAN.name,
-            },
-            {
-                "name": "Seed Course B",
-                "category": CourseCategory.GRADUATE.name,
-            },
+            {"name": "Seed Course A", "category": CourseCategory.FRESHMAN.name},
+            {"name": "Seed Course B", "category": CourseCategory.GRADUATE.name},
         ],
-        "memes": [
-            {"content": "Study hard!", "language": "en"},
-        ],
+        "memes": [{"content": "Study hard!", "language": "en"}],
     }
-
-    class Result:
-        returncode = 0
-        stdout = ""
-        stderr = ""
-
     fake_session = FakeSession()
 
     @asynccontextmanager
@@ -126,115 +140,64 @@ async def test_init_db_creates_admin_and_seeds(monkeypatch):
         async with fake_session:
             yield fake_session
 
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *args, **kwargs: Result(),
-    )
-    monkeypatch.setattr(
-        init_db,
-        "load_seed_data",
-        lambda: seed_payload,
-        raising=False,
-    )
-    monkeypatch.setattr(
-        init_db,
-        "AsyncSessionLocal",
-        lambda: fake_session_factory(),
-        raising=False,
-    )
+    monkeypatch.setattr(init_db, "validate_database_ready", ready_report)
+    monkeypatch.setattr(init_db, "load_seed_data", lambda: seed_payload)
+    monkeypatch.setattr(init_db, "AsyncSessionLocal", fake_session_factory)
+    monkeypatch.setattr(settings, "ALLOW_DATABASE_BOOTSTRAP", True)
 
-    await init_db.init_db()
+    await init_db.bootstrap_db(
+        confirmed_database_name=settings.DB_NAME,
+    )
 
     assert fake_session.admin is not None
-    assert fake_session.admin.email == settings.DEFAULT_ADMIN_EMAIL
     assert verify_password(
         settings.DEFAULT_ADMIN_PASSWORD,
         fake_session.admin.password_hash,
     )
+    assert [item.key for item in fake_session.added_category_configs] == [
+        item.key for item in CANONICAL_COURSE_CATEGORIES
+    ]
     assert len(fake_session.added_courses) == 2
-    assert {course.name for course in fake_session.added_courses} == {
-        "Seed Course A",
-        "Seed Course B",
-    }
     assert len(fake_session.added_memes) == 1
-    assert fake_session.added_memes[0].content == "Study hard!"
-
-    original_loader.cache_clear()
 
 
 @pytest.mark.asyncio
-async def test_init_db_fallback_when_migration_fails(monkeypatch):
-    original_loader = init_db.load_seed_data
-    original_loader.cache_clear()
+async def test_category_seed_is_idempotent_and_rejects_legacy_keys():
+    fake_session = FakeSession()
+    for _ in range(10):
+        fake_session.execute_step = 1
+        await init_db.sync_course_categories(fake_session)
 
-    class FailResult:
-        returncode = 1
-        stdout = ""
-        stderr = "boom"
+    assert len(fake_session.category_configs) == 6
+    assert {item.key for item in fake_session.category_configs} == {
+        item.key for item in CANONICAL_COURSE_CATEGORIES
+    }
 
-    fake_session = FakeSession(
-        admin_exists=True,
-        courses=[Course(name="Seed Course A", category=CourseCategory.FRESHMAN)],
-        meme_count=1,
+    legacy_session = FakeSession(
+        category_configs=[
+            CourseCategoryConfig(
+                key="freshman",
+                name="基礎必修",
+            )
+        ]
     )
+    legacy_session.execute_step = 1
+    with pytest.raises(RuntimeError, match="Legacy course categories"):
+        await init_db.sync_course_categories(legacy_session)
 
-    @asynccontextmanager
-    async def fake_session_factory():
-        async with fake_session:
-            yield fake_session
 
-    class FakeConnection:
-        def __init__(self, tracker):
-            self.tracker = tracker
+@pytest.mark.asyncio
+async def test_bootstrap_requires_explicit_flag_and_exact_database_confirmation(
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "ALLOW_DATABASE_BOOTSTRAP", False)
+    with pytest.raises(RuntimeError, match="disabled"):
+        await init_db.bootstrap_db(
+            confirmed_database_name=settings.DB_NAME,
+        )
 
-        async def run_sync(self, fn):
-            self.tracker["create_all"] += 1
-            return None
-
-        async def commit(self):
-            return None
-
-    class FakeEngine:
-        def __init__(self, tracker):
-            self.tracker = tracker
-
-        def begin(self):
-            tracker = self.tracker
-
-            @asynccontextmanager
-            async def ctx():
-                yield FakeConnection(tracker)
-
-            return ctx()
-
-    tracker = {"create_all": 0}
-
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *args, **kwargs: FailResult(),
-    )
-    monkeypatch.setattr(
-        init_db,
-        "load_seed_data",
-        lambda: {"courses": [], "memes": []},
-        raising=False,
-    )
-    monkeypatch.setattr(
-        init_db,
-        "AsyncSessionLocal",
-        lambda: fake_session_factory(),
-        raising=False,
-    )
-    monkeypatch.setattr(
-        init_db,
-        "engine",
-        FakeEngine(tracker),
-        raising=False,
-    )
-
-    await init_db.init_db()
-
-    assert tracker["create_all"] == 2
-    original_loader.cache_clear()
+    monkeypatch.setattr(settings, "ALLOW_DATABASE_BOOTSTRAP", True)
+    with pytest.raises(RuntimeError, match="confirmation"):
+        await init_db.bootstrap_db(
+            confirmed_database_name=f"{settings.DB_NAME}_wrong",
+        )

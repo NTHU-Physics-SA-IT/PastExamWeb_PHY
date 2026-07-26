@@ -932,12 +932,17 @@ const expandedMenuItems = ref({})
 const shouldResetPanels = ref(true)
 
 const fallbackCategories = [
-  { key: 'freshman', name: '基礎必修', icon: 'pi pi-fw pi-book', label: '基礎' },
-  { key: 'sophomore', name: '專業必修', icon: 'pi pi-fw pi-compass', label: '必修' },
-  { key: 'junior', name: '實驗課程', icon: 'pi pi-fw pi-sparkles', label: '實驗' },
-  { key: 'senior', name: '專業選修', icon: 'pi pi-fw pi-book', label: '選修' },
+  { key: 'fundamental', name: '基礎必修', icon: 'pi pi-fw pi-book', label: '基礎' },
+  { key: 'required', name: '專業必修', icon: 'pi pi-fw pi-compass', label: '必修' },
+  { key: 'experience', name: '實驗課程', icon: 'pi pi-fw pi-sparkles', label: '實驗' },
+  { key: 'optional', name: '專業選修', icon: 'pi pi-fw pi-book', label: '選修' },
   { key: 'graduate', name: '研究所', icon: 'pi pi-fw pi-graduation-cap', label: '研究所' },
-  { key: 'interdisciplinary', name: '戳戳數學系', icon: 'pi pi-fw pi-calculator', label: '數學' },
+  {
+    key: 'math-department',
+    name: '跨群數學系',
+    icon: 'pi pi-fw pi-calculator',
+    label: '數學',
+  },
 ]
 
 const courseCategories = ref([...fallbackCategories])

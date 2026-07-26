@@ -27,10 +27,13 @@ provides no stamp or repair command.
 - the database has no application tables and has no ledger revision; or
 - the repository has exactly one head, the database ledger contains exactly
   that known head, and the complete supported head-schema comparison passes.
+- the database is at an explicitly reviewed forward-migration source revision
+  and its complete revision-specific schema manifest passes.
 
-A known non-head revision is deliberately blocked. The repository does not
+All other known non-head revisions remain blocked. The repository does not
 store a reviewed schema manifest for every historical revision, so preflight
-cannot prove that an older live schema is consistent with its ledger.
+cannot prove that an arbitrary older live schema is consistent with its
+ledger.
 
 ## What is compared
 

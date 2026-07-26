@@ -93,8 +93,8 @@ cp frontend/.env.example frontend/.env
 ### 3. 建置並啟動開發環境
 
 ```bash
-docker compose -f docker/docker-compose.dev.yml build
-docker compose -f docker/docker-compose.dev.yml up -d
+./scripts/dev-compose.sh build
+./scripts/dev-compose.sh up -d
 ```
 
 啟動後可使用：
@@ -107,8 +107,8 @@ docker compose -f docker/docker-compose.dev.yml up -d
 PostgreSQL、Redis、後端及前端開發伺服器預設在 Docker Compose 網路內互通，不另外暴露主機連接埠。可用下列指令查看狀態與停止服務：
 
 ```bash
-docker compose -f docker/docker-compose.dev.yml ps
-docker compose -f docker/docker-compose.dev.yml down
+./scripts/dev-compose.sh ps
+./scripts/dev-compose.sh down
 ```
 
 ## 參與貢獻

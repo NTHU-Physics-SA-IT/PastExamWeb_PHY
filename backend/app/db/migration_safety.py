@@ -29,6 +29,10 @@ from app.models import models as models_module
 
 
 LEDGER_TABLE = "alembic_version"
+CANONICAL_CATEGORY_SOURCE_REVISION = "a4c7e9d2f6b1"
+CANONICAL_CATEGORY_NAME_INDEX = "uq_course_category_configs_normalized_name"
+CANONICAL_CATEGORY_KEY_INDEX = "uq_course_category_configs_normalized_key"
+CANONICAL_CATEGORY_LEGACY_CHECK = "ck_course_category_configs_no_legacy_key"
 RETAINED_ENUMS = {
     # b6f1e2d9a4c7 converted category columns to varchar but intentionally
     # retained the historical PostgreSQL type.
@@ -93,11 +97,16 @@ def database_url() -> URL:
     )
 
 
-def alembic_config() -> Config:
+def alembic_config(url: URL | str | None = None) -> Config:
     config = Config("alembic.ini")
+    configured_url = url or database_url()
+    if isinstance(configured_url, str):
+        rendered_url = configured_url
+    else:
+        rendered_url = configured_url.render_as_string(hide_password=False)
     config.set_main_option(
         "sqlalchemy.url",
-        database_url().render_as_string(hide_password=False).replace("%", "%%"),
+        rendered_url.replace("+asyncpg", "").replace("%", "%%"),
     )
     return config
 
@@ -148,6 +157,39 @@ def revision_graph(
 ) -> tuple[ScriptDirectory, list[str]]:
     script = ScriptDirectory.from_config(config or alembic_config())
     return script, sorted(script.get_heads())
+
+
+def is_revision_ancestor(
+    script: ScriptDirectory,
+    *,
+    revision: str,
+    head: str,
+) -> bool:
+    return revision in {
+        item.revision
+        for item in script.walk_revisions(base="base", head=head)
+    }
+
+
+def metadata_for_revision(revision: str) -> MetaData | None:
+    """Return a reviewed schema manifest for an explicitly supported source."""
+    if revision != CANONICAL_CATEGORY_SOURCE_REVISION:
+        return None
+    metadata = head_metadata()
+    category_config = metadata.tables["course_category_configs"]
+    for index in list(category_config.indexes):
+        if index.name in {
+            CANONICAL_CATEGORY_NAME_INDEX,
+            CANONICAL_CATEGORY_KEY_INDEX,
+        }:
+            category_config.indexes.remove(index)
+    for constraint in list(category_config.constraints):
+        if (
+            isinstance(constraint, CheckConstraint)
+            and constraint.name == CANONICAL_CATEGORY_LEGACY_CHECK
+        ):
+            category_config.constraints.remove(constraint)
+    return metadata
 
 
 def head_metadata() -> MetaData:
@@ -205,6 +247,21 @@ def head_metadata() -> MetaData:
                 "((status)::text = 'pending'::text)"
             )
 
+    category_config = metadata.tables["course_category_configs"]
+    for constraint in list(category_config.constraints):
+        if (
+            isinstance(constraint, CheckConstraint)
+            and constraint.name == CANONICAL_CATEGORY_LEGACY_CHECK
+        ):
+            category_config.constraints.remove(constraint)
+    CheckConstraint(
+        "lower(btrim(key::text)) <> ALL "
+        "(ARRAY['freshman'::text, 'sophomore'::text, 'junior'::text, "
+        "'senior'::text, 'interdisciplinary'::text])",
+        name=CANONICAL_CATEGORY_LEGACY_CHECK,
+        table=category_config,
+    )
+
     # These model indexes were not introduced by the immutable migration chain.
     for table_name in ("courses", "course_submissions", "archive_submissions"):
         table = metadata.tables[table_name]
@@ -243,7 +300,6 @@ def head_metadata() -> MetaData:
         )
 
     # Match constraints/indexes that exist in the immutable chain.
-    category_config = metadata.tables["course_category_configs"]
     UniqueConstraint(category_config.c.key)
     system_settings = metadata.tables["system_settings"]
     for index in list(system_settings.indexes):
@@ -274,6 +330,13 @@ def _normalize_predicate(value: Any) -> str | None:
     return " ".join(str(value).replace('"', "").lower().split())
 
 
+def _normalize_index_expression(value: Any) -> str | None:
+    normalized = _normalize_predicate(value)
+    if normalized is None:
+        return None
+    return normalized.replace("::character varying", "").replace("::text", "")
+
+
 def _set_check(name: str, expected: set[Any], actual: set[Any]) -> CheckResult:
     missing = sorted(expected - actual, key=str)
     unexpected = sorted(actual - expected, key=str)
@@ -288,8 +351,12 @@ def _set_check(name: str, expected: set[Any], actual: set[Any]) -> CheckResult:
 
 def _expected_index_signature(index: Index) -> tuple[Any, ...]:
     predicate = index.dialect_options["postgresql"].get("where")
+    column_names = tuple(index.columns.keys())
+    elements = column_names or tuple(
+        _normalize_index_expression(expression) for expression in index.expressions
+    )
     return (
-        tuple(index.columns.keys()),
+        elements,
         bool(index.unique),
         _normalize_predicate(predicate),
     )
@@ -297,8 +364,18 @@ def _expected_index_signature(index: Index) -> tuple[Any, ...]:
 
 def _actual_index_signature(index: dict[str, Any]) -> tuple[Any, ...]:
     dialect_options = index.get("dialect_options") or {}
+    column_names = index.get("column_names") or []
+    expressions = index.get("expressions") or []
+    elements = tuple(
+        column_name
+        if column_name is not None
+        else _normalize_index_expression(
+            expressions[position] if position < len(expressions) else None
+        )
+        for position, column_name in enumerate(column_names)
+    )
     return (
-        tuple(index.get("column_names") or []),
+        elements,
         bool(index.get("unique")),
         _normalize_predicate(dialect_options.get("postgresql_where")),
     )
@@ -519,6 +596,7 @@ def inspect_database(
             ledger_missing = (
                 not report.alembic_version_exists or not report.alembic_versions
             )
+            source_metadata: MetaData | None = None
             if (
                 report.database_empty
                 and ledger_missing
@@ -536,11 +614,27 @@ def inspect_database(
                     "Database revision does not exist in this repository"
                 )
             elif len(report.alembic_versions) == 1 and heads:
-                if report.current_revision != heads[0]:
-                    report.errors.append(
-                        "Known non-head revisions require a separately reviewed "
-                        "schema manifest; automatic upgrade is blocked"
+                if (
+                    report.current_revision != heads[0]
+                ):
+                    source_metadata = metadata_for_revision(
+                        report.current_revision
                     )
+                    if source_metadata is None:
+                        report.errors.append(
+                            "Known non-head revision has no reviewed schema "
+                            "manifest; automatic upgrade is blocked"
+                        )
+                    elif not is_revision_ancestor(
+                        script,
+                        revision=report.current_revision,
+                        head=heads[0],
+                    ):
+                        report.errors.append(
+                            "Database revision is not an ancestor of repository head"
+                        )
+                else:
+                    source_metadata = None
 
             should_compare = (
                 compare_schema
@@ -550,22 +644,48 @@ def inspect_database(
                     ledger_missing
                     or (
                         len(report.alembic_versions) == 1
-                        and report.current_revision == heads[0]
+                        and (
+                            report.current_revision == heads[0]
+                            or source_metadata is not None
+                        )
                     )
                 )
             )
             if should_compare:
-                report.schema_checks = compare_head_schema(connection)
+                report.schema_checks = compare_head_schema(
+                    connection,
+                    metadata=source_metadata,
+                )
                 if report.schema_matches_head:
-                    report.schema_candidate_revision = heads[0]
+                    report.schema_candidate_revision = (
+                        report.current_revision
+                        if source_metadata is not None
+                        else heads[0]
+                    )
 
             report.upgrade_allowed = bool(
                 not report.errors
                 and len(report.alembic_versions) == 1
-                and report.current_revision == heads[0]
                 and report.current_revision_known
-                and report.schema_matches_head
+                and (
+                    (
+                        report.current_revision == heads[0]
+                        and report.schema_matches_head
+                    )
+                    or (
+                        report.current_revision != heads[0]
+                        and source_metadata is not None
+                        and report.schema_matches_head
+                    )
+                )
             )
+            if (
+                report.upgrade_allowed
+                and report.current_revision != heads[0]
+            ):
+                report.warnings.append(
+                    "Database has a validated forward migration path to head"
+                )
             if (
                 len(report.alembic_versions) == 1
                 and report.current_revision == heads[0]

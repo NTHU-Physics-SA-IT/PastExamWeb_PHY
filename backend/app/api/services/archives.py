@@ -15,6 +15,11 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
 from app.db.session import get_session
+from app.db.course_categories import (
+    RESERVED_LEGACY_COURSE_CATEGORY_KEYS,
+    canonicalize_course_category_key,
+    normalize_course_category_key,
+)
 from app.models.models import (
     Archive,
     ArchiveSubmissionComparisonRead,
@@ -99,6 +104,7 @@ async def _enqueue_submission_status_notification(
 
 
 async def _ensure_category(db: AsyncSession, category_key: str) -> None:
+    category_key = canonicalize_course_category_key(category_key)
     result = await db.execute(
         select(CourseCategoryConfig).where(
             CourseCategoryConfig.key == category_key,
@@ -119,7 +125,7 @@ def _normalize_category_key(value: str) -> str:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Category key must use lowercase letters, numbers, or hyphens",
         )
-    return key
+    return canonicalize_course_category_key(key)
 
 
 def _unwrap_form_default(value, default=None):
@@ -334,7 +340,7 @@ async def upload_archive(
     requested_category_icon = _unwrap_form_default(requested_category_icon)
 
     subject = format_course_display_name(subject)
-    category = category.strip()
+    category = _normalize_category_key(category)
     professor = professor.strip()
     requested_course_name = (
         format_course_display_name(requested_course_name) if requested_course_name else None
@@ -356,7 +362,13 @@ async def upload_archive(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="New category key and name are required",
             )
-        category = _normalize_category_key(requested_category_key)
+        requested_key = normalize_course_category_key(requested_category_key)
+        if requested_key in RESERVED_LEGACY_COURSE_CATEGORY_KEYS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Legacy category keys are reserved",
+            )
+        category = _normalize_category_key(requested_key)
         requested_category_key = category
         if not requested_course_name:
             requested_course_name = subject

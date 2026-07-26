@@ -204,7 +204,9 @@ echo "Running backend tests against a third isolated database..."
   migrate alembic upgrade head
 "${compose[@]}" run --rm \
   -e "DB_NAME=$test_database" \
-  migrate python -m app.scripts.seed_db
+  -e "ALLOW_DATABASE_BOOTSTRAP=true" \
+  migrate python -m app.scripts.seed_db \
+  --confirm-database-name "$test_database"
 "${compose[@]}" --profile tests run --rm backend-tests
 
 compose_up backend frontend nginx

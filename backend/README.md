@@ -67,6 +67,11 @@ uv run migrate.py create "Your migration message"
 uv run migrate.py preflight
 uv run migrate.py upgrade
 
+# Explicitly initialize local/test seed data after migration.
+# Bootstrap is disabled by default and is never run during API startup.
+ALLOW_DATABASE_BOOTSTRAP=true \
+  uv run python -m app.scripts.seed_db --confirm-database-name <database_name>
+
 # Read-only assessment for a non-empty database with a missing ledger
 uv run migrate.py reconcile --check
 

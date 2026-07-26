@@ -6,6 +6,7 @@
 
 .codex/skills/
 node_modules/
+.pnpm-store/
 backup/
 frontend/playwright/.auth
 *.temp

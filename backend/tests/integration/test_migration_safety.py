@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import json
+import os
 from urllib.parse import quote, quote_plus
 
 import pytest
 from alembic import command
 from sqlalchemy import create_engine, inspect as sa_inspect, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 
 import migrate
+from app.core.config import settings
 from app.db.migration_safety import (
     alembic_config,
     database_url,
@@ -19,9 +21,24 @@ from app.db.migration_safety import (
 
 
 @pytest.fixture(autouse=True)
-def clean_public_schema() -> Engine:
+def clean_public_schema(monkeypatch: pytest.MonkeyPatch) -> Engine:
+    test_database_url = os.environ["TEST_DATABASE_URL"]
+    test_url = make_url(test_database_url)
+    test_database_name = test_url.database or ""
+    assert test_database_name.startswith("test_") or test_database_name.endswith(
+        "_test"
+    )
+    assert test_database_name != "archive_db"
+
+    monkeypatch.setattr(settings, "DB_HOST", test_url.host)
+    monkeypatch.setattr(settings, "DB_PORT", test_url.port)
+    monkeypatch.setattr(settings, "DB_USER", test_url.username)
+    monkeypatch.setattr(settings, "DB_PASSWORD", test_url.password)
+    monkeypatch.setattr(settings, "DB_NAME", test_database_name)
+
     engine = create_engine(alembic_config().get_main_option("sqlalchemy.url"))
     with engine.begin() as connection:
+        assert connection.scalar(text("SELECT current_database()")) == test_database_name
         connection.execute(text("DROP SCHEMA public CASCADE"))
         connection.execute(text("CREATE SCHEMA public"))
     yield engine
@@ -159,18 +176,19 @@ def test_unknown_and_multiple_ledger_revisions_fail(
     assert any("exactly one revision" in error for error in multiple.errors)
 
 
-def test_known_non_head_revision_is_not_auto_upgraded() -> None:
+def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
     script, _ = revision_graph()
     previous_revision = script.get_revision(head_revision()).down_revision
     assert isinstance(previous_revision, str)
     upgrade(previous_revision)
 
-    before = inspect_database().alembic_versions
-    assert migrate.main(["upgrade", "--json"]) == 2
-    after = inspect_database().alembic_versions
-
-    assert before == [previous_revision]
-    assert after == before
+    before = inspect_database()
+    assert before.alembic_versions == [previous_revision]
+    assert before.upgrade_allowed is True
+    assert migrate.main(["upgrade", "--json"]) == 0
+    after = inspect_database()
+    assert after.current_revision == head_revision()
+    assert after.schema_matches_head is True
 
 
 def test_multiple_repository_heads_fail_closed(

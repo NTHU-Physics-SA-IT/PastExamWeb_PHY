@@ -13,13 +13,22 @@ from fastapi import (
 )
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
-from sqlalchemy import and_, delete, exists, func, or_
+from sqlalchemy import and_, delete, exists, func, or_, update as sql_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db.session import get_session
+from app.db.course_categories import (
+    CANONICAL_COURSE_CATEGORIES,
+    LEGACY_COURSE_CATEGORY_ALIASES,
+    RESERVED_LEGACY_COURSE_CATEGORY_KEYS,
+    canonicalize_course_category_key,
+    normalize_course_category_key,
+    normalize_course_category_name,
+)
 from app.api.services.archive_submission_lifecycle import (
     make_course_trash_lifecycle_reason,
     is_course_trash_lifecycle_reason,
@@ -73,12 +82,8 @@ router = APIRouter()
 _discussion_connections_by_archive: dict[int, set[WebSocket]] = {}
 DISCUSSION_MESSAGE_MAX_LENGTH = 200
 DEFAULT_CATEGORIES = [
-    ("fundamental", "基礎必修", "基礎", "pi pi-fw pi-book"),
-    ("required", "專業必修", "必修", "pi pi-fw pi-compass"),
-    ("experience", "實驗課程", "實驗", "pi pi-fw pi-sparkles"),
-    ("optional", "專業選修", "選修", "pi pi-fw pi-book"),
-    ("graduate", "研究所", "研究所", "pi pi-fw pi-graduation-cap"),
-    ("math-department", "戳戳數學系", "數學", "pi pi-fw pi-calculator"),
+    (category.key, category.name, category.label, category.icon)
+    for category in CANONICAL_COURSE_CATEGORIES
 ]
 DEFAULT_CATEGORY_ORDER = {item[0]: index for index, item in enumerate(DEFAULT_CATEGORIES)}
 DEFAULT_CATEGORY_BADGE_COLOR = "slate"
@@ -100,20 +105,10 @@ CATEGORY_BADGE_COLOR_ALIASES = {
     "gray": "slate",
 }
 DEFAULT_CATEGORY_BADGE_COLORS = {
-    "fundamental": "navy",
-    "required": "forest",
-    "experience": "amber",
-    "optional": "violet",
-    "graduate": "burgundy",
-    "math-department": "slate",
+    category.key: category.badge_color
+    for category in CANONICAL_COURSE_CATEGORIES
 }
-LEGACY_CATEGORY_ALIASES = {
-    "freshman": "fundamental",
-    "sophomore": "required",
-    "junior": "experience",
-    "senior": "optional",
-    "interdisciplinary": "math-department",
-}
+LEGACY_CATEGORY_ALIASES = LEGACY_COURSE_CATEGORY_ALIASES
 
 
 class CategorizedCourses(dict):
@@ -283,6 +278,7 @@ async def _admin_category_order_map(db: AsyncSession) -> dict[str, int]:
 
 
 async def _ensure_category(db: AsyncSession, category_key: str) -> CourseCategoryConfig:
+    category_key = canonicalize_course_category_key(category_key)
     result = await db.execute(
         select(CourseCategoryConfig).where(
             CourseCategoryConfig.key == category_key,
@@ -304,6 +300,47 @@ async def _ensure_category(db: AsyncSession, category_key: str) -> CourseCategor
             order_index=DEFAULT_CATEGORY_ORDER[category_key],
         )
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Course category does not exist")
+
+
+def _validated_admin_category_key(value: str) -> str:
+    key = normalize_course_category_key(value)
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category key is required",
+        )
+    if key in RESERVED_LEGACY_COURSE_CATEGORY_KEYS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Legacy category keys are reserved",
+        )
+    return key
+
+
+async def _ensure_unique_category_name(
+    db: AsyncSession,
+    value: str,
+    *,
+    exclude_category_id: int | None = None,
+) -> str:
+    name = value.strip()
+    normalized_name = normalize_course_category_name(name)
+    if not normalized_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category name is required",
+        )
+    query = select(CourseCategoryConfig).where(
+        func.lower(func.trim(CourseCategoryConfig.name)) == normalized_name
+    )
+    if exclude_category_id is not None:
+        query = query.where(CourseCategoryConfig.id != exclude_category_id)
+    if (await db.execute(query)).scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category name already exists",
+        )
+    return name
 
 
 async def _next_order_index(db: AsyncSession, category) -> int:
@@ -342,15 +379,15 @@ async def list_course_categories(
     return [
         CourseCategoryRead(
             id=index + 1,
-            key=key,
-            name=name,
-            label=label,
-            icon=icon,
-            badge_color=DEFAULT_CATEGORY_BADGE_COLORS.get(key, DEFAULT_CATEGORY_BADGE_COLOR),
-            order_index=index,
+            key=category.key,
+            name=category.name,
+            label=category.label,
+            icon=category.icon,
+            badge_color=category.badge_color,
+            order_index=category.order_index,
             is_active=True,
         )
-        for index, (key, name, label, icon) in enumerate(DEFAULT_CATEGORIES)
+        for index, category in enumerate(CANONICAL_COURSE_CATEGORIES)
     ]
 
 
@@ -390,9 +427,9 @@ async def create_course_request(
     current_user: UserRoles = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
-    await _ensure_category(db, course_data.category)
+    normalized_category = canonicalize_course_category_key(course_data.category)
+    await _ensure_category(db, normalized_category)
     normalized_name = normalize_course_search_text(course_data.name)
-    normalized_category = course_data.category
     formatted_name = format_course_display_name(course_data.name)
 
     existing_course = (
@@ -428,8 +465,8 @@ async def create_course_request(
     if current_user.is_admin:
         course = Course(
             name=formatted_name,
-            category=course_data.category,
-            order_index=await _next_order_index(db, course_data.category),
+            category=normalized_category,
+            order_index=await _next_order_index(db, normalized_category),
         )
         db.add(course)
         await db.commit()
@@ -446,7 +483,7 @@ async def create_course_request(
     else:
         submission = CourseSubmission(
             name=formatted_name,
-            category=course_data.category,
+            category=normalized_category,
             requester_id=current_user.user_id,
         )
 
@@ -1981,9 +2018,8 @@ async def create_course_category(
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
-    key = category_data.key.strip().lower().replace(" ", "-")
-    if not key:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category key is required")
+    key = _validated_admin_category_key(category_data.key)
+    name = await _ensure_unique_category_name(db, category_data.name)
 
     existing = (
         await db.execute(select(CourseCategoryConfig).where(CourseCategoryConfig.key == key))
@@ -2000,7 +2036,7 @@ async def create_course_category(
 
     category = CourseCategoryConfig(
         key=key,
-        name=category_data.name.strip(),
+        name=name,
         label=category_data.label.strip(),
         icon=category_data.icon.strip() or "pi pi-fw pi-book",
         badge_color=_normalize_category_badge_color(category_data.badge_color),
@@ -2008,7 +2044,14 @@ async def create_course_category(
         is_active=True,
     )
     db.add(category)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category key or name already exists",
+        ) from exc
     await db.refresh(category)
     return category
 
@@ -2029,9 +2072,7 @@ async def update_course_category(
 
     old_key = category.key
     if category_data.key is not None:
-        new_key = category_data.key.strip().lower().replace(" ", "-")
-        if not new_key:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category key is required")
+        new_key = _validated_admin_category_key(category_data.key)
         existing = (
             await db.execute(
                 select(CourseCategoryConfig).where(
@@ -2045,12 +2086,23 @@ async def update_course_category(
         category.key = new_key
         if new_key != old_key:
             for model in (Course, CourseSubmission, ArchiveSubmission):
-                result = await db.execute(select(model).where(model.category == old_key))
-                for item in result.scalars().all():
-                    item.category = new_key
+                await db.execute(
+                    sql_update(model)
+                    .where(model.category == old_key)
+                    .values(category=new_key)
+                )
+            await db.execute(
+                sql_update(ArchiveSubmission)
+                .where(ArchiveSubmission.requested_category_key == old_key)
+                .values(requested_category_key=new_key)
+            )
 
     if category_data.name is not None:
-        category.name = category_data.name.strip()
+        category.name = await _ensure_unique_category_name(
+            db,
+            category_data.name,
+            exclude_category_id=category_id,
+        )
     if category_data.label is not None:
         category.label = category_data.label.strip()
     if category_data.icon is not None:
@@ -2062,8 +2114,24 @@ async def update_course_category(
     if category_data.is_active is not None:
         category.is_active = category_data.is_active
     category.updated_at = datetime.now(timezone.utc)
+    await db.execute(
+        sql_update(ArchiveSubmission)
+        .where(ArchiveSubmission.requested_category_key == category.key)
+        .values(
+            requested_category_name=category.name,
+            requested_category_label=category.label,
+            requested_category_icon=category.icon,
+        )
+    )
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category key or name already exists",
+        ) from exc
     await db.refresh(category)
     return category
 

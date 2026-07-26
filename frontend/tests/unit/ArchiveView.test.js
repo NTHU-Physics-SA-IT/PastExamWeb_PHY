@@ -32,6 +32,14 @@ let originalFetch
 let consoleErrorSpy
 
 const sampleCourses = {
+  fundamental: [
+    { id: 'c1', name: 'Calculus I', english_name: 'Calculus I (English)' },
+    { id: 'c2', name: 'Linear Algebra' },
+  ],
+  required: [{ id: 'c3', name: 'Data Structures' }],
+  experience: [],
+  optional: [],
+  'math-department': [],
   freshman: [
     { id: 'c1', name: 'Calculus I', english_name: 'Calculus I (English)' },
     { id: 'c2', name: 'Linear Algebra' },
@@ -238,6 +246,15 @@ describe('ArchiveView', () => {
     expect(initialIssueContext.page).toBe('archive')
 
     const vm = wrapper.vm
+    expect(vm.courseCategories.map(({ key }) => key)).toEqual([
+      'fundamental',
+      'required',
+      'experience',
+      'optional',
+      'graduate',
+      'math-department',
+    ])
+    expect(new Set(vm.courseCategories.map(({ name }) => name)).size).toBe(6)
 
     vm.filterBySubject({ label: 'Calculus I', id: 'c1' })
     await flushPromises()

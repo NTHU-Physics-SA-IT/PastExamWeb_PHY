@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     DEFAULT_ADMIN_NAME: str
     DEFAULT_ADMIN_PASSWORD: str
     DEFAULT_ADMIN_EMAIL: str
+    ALLOW_DATABASE_BOOTSTRAP: bool = False
 
     class Config:
         env_file = ".env"

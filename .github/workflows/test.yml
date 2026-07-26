@@ -169,7 +169,9 @@ jobs:
         run: |
           docker compose -f docker/docker-compose.dev.yml run --rm \
             -e DB_NAME=test_archive_db \
-            backend uv run python app/scripts/seed_db.py
+            -e ALLOW_DATABASE_BOOTSTRAP=true \
+            backend uv run python app/scripts/seed_db.py \
+              --confirm-database-name test_archive_db
 
       - name: Run backend tests with coverage
         run: |

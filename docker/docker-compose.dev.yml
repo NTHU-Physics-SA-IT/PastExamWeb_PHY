@@ -12,7 +12,10 @@ services:
       - "24678:24678"
     env_file:
       - ../frontend/.env
-    command: sh -c "pnpm install --frozen-lockfile && pnpm run dev --host 0.0.0.0 --port 80"
+    command: >-
+      sh -c "pnpm install --frozen-lockfile
+      --store-dir /app/node_modules/.pnpm-store
+      && pnpm run dev --host 0.0.0.0 --port 80"
     volumes:
       - /app/node_modules
       - ../frontend:/app
