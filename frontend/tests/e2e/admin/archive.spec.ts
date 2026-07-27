@@ -3,15 +3,15 @@ import { JSON_HEADERS } from '../support/constants'
 import { clickWhenVisible } from '../support/ui'
 
 const COURSES_FIXTURE = {
-  freshman: [
+  fundamental: [
     { id: 101, name: '普通物理(一)' },
     { id: 102, name: '電磁學(一)' },
   ],
-  sophomore: [],
-  junior: [],
-  senior: [],
+  required: [],
+  experience: [],
+  optional: [],
   graduate: [],
-  interdisciplinary: [],
+  'math-department': [],
 }
 
 const ARCHIVES_FIXTURE: Record<number, Array<Record<string, unknown>>> = {
