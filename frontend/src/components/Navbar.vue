@@ -579,6 +579,16 @@ export default {
             messageId: metadata.message_id || metadata.reply_message_id || item.source_message_id,
           },
         })
+        return
+      }
+      if (item?.source_type === 'archive_report') {
+        await this.$router.push({
+          path: '/archive',
+          query: {
+            courseId: metadata.course_id,
+            archiveId: metadata.archive_id,
+          },
+        })
       }
     },
 

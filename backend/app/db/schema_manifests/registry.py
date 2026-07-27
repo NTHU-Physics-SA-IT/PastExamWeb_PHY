@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-HEAD_SCHEMA_REVISION = "e3b7c1d9f5a2"
+HEAD_SCHEMA_REVISION = "a7c3e9f1b5d2"
 
 
 @dataclass(frozen=True)
@@ -57,6 +57,11 @@ MANIFESTS = {
         description="canonical category schema before metadata drift alignment",
         metadata_variant="pre_metadata_alignment",
         retained_enums=_COURSE_CATEGORY_ENUM,
+    ),
+    "e3b7c1d9f5a2": ManifestSpec(
+        revision="e3b7c1d9f5a2",
+        description="schema before archive report workflow",
+        metadata_variant="pre_archive_reports",
     ),
     HEAD_SCHEMA_REVISION: ManifestSpec(
         revision=HEAD_SCHEMA_REVISION,

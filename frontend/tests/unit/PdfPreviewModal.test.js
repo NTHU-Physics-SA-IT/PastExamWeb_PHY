@@ -154,6 +154,7 @@ describe('PdfPreviewModal', () => {
           ProgressSpinner: stubComponent,
           Button: stubComponent,
           ArchiveDiscussionPanel: { template: '<div class="discussion-panel-stub"></div>' },
+          ArchiveReportPanel: { template: '<div class="archive-report-panel-stub"></div>' },
         },
       },
     })
@@ -199,11 +200,55 @@ describe('PdfPreviewModal', () => {
           ProgressSpinner: stubComponent,
           Button: stubComponent,
           ArchiveDiscussionPanel: { template: '<div class="discussion-panel-stub"></div>' },
+          ArchiveReportPanel: { template: '<div class="archive-report-panel-stub"></div>' },
         },
       },
     })
 
     expect(wrapper.find('.discussion-panel-stub').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('switches between discussion and archive report without unmounting discussion', async () => {
+    const wrapper = mount(PdfPreviewModal, {
+      props: {
+        visible: true,
+        previewUrl: '',
+        courseId: 1,
+        archiveId: 2,
+        courseName: '電磁學',
+        title: '期中考',
+      },
+      global: {
+        stubs: {
+          Dialog: stubComponent,
+          ProgressSpinner: stubComponent,
+          Button: {
+            inheritAttrs: false,
+            props: ['label'],
+            template: '<button v-bind="$attrs">{{ label }}</button>',
+          },
+          ArchiveDiscussionPanel: {
+            template: '<div class="discussion-panel-stub"><textarea value="draft" /></div>',
+          },
+          ArchiveReportPanel: {
+            template: '<div class="archive-report-panel-stub"></div>',
+          },
+        },
+      },
+    })
+
+    expect(wrapper.vm.sidePanelMode).toBe('discussion')
+    wrapper.vm.handleArchiveReportClick()
+    await nextTick()
+    expect(wrapper.vm.sidePanelMode).toBe('exam-report')
+    expect(wrapper.find('.discussion-panel-stub').exists()).toBe(true)
+    expect(wrapper.find('.archive-report-panel-stub').exists()).toBe(true)
+
+    wrapper.vm.returnToDiscussion()
+    await nextTick()
+    expect(wrapper.vm.sidePanelMode).toBe('discussion')
+    expect(wrapper.find('.discussion-panel-stub textarea').element.value).toBe('draft')
     wrapper.unmount()
   })
 })

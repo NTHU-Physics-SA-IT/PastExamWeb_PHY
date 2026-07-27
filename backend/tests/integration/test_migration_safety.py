@@ -248,6 +248,54 @@ def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
     assert after.schema_matches_head is True
 
 
+def test_archive_report_revision_is_additive_and_reversible(
+    clean_public_schema: Engine,
+) -> None:
+    previous_revision = "e3b7c1d9f5a2"
+    new_revision = "a7c3e9f1b5d2"
+    config = alembic_config()
+    upgrade(previous_revision)
+
+    def schema_signature() -> dict[str, tuple[str, ...]]:
+        with clean_public_schema.connect() as connection:
+            inspector = sa_inspect(connection)
+            return {
+                table_name: tuple(
+                    column["name"]
+                    for column in inspector.get_columns(
+                        table_name, schema="public"
+                    )
+                )
+                for table_name in inspector.get_table_names(schema="public")
+                if table_name != "alembic_version"
+            }
+
+    baseline = schema_signature()
+    assert "archive_reports" not in baseline
+
+    command.upgrade(config, new_revision)
+    upgraded = schema_signature()
+    assert set(upgraded) == {*baseline, "archive_reports"}
+    assert all(upgraded[name] == columns for name, columns in baseline.items())
+    assert {
+        "reporter_user_id",
+        "archive_id",
+        "archive_submission_id",
+        "archive_id_snapshot",
+        "status",
+        "archive_taken_down",
+        "deleted_at",
+    }.issubset(upgraded["archive_reports"])
+
+    command.downgrade(config, previous_revision)
+    assert schema_signature() == baseline
+
+    command.upgrade(config, new_revision)
+    assert schema_signature() == upgraded
+    _, heads = revision_graph(config)
+    assert heads == [new_revision]
+
+
 def test_known_revision_without_manifest_is_blocked() -> None:
     upgrade("d1e6c8a4f2b9")
 

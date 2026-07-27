@@ -16,6 +16,7 @@ declare module 'vue' {
     AccordionHeader: typeof import('primevue/accordionheader')['default']
     AccordionPanel: typeof import('primevue/accordionpanel')['default']
     ArchiveDiscussionPanel: typeof import('./src/components/ArchiveDiscussionPanel.vue')['default']
+    ArchiveReportPanel: typeof import('./src/components/ArchiveReportPanel.vue')['default']
     AutoComplete: typeof import('primevue/autocomplete')['default']
     Badge: typeof import('primevue/badge')['default']
     Button: typeof import('primevue/button')['default']

@@ -28,4 +28,22 @@ export const reportService = {
   reviewCommentReport(id, payload) {
     return api.patch(`/reports/admin/comments/${id}`, payload)
   },
+  createArchiveReport(courseId, archiveId, payload) {
+    return api.post(`/reports/courses/${courseId}/archives/${archiveId}`, payload)
+  },
+  getPendingArchiveReport(courseId, archiveId) {
+    return api.get(`/reports/courses/${courseId}/archives/${archiveId}/pending`)
+  },
+  listArchiveReports(params) {
+    return api.get('/reports/admin/archives', { params })
+  },
+  getArchiveReport(id) {
+    return api.get(`/reports/admin/archives/${id}`)
+  },
+  deleteArchiveReport(id) {
+    return api.delete(`/reports/admin/archives/${id}`)
+  },
+  reviewArchiveReport(id, payload) {
+    return api.patch(`/reports/admin/archives/${id}`, payload)
+  },
 }

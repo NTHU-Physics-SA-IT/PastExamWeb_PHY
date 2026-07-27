@@ -13,6 +13,7 @@ from app.db.session import get_session
 from app.models.models import (
     Archive,
     ArchiveDiscussionMessage,
+    ArchiveReport,
     ArchiveSubmission,
     CommentReport,
     Course,
@@ -54,6 +55,14 @@ COMMENT_REPORT_REASON_LABELS = {
     "privacy_violation": "洩漏個人資料或隱私",
     "misinformation": "錯誤或誤導資訊",
     "other": "其他",
+}
+ARCHIVE_REPORT_REASON_LABELS = {
+    "file_unavailable_or_corrupt": "檔案無法開啟或檔案損毀",
+    "metadata_mismatch": "考古題內容與課程／考試資訊不符",
+    "duplicate_archive": "重複的考古題",
+    "incomplete_or_low_quality": "檔案模糊、缺頁或內容不完整",
+    "personal_information": "含有不適合公開的個人資訊",
+    "other": "其他問題",
 }
 
 
@@ -1166,6 +1175,38 @@ async def list_trash_items(
                 )
             )
 
+    if normalized_item_type in (None, TrashEntityType.ARCHIVE_REPORT):
+        reports = (
+            await db.execute(
+                select(ArchiveReport)
+                .where(ArchiveReport.deleted_at.is_not(None))
+                .order_by(ArchiveReport.deleted_at.desc())
+            )
+        ).scalars().all()
+        for report in reports:
+            items.append(
+                _to_trash_item(
+                    item_type=TrashEntityType.ARCHIVE_REPORT,
+                    item_id=report.id,
+                    display_name=ARCHIVE_REPORT_REASON_LABELS.get(
+                        report.reason, report.reason
+                    ),
+                    deleted_at=report.deleted_at,
+                    deleted_by_id=report.deleted_by_id,
+                    deleted_by_name=_format_deleted_by(
+                        users_by_id, report.deleted_by_id
+                    ),
+                    status=report.status,
+                    reason=report.reason,
+                    created_at=report.created_at,
+                    reporter_name=report.reporter_name_snapshot,
+                    course_id=report.course_id,
+                    course_name=report.course_name_snapshot,
+                    archive_name=report.archive_name_snapshot,
+                    dependencies=[],
+                )
+            )
+
     if normalized_item_type in (None, TrashEntityType.COURSE_CATEGORY):
         categories = (
             await db.execute(
@@ -1580,6 +1621,18 @@ async def restore_trash_item(
         await db.commit()
         return {"message": "留言回報已還原"}
 
+    if payload.item_type == TrashEntityType.ARCHIVE_REPORT:
+        report = await db.get(ArchiveReport, payload.item_id)
+        if not report or report.deleted_at is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Archive report not found",
+            )
+        report.deleted_at = None
+        report.deleted_by_id = None
+        await db.commit()
+        return {"message": "考古題回報已還原"}
+
     if payload.item_type == TrashEntityType.COURSE_CATEGORY:
         category = await db.get(CourseCategoryConfig, payload.item_id)
         if not category or category.deleted_at is None:
@@ -1851,6 +1904,7 @@ async def bulk_permanently_delete_trash_items(
         TrashEntityType.USER: 5,
         TrashEntityType.SYSTEM_ISSUE_REPORT: 6,
         TrashEntityType.COMMENT_REPORT: 7,
+        TrashEntityType.ARCHIVE_REPORT: 8,
     }
     sorted_items = sorted(
         items,
@@ -1958,6 +2012,23 @@ async def _permanently_delete_trash_item(
             item_type=item_type,
             item_id=item_id,
             name=COMMENT_REPORT_REASON_LABELS.get(report.reason, report.reason),
+            deleted=1,
+            warnings=warnings,
+        )
+
+    if item_type == TrashEntityType.ARCHIVE_REPORT:
+        report = await db.get(ArchiveReport, item_id)
+        if not report or report.deleted_at is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Archive report not found",
+            )
+
+        await db.delete(report)
+        return _delete_result(
+            item_type=item_type,
+            item_id=item_id,
+            name=ARCHIVE_REPORT_REASON_LABELS.get(report.reason, report.reason),
             deleted=1,
             warnings=warnings,
         )

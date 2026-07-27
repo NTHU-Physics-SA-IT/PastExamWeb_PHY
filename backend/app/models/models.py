@@ -50,6 +50,8 @@ class PersonalNotificationType(str, PyEnum):
     DISCUSSION_PIN = "discussion_pin"
     COMMENT_REPORT_SUBMITTED = "comment_report_submitted"
     COMMENT_REPORT_RESULT = "comment_report_result"
+    ARCHIVE_REPORT_SUBMITTED = "archive_report_submitted"
+    ARCHIVE_REPORT_RESULT = "archive_report_result"
     ARCHIVE_SUBMISSION_APPROVED = "archive_submission_approved"
     ARCHIVE_SUBMISSION_REJECTED = "archive_submission_rejected"
     ARCHIVE_SUBMISSION_TAKEDOWN = "archive_submission_takedown"
@@ -61,6 +63,15 @@ class CommentReportReason(str, PyEnum):
     INAPPROPRIATE_OR_ILLEGAL = "inappropriate_or_illegal"
     PRIVACY_VIOLATION = "privacy_violation"
     MISINFORMATION = "misinformation"
+    OTHER = "other"
+
+
+class ArchiveReportReason(str, PyEnum):
+    FILE_UNAVAILABLE_OR_CORRUPT = "file_unavailable_or_corrupt"
+    METADATA_MISMATCH = "metadata_mismatch"
+    DUPLICATE_ARCHIVE = "duplicate_archive"
+    INCOMPLETE_OR_LOW_QUALITY = "incomplete_or_low_quality"
+    PERSONAL_INFORMATION = "personal_information"
     OTHER = "other"
 
 
@@ -790,6 +801,142 @@ class CommentReport(SQLModel, table=True):
     )
 
 
+class ArchiveReport(SQLModel, table=True):
+    __tablename__ = "archive_reports"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'upheld', 'dismissed')",
+            name="ck_archive_reports_status",
+        ),
+        Index(
+            "uq_archive_reports_pending_reporter_archive",
+            "reporter_user_id",
+            "archive_id",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+        ),
+        Index("ix_archive_reports_status_created", "status", "created_at"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    reporter_user_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    reporter_name_snapshot: str = Field(
+        sa_column=Column(String(100), nullable=False)
+    )
+    archive_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("archives.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    archive_id_snapshot: int = Field(sa_column=Column(Integer, nullable=False))
+    course_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("courses.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    archive_submission_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("archive_submissions.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    reason: str = Field(sa_column=Column(String(60), nullable=False, index=True))
+    supplementary_detail: Optional[str] = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
+    archive_name_snapshot: str = Field(
+        sa_column=Column(String(200), nullable=False)
+    )
+    course_name_snapshot: str = Field(
+        sa_column=Column(String(200), nullable=False)
+    )
+    academic_year_snapshot: int = Field(sa_column=Column(Integer, nullable=False))
+    archive_type_snapshot: str = Field(
+        sa_column=Column(String(30), nullable=False)
+    )
+    professor_snapshot: str = Field(
+        sa_column=Column(String(200), nullable=False)
+    )
+    status: str = Field(
+        default=CommentReportStatus.PENDING.value,
+        sa_column=Column(
+            String(30),
+            nullable=False,
+            index=True,
+            server_default=text("'pending'"),
+        ),
+    )
+    admin_response: Optional[str] = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
+    reviewed_by: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    reviewed_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    archive_taken_down: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, server_default=text("false")),
+    )
+    created_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(timezone.utc),
+            nullable=False,
+            index=True,
+            server_default=text("now()"),
+        )
+    )
+    updated_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(timezone.utc),
+            nullable=False,
+            server_default=text("now()"),
+        )
+    )
+    deleted_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    deleted_by_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+
+
 class SystemIssueReport(SQLModel, table=True):
     __tablename__ = "system_issue_reports"
     __table_args__ = (
@@ -1151,6 +1298,52 @@ class CommentReportRead(BaseModel):
 
 class CommentReportListRead(BaseModel):
     items: List[CommentReportRead] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 20
+    offset: int = 0
+
+
+class ArchiveReportCreate(BaseModel):
+    report_reason: ArchiveReportReason
+    supplementary_detail: Optional[str] = Field(default=None, max_length=1000)
+
+
+class ArchiveReportAdminUpdate(BaseModel):
+    status: CommentReportStatus
+    admin_response: Optional[str] = Field(default=None, max_length=1000)
+    take_down_archive: bool = False
+
+
+class ArchiveReportRead(BaseModel):
+    id: int
+    reporter_user_id: Optional[int]
+    reporter_name: str
+    archive_id: Optional[int]
+    archive_id_snapshot: int
+    course_id: Optional[int]
+    archive_submission_id: Optional[int]
+    reason: str
+    supplementary_detail: Optional[str]
+    archive_name: str
+    course_name: str
+    academic_year: int
+    archive_type: str
+    professor: str
+    status: str
+    admin_response: Optional[str]
+    reviewed_by: Optional[int]
+    reviewer_name: Optional[str]
+    reviewed_at: Optional[datetime]
+    archive_taken_down: bool
+    source_exists: bool
+    source_state: str
+    can_take_down: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class ArchiveReportListRead(BaseModel):
+    items: List[ArchiveReportRead] = Field(default_factory=list)
     total: int = 0
     limit: int = 20
     offset: int = 0

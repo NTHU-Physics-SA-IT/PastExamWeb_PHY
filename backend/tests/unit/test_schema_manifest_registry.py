@@ -10,12 +10,13 @@ from app.db.schema_manifests import (
 
 
 def test_reviewed_manifest_registry_has_required_revisions() -> None:
-    assert HEAD_SCHEMA_REVISION == "e3b7c1d9f5a2"
+    assert HEAD_SCHEMA_REVISION == "a7c3e9f1b5d2"
     assert reviewed_manifest_revisions() == (
         "c4d8e2f1a6b9",
         "a4c7e9d2f6b1",
         "c9e4f1a7b2d6",
         "e3b7c1d9f5a2",
+        "a7c3e9f1b5d2",
     )
 
 

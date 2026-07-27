@@ -611,13 +611,224 @@
       <div class="report-section__header">
         <div>
           <h4 id="archive-report-heading">考古題回報</h4>
-          <p>此區段預留未來的考古題回報列表與獨立查詢狀態。</p>
+          <p>依課程、考古題、回報者、原因與狀態搜尋，並完成審核。</p>
         </div>
       </div>
-      <div class="report-management__empty">
-        <i class="pi pi-file-pdf" aria-hidden="true" /><strong>考古題回報功能尚未開放</strong
-        ><span>目前沒有資料表、分頁或送出流程。</span>
+      <div class="report-management__filters">
+        <InputText
+          v-model="archiveFilters.search"
+          class="report-filter-search"
+          placeholder="搜尋回報者、課程、考試、教師或編號"
+          @keyup.enter="applyArchiveFilters"
+        />
+        <Select
+          v-model="archiveFilters.status"
+          class="report-filter-select report-filter-select--primary"
+          :options="statusOptions"
+          optionLabel="label"
+          optionValue="value"
+          placeholder="全部狀態"
+          showClear
+          @change="applyArchiveFilters"
+        />
+        <Select
+          v-model="archiveFilters.reason"
+          class="report-filter-select report-filter-select--secondary"
+          :options="archiveReasonOptions"
+          optionLabel="label"
+          optionValue="value"
+          placeholder="全部原因"
+          showClear
+          @change="applyArchiveFilters"
+        />
+        <Button
+          class="report-filter-submit"
+          label="搜尋"
+          icon="pi pi-search"
+          outlined
+          @click="applyArchiveFilters"
+        />
       </div>
+      <Message v-if="archiveListState.error" severity="error" :closable="false">
+        {{ archiveListState.error }}
+      </Message>
+      <DataTable
+        v-else
+        :value="archiveReports"
+        :loading="archiveListState.loading"
+        lazy
+        paginator
+        :first="archiveListState.first"
+        :rows="archiveListState.rows"
+        :totalRecords="archiveListState.total"
+        :rowsPerPageOptions="ADMIN_PAGE_SIZE_OPTIONS"
+        :sortField="archiveListState.sortField"
+        :sortOrder="archiveListState.sortOrder"
+        responsiveLayout="stack"
+        breakpoint="1399px"
+        class="report-management__table report-management__archive-table admin-data-table"
+        tableStyle="table-layout: fixed; min-width: 72rem"
+        @page="onArchivePage"
+        @sort="onArchiveSort"
+      >
+        <template #empty>目前沒有符合條件的考古題回報</template>
+        <Column
+          field="created_at"
+          sortField="created_at"
+          header="回報"
+          sortable
+          style="width: 10rem"
+        >
+          <template #body="{ data }">
+            <div v-if="!isCardLayout" class="report-person-time">
+              <span class="report-person-time__name">{{ data.reporter_name }}</span>
+              <time class="report-person-time__time" :datetime="data.created_at">{{
+                formatDateTime(data.created_at, true)
+              }}</time>
+            </div>
+          </template>
+        </Column>
+        <Column field="reason" sortField="reason" header="原因與摘要" sortable style="width: 20rem">
+          <template #body="{ data }">
+            <div v-if="!isCardLayout" class="comment-report-content">
+              <strong class="comment-report-content__reason">{{
+                archiveReasonLabel(data.reason)
+              }}</strong>
+              <span class="comment-report-content__summary">{{
+                data.supplementary_detail || '未提供補充說明'
+              }}</span>
+            </div>
+            <article v-else class="report-mobile-card report-mobile-card-content">
+              <header class="report-mobile-card__header report-mobile-card-header">
+                <strong class="report-mobile-card-title">{{
+                  archiveReasonLabel(data.reason)
+                }}</strong>
+                <Tag
+                  class="report-mobile-card-status"
+                  :severity="statusSeverity(data.status)"
+                  :value="statusLabel(data.status)"
+                />
+              </header>
+              <div class="report-mobile-card__body">
+                <section class="report-mobile-card__summary report-mobile-summary-preview">
+                  <span class="report-mobile-summary-preview__label">補充說明</span>
+                  <p class="report-mobile-summary-preview__text">
+                    {{ data.supplementary_detail || '未提供補充說明' }}
+                  </p>
+                </section>
+                <dl class="report-mobile-card__metadata report-mobile-info-grid">
+                  <div class="report-mobile-info-item">
+                    <dt>回報者</dt>
+                    <dd>{{ data.reporter_name }}</dd>
+                  </div>
+                  <div class="report-mobile-info-item">
+                    <dt>時間</dt>
+                    <dd>{{ formatDateTime(data.created_at, true) }}</dd>
+                  </div>
+                  <div class="report-mobile-info-item report-mobile-info-item--wide">
+                    <dt>課程／考古題</dt>
+                    <dd>
+                      {{ data.course_name }} · {{ data.archive_name }} #{{
+                        data.archive_id_snapshot
+                      }}
+                    </dd>
+                  </div>
+                  <div class="report-mobile-info-item">
+                    <dt>審核人</dt>
+                    <dd>{{ data.reviewer_name || '尚未審核' }}</dd>
+                  </div>
+                  <div class="report-mobile-info-item">
+                    <dt>審核時間</dt>
+                    <dd>{{ formatDateTime(data.reviewed_at, true) }}</dd>
+                  </div>
+                </dl>
+              </div>
+              <footer class="report-mobile-card__footer">
+                <div class="report-row-actions">
+                  <Button
+                    :label="isFinal(data.status) ? '檢視' : '檢視／審核'"
+                    icon="pi pi-search"
+                    size="small"
+                    outlined
+                    @click="openArchiveReport(data.id)"
+                  />
+                  <Button
+                    label="刪除"
+                    icon="pi pi-trash"
+                    severity="danger"
+                    size="small"
+                    outlined
+                    :loading="deletingArchiveId === data.id"
+                    @click="confirmDeleteArchiveReport(data)"
+                  />
+                </div>
+              </footer>
+            </article>
+          </template>
+        </Column>
+        <Column sortField="course_archive" header="課程／考古題" sortable style="width: 14rem">
+          <template #body="{ data }">
+            <div v-if="!isCardLayout" class="report-management__summary">
+              <span>{{ data.course_name }}</span>
+              <small
+                >{{ data.archive_name }} · #{{ data.archive_id_snapshot }} ·
+                {{ data.professor }}</small
+              >
+            </div>
+          </template>
+        </Column>
+        <Column field="status" sortField="status" header="狀態" sortable style="width: 8rem">
+          <template #body="{ data }">
+            <Tag
+              v-if="!isCardLayout"
+              :severity="statusSeverity(data.status)"
+              :value="statusLabel(data.status)"
+            />
+          </template>
+        </Column>
+        <Column
+          field="reviewed_at"
+          sortField="reviewed_at"
+          header="審核"
+          sortable
+          style="width: 10rem"
+        >
+          <template #body="{ data }">
+            <div v-if="!isCardLayout" class="report-person-time">
+              <span class="report-person-time__name">{{ data.reviewer_name || '尚未審核' }}</span>
+              <time
+                v-if="data.reviewed_at"
+                class="report-person-time__time"
+                :datetime="data.reviewed_at"
+              >
+                {{ formatDateTime(data.reviewed_at, true) }}
+              </time>
+            </div>
+          </template>
+        </Column>
+        <Column header="操作" style="width: 16rem">
+          <template #body="{ data }">
+            <div v-if="!isCardLayout" class="report-row-actions">
+              <Button
+                :label="isFinal(data.status) ? '檢視' : '檢視／審核'"
+                icon="pi pi-search"
+                size="small"
+                outlined
+                @click="openArchiveReport(data.id)"
+              />
+              <Button
+                label="刪除"
+                icon="pi pi-trash"
+                severity="danger"
+                size="small"
+                outlined
+                :loading="deletingArchiveId === data.id"
+                @click="confirmDeleteArchiveReport(data)"
+              />
+            </div>
+          </template>
+        </Column>
+      </DataTable>
     </section>
 
     <Dialog
@@ -755,16 +966,154 @@
         </div>
       </div>
     </Dialog>
+
+    <Dialog
+      v-model:visible="archiveReviewVisible"
+      class="report-management-dialog"
+      modal
+      header="考古題回報審核"
+      :style="{ width: '760px', maxWidth: '94vw' }"
+      :contentStyle="{ maxHeight: '76vh', overflowY: 'auto' }"
+      :draggable="false"
+    >
+      <div v-if="selectedArchiveReport" class="report-review">
+        <div class="report-review__title">
+          <div>
+            <strong
+              >{{ selectedArchiveReport.course_name }} ·
+              {{ selectedArchiveReport.archive_name }}</strong
+            >
+            <small>考古題 #{{ selectedArchiveReport.archive_id_snapshot }}</small>
+          </div>
+          <Tag
+            :severity="statusSeverity(selectedArchiveReport.status)"
+            :value="statusLabel(selectedArchiveReport.status)"
+          />
+        </div>
+        <dl class="report-review__meta">
+          <div>
+            <dt>回報者</dt>
+            <dd>{{ selectedArchiveReport.reporter_name }}</dd>
+          </div>
+          <div>
+            <dt>建立時間</dt>
+            <dd>{{ formatDateTime(selectedArchiveReport.created_at) }}</dd>
+          </div>
+          <div>
+            <dt>回報原因</dt>
+            <dd>{{ archiveReasonLabel(selectedArchiveReport.reason) }}</dd>
+          </div>
+          <div>
+            <dt>學期／年度</dt>
+            <dd>{{ selectedArchiveReport.academic_year }}</dd>
+          </div>
+          <div>
+            <dt>授課教師</dt>
+            <dd>{{ selectedArchiveReport.professor || '—' }}</dd>
+          </div>
+          <div>
+            <dt>考試名稱</dt>
+            <dd>{{ selectedArchiveReport.archive_name }}</dd>
+          </div>
+          <div>
+            <dt>目前狀態</dt>
+            <dd>{{ archiveSourceStateLabel(selectedArchiveReport.source_state) }}</dd>
+          </div>
+          <div>
+            <dt>審核人</dt>
+            <dd>{{ selectedArchiveReport.reviewer_name || '尚未審核' }}</dd>
+          </div>
+          <div>
+            <dt>審核時間</dt>
+            <dd>{{ formatDateTime(selectedArchiveReport.reviewed_at) }}</dd>
+          </div>
+        </dl>
+        <section class="report-review__quote">
+          <strong>補充說明</strong>
+          <p>{{ selectedArchiveReport.supplementary_detail || '未提供補充說明' }}</p>
+        </section>
+        <p v-if="isFinal(selectedArchiveReport.status)" class="report-review__response">
+          <strong>管理員答覆：</strong>{{ selectedArchiveReport.admin_response || '未提供答覆' }}
+        </p>
+        <Message v-if="isFinal(selectedArchiveReport.status)" severity="info" :closable="false">
+          審核結果已送出，無法修改。{{
+            selectedArchiveReport.archive_taken_down ? '本次審核已將考古題下架。' : ''
+          }}
+        </Message>
+        <Message v-else-if="!selectedArchiveReport.can_take_down" severity="warn" :closable="false">
+          {{ archiveTakedownUnavailableMessage(selectedArchiveReport.source_state) }}
+        </Message>
+        <div v-if="!isFinal(selectedArchiveReport.status)" class="report-review__field">
+          <label for="archive-review-status">審核結果</label>
+          <Select
+            inputId="archive-review-status"
+            v-model="archiveReviewForm.status"
+            :options="statusOptions"
+            optionLabel="label"
+            optionValue="value"
+            :disabled="archiveReviewSaving"
+          />
+        </div>
+        <div v-if="!isFinal(selectedArchiveReport.status)" class="report-review__field">
+          <label for="archive-admin-response">給回報者的答覆</label>
+          <Textarea
+            id="archive-admin-response"
+            v-model="archiveReviewForm.admin_response"
+            rows="4"
+            maxlength="1000"
+            :disabled="archiveReviewSaving"
+          />
+          <small>{{ archiveReviewForm.admin_response.length }}/1000</small>
+        </div>
+        <label
+          v-if="!isFinal(selectedArchiveReport.status) && archiveReviewForm.status === 'upheld'"
+          class="report-review__delete-option"
+        >
+          <Checkbox
+            v-model="archiveReviewForm.take_down_archive"
+            binary
+            :disabled="!selectedArchiveReport.can_take_down || archiveReviewSaving"
+          />
+          同時將此考古題下架
+        </label>
+        <div class="report-review__actions">
+          <Button
+            label="前往來源"
+            icon="pi pi-external-link"
+            severity="secondary"
+            text
+            :disabled="!selectedArchiveReport.source_exists"
+            @click="openArchiveReportSource"
+          />
+          <span class="report-review__spacer" />
+          <Button
+            label="關閉"
+            severity="secondary"
+            outlined
+            @click="archiveReviewVisible = false"
+          />
+          <Button
+            v-if="!isFinal(selectedArchiveReport.status)"
+            label="儲存審核"
+            icon="pi pi-check"
+            :loading="archiveReviewSaving"
+            :disabled="!canSaveArchiveReview"
+            @click="confirmSaveArchiveReview"
+          />
+        </div>
+      </div>
+    </Dialog>
   </section>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useRouter } from 'vue-router'
 import { reportService } from '@/api'
 import { ADMIN_PAGE_SIZE_OPTIONS } from '@/constants/pagination'
+import { ARCHIVE_REPORT_REASONS } from '@/constants/archiveReport'
 import { getCurrentUser } from '@/utils/auth'
 import { formatRelativeOrAbsoluteDateTime } from '@/utils/time'
 
@@ -779,6 +1128,7 @@ const reportCardMediaQuery =
 const isCardLayout = ref(reportCardMediaQuery?.matches ?? false)
 const loadingSystem = ref(false)
 const loadingComments = ref(false)
+const archiveReports = ref([])
 const systemIssues = ref([])
 const systemTotal = ref(0)
 const systemError = ref('')
@@ -786,17 +1136,22 @@ const commentReports = ref([])
 const commentTotal = ref(0)
 const commentError = ref('')
 const reviewVisible = ref(false)
+const archiveReviewVisible = ref(false)
 const systemDetailVisible = ref(false)
 const loadingSystemDetailId = ref(null)
 const systemReadSaving = ref(false)
 const systemReadForm = ref(false)
 const reviewSaving = ref(false)
+const archiveReviewSaving = ref(false)
 const deletingSystemId = ref(null)
 const deletingCommentId = ref(null)
+const deletingArchiveId = ref(null)
 const selectedReport = ref(null)
 const selectedSystemReport = ref(null)
+const selectedArchiveReport = ref(null)
 const systemFilters = ref({ search: '', type: null, readState: 'all' })
 const commentFilters = ref({ search: '', status: null, reason: null })
+const archiveFilters = ref({ search: '', status: null, reason: null })
 const systemPage = ref({ first: 0, rows: 10, sortField: 'read_state', sortOrder: 1 })
 const commentPage = ref({ first: 0, rows: 10, sortField: 'status', sortOrder: 1 })
 const archiveListState = ref({
@@ -805,13 +1160,18 @@ const archiveListState = ref({
   total: 0,
   sortField: 'created_at',
   sortOrder: -1,
-  search: '',
-  filter: null,
   loading: false,
   error: '',
 })
 const reviewForm = ref({ status: 'pending', admin_response: '', delete_comment: false })
-const loading = computed(() => loadingSystem.value || loadingComments.value)
+const archiveReviewForm = ref({
+  status: 'pending',
+  admin_response: '',
+  take_down_archive: false,
+})
+const loading = computed(
+  () => loadingSystem.value || loadingComments.value || archiveListState.value.loading
+)
 
 const reasonOptions = [
   { label: '垃圾訊息或重複洗版', value: 'spam_or_duplicate' },
@@ -821,6 +1181,7 @@ const reasonOptions = [
   { label: '錯誤或誤導資訊', value: 'misinformation' },
   { label: '其他', value: 'other' },
 ]
+const archiveReasonOptions = ARCHIVE_REPORT_REASONS
 const systemTypeOptions = [
   { label: '程式錯誤', value: 'bug' },
   { label: '功能建議', value: 'enhancement' },
@@ -847,6 +1208,22 @@ const canSaveReview = computed(() => {
   if (!['upheld', 'dismissed'].includes(reviewForm.value.status)) return false
   return reviewForm.value.admin_response.length <= 1000
 })
+const canSaveArchiveReview = computed(() => {
+  if (!['upheld', 'dismissed'].includes(archiveReviewForm.value.status)) return false
+  if (archiveReviewForm.value.admin_response.length > 1000) return false
+  if (
+    archiveReviewForm.value.take_down_archive &&
+    (archiveReviewForm.value.status !== 'upheld' || !selectedArchiveReport.value?.can_take_down)
+  )
+    return false
+  return true
+})
+watch(
+  () => archiveReviewForm.value.status,
+  (value) => {
+    if (value !== 'upheld') archiveReviewForm.value.take_down_archive = false
+  }
+)
 
 function ensureAdmin() {
   if (!getCurrentUser()?.is_admin) throw new Error('Admin access required')
@@ -904,6 +1281,29 @@ async function loadCommentReports() {
     loadingComments.value = false
   }
 }
+async function loadArchiveReports() {
+  ensureAdmin()
+  archiveListState.value.loading = true
+  archiveListState.value.error = ''
+  try {
+    const { data } = await reportService.listArchiveReports({
+      search: archiveFilters.value.search.trim() || undefined,
+      status: archiveFilters.value.status || undefined,
+      reason: archiveFilters.value.reason || undefined,
+      sort_by: archiveListState.value.sortField,
+      sort_order: archiveListState.value.sortOrder === 1 ? 'asc' : 'desc',
+      limit: archiveListState.value.rows,
+      offset: archiveListState.value.first,
+    })
+    archiveReports.value = data.items || []
+    archiveListState.value.total = Number(data.total || 0)
+  } catch (error) {
+    console.error('Load archive reports error:', error)
+    archiveListState.value.error = '無法載入考古題回報，請重新整理後再試。'
+  } finally {
+    archiveListState.value.loading = false
+  }
+}
 function applySystemFilters() {
   systemPage.value.first = 0
   return loadSystemIssues()
@@ -911,6 +1311,10 @@ function applySystemFilters() {
 function applyCommentFilters() {
   commentPage.value.first = 0
   return loadCommentReports()
+}
+function applyArchiveFilters() {
+  archiveListState.value.first = 0
+  return loadArchiveReports()
 }
 function onSystemPage(event) {
   const pageSizeChanged = systemPage.value.rows !== event.rows
@@ -924,6 +1328,12 @@ function onCommentPage(event) {
   commentPage.value.rows = event.rows
   return loadCommentReports()
 }
+function onArchivePage(event) {
+  const pageSizeChanged = archiveListState.value.rows !== event.rows
+  archiveListState.value.first = pageSizeChanged ? 0 : event.first
+  archiveListState.value.rows = event.rows
+  return loadArchiveReports()
+}
 function onSystemSort(event) {
   systemPage.value.first = 0
   systemPage.value.sortField = event.sortField || 'read_state'
@@ -936,10 +1346,21 @@ function onCommentSort(event) {
   commentPage.value.sortOrder = event.sortOrder || 1
   return loadCommentReports()
 }
+function onArchiveSort(event) {
+  archiveListState.value.first = 0
+  archiveListState.value.sortField = event.sortField || 'status'
+  archiveListState.value.sortOrder = event.sortOrder || 1
+  return loadArchiveReports()
+}
 function refreshAll() {
   Object.assign(systemPage.value, { first: 0, sortField: 'read_state', sortOrder: 1 })
   Object.assign(commentPage.value, { first: 0, sortField: 'status', sortOrder: 1 })
-  return Promise.allSettled([loadSystemIssues(), loadCommentReports()])
+  Object.assign(archiveListState.value, {
+    first: 0,
+    sortField: 'status',
+    sortOrder: 1,
+  })
+  return Promise.allSettled([loadSystemIssues(), loadCommentReports(), loadArchiveReports()])
 }
 function clampReportPageAfterDelete(page, total) {
   const nextTotal = Math.max(0, total - 1)
@@ -1138,6 +1559,150 @@ function openReportSource() {
       messageId: item.comment_id,
     },
   })
+}
+function confirmDeleteArchiveReport(item) {
+  if (!item?.id || deletingArchiveId.value !== null) return
+  confirm.require({
+    header: '刪除這筆考古題回報？',
+    message: '回報會移至垃圾桶；考古題、投稿與 PDF 不會受到影響。',
+    icon: 'pi pi-exclamation-triangle',
+    rejectLabel: '取消',
+    acceptLabel: '刪除',
+    acceptClass: 'p-button-danger',
+    accept: () => deleteArchiveReport(item),
+  })
+}
+async function deleteArchiveReport(item) {
+  deletingArchiveId.value = item.id
+  try {
+    await reportService.deleteArchiveReport(item.id)
+    archiveReports.value = archiveReports.value.filter((candidate) => candidate.id !== item.id)
+    archiveListState.value.total = clampReportPageAfterDelete(
+      archiveListState.value,
+      archiveListState.value.total
+    )
+    if (selectedArchiveReport.value?.id === item.id) {
+      archiveReviewVisible.value = false
+    }
+    toast.add({
+      severity: 'success',
+      summary: '回報已移至垃圾桶',
+      detail: '考古題與投稿未變更',
+      life: 3000,
+    })
+    await loadArchiveReports()
+  } catch (error) {
+    console.error('Delete archive report error:', error)
+    toast.add({ severity: 'error', summary: '刪除失敗', detail: '回報未變更', life: 3000 })
+  } finally {
+    deletingArchiveId.value = null
+  }
+}
+async function openArchiveReport(id) {
+  try {
+    const { data } = await reportService.getArchiveReport(id)
+    selectedArchiveReport.value = data
+    archiveReviewForm.value = {
+      status: data.status,
+      admin_response: data.admin_response || '',
+      take_down_archive: false,
+    }
+    archiveReviewVisible.value = true
+  } catch (error) {
+    console.error('Load archive report detail error:', error)
+    toast.add({ severity: 'error', summary: '載入失敗', detail: '無法載入回報詳情', life: 3000 })
+  }
+}
+function confirmSaveArchiveReview() {
+  if (
+    archiveReviewSaving.value ||
+    !selectedArchiveReport.value ||
+    isFinal(selectedArchiveReport.value.status) ||
+    !canSaveArchiveReview.value
+  )
+    return
+  const takesDown =
+    archiveReviewForm.value.status === 'upheld' && archiveReviewForm.value.take_down_archive
+  confirm.require({
+    header: '確認送出考古題回報審核',
+    message: takesDown
+      ? '送出後將通知回報者，並以既有流程下架考古題；不會刪除考古題、投稿或 PDF。'
+      : '送出後將通知回報者，審核結果無法修改。',
+    icon: takesDown ? 'pi pi-exclamation-triangle' : 'pi pi-question-circle',
+    rejectLabel: '取消',
+    acceptLabel: '確認送出',
+    defaultFocus: 'reject',
+    accept: saveArchiveReview,
+  })
+}
+async function saveArchiveReview() {
+  if (!canSaveArchiveReview.value || archiveReviewSaving.value) return
+  archiveReviewSaving.value = true
+  try {
+    const { data } = await reportService.reviewArchiveReport(selectedArchiveReport.value.id, {
+      status: archiveReviewForm.value.status,
+      admin_response: archiveReviewForm.value.admin_response.trim() || null,
+      take_down_archive:
+        archiveReviewForm.value.status === 'upheld' && archiveReviewForm.value.take_down_archive,
+    })
+    selectedArchiveReport.value = data
+    archiveReviewForm.value.take_down_archive = false
+    toast.add({
+      severity: 'success',
+      summary: '審核已完成',
+      detail: data.archive_taken_down ? '回報成立，考古題已下架' : '考古題回報審核已更新',
+      life: 3500,
+    })
+    await loadArchiveReports()
+  } catch (error) {
+    console.error('Review archive report error:', error)
+    const conflict = error?.response?.status === 409
+    toast.add({
+      severity: 'error',
+      summary: conflict ? '資料狀態已變更' : '更新失敗',
+      detail: conflict ? '請重新開啟回報確認最新狀態' : '回報狀態未變更',
+      life: 3500,
+    })
+  } finally {
+    archiveReviewSaving.value = false
+  }
+}
+function openArchiveReportSource() {
+  const item = selectedArchiveReport.value
+  if (!item?.source_exists) return
+  archiveReviewVisible.value = false
+  router.push({
+    path: '/archive',
+    query: { courseId: item.course_id, archiveId: item.archive_id },
+  })
+}
+function archiveReasonLabel(value) {
+  return archiveReasonOptions.find((item) => item.value === value)?.label || value
+}
+function archiveSourceStateLabel(value) {
+  return (
+    {
+      available: '公開中',
+      taken_down: '已下架',
+      trashed: '已在垃圾桶',
+      deleted: '投稿已刪除',
+      missing: '來源已不存在',
+      unavailable: '目前不可公開',
+      not_managed: '無投稿紀錄可供下架',
+    }[value] || value
+  )
+}
+function archiveTakedownUnavailableMessage(value) {
+  return (
+    {
+      taken_down: '此考古題已下架，不能重複執行。',
+      trashed: '此考古題或課程已在垃圾桶，不能執行下架。',
+      deleted: '對應投稿已刪除，不能執行下架。',
+      missing: '來源已不存在，仍可完成審核但不能執行下架。',
+      unavailable: '此考古題目前不是公開狀態，不能執行下架。',
+      not_managed: '此考古題沒有可供既有下架 service 管理的投稿紀錄。',
+    }[value] || '目前不能執行下架。'
+  )
 }
 function reasonLabel(value) {
   return reasonOptions.find((item) => item.value === value)?.label || value

@@ -21,6 +21,7 @@ from app.models.models import (
     PersonalNotification,
     PersonalNotificationRead,
     ArchiveDiscussionMessage,
+    ArchiveReport,
     CommentReport,
     User,
     UserRoles,
@@ -145,6 +146,26 @@ async def _list_personal_notifications(
             .all()
         )
 
+    archive_report_source_ids = {
+        item.source_id
+        for item in items
+        if item.source_type == "archive_report" and item.source_id is not None
+    }
+    available_archive_report_ids: set[int] = set()
+    if archive_report_source_ids:
+        available_archive_report_ids = set(
+            (
+                await db.execute(
+                    select(ArchiveReport.id).where(
+                        ArchiveReport.id.in_(archive_report_source_ids),
+                        ArchiveReport.deleted_at.is_(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
     def source_is_available(item: PersonalNotification) -> bool:
         if item.source_type == "comment_report":
             return bool(
@@ -154,6 +175,8 @@ async def _list_personal_notifications(
                     or item.source_message_id in available_source_ids
                 )
             )
+        if item.source_type == "archive_report":
+            return item.source_id in available_archive_report_ids
         if item.source_message_id is not None:
             return item.source_message_id in available_source_ids
         return item.source_type in {None, "archive_submission"}

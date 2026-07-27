@@ -217,10 +217,15 @@ def _metadata_for_variant(variant: str) -> MetaData:
     if variant == "head":
         return metadata
     if variant not in {
+        "pre_archive_reports",
         "pre_metadata_alignment",
         "pre_category_canonicalization",
     }:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
+
+    if variant == "pre_archive_reports":
+        metadata.remove(metadata.tables["archive_reports"])
+        return metadata
 
     # e3b7c1d9f5a2 adds these indexes and drops the no-longer-referenced enum.
     for table_name in ("courses", "course_submissions", "archive_submissions"):
