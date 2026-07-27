@@ -12,7 +12,7 @@ fi
 : "${RELEASE_DIRECTORY:?Set RELEASE_DIRECTORY}"
 : "${RELEASE_MANIFEST:?Set RELEASE_MANIFEST}"
 : "${RELEASE_MANIFEST_SHA256:?Set RELEASE_MANIFEST_SHA256}"
-: "${PRODUCTION_COMPOSE_ENV_FILE:=/opt/pastexam-config/.env}"
+: "${PRODUCTION_COMPOSE_ENV_FILE:=/etc/pastexam/compose.prod.env}"
 : "${PRODUCTION_BACKEND_ENV_FILE:=/opt/pastexam-config/backend.env}"
 : "${PRODUCTION_MIGRATOR_ENV_FILE:=/opt/pastexam-config/migrator.env}"
 : "${PRODUCTION_BACKUP_DIRECTORY:=/opt/pastexam-backups}"

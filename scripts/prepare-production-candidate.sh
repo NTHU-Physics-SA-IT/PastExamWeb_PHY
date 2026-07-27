@@ -12,7 +12,8 @@ release_files_checksum="${RELEASE_FILES_SHA256:?Set RELEASE_FILES_SHA256}"
 archive="${ARCHIVE_PATH:?Set ARCHIVE_PATH}"
 
 releases_root="${RELEASES_ROOT:-/opt/pastexam-releases}"
-production_config_root="${PRODUCTION_CONFIG_ROOT:-/opt/PastExamWeb_PHY}"
+production_compose_env="${PRODUCTION_COMPOSE_ENV_FILE:-/etc/pastexam/compose.prod.env}"
+production_backend_env="${PRODUCTION_BACKEND_ENV_FILE:-/opt/pastexam-config/backend.env}"
 frontend_repository="${FRONTEND_IMAGE_REPOSITORY:-ghcr.io/nthu-physics-sa-it/pastexam}"
 backend_repository="${BACKEND_IMAGE_REPOSITORY:-ghcr.io/nthu-physics-sa-it/pastexam}"
 
@@ -78,6 +79,7 @@ manifest_value() {
 verify_candidate() {
   local candidate_root="$1"
   local manifest="$candidate_root/$manifest_name"
+  local candidate_compose_env="$candidate_root/compose.prod.env"
 
   test -d "$candidate_root"
   test -f "$manifest"
@@ -109,7 +111,7 @@ verify_candidate() {
 
   configured_images="$(
     docker compose \
-      --env-file "$candidate_root/.env" \
+      --env-file "$candidate_compose_env" \
       --file "$candidate_root/docker/docker-compose.prod.yml" \
       config --images
   )"
@@ -133,8 +135,8 @@ if [ -e "$staging_root" ]; then
   exit 1
 fi
 
-root_env="$production_config_root/.env"
-backend_env="$production_config_root/backend/.env"
+root_env="$production_compose_env"
+backend_env="$production_backend_env"
 
 if [ ! -f "$root_env" ] || [ ! -f "$backend_env" ]; then
   echo "Required production configuration files are unavailable." >&2
@@ -155,7 +157,7 @@ test "$("${checksum_command[@]}" "$staging_root/.release-files.sha256" |
   "${checksum_check_command[@]}" .release-files.sha256
 )
 
-install -m 600 "$root_env" "$staging_root/.env"
+install -m 600 "$root_env" "$staging_root/compose.prod.env"
 install -m 600 "$backend_env" "$staging_root/backend/.env"
 
 {
@@ -163,16 +165,16 @@ install -m 600 "$backend_env" "$staging_root/backend/.env"
   printf '# Immutable images for release %s\n' "$release_sha"
   printf 'FRONTEND_IMAGE=%s\n' "$frontend_image"
   printf 'BACKEND_IMAGE=%s\n' "$backend_image"
-} >>"$staging_root/.env"
+} >>"$staging_root/compose.prod.env"
 
 docker compose \
-  --env-file "$staging_root/.env" \
+  --env-file "$staging_root/compose.prod.env" \
   --file "$staging_root/docker/docker-compose.prod.yml" \
   config --quiet
 
 configured_images="$(
   docker compose \
-    --env-file "$staging_root/.env" \
+    --env-file "$staging_root/compose.prod.env" \
     --file "$staging_root/docker/docker-compose.prod.yml" \
     config --images
 )"

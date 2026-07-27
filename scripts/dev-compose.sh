@@ -3,15 +3,17 @@ set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 compose_file="${repo_root}/docker/docker-compose.dev.yml"
-env_file="${DEV_ENV_FILE:-${repo_root}/docker/.env}"
+default_env_file="${repo_root}/docker/compose.dev.env"
+legacy_env_file="${repo_root}/docker/.env"
+env_file="${PASTEXAM_DEV_COMPOSE_ENV_FILE:-${default_env_file}}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/dev-compose.sh <preflight|start|stop|status|logs>
+Usage: scripts/dev-compose.sh <preflight|config|start|stop|status|logs>
 
 The development stack reads secrets and resource identities from the ignored
-docker/.env file. It never bootstraps, destroys volumes, or targets a remote
-Docker daemon.
+docker/compose.dev.env file. It never bootstraps, destroys volumes, or targets
+a remote Docker daemon.
 EOF
 }
 
@@ -30,8 +32,15 @@ require_local_docker() {
 }
 
 require_env_file() {
-  [[ -f "${env_file}" ]] || fail "missing ${env_file}; create it from docker/.env.example"
+  if [[ ! -f "${env_file}" ]]; then
+    if [[ "${env_file}" == "${default_env_file}" && -f "${legacy_env_file}" ]]; then
+      fail "docker/.env is retired; move it to docker/compose.dev.env"
+    fi
+    fail "missing ${env_file}; run: cp docker/compose.dev.env.example docker/compose.dev.env"
+  fi
   [[ "${env_file}" != *.example ]] || fail "do not run with committed example credentials"
+  [[ "$(basename "${env_file}")" != "compose.prod.env" ]] \
+    || fail "refusing to use the production Compose environment"
 }
 
 env_value() {
@@ -61,7 +70,11 @@ load_identity() {
 }
 
 compose() {
-  docker compose --env-file "${env_file}" -f "${compose_file}" "$@"
+  docker compose \
+    --project-name "${COMPOSE_PROJECT_NAME}" \
+    --env-file "${env_file}" \
+    -f "${compose_file}" \
+    "$@"
 }
 
 preflight() {
@@ -99,9 +112,13 @@ case "${1:-}" in
   preflight)
     preflight
     ;;
+  config)
+    preflight
+    compose config --services
+    ;;
   start)
     preflight
-    compose up -d --build
+    compose up -d
     ;;
   stop)
     preflight

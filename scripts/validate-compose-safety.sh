@@ -13,15 +13,21 @@ trap cleanup EXIT HUP INT TERM
 production_json="$temporary_directory/production.json"
 development_json="$temporary_directory/development.json"
 
-PRODUCTION_BACKEND_ENV_FILE="$repository_root/backend/.env.production.runtime.example" \
-PRODUCTION_MIGRATOR_ENV_FILE="$repository_root/backend/.env.production.migrator.example" \
-docker compose \
-  --env-file "$repository_root/docker/production.env.example" \
+env -i \
+  HOME="$HOME" \
+  PATH="$PATH" \
+  PRODUCTION_BACKEND_ENV_FILE="$repository_root/backend/.env.production.runtime.example" \
+  PRODUCTION_MIGRATOR_ENV_FILE="$repository_root/backend/.env.production.migrator.example" \
+  docker compose \
+  --env-file "$repository_root/docker/compose.prod.env.example" \
   --file "$repository_root/docker/docker-compose.prod.yml" \
   config --format json >"$production_json"
 
-docker compose \
-  --env-file "$repository_root/docker/.env.example" \
+env -i \
+  HOME="$HOME" \
+  PATH="$PATH" \
+  docker compose \
+  --env-file "$repository_root/docker/compose.dev.env.example" \
   --file "$repository_root/docker/docker-compose.dev.yml" \
   --profile bootstrap \
   config --format json >"$development_json"

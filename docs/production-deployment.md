@@ -26,7 +26,7 @@ until candidate evidence has been reviewed. Candidate preparation never runs
 The production Compose contract reads secret-bearing configuration outside
 the release checkout:
 
-- `/opt/pastexam-config/.env` for Compose interpolation;
+- `/etc/pastexam/compose.prod.env` for Compose interpolation;
 - `/opt/pastexam-config/backend.env` for the restricted runtime role; and
 - `/opt/pastexam-config/migrator.env` for the one-shot migration role.
 
@@ -34,13 +34,13 @@ All three files must be root-owned deployment inputs with mode `0600`.
 Secrets are neither copied into an immutable release nor printed. Runtime and
 migrator credentials must be different.
 
-`docker/production.env.example` documents the non-secret Compose variable
+`docker/compose.prod.env.example` documents the non-secret Compose variable
 contract. A release is rendered explicitly with the production definition and
 the external environment file:
 
 ```bash
 docker compose \
-  --env-file /opt/pastexam-config/.env \
+  --env-file /etc/pastexam/compose.prod.env \
   --file docker/docker-compose.prod.yml \
   config
 ```

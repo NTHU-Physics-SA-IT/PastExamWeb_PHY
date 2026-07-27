@@ -111,18 +111,24 @@ jobs:
         run: cp frontend/.env.example frontend/.env
 
       - name: Prepare docker env
-        run: cp docker/.env.example docker/.env
+        run: cp docker/compose.dev.env.example docker/compose.dev.env
 
       - name: Start core services
         run: |
-          docker compose -f docker/docker-compose.dev.yml up -d --wait --wait-timeout 60 \
+          docker compose \
+            --env-file docker/compose.dev.env \
+            -f docker/docker-compose.dev.yml \
+            up -d --wait --wait-timeout 60 \
             db redis minio
 
       - name: Create test database
         run: |
           set -euo pipefail
 
-          docker compose -f docker/docker-compose.dev.yml exec -T db \
+          docker compose \
+            --env-file docker/compose.dev.env \
+            -f docker/docker-compose.dev.yml \
+            exec -T db \
             sh -eu -c '
               echo "PostgreSQL user: $POSTGRES_USER"
               echo "PostgreSQL database: $POSTGRES_DB"
@@ -159,12 +165,21 @@ jobs:
       - name: Show database diagnostics
         if: failure()
         run: |
-          docker compose -f docker/docker-compose.dev.yml ps
-          docker compose -f docker/docker-compose.dev.yml logs db
+          docker compose \
+            --env-file docker/compose.dev.env \
+            -f docker/docker-compose.dev.yml \
+            ps
+          docker compose \
+            --env-file docker/compose.dev.env \
+            -f docker/docker-compose.dev.yml \
+            logs db
 
       - name: Run migrations
         run: |
-          docker compose -f docker/docker-compose.dev.yml run --rm \
+          docker compose \
+            --env-file docker/compose.dev.env \
+            -f docker/docker-compose.dev.yml \
+            run --rm \
             -e DB_NAME=pastexam_test_local \
             -e DB_USER=pastexam_test_local \
             -e DB_PASSWORD=local-test-only \
@@ -172,7 +187,10 @@ jobs:
 
       - name: Seed database
         run: |
-          docker compose -f docker/docker-compose.dev.yml run --rm \
+          docker compose \
+            --env-file docker/compose.dev.env \
+            -f docker/docker-compose.dev.yml \
+            run --rm \
             -e DB_NAME=pastexam_test_local \
             -e DB_USER=pastexam_test_local \
             -e DB_PASSWORD=local-test-only \
@@ -182,7 +200,10 @@ jobs:
 
       - name: Run backend tests with coverage
         run: |
-          docker compose -f docker/docker-compose.dev.yml run --rm \
+          docker compose \
+            --env-file docker/compose.dev.env \
+            -f docker/docker-compose.dev.yml \
+            run --rm \
             -e DB_NAME=pastexam_test_local \
             -e DB_USER=pastexam_test_local \
             -e DB_PASSWORD=local-test-only \
@@ -200,7 +221,11 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose -f docker/docker-compose.dev.yml down --volumes --remove-orphans
+        run: >-
+          docker compose
+          --env-file docker/compose.dev.env
+          -f docker/docker-compose.dev.yml
+          down --volumes --remove-orphans
 
   frontend-unit:
     if: ${{ inputs.run_checks }}
@@ -310,10 +335,14 @@ jobs:
           echo "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=nginx" >> frontend/.env
 
       - name: Prepare docker env
-        run: cp docker/.env.example docker/.env
+        run: cp docker/compose.dev.env.example docker/compose.dev.env
 
       - name: Start application stack
-        run: docker compose -f docker/docker-compose.dev.yml up -d
+        run: >-
+          docker compose
+          --env-file docker/compose.dev.env
+          -f docker/docker-compose.dev.yml
+          up -d
 
       - name: Proxy Vite HMR through nginx
         shell: bash
@@ -355,8 +384,14 @@ jobs:
             sleep 3
           done
           echo "API did not become ready in time" >&2
-          docker compose -f docker/docker-compose.dev.yml logs backend
-          docker compose -f docker/docker-compose.dev.yml logs nginx
+          docker compose \
+            --env-file docker/compose.dev.env \
+            -f docker/docker-compose.dev.yml \
+            logs backend
+          docker compose \
+            --env-file docker/compose.dev.env \
+            -f docker/docker-compose.dev.yml \
+            logs nginx
           exit 1
 
       - name: Run frontend E2E tests
@@ -395,4 +430,8 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose -f docker/docker-compose.dev.yml down --volumes --remove-orphans
+        run: >-
+          docker compose
+          --env-file docker/compose.dev.env
+          -f docker/docker-compose.dev.yml
+          down --volumes --remove-orphans
