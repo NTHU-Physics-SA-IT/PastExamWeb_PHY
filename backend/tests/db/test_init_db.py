@@ -232,7 +232,13 @@ async def test_category_seed_preserves_managed_and_custom_rows_and_fills_missing
             label=definition.label,
             icon=definition.icon,
             badge_color=definition.badge_color,
-            order_index=definition.order_index,
+            order_index=(
+                81
+                if definition.key == "optional"
+                else 82
+                if definition.key == "experience"
+                else definition.order_index
+            ),
             is_active=definition.key != "math-department",
         )
         for definition in DEFAULT_COURSE_CATEGORY_DEFINITIONS
@@ -254,6 +260,14 @@ async def test_category_seed_preserves_managed_and_custom_rows_and_fills_missing
         if category.key == "math-department"
     )
     before_math = math_category.model_dump()
+    optional_category = next(
+        category for category in categories if category.key == "optional"
+    )
+    experience_category = next(
+        category for category in categories if category.key == "experience"
+    )
+    before_optional = optional_category.model_dump()
+    before_experience = experience_category.model_dump()
     before_custom = custom.model_dump()
     fake_session = FakeSession(
         category_configs=categories,
@@ -266,6 +280,8 @@ async def test_category_seed_preserves_managed_and_custom_rows_and_fills_missing
         "required"
     ]
     assert math_category.model_dump() == before_math
+    assert optional_category.model_dump() == before_optional
+    assert experience_category.model_dump() == before_experience
     assert custom.model_dump() == before_custom
     assert {
         category.key for category in fake_session.category_configs
@@ -296,6 +312,43 @@ async def test_math_default_name_is_used_only_when_row_is_missing():
     assert len(fake_session.added_category_configs) == 1
     assert fake_session.added_category_configs[0].key == "math-department"
     assert fake_session.added_category_configs[0].name == "戳戳數學系"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("missing_key", "expected_order_index"),
+    [
+        ("optional", 3),
+        ("experience", 4),
+    ],
+)
+async def test_later_category_seed_uses_default_order_for_missing_key(
+    missing_key,
+    expected_order_index,
+):
+    categories = [
+        CourseCategoryConfig(
+            key=definition.key,
+            name=definition.name,
+            label=definition.label,
+            icon=definition.icon,
+            badge_color=definition.badge_color,
+            order_index=definition.order_index,
+        )
+        for definition in DEFAULT_COURSE_CATEGORY_DEFINITIONS
+        if definition.key != missing_key
+    ]
+    fake_session = FakeSession(
+        category_configs=categories,
+        query_values=[categories],
+    )
+
+    await init_db.sync_course_categories(fake_session)
+
+    assert len(fake_session.added_category_configs) == 1
+    added = fake_session.added_category_configs[0]
+    assert added.key == missing_key
+    assert added.order_index == expected_order_index
 
 
 @pytest.mark.asyncio

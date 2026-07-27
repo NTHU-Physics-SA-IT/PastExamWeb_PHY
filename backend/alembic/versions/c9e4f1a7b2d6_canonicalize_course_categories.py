@@ -30,6 +30,64 @@ NORMALIZED_NAME_INDEX = "uq_course_category_configs_normalized_name"
 NORMALIZED_KEY_INDEX = "uq_course_category_configs_normalized_key"
 NO_LEGACY_KEY_CHECK = "ck_course_category_configs_no_legacy_key"
 KNOWN_MATH_NAME_TYPO = "跨群數學系"
+PRISTINE_LEGACY_SEED_BY_KEY = {
+    "freshman": (
+        "基礎必修",
+        "基礎",
+        "pi pi-fw pi-book",
+        "blue",
+        0,
+    ),
+    "sophomore": (
+        "專業必修",
+        "必修",
+        "pi pi-fw pi-compass",
+        "blue",
+        1,
+    ),
+    "junior": (
+        "實驗課程",
+        "實驗",
+        "pi pi-fw pi-sparkles",
+        "blue",
+        2,
+    ),
+    "senior": (
+        "專業選修",
+        "選修",
+        "pi pi-fw pi-book",
+        "blue",
+        3,
+    ),
+    "graduate": (
+        "研究所",
+        "研究所",
+        "pi pi-fw pi-graduation-cap",
+        "blue",
+        4,
+    ),
+    "interdisciplinary": (
+        "戳戳數學系",
+        "數學",
+        "pi pi-fw pi-calculator",
+        "blue",
+        5,
+    ),
+}
+APPLICATION_TABLES = (
+    "users",
+    "courses",
+    "course_submissions",
+    "archive_submissions",
+    "archives",
+    "archive_discussion_messages",
+    "notifications",
+    "personal_notifications",
+    "system_issue_reports",
+    "comment_reports",
+    "memes",
+    "system_settings",
+)
 
 
 def _load_category_rows(connection: sa.Connection) -> list[dict[str, Any]]:
@@ -38,13 +96,53 @@ def _load_category_rows(connection: sa.Connection) -> list[dict[str, Any]]:
         for row in connection.execute(
             sa.text(
                 """
-                SELECT id, key, name
+                SELECT id, key, name, label, icon, badge_color, order_index,
+                       is_active, deleted_at, deleted_by_id, restored_at,
+                       restored_by_id
                 FROM course_category_configs
                 ORDER BY id
                 """
             )
         ).mappings()
     ]
+
+
+def _is_pristine_fresh_database(
+    connection: sa.Connection,
+    rows: list[dict[str, Any]],
+) -> bool:
+    """Recognize untouched legacy seed artifacts, not managed category rows."""
+    if len(rows) != len(PRISTINE_LEGACY_SEED_BY_KEY):
+        return False
+
+    for row in rows:
+        expected = PRISTINE_LEGACY_SEED_BY_KEY.get(row["key"])
+        actual = (
+            row["name"],
+            row["label"],
+            row["icon"],
+            row["badge_color"],
+            row["order_index"],
+        )
+        if (
+            expected != actual
+            or not row["is_active"]
+            or any(
+                row[field] is not None
+                for field in (
+                    "deleted_at",
+                    "deleted_by_id",
+                    "restored_at",
+                    "restored_by_id",
+                )
+            )
+        ):
+            return False
+
+    return all(
+        connection.scalar(sa.text(f"SELECT count(*) FROM {table_name}")) == 0
+        for table_name in APPLICATION_TABLES
+    )
 
 
 def _raise_conflict(
@@ -219,6 +317,7 @@ def _apply_definition(
     *,
     definition: Any,
     candidate: dict[str, Any] | None,
+    apply_fresh_default_order: bool,
 ) -> None:
     aliases = sorted(
         alias
@@ -271,18 +370,28 @@ def _apply_definition(
                     "name": definition.name,
                 },
             )
-        elif candidate["key"] != definition.key:
+        elif (
+            candidate["key"] != definition.key
+            or apply_fresh_default_order
+        ):
             connection.execute(
                 sa.text(
                     """
                     UPDATE course_category_configs
-                    SET key = :key
+                    SET key = :key,
+                        order_index = CASE
+                            WHEN :apply_fresh_default_order
+                            THEN :order_index
+                            ELSE order_index
+                        END
                     WHERE id = :target_id
                     """
                 ),
                 {
                     "target_id": candidate["id"],
                     "key": definition.key,
+                    "apply_fresh_default_order": apply_fresh_default_order,
+                    "order_index": definition.order_index,
                 },
             )
 
@@ -297,12 +406,17 @@ def upgrade() -> None:
     connection = op.get_bind()
     rows = _load_category_rows(connection)
     plan = _build_canonicalization_plan(rows)
+    apply_fresh_default_order = _is_pristine_fresh_database(
+        connection,
+        rows,
+    )
 
     for definition, candidate in plan:
         _apply_definition(
             connection,
             definition=definition,
             candidate=candidate,
+            apply_fresh_default_order=apply_fresh_default_order,
         )
 
     remaining_legacy = connection.scalar(

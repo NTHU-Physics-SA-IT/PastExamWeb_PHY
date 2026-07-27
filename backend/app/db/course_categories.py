@@ -33,19 +33,19 @@ DEFAULT_COURSE_CATEGORY_DEFINITIONS = (
         2,
     ),
     DefaultCourseCategoryDefinition(
-        "experience",
-        "實驗課程",
-        "實驗",
-        "pi pi-fw pi-sparkles",
-        "amber",
-        3,
-    ),
-    DefaultCourseCategoryDefinition(
         "optional",
         "專業選修",
         "選修",
         "pi pi-fw pi-book",
         "violet",
+        3,
+    ),
+    DefaultCourseCategoryDefinition(
+        "experience",
+        "實驗課程",
+        "實驗",
+        "pi pi-fw pi-sparkles",
+        "amber",
         4,
     ),
     DefaultCourseCategoryDefinition(

@@ -302,6 +302,16 @@ def test_fresh_database_creates_six_canonical_defaults(
     rows = _all_categories(migration_engine)
     assert len(rows) == 6
     assert {row["key"] for row in rows} == CANONICAL_COURSE_CATEGORY_KEYS
+    assert {
+        row["key"]: row["order_index"] for row in rows
+    } == {
+        "fundamental": 1,
+        "required": 2,
+        "optional": 3,
+        "experience": 4,
+        "graduate": 5,
+        "math-department": 6,
+    }
     math_category = next(
         row for row in rows if row["key"] == "math-department"
     )
@@ -340,6 +350,25 @@ def test_existing_canonical_metadata_and_soft_delete_are_preserved(
     _upgrade_head()
 
     assert _category(migration_engine, "math-department") == before
+
+
+def test_existing_canonical_course_order_is_preserved(
+    migration_engine: Engine,
+) -> None:
+    _replace_categories(
+        migration_engine,
+        _canonical_rows(
+            optional={"order_index": 81},
+            experience={"order_index": 82},
+        ),
+    )
+    before_optional = _category(migration_engine, "optional")
+    before_experience = _category(migration_engine, "experience")
+
+    _upgrade_head()
+
+    assert _category(migration_engine, "optional") == before_optional
+    assert _category(migration_engine, "experience") == before_experience
 
 
 def test_known_math_typo_only_updates_name_and_timestamp(
@@ -543,6 +572,7 @@ def test_legacy_only_row_keeps_id_metadata_and_updates_only_keys(
 
     after = _category(migration_engine, "math-department")
     assert after["id"] == before["id"]
+    assert after["order_index"] == 77
     assert {
         key: value for key, value in after.items() if key != "key"
     } == {
