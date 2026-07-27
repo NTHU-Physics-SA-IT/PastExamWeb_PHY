@@ -349,7 +349,11 @@ jobs:
           echo "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=nginx" >> frontend/.env
 
       - name: Prepare docker env
-        run: cp docker/.env.example docker/.env
+        run: |
+          cp docker/.env.example docker/.env
+          sed -i \
+            "s/^POSTGRES_DB=.*/POSTGRES_DB=archive_db_dev_e2e/" \
+            docker/.env
 
       - name: Start application stack
         run: >-
@@ -357,6 +361,14 @@ jobs:
           --env-file docker/.env
           -f docker/docker-compose.dev.yml
           up -d
+
+      - name: Bootstrap isolated E2E database
+        run: >-
+          docker compose
+          --env-file docker/.env
+          -f docker/docker-compose.dev.yml
+          --profile bootstrap
+          run --rm bootstrap
 
       - name: Proxy Vite HMR through nginx
         shell: bash
@@ -411,6 +423,8 @@ jobs:
       - name: Run frontend E2E tests
         env:
           PLAYWRIGHT_IMAGE: ${{ steps.playwright-image.outputs.image }}
+          PLAYWRIGHT_ADMIN_USERNAME: admin
+          PLAYWRIGHT_ADMIN_PASSWORD: local-admin-only
         run: |
           set -euo pipefail
 
@@ -426,6 +440,8 @@ jobs:
             -e CI=true \
             -e PLAYWRIGHT_START_SERVER=false \
             -e PLAYWRIGHT_BASE_URL=http://nginx:8080 \
+            -e PLAYWRIGHT_ADMIN_USERNAME \
+            -e PLAYWRIGHT_ADMIN_PASSWORD \
             -v "$GITHUB_WORKSPACE:/work" \
             -w /work/frontend \
             "$PLAYWRIGHT_IMAGE" \
