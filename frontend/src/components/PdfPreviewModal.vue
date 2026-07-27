@@ -117,6 +117,7 @@
             @desktop-default-open-change="handleDesktopDefaultOpenChange"
           />
           <ArchiveReportPanel
+            v-if="archiveReportActivated"
             v-show="sidePanelMode === 'exam-report'"
             :courseId="courseId"
             :archiveId="archiveId"
@@ -203,6 +204,7 @@
         @desktop-default-open-change="handleDesktopDefaultOpenChange"
       />
       <ArchiveReportPanel
+        v-if="archiveReportActivated"
         v-show="sidePanelMode === 'exam-report'"
         :courseId="courseId"
         :archiveId="archiveId"
@@ -299,6 +301,7 @@ const isMobile = ref(false)
 const discussionOpen = ref(false)
 const discussionModalVisible = ref(false)
 const sidePanelMode = ref('discussion')
+const archiveReportActivated = ref(false)
 const discussionPanelRef = ref(null)
 const discussionEnabled = computed(
   () => props.showDiscussion && Boolean(props.courseId) && Boolean(props.archiveId)
@@ -376,6 +379,7 @@ function onHide() {
     : getBooleanPreference(DESKTOP_DEFAULT_OPEN_KEY, true)
   discussionModalVisible.value = false
   sidePanelMode.value = 'discussion'
+  archiveReportActivated.value = false
   emit('hide')
 }
 
@@ -400,6 +404,7 @@ function handleDiscussionClick() {
 }
 
 function handleArchiveReportClick() {
+  archiveReportActivated.value = true
   sidePanelMode.value = 'exam-report'
   if (isMobile.value) {
     discussionModalVisible.value = true
@@ -413,7 +418,12 @@ function returnToDiscussion() {
 }
 
 function toggleSidePanelMode() {
-  sidePanelMode.value = sidePanelMode.value === 'exam-report' ? 'discussion' : 'exam-report'
+  if (sidePanelMode.value === 'exam-report') {
+    sidePanelMode.value = 'discussion'
+    return
+  }
+  archiveReportActivated.value = true
+  sidePanelMode.value = 'exam-report'
 }
 
 function openDiscussionSettings() {

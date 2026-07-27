@@ -29,10 +29,14 @@ export const reportService = {
     return api.patch(`/reports/admin/comments/${id}`, payload)
   },
   createArchiveReport(courseId, archiveId, payload) {
-    return api.post(`/reports/courses/${courseId}/archives/${archiveId}`, payload)
+    return api.post(`/reports/courses/${courseId}/archives/${archiveId}`, payload, {
+      skipUnauthorizedHandling: true,
+    })
   },
   getPendingArchiveReport(courseId, archiveId) {
-    return api.get(`/reports/courses/${courseId}/archives/${archiveId}/pending`)
+    return api.get(`/reports/courses/${courseId}/archives/${archiveId}/pending`, {
+      skipUnauthorizedHandling: true,
+    })
   },
   listArchiveReports(params) {
     return api.get('/reports/admin/archives', { params })

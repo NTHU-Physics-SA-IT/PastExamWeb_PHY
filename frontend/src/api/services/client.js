@@ -150,7 +150,7 @@ api.interceptors.response.use(
       return Promise.reject(error)
     }
 
-    if (status === 401) {
+    if (status === 401 && !error.config?.skipUnauthorizedHandling) {
       error.isUnauthorized = true
       handleUnauthorized()
     }

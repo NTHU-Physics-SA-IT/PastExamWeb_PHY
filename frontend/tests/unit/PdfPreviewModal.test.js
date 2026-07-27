@@ -239,6 +239,7 @@ describe('PdfPreviewModal', () => {
     })
 
     expect(wrapper.vm.sidePanelMode).toBe('discussion')
+    expect(wrapper.find('.archive-report-panel-stub').exists()).toBe(false)
     wrapper.vm.handleArchiveReportClick()
     await nextTick()
     expect(wrapper.vm.sidePanelMode).toBe('exam-report')
