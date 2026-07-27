@@ -5,7 +5,6 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.core.config import settings
 from app.api.api import api_router
 from app.db.init_db import init_db
-from app.middleware.recovery_review import enforce_recovery_review_read_only
 
 app = FastAPI(title="Past Exam API", docs_url=None, redoc_url=None)
 
@@ -22,7 +21,6 @@ app.add_middleware(
     secret_key=settings.SECRET_KEY,
     max_age=3600
 )
-app.middleware("http")(enforce_recovery_review_read_only)
 
 app.include_router(api_router)
 

@@ -162,13 +162,13 @@ describe('PdfPreviewModal', () => {
     wrapper.unmount()
   })
 
-  it('顯示明確的舊檔案缺失訊息', async () => {
+  it('顯示明確的考古題檔案缺失訊息', async () => {
     const wrapper = mount(PdfPreviewModal, {
       props: {
         visible: true,
         previewUrl: '',
         error: true,
-        errorMessage: '檔案缺失：Recovery Review 找不到這份舊檔案。',
+        errorMessage: '檔案缺失：找不到這份考古題檔案。',
       },
       global: {
         stubs: {
@@ -180,7 +180,7 @@ describe('PdfPreviewModal', () => {
     })
 
     expect(wrapper.text()).toContain('檔案缺失')
-    expect(wrapper.text()).toContain('Recovery Review')
+    expect(wrapper.text()).toContain('考古題檔案')
     wrapper.unmount()
   })
 

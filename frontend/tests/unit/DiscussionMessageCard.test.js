@@ -87,34 +87,4 @@ describe('DiscussionMessageCard', () => {
     expect(labels).toEqual(['回覆留言', '按愛心', '回報留言'])
     expect(wrapper.find('.discussion-card__actions.is-secondary').exists()).toBe(false)
   })
-
-  it('hides every mutation action in Recovery Review 唯讀模式', () => {
-    const wrapper = mount(DiscussionMessageCard, {
-      props: {
-        message: {
-          id: 9,
-          user_name: '舊資料使用者',
-          content: '唯讀留言內容',
-          is_pinned: false,
-          is_deleted: false,
-          like_count: 0,
-          created_at: '2026-07-12T08:00:00Z',
-        },
-        canPin: true,
-        canDelete: true,
-        reportOpen: true,
-        readOnly: true,
-      },
-      global: {
-        stubs: {
-          Button: ButtonStub,
-          InlineCommentReport: { template: '<div class="inline-report-stub" />' },
-        },
-      },
-    })
-
-    expect(wrapper.find('.discussion-card__action-stack').exists()).toBe(false)
-    expect(wrapper.find('.inline-report-stub').exists()).toBe(false)
-    expect(wrapper.text()).toContain('唯讀留言內容')
-  })
 })

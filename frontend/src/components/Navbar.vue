@@ -129,7 +129,7 @@
     </Menubar>
 
     <NotificationModal
-      v-if="isAuthenticated && !isRecoveryReview"
+      v-if="isAuthenticated"
       :visible="notificationStore.state.modalVisible"
       :summary="notificationStore.state.unreadSummary"
       @update:visible="handleNotificationModalVisible"
@@ -149,7 +149,6 @@
       :focus-id="notificationFocusId"
       :deleting-personal-id="deletingPersonalNotificationId"
       :deleting-all-personal="deletingAllPersonalNotifications"
-      :read-only="isRecoveryReview"
       @update:visible="handleNotificationCenterVisible"
       @mark-announcement-read="notificationStore.markAnnouncementRead"
       @mark-personal-read="notificationStore.markPersonalRead"
@@ -321,7 +320,6 @@ import { trackEvent, EVENTS } from '../utils/analytics'
 import { useNotifications } from '../utils/useNotifications'
 import NotificationModal from './NotificationModal.vue'
 import NotificationCenterModal from './NotificationCenterModal.vue'
-import { isRecoveryReview } from '../utils/environment'
 import {
   STORAGE_KEYS,
   removeLocalItem,
@@ -340,7 +338,6 @@ export default {
   emits: ['toggle-sidebar'],
   data() {
     return {
-      isRecoveryReview,
       loginVisible: false,
       username: '',
       password: '',
@@ -1083,18 +1080,16 @@ export default {
         },
       ]
 
-      if (!this.isRecoveryReview) {
-        items.unshift({
-          label: '個人化設定',
-          icon: 'pi pi-sliders-h',
-          command: () => this.invokeMenuAction(() => this.handleNavigatePersonalSettings()),
-        })
-        items.push({
-          label: '系統問題回報',
-          icon: 'pi pi-comments',
-          command: () => this.invokeMenuAction(() => this.openIssueReportDialog()),
-        })
-      }
+      items.unshift({
+        label: '個人化設定',
+        icon: 'pi pi-sliders-h',
+        command: () => this.invokeMenuAction(() => this.handleNavigatePersonalSettings()),
+      })
+      items.push({
+        label: '系統問題回報',
+        icon: 'pi pi-comments',
+        command: () => this.invokeMenuAction(() => this.openIssueReportDialog()),
+      })
 
       if (this.isAuthenticated && !this.isDesktopView) {
         items.push({ separator: true })

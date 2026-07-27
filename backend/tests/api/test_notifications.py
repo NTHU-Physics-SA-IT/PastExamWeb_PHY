@@ -348,56 +348,6 @@ async def test_personal_notifications_are_owned_and_can_be_marked_read(
             await session.commit()
 
 
-@pytest.mark.asyncio
-async def test_recovery_review_admin_can_inspect_recovered_personal_notifications(
-    client: AsyncClient,
-    session_maker,
-    make_user,
-    monkeypatch,
-):
-    recovered_user = await make_user()
-    review_admin = await make_user(name="recovery-review-admin", is_admin=True)
-    item = PersonalNotification(
-        user_id=recovered_user.id,
-        notification_type="discussion_reply",
-        title="Recovered notification",
-        message="Recovered notification body",
-        dedupe_key=f"recovery-review-test-{uuid.uuid4().hex}",
-        created_at=datetime.now(timezone.utc),
-    )
-    async with session_maker() as session:
-        session.add(item)
-        await session.commit()
-        await session.refresh(item)
-
-    app.dependency_overrides[get_current_user] = _override_user(
-        {"id": review_admin.id, "is_admin": True}
-    )
-    monkeypatch.setattr(
-        "app.api.services.notifications.settings.RECOVERY_REVIEW_MODE",
-        True,
-    )
-    monkeypatch.setattr(
-        "app.api.services.notifications.settings.RECOVERY_REVIEW_ADMIN_NAME",
-        review_admin.name,
-    )
-
-    try:
-        center = (await client.get("/notifications/center")).json()
-        counts = (await client.get("/notifications/counts")).json()
-        summary = (await client.get("/notifications/unread-summary")).json()
-
-        assert [row["id"] for row in center["personal_notifications"]] == [item.id]
-        assert counts["personal_notifications"] == 1
-        assert [row["id"] for row in summary["personal_notifications"]] == [item.id]
-    finally:
-        app.dependency_overrides.pop(get_current_user, None)
-        async with session_maker() as session:
-            await session.execute(
-                delete(PersonalNotification).where(PersonalNotification.id == item.id)
-            )
-            await session.commit()
-
 
 @pytest.mark.asyncio
 async def test_personal_notifications_can_be_permanently_deleted_by_owner_only(

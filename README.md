@@ -112,9 +112,9 @@ PostgreSQL、Redis、MinIO、後端及前端開發伺服器預設在 Docker Comp
 `docker/docker-compose.prod.yml` 與 repository 外的
 `/etc/pastexam/compose.prod.env`。正式 backend runtime 與 migrator
 credentials 使用另外兩份外部 env，不放入 Compose interpolation env。
-測試必須使用通過隔離 guard 的專用 test database。資料恢復則依
-`docs/data-recovery-2026-07.md` 與外部 backups 執行，不保留常駐
-Recovery Compose。
+測試必須使用通過隔離 guard 的專用 test database。資料恢復應遵循
+`docs/migration-safety.md` 與 `docs/production-deployment.md` 的備份、
+隔離還原及 migration 檢查原則，不保留常駐的恢復網站環境。
 
 ### Environment files
 

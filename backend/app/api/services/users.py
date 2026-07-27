@@ -533,7 +533,7 @@ async def get_me(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
-    if not user.nickname and not settings.RECOVERY_REVIEW_MODE:
+    if not user.nickname:
         user.nickname = user.name
         await db.commit()
         await db.refresh(user)

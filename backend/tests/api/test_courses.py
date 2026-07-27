@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi import HTTPException
 from httpx import AsyncClient
+from minio.error import S3Error
 from sqlalchemy import delete
 from sqlmodel import select
 
@@ -303,6 +304,10 @@ async def test_get_archive_preview_url_returns_presigned_link(
     monkeypatch.setattr(
         "app.api.services.courses.presigned_get_url", fake_presigned
     )
+    monkeypatch.setattr(
+        "app.api.services.courses.get_minio_client",
+        lambda: type("MinioStub", (), {"stat_object": lambda *_args: None})(),
+    )
     app.dependency_overrides[get_current_user] = _override_user(user)
     try:
         response = await client.get(
@@ -319,6 +324,53 @@ async def test_get_archive_preview_url_returns_presigned_link(
             await session.execute(
                 delete(Course).where(Course.id == course.id)
             )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_archive_preview_and_download_return_structured_missing_file(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    monkeypatch,
+):
+    user = await make_user()
+    course = await _create_course(session_maker)
+    archive = await _create_archive(
+        session_maker, course_id=course.id, uploader_id=user.id
+    )
+
+    def missing_object(*_args):
+        raise S3Error(
+            None,
+            "NoSuchKey",
+            "Object does not exist",
+            archive.object_name,
+            "request-id",
+            "host-id",
+        )
+
+    monkeypatch.setattr(
+        "app.api.services.courses.get_minio_client",
+        lambda: type("MinioStub", (), {"stat_object": missing_object})(),
+    )
+    app.dependency_overrides[get_current_user] = _override_user(user)
+    try:
+        for endpoint in ("preview", "download"):
+            response = await client.get(
+                f"/courses/{course.id}/archives/{archive.id}/{endpoint}"
+            )
+            assert response.status_code == 404
+            assert response.json()["detail"]["code"] == "archive_file_missing"
+
+        async with session_maker() as session:
+            refreshed = await session.get(Archive, archive.id)
+            assert refreshed.download_count == 0
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
             await session.commit()
 
 
@@ -344,6 +396,10 @@ async def test_get_archive_download_url_increments_count(
 
     monkeypatch.setattr(
         "app.api.services.courses.presigned_get_url", fake_presigned
+    )
+    monkeypatch.setattr(
+        "app.api.services.courses.get_minio_client",
+        lambda: type("MinioStub", (), {"stat_object": lambda *_args: None})(),
     )
     app.dependency_overrides[get_current_user] = _override_user(user)
     try:

@@ -6,7 +6,6 @@ from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db.session import get_session
-from app.core.config import settings
 from app.models.models import Archive, Course, User
 from app.api.services.presence import distinct_online_user_ids, load_presence_sessions
 
@@ -18,10 +17,9 @@ logger = logging.getLogger(__name__)
 async def get_system_statistics(db: AsyncSession = Depends(get_session)):
     """Get system-wide statistics"""
     try:
-        user_conditions = [User.deleted_at.is_(None)]
-        if settings.RECOVERY_REVIEW_MODE:
-            user_conditions.append(User.name != settings.RECOVERY_REVIEW_ADMIN_NAME)
-        result = await db.execute(select(func.count(User.id)).where(*user_conditions))
+        result = await db.execute(
+            select(func.count(User.id)).where(User.deleted_at.is_(None))
+        )
         total_users = result.scalar()
 
         result = await db.execute(
@@ -52,7 +50,7 @@ async def get_system_statistics(db: AsyncSession = Depends(get_session)):
         )
         result = await db.execute(
             select(func.count(User.id)).where(
-                *user_conditions, User.last_login >= today_start
+                User.deleted_at.is_(None), User.last_login >= today_start
             )
         )
         active_today = result.scalar()

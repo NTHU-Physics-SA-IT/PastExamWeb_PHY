@@ -1,8 +1,5 @@
 <template>
-  <div
-    class="h-full px-2 md:px-4 admin-container"
-    :class="{ 'recovery-review-admin': isRecoveryReview }"
-  >
+  <div class="h-full px-2 md:px-4 admin-container">
     <div class="card h-full flex flex-col">
       <Tabs :value="currentTab" class="flex-1" @update:value="handleTabChange">
         <TabList>
@@ -3346,39 +3343,37 @@
             @click="previewArchiveRequestFile"
           />
           <Button
-            v-if="canEditSelectedArchiveRequest && !isRecoveryReview"
+            v-if="canEditSelectedArchiveRequest"
             label="儲存修改"
             icon="pi pi-save"
             aria-label="儲存修改"
             :loading="reviewEditLoading"
             @click="saveArchiveRequestEdit"
           />
-          <template v-if="!isRecoveryReview">
-            <Button
-              v-for="action in getReviewRowActions(selectedArchiveRequest)"
-              :key="action.key"
-              :label="action.label"
-              :icon="action.icon"
-              :aria-label="action.label"
-              :title="action.label"
-              :class="[
-                'review-action-button',
-                {
-                  'review-action-button--reject': action.key === 'reject',
-                  'review-action-button--delete': action.key === 'delete',
-                  'review-action-reject': action.key === 'reject',
-                  'admin-danger-solid-button': action.key === 'reject',
-                  'admin-danger-outline-button': action.key === 'delete',
-                  'review-action-delete': action.key === 'delete',
-                },
-              ]"
-              :severity="action.severity"
-              :outlined="action.outlined"
-              :text="action.text"
-              :disabled="!selectedArchiveRequest"
-              @click="runReviewRowAction(selectedArchiveRequest, action.key)"
-            />
-          </template>
+          <Button
+            v-for="action in getReviewRowActions(selectedArchiveRequest)"
+            :key="action.key"
+            :label="action.label"
+            :icon="action.icon"
+            :aria-label="action.label"
+            :title="action.label"
+            :class="[
+              'review-action-button',
+              {
+                'review-action-button--reject': action.key === 'reject',
+                'review-action-button--delete': action.key === 'delete',
+                'review-action-reject': action.key === 'reject',
+                'admin-danger-solid-button': action.key === 'reject',
+                'admin-danger-outline-button': action.key === 'delete',
+                'review-action-delete': action.key === 'delete',
+              },
+            ]"
+            :severity="action.severity"
+            :outlined="action.outlined"
+            :text="action.text"
+            :disabled="!selectedArchiveRequest"
+            @click="runReviewRowAction(selectedArchiveRequest, action.key)"
+          />
         </div>
       </Dialog>
 
@@ -4197,7 +4192,6 @@ import {
 import { trackEvent, EVENTS } from '../utils/analytics'
 import { STORAGE_KEYS, getLocalItem, setLocalItem } from '../utils/storage'
 import { formatCourseDisplayName, normalizeCourseSearchText } from '../utils/courseText'
-import { isRecoveryReview } from '../utils/environment'
 import { ADMIN_PAGE_SIZE_OPTIONS } from '../constants/pagination'
 import PdfPreviewModal from '../components/PdfPreviewModal.vue'
 import ContributorLevelBadge from '../components/ContributorLevelBadge.vue'
@@ -4569,7 +4563,6 @@ const getReadonlyReviewSubmissionMessage = (item) => {
 }
 const canEditSelectedArchiveRequest = computed(() => {
   return (
-    !isRecoveryReview &&
     Boolean(selectedArchiveRequest.value) &&
     !isReadonlyReviewSubmission(selectedArchiveRequest.value)
   )
@@ -8210,23 +8203,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.recovery-review-admin :deep(button:has(.pi-plus)),
-.recovery-review-admin :deep(button:has(.pi-pencil)),
-.recovery-review-admin :deep(button:has(.pi-trash)),
-.recovery-review-admin :deep(button:has(.pi-key)),
-.recovery-review-admin :deep(button:has(.pi-save)),
-.recovery-review-admin :deep(button:has(.pi-check)),
-.recovery-review-admin :deep(button:has(.pi-times-circle)),
-.recovery-review-admin :deep(button:has(.pi-eye-slash)),
-.recovery-review-admin :deep(button:has(.pi-undo)),
-.recovery-review-admin :deep(button:has(.pi-power-off)),
-.recovery-review-admin :deep(button:has(.pi-arrow-up)),
-.recovery-review-admin :deep(button:has(.pi-arrow-down)),
-.recovery-review-admin :deep(button:has(.pi-cloud-upload)),
-.recovery-review-admin :deep(button:has(.pi-upload)) {
-  display: none;
-}
-
 .admin-container {
   background: var(--p-tabs-tabpanel-background);
   min-width: 0;

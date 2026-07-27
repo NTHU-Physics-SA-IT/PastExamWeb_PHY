@@ -84,7 +84,7 @@ _discussion_connections_by_archive: dict[int, set[WebSocket]] = {}
 DISCUSSION_MESSAGE_MAX_LENGTH = 200
 ARCHIVE_FILE_MISSING_DETAIL = {
     "code": "archive_file_missing",
-    "message": "此筆恢復資料的 PDF 檔案缺失，無法預覽或下載。",
+    "message": "此筆考古題的 PDF 檔案缺失，無法預覽或下載。",
 }
 DEFAULT_CATEGORIES = [
     (category.key, category.name, category.label, category.icon)
@@ -817,10 +817,9 @@ async def get_archive_download_url(
             ) from exc
         raise
 
-    if not settings.RECOVERY_REVIEW_MODE:
-        archive.download_count += 1
-        await db.commit()
-        await db.refresh(archive)
+    archive.download_count += 1
+    await db.commit()
+    await db.refresh(archive)
 
     return {"url": presigned_get_url(archive.object_name, expires=timedelta(hours=1))}
 
@@ -1117,16 +1116,6 @@ async def archive_discussion_ws(
             msg_type = str(data.get("type") or "").strip().lower()
             if msg_type != "send":
                 continue
-            if settings.RECOVERY_REVIEW_MODE:
-                await websocket.send_json(
-                    {
-                        "type": "error",
-                        "code": "recovery_review_read_only",
-                        "detail": "Recovery Review 是唯讀環境，不能新增留言。",
-                    }
-                )
-                continue
-
             raw_content = str(data.get("content") or "")
             content = raw_content.strip()
             if not content:

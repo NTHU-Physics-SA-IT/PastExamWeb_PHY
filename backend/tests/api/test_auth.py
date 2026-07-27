@@ -42,34 +42,6 @@ async def test_local_login_failure(client):
 
 
 @pytest.mark.asyncio
-async def test_recovery_review_login_only_accepts_review_admin(
-    client,
-    make_user,
-    monkeypatch,
-):
-    original_user = await make_user(name="recovered-user")
-    review_admin = await make_user(name="recovery-review-admin", is_admin=True)
-    monkeypatch.setattr(auth_service.settings, "RECOVERY_REVIEW_MODE", True)
-    monkeypatch.setattr(
-        auth_service.settings,
-        "RECOVERY_REVIEW_ADMIN_NAME",
-        review_admin.name,
-    )
-
-    original_response = await client.post(
-        "/auth/login",
-        data={"username": original_user.name, "password": original_user.password},
-    )
-    review_response = await client.post(
-        "/auth/login",
-        data={"username": review_admin.name, "password": review_admin.password},
-    )
-
-    assert original_response.status_code == 401
-    assert review_response.status_code == 200
-
-
-@pytest.mark.asyncio
 async def test_local_login_supports_password_longer_than_bcrypt_limit(
     client,
     make_user,

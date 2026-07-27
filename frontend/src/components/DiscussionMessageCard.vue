@@ -29,7 +29,7 @@
       </time>
     </div>
 
-    <div v-if="!message.is_deleted && !readOnly" class="discussion-card__action-stack">
+    <div v-if="!message.is_deleted" class="discussion-card__action-stack">
       <div class="discussion-card__actions is-primary">
         <Button
           icon="pi pi-reply"
@@ -120,7 +120,7 @@
     </div>
 
     <InlineCommentReport
-      v-if="reportOpen && !message.is_deleted && !readOnly"
+      v-if="reportOpen && !message.is_deleted"
       class="discussion-card__inline-panel"
       :message="message"
       :reason="reportReason"
@@ -154,7 +154,6 @@ const props = defineProps({
   reportReason: { type: String, default: null },
   reportCustomMessage: { type: String, default: '' },
   reportLoading: { type: Boolean, default: false },
-  readOnly: { type: Boolean, default: false },
 })
 
 defineEmits([

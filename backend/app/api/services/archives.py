@@ -901,7 +901,7 @@ async def get_archive_submission_preview_file(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={
                     "code": "archive_file_missing",
-                    "message": "此筆恢復資料的 PDF 檔案缺失，無法預覽或下載。",
+                    "message": "此筆考古題的 PDF 檔案缺失，無法預覽或下載。",
                 },
             ) from exc
         raise HTTPException(

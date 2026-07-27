@@ -59,7 +59,7 @@
           </div>
 
           <!-- Fixed upload section for desktop -->
-          <div v-if="isAuthenticatedRef && !isRecoveryReview" class="upload-section p-3">
+          <div v-if="isAuthenticatedRef" class="upload-section p-3">
             <div class="upload-actions">
               <Button
                 icon="pi pi-cloud-upload"
@@ -154,10 +154,7 @@
             <PanelMenu v-else :model="mobileMenuItems" multiple class="w-full" />
           </div>
 
-          <div
-            v-if="isAuthenticatedRef && !isRecoveryReview"
-            class="upload-section mobile-upload-section"
-          >
+          <div v-if="isAuthenticatedRef" class="upload-section mobile-upload-section">
             <div class="upload-actions">
               <Button
                 icon="pi pi-cloud-upload"
@@ -323,7 +320,7 @@
                                 class="archive-action-download"
                               />
                               <Button
-                                v-if="canEditArchive(data) && !isRecoveryReview"
+                                v-if="canEditArchive(data)"
                                 icon="pi pi-pencil"
                                 @click="openEditDialog(data)"
                                 size="small"
@@ -335,7 +332,7 @@
                                 class="archive-action-edit"
                               />
                               <Button
-                                v-if="canDeleteArchive(data) && !isRecoveryReview"
+                                v-if="canDeleteArchive(data)"
                                 icon="pi pi-trash"
                                 @click="confirmDelete(data)"
                                 size="small"
@@ -398,7 +395,6 @@
           />
 
           <UploadArchiveDialog
-            v-if="!isRecoveryReview"
             v-model="showUploadDialog"
             :coursesList="coursesList"
             :courseCategories="courseCategories"
@@ -769,7 +765,6 @@ import { useTheme } from '../utils/useTheme'
 import { trackEvent, EVENTS } from '../utils/analytics'
 import { isUnauthorizedError } from '../utils/http'
 import { formatCourseDisplayName, normalizeCourseSearchText } from '../utils/courseText'
-import { isRecoveryReview } from '../utils/environment'
 import {
   getContributorLevelPalette,
   loadContributorLevelSettings,
@@ -1612,7 +1607,7 @@ async function downloadArchive(archive) {
     toast.add({
       severity: 'error',
       summary: '下載失敗',
-      detail: error.response?.status === 404 ? '此筆恢復資料的 PDF 檔案缺失' : '無法取得下載連結',
+      detail: error.response?.status === 404 ? '此筆考古題的 PDF 檔案缺失' : '無法取得下載連結',
       life: 3000,
     })
   } finally {
@@ -1657,7 +1652,7 @@ async function previewArchive(archive) {
     toast.add({
       severity: 'error',
       summary: '預覽失敗',
-      detail: isMissingFile ? '此筆恢復資料的 PDF 檔案缺失' : '無法取得預覽連結',
+      detail: isMissingFile ? '此筆考古題的 PDF 檔案缺失' : '無法取得預覽連結',
       life: 3000,
     })
   } finally {
@@ -2093,7 +2088,7 @@ async function handlePreviewDownload(onComplete) {
     toast.add({
       severity: 'error',
       summary: '下載失敗',
-      detail: error.response?.status === 404 ? '此筆恢復資料的 PDF 檔案缺失' : '無法取得下載連結',
+      detail: error.response?.status === 404 ? '此筆考古題的 PDF 檔案缺失' : '無法取得下載連結',
       life: 3000,
     })
   } finally {

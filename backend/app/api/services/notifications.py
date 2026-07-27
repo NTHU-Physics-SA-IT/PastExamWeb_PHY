@@ -8,7 +8,6 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db.session import get_session
-from app.core.config import settings
 from app.models.models import (
     AnnouncementReadReceipt,
     AnnouncementWithRead,
@@ -94,7 +93,6 @@ async def _list_personal_notifications(
     db: AsyncSession,
     user_id: int,
     *,
-    all_users: bool = False,
     unread_only: bool = False,
     limit: int = 50,
     offset: int = 0,
@@ -107,8 +105,7 @@ async def _list_personal_notifications(
         .limit(max(1, min(limit, 100)))
         .offset(max(0, offset))
     )
-    if not all_users:
-        statement = statement.where(PersonalNotification.user_id == user_id)
+    statement = statement.where(PersonalNotification.user_id == user_id)
     if unread_only:
         statement = statement.where(PersonalNotification.read_at.is_(None))
     items = list((await db.execute(statement)).scalars().all())
@@ -182,8 +179,6 @@ async def _list_personal_notifications(
 async def _unread_counts(
     db: AsyncSession,
     user_id: int,
-    *,
-    all_personal_users: bool = False,
 ) -> NotificationUnreadCounts:
     announcement_statement = (
         select(func.count(Notification.id))
@@ -202,33 +197,15 @@ async def _unread_counts(
     announcement_statement = _apply_time_filters(announcement_statement)
     announcement_count = int(await db.scalar(announcement_statement) or 0)
     personal_statement = select(func.count(PersonalNotification.id)).where(
-        PersonalNotification.read_at.is_(None)
+        PersonalNotification.read_at.is_(None),
+        PersonalNotification.user_id == user_id,
     )
-    if not all_personal_users:
-        personal_statement = personal_statement.where(
-            PersonalNotification.user_id == user_id
-        )
     personal_count = int(await db.scalar(personal_statement) or 0)
     return NotificationUnreadCounts(
         announcements=announcement_count,
         personal_notifications=personal_count,
         total=announcement_count + personal_count,
     )
-
-
-async def _is_recovery_review_admin(
-    db: AsyncSession,
-    current_user: UserRoles,
-) -> bool:
-    if not settings.RECOVERY_REVIEW_MODE or not current_user.is_admin:
-        return False
-    current_name = await db.scalar(
-        select(User.name).where(
-            User.id == current_user.user_id,
-            User.deleted_at.is_(None),
-        )
-    )
-    return current_name == settings.RECOVERY_REVIEW_ADMIN_NAME
 
 
 @router.get("/active", response_model=List[NotificationRead])
@@ -264,20 +241,14 @@ async def get_notification_center(
     db: AsyncSession = Depends(get_session),
     current_user: UserRoles = Depends(get_current_user),
 ):
-    review_admin = await _is_recovery_review_admin(db, current_user)
     announcements = await _list_announcements_for_user(db, current_user.user_id)
     personal_notifications = await _list_personal_notifications(
         db,
         current_user.user_id,
-        all_users=review_admin,
         limit=personal_limit,
         offset=personal_offset,
     )
-    counts = await _unread_counts(
-        db,
-        current_user.user_id,
-        all_personal_users=review_admin,
-    )
+    counts = await _unread_counts(db, current_user.user_id)
     return NotificationCenterRead(
         announcements=announcements,
         personal_notifications=personal_notifications,
@@ -290,12 +261,7 @@ async def get_notification_counts(
     db: AsyncSession = Depends(get_session),
     current_user: UserRoles = Depends(get_current_user),
 ):
-    review_admin = await _is_recovery_review_admin(db, current_user)
-    return await _unread_counts(
-        db,
-        current_user.user_id,
-        all_personal_users=review_admin,
-    )
+    return await _unread_counts(db, current_user.user_id)
 
 
 @router.get("/unread-summary", response_model=NotificationUnreadSummary)
@@ -304,22 +270,16 @@ async def get_unread_notification_summary(
     db: AsyncSession = Depends(get_session),
     current_user: UserRoles = Depends(get_current_user),
 ):
-    review_admin = await _is_recovery_review_admin(db, current_user)
     announcements = await _list_announcements_for_user(
         db, current_user.user_id, unread_only=True, limit=limit
     )
     personal_notifications = await _list_personal_notifications(
         db,
         current_user.user_id,
-        all_users=review_admin,
         unread_only=True,
         limit=limit,
     )
-    counts = await _unread_counts(
-        db,
-        current_user.user_id,
-        all_personal_users=review_admin,
-    )
+    counts = await _unread_counts(db, current_user.user_id)
     return NotificationUnreadSummary(
         announcements=announcements,
         personal_notifications=personal_notifications,

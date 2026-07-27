@@ -36,16 +36,6 @@ async def login(
     """
     Local login endpoint for users with password authentication
     """
-    if (
-        settings.RECOVERY_REVIEW_MODE
-        and form_data.username != settings.RECOVERY_REVIEW_ADMIN_NAME
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
     user = await authenticate_user(form_data.username, form_data.password, db)
     if not user:
         raise HTTPException(

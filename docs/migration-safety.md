@@ -41,8 +41,8 @@ postflight error exits non-zero.
 
 Reviewed manifests currently cover:
 
-- `c4d8e2f1a6b9`: the July 12 recovery dump schema, captured from the
-  read-only restored database;
+- `c4d8e2f1a6b9`: a reviewed legacy schema captured from an isolated,
+  read-only restore;
 - `a4c7e9d2f6b1`: the reviewed pre-canonicalization test baseline;
 - `c9e4f1a7b2d6`: the canonical-category schema before metadata alignment;
 - `e3b7c1d9f5a2`: the current SQLModel/head contract.
