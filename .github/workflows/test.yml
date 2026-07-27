@@ -111,12 +111,12 @@ jobs:
         run: cp frontend/.env.example frontend/.env
 
       - name: Prepare docker env
-        run: cp docker/compose.dev.env.example docker/compose.dev.env
+        run: cp docker/.env.example docker/.env
 
       - name: Start core services
         run: |
           docker compose \
-            --env-file docker/compose.dev.env \
+            --env-file docker/.env \
             -f docker/docker-compose.dev.yml \
             up -d --wait --wait-timeout 60 \
             db redis minio
@@ -126,7 +126,7 @@ jobs:
           set -euo pipefail
 
           docker compose \
-            --env-file docker/compose.dev.env \
+            --env-file docker/.env \
             -f docker/docker-compose.dev.yml \
             exec -T db \
             sh -eu -c '
@@ -166,18 +166,18 @@ jobs:
         if: failure()
         run: |
           docker compose \
-            --env-file docker/compose.dev.env \
+            --env-file docker/.env \
             -f docker/docker-compose.dev.yml \
             ps
           docker compose \
-            --env-file docker/compose.dev.env \
+            --env-file docker/.env \
             -f docker/docker-compose.dev.yml \
             logs db
 
       - name: Run migrations
         run: |
           docker compose \
-            --env-file docker/compose.dev.env \
+            --env-file docker/.env \
             -f docker/docker-compose.dev.yml \
             run --rm \
             -e DB_NAME=pastexam_test_local \
@@ -188,7 +188,7 @@ jobs:
       - name: Seed database
         run: |
           docker compose \
-            --env-file docker/compose.dev.env \
+            --env-file docker/.env \
             -f docker/docker-compose.dev.yml \
             run --rm \
             -e DB_NAME=pastexam_test_local \
@@ -201,7 +201,7 @@ jobs:
       - name: Run backend tests with coverage
         run: |
           docker compose \
-            --env-file docker/compose.dev.env \
+            --env-file docker/.env \
             -f docker/docker-compose.dev.yml \
             run --rm \
             -e DB_NAME=pastexam_test_local \
@@ -223,7 +223,7 @@ jobs:
         if: always()
         run: >-
           docker compose
-          --env-file docker/compose.dev.env
+          --env-file docker/.env
           -f docker/docker-compose.dev.yml
           down --volumes --remove-orphans
 
@@ -335,12 +335,12 @@ jobs:
           echo "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=nginx" >> frontend/.env
 
       - name: Prepare docker env
-        run: cp docker/compose.dev.env.example docker/compose.dev.env
+        run: cp docker/.env.example docker/.env
 
       - name: Start application stack
         run: >-
           docker compose
-          --env-file docker/compose.dev.env
+          --env-file docker/.env
           -f docker/docker-compose.dev.yml
           up -d
 
@@ -385,11 +385,11 @@ jobs:
           done
           echo "API did not become ready in time" >&2
           docker compose \
-            --env-file docker/compose.dev.env \
+            --env-file docker/.env \
             -f docker/docker-compose.dev.yml \
             logs backend
           docker compose \
-            --env-file docker/compose.dev.env \
+            --env-file docker/.env \
             -f docker/docker-compose.dev.yml \
             logs nginx
           exit 1
@@ -432,6 +432,6 @@ jobs:
         if: always()
         run: >-
           docker compose
-          --env-file docker/compose.dev.env
+          --env-file docker/.env
           -f docker/docker-compose.dev.yml
           down --volumes --remove-orphans

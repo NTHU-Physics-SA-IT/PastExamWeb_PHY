@@ -85,7 +85,7 @@ cd PastExamWeb_PHY
 範例值僅供本地開發；部署時請改用安全且獨立的密碼與金鑰。
 
 ```bash
-cp docker/compose.dev.env.example docker/compose.dev.env
+cp docker/.env.example docker/.env
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 ```
@@ -108,13 +108,30 @@ PostgreSQL、Redis、MinIO、後端及前端開發伺服器預設在 Docker Comp
 ```
 
 本機開發使用 `docker/docker-compose.dev.yml` 與 ignored
-`docker/compose.dev.env`；正式 VPS 部署使用
+`docker/.env`；正式 VPS 部署使用
 `docker/docker-compose.prod.yml` 與 repository 外的
 `/etc/pastexam/compose.prod.env`。正式 backend runtime 與 migrator
 credentials 使用另外兩份外部 env，不放入 Compose interpolation env。
 測試必須使用通過隔離 guard 的專用 test database。資料恢復則依
 `docs/data-recovery-2026-07.md` 與外部 backups 執行，不保留常駐
 Recovery Compose。
+
+### Environment files
+
+| Scope | Actual local file | Tracked example | Consumer |
+|---|---|---|---|
+| Docker Compose Dev | `docker/.env` | `docker/.env.example` | Docker Compose／`scripts/dev-compose.sh` |
+| Backend local | `backend/.env` | `backend/.env.example` | Pydantic backend settings／Alembic |
+| Frontend local | `frontend/.env` | `frontend/.env.example` | Vite |
+| Backend production runtime | repository 外部檔案 | `backend/.env.production.runtime.example` | Backend application |
+| Backend production migrator | repository 外部檔案 | `backend/.env.production.migrator.example` | Alembic／migration CLI |
+| Production Compose | `/etc/pastexam/compose.prod.env` | `docker/.env.production.example` | Docker Compose |
+
+實際 env 檔不得提交 Git；可提交的 example 只描述設定契約。Dotfile
+雖然在 Unix／macOS 中預設隱藏，但隱藏不等於安全，仍必須搭配 Git
+ignore、適當檔案權限及 secrets 管理。Compose interpolation env 與
+backend runtime env 是不同邊界，migrator credentials 也不得提供給
+一般 backend runtime 使用。
 
 ## 參與貢獻
 

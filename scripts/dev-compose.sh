@@ -3,8 +3,8 @@ set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 compose_file="${repo_root}/docker/docker-compose.dev.yml"
-default_env_file="${repo_root}/docker/compose.dev.env"
-legacy_env_file="${repo_root}/docker/.env"
+default_env_file="${repo_root}/docker/.env"
+legacy_env_file="${repo_root}/docker/compose.dev.env"
 env_file="${PASTEXAM_DEV_COMPOSE_ENV_FILE:-${default_env_file}}"
 
 usage() {
@@ -12,7 +12,7 @@ usage() {
 Usage: scripts/dev-compose.sh <preflight|config|start|stop|status|logs>
 
 The development stack reads secrets and resource identities from the ignored
-docker/compose.dev.env file. It never bootstraps, destroys volumes, or targets
+docker/.env file. It never bootstraps, destroys volumes, or targets
 a remote Docker daemon.
 EOF
 }
@@ -34,13 +34,16 @@ require_local_docker() {
 require_env_file() {
   if [[ ! -f "${env_file}" ]]; then
     if [[ "${env_file}" == "${default_env_file}" && -f "${legacy_env_file}" ]]; then
-      fail "docker/.env is retired; move it to docker/compose.dev.env"
+      fail "docker/compose.dev.env is retired; move it to docker/.env"
     fi
-    fail "missing ${env_file}; run: cp docker/compose.dev.env.example docker/compose.dev.env"
+    fail "missing ${env_file}; run: cp docker/.env.example docker/.env"
   fi
   [[ "${env_file}" != *.example ]] || fail "do not run with committed example credentials"
-  [[ "$(basename "${env_file}")" != "compose.prod.env" ]] \
-    || fail "refusing to use the production Compose environment"
+  case "$(basename "${env_file}")" in
+    .env.production | compose.prod.env)
+      fail "refusing to use the production Compose environment"
+      ;;
+  esac
 }
 
 env_value() {

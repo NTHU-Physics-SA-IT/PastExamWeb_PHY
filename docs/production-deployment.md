@@ -34,7 +34,7 @@ All three files must be root-owned deployment inputs with mode `0600`.
 Secrets are neither copied into an immutable release nor printed. Runtime and
 migrator credentials must be different.
 
-`docker/compose.prod.env.example` documents the non-secret Compose variable
+`docker/.env.production.example` documents the non-secret Compose variable
 contract. A release is rendered explicitly with the production definition and
 the external environment file:
 

@@ -1,10 +1,10 @@
 .vscode
 .env*
 !.env.example
-/docker/compose.dev.env
-/docker/compose.prod.env
-!/docker/compose.dev.env.example
-!/docker/compose.prod.env.example
+/docker/.env
+/docker/.env.production
+!/docker/.env.example
+!/docker/.env.production.example
 .DS_Store
 
 .codex/skills/

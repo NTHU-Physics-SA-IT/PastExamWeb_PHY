@@ -19,7 +19,7 @@ env -i \
   PRODUCTION_BACKEND_ENV_FILE="$repository_root/backend/.env.production.runtime.example" \
   PRODUCTION_MIGRATOR_ENV_FILE="$repository_root/backend/.env.production.migrator.example" \
   docker compose \
-  --env-file "$repository_root/docker/compose.prod.env.example" \
+  --env-file "$repository_root/docker/.env.production.example" \
   --file "$repository_root/docker/docker-compose.prod.yml" \
   config --format json >"$production_json"
 
@@ -27,7 +27,7 @@ env -i \
   HOME="$HOME" \
   PATH="$PATH" \
   docker compose \
-  --env-file "$repository_root/docker/compose.dev.env.example" \
+  --env-file "$repository_root/docker/.env.example" \
   --file "$repository_root/docker/docker-compose.dev.yml" \
   --profile bootstrap \
   config --format json >"$development_json"
