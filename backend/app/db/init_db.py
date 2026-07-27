@@ -9,7 +9,8 @@ from sqlmodel import func, select
 
 from app.core.config import settings
 from app.db.course_categories import (
-    CANONICAL_COURSE_CATEGORIES,
+    CANONICAL_COURSE_CATEGORY_KEYS,
+    DEFAULT_COURSE_CATEGORY_DEFINITIONS,
     RESERVED_LEGACY_COURSE_CATEGORY_KEYS,
     normalize_course_category_name,
 )
@@ -145,7 +146,7 @@ async def sync_course_categories(session, *, commit: bool = True):
     }
     changed = False
 
-    for definition in CANONICAL_COURSE_CATEGORIES:
+    for definition in DEFAULT_COURSE_CATEGORY_DEFINITIONS:
         category = existing_by_key.get(definition.key)
         if category:
             continue
@@ -241,10 +242,10 @@ async def _validate_bootstrap_contents(session) -> bool:
         await session.execute(select(CourseCategoryConfig))
     ).scalars().all()
     category_keys = {item.key for item in category_rows}
-    canonical_keys = {
-        item.key for item in CANONICAL_COURSE_CATEGORIES
-    }
-    if len(category_rows) != len(canonical_keys) or category_keys != canonical_keys:
+    if (
+        len(category_rows) != len(CANONICAL_COURSE_CATEGORY_KEYS)
+        or category_keys != CANONICAL_COURSE_CATEGORY_KEYS
+    ):
         raise RuntimeError(
             "First bootstrap requires only the six migration-created "
             "canonical course categories"
@@ -310,6 +311,18 @@ async def bootstrap_db(*, confirmed_database_name: str) -> None:
             admin_user.is_local = True
             admin_user.is_admin = True
         elif not admin_user:
+            email_owner = (
+                await session.execute(
+                    select(User).where(
+                        User.email == settings.DEFAULT_ADMIN_EMAIL
+                    )
+                )
+            ).scalar_one_or_none()
+            if email_owner is not None:
+                raise RuntimeError(
+                    "Default administrator email is already used by a "
+                    "different account; refusing to create or reset users"
+                )
             admin_user = User(
                 name=settings.DEFAULT_ADMIN_NAME,
                 email=settings.DEFAULT_ADMIN_EMAIL,

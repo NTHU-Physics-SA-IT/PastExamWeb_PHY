@@ -53,6 +53,14 @@ completion and therefore cannot start after a failed preflight, migration, or
 postflight. Runtime credentials have DML and sequence access but no schema
 ownership or DDL privilege.
 
+Production activation runs migrations only. The production Compose definition
+has no bootstrap profile or `seed_db.py` command, and backend startup performs
+only its read-only schema readiness check. Consequently,
+`DEFAULT_ADMIN_PASSWORD` is never consumed to create, restore, or reset an
+account during a production update. Category display metadata and custom
+categories remain managed data; deployment does not synchronize them to
+application defaults.
+
 The activation skeleton is deliberately disabled unless all of the following
 are supplied outside Git:
 

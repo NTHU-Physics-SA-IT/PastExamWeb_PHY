@@ -23,7 +23,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db.session import get_session
 from app.db.course_categories import (
-    CANONICAL_COURSE_CATEGORIES,
+    DEFAULT_COURSE_CATEGORY_DEFINITIONS,
     LEGACY_COURSE_CATEGORY_ALIASES,
     RESERVED_LEGACY_COURSE_CATEGORY_KEYS,
     canonicalize_course_category_key,
@@ -88,7 +88,7 @@ ARCHIVE_FILE_MISSING_DETAIL = {
 }
 DEFAULT_CATEGORIES = [
     (category.key, category.name, category.label, category.icon)
-    for category in CANONICAL_COURSE_CATEGORIES
+    for category in DEFAULT_COURSE_CATEGORY_DEFINITIONS
 ]
 DEFAULT_CATEGORY_ORDER = {item[0]: index for index, item in enumerate(DEFAULT_CATEGORIES)}
 DEFAULT_CATEGORY_BADGE_COLOR = "slate"
@@ -111,7 +111,7 @@ CATEGORY_BADGE_COLOR_ALIASES = {
 }
 DEFAULT_CATEGORY_BADGE_COLORS = {
     category.key: category.badge_color
-    for category in CANONICAL_COURSE_CATEGORIES
+    for category in DEFAULT_COURSE_CATEGORY_DEFINITIONS
 }
 LEGACY_CATEGORY_ALIASES = LEGACY_COURSE_CATEGORY_ALIASES
 
@@ -392,7 +392,7 @@ async def list_course_categories(
             order_index=category.order_index,
             is_active=True,
         )
-        for index, category in enumerate(CANONICAL_COURSE_CATEGORIES)
+        for index, category in enumerate(DEFAULT_COURSE_CATEGORY_DEFINITIONS)
     ]
 
 

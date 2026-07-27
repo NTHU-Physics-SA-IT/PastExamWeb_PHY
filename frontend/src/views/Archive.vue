@@ -940,7 +940,7 @@ const fallbackCategories = [
   { key: 'graduate', name: '研究所', icon: 'pi pi-fw pi-graduation-cap', label: '研究所' },
   {
     key: 'math-department',
-    name: '跨群數學系',
+    name: '戳戳數學系',
     icon: 'pi pi-fw pi-calculator',
     label: '數學',
   },

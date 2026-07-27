@@ -99,6 +99,33 @@ postflight must already pass, and the first run permits only the six
 migration-created canonical categories with otherwise empty application
 tables. A durable marker makes later explicit runs idempotent.
 
+The six canonical category keys are identity anchors, not immutable display
+content. Category `name`, `label`, `icon`, `badge_color`, ordering, active
+state, and trash/restore metadata remain database-managed. Custom rows are
+also database-managed and do not need to be added to application constants.
+The missing-row default for `math-department` is `戳戳數學系` with label
+`數學`.
+
+Category migrations only convert the documented legacy keys and their key
+references. They preserve administrator metadata and submission snapshot
+fields. Ambiguous canonical/legacy rows or normalized-name collisions abort
+the transaction; migrations never choose a row by ID or delete a conflicting
+row automatically.
+
+On the first bootstrap, one missing canonical key or any extra custom category
+is evidence that the database is not the expected clean initialized target,
+so bootstrap fails without creating an administrator or marker. After the
+marker exists, missing canonical keys are recreated from defaults, while
+existing and custom rows are left unchanged. Legacy keys and same-name
+different-key conflicts still fail closed.
+
+The default administrator password is applied only while creating the named
+default account or restoring it from soft deletion. Restoration intentionally
+resets the password and is therefore a sensitive dev/test operation. A normal
+account retains its password and email. A renamed account still holding the
+configured default email causes an explicit conflict error; if both configured
+identity fields were changed, bootstrap can create a separate default account.
+
 Development and production Compose definitions use a
 one-shot `migrate` service running `python migrate.py upgrade`. Backend
 startup depends on `service_completed_successfully`; the migrate service has
@@ -111,7 +138,10 @@ configuration. They never fall back to `DATABASE_URL` or `archive_db`.
 
 ## Migration-chain rule
 
-Existing revision files are immutable. Add a new revision for future schema
-changes and update the models in the same change. Extend the focused migration
-safety scenarios whenever a new PostgreSQL enum, persistent server default,
-partial index, or other schema feature changes the head manifest.
+Published or deployed revision files are immutable. Add a new revision for
+future schema changes and update the models in the same change. An unpublished
+revision isolated to an unmerged development branch may be corrected before
+release only after history and tag checks prove it has not shipped. Extend the
+focused migration safety scenarios whenever a new PostgreSQL enum, persistent
+server default, partial index, or other schema feature changes the head
+manifest.

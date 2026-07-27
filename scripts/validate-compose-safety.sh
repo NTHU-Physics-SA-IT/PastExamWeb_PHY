@@ -52,6 +52,17 @@ for compose in (production, development):
     assert "container_name" not in migrate
     assert "seed" not in " ".join(migrate["command"]).lower()
 
+assert "bootstrap" not in production["services"]
+for service in production["services"].values():
+    raw_command = service.get("command") or []
+    command = (
+        raw_command
+        if isinstance(raw_command, str)
+        else " ".join(raw_command)
+    )
+    assert "seed_db" not in command
+    assert "bootstrap" not in command.lower()
+
 assert (
     production["services"]["backend"]["depends_on"]["migrate"]["condition"]
     == "service_completed_successfully"

@@ -1,4 +1,4 @@
-"""Canonical course-category definitions and normalization rules."""
+"""Course-category keys, legacy aliases, and missing-row defaults."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
-class CanonicalCourseCategory:
+class DefaultCourseCategoryDefinition:
     key: str
     name: str
     label: str
@@ -15,8 +15,8 @@ class CanonicalCourseCategory:
     order_index: int
 
 
-CANONICAL_COURSE_CATEGORIES = (
-    CanonicalCourseCategory(
+DEFAULT_COURSE_CATEGORY_DEFINITIONS = (
+    DefaultCourseCategoryDefinition(
         "fundamental",
         "基礎必修",
         "基礎",
@@ -24,7 +24,7 @@ CANONICAL_COURSE_CATEGORIES = (
         "navy",
         1,
     ),
-    CanonicalCourseCategory(
+    DefaultCourseCategoryDefinition(
         "required",
         "專業必修",
         "必修",
@@ -32,7 +32,7 @@ CANONICAL_COURSE_CATEGORIES = (
         "forest",
         2,
     ),
-    CanonicalCourseCategory(
+    DefaultCourseCategoryDefinition(
         "experience",
         "實驗課程",
         "實驗",
@@ -40,7 +40,7 @@ CANONICAL_COURSE_CATEGORIES = (
         "amber",
         3,
     ),
-    CanonicalCourseCategory(
+    DefaultCourseCategoryDefinition(
         "optional",
         "專業選修",
         "選修",
@@ -48,7 +48,7 @@ CANONICAL_COURSE_CATEGORIES = (
         "violet",
         4,
     ),
-    CanonicalCourseCategory(
+    DefaultCourseCategoryDefinition(
         "graduate",
         "研究所",
         "研究所",
@@ -56,9 +56,9 @@ CANONICAL_COURSE_CATEGORIES = (
         "burgundy",
         5,
     ),
-    CanonicalCourseCategory(
+    DefaultCourseCategoryDefinition(
         "math-department",
-        "跨群數學系",
+        "戳戳數學系",
         "數學",
         "pi pi-fw pi-calculator",
         "slate",
@@ -66,8 +66,12 @@ CANONICAL_COURSE_CATEGORIES = (
     ),
 )
 
-CANONICAL_COURSE_CATEGORY_BY_KEY = {
-    category.key: category for category in CANONICAL_COURSE_CATEGORIES
+CANONICAL_COURSE_CATEGORY_KEYS = frozenset(
+    definition.key for definition in DEFAULT_COURSE_CATEGORY_DEFINITIONS
+)
+DEFAULT_COURSE_CATEGORY_BY_KEY = {
+    definition.key: definition
+    for definition in DEFAULT_COURSE_CATEGORY_DEFINITIONS
 }
 LEGACY_COURSE_CATEGORY_ALIASES = {
     "freshman": "fundamental",

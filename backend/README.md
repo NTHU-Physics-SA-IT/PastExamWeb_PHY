@@ -84,3 +84,26 @@ uv run migrate.py history
 # Downgrade to a specific revision (use with caution!)
 uv run migrate.py downgrade <revision_id>
 ```
+
+Migrations and bootstrap have separate responsibilities. Migrations create or
+change schema, canonicalize the legacy category keys, and add a base category
+only when no canonical or legacy row exists. They preserve administrator-owned
+category display metadata and custom categories. `math-department` uses
+`戳戳數學系` / `數學` only as its missing-row default.
+
+The explicit dev/test bootstrap requires a migration-complete database. Its
+first run accepts exactly the six migration-created canonical categories and
+otherwise empty application tables, then writes
+`database.explicit_bootstrap.v1`. Later runs may restore a missing canonical
+key from default metadata, but never overwrite an existing row or delete a
+custom category such as `web-development` / `網站架設`. A legacy key or a
+default-name collision fails closed and must be resolved through a reviewed
+migration.
+
+`DEFAULT_ADMIN_PASSWORD` is used only when explicit bootstrap creates the
+named default administrator or restores that same soft-deleted account. An
+active account with `DEFAULT_ADMIN_NAME` keeps its current email and password.
+If the named account is absent but `DEFAULT_ADMIN_EMAIL` belongs to a renamed
+account, bootstrap fails before changing any user. If both name and email were
+changed, a later explicit dev/test bootstrap may create another default
+administrator.
