@@ -11,42 +11,35 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 production_json="$temporary_directory/production.json"
-local_json="$temporary_directory/local.json"
-acceptance_json="$temporary_directory/acceptance.json"
+development_json="$temporary_directory/development.json"
 
 PRODUCTION_BACKEND_ENV_FILE="$repository_root/backend/.env.production.runtime.example" \
 PRODUCTION_MIGRATOR_ENV_FILE="$repository_root/backend/.env.production.migrator.example" \
 docker compose \
-  --env-file "$repository_root/docker/production.compose.env.example" \
-  --file "$repository_root/docker/docker-compose.yml" \
+  --env-file "$repository_root/docker/production.env.example" \
+  --file "$repository_root/docker/docker-compose.prod.yml" \
   config --format json >"$production_json"
 
 docker compose \
   --env-file "$repository_root/docker/.env.example" \
-  --file "$repository_root/docker/docker-compose.local.yml" \
+  --file "$repository_root/docker/docker-compose.dev.yml" \
   --profile bootstrap \
-  config --format json >"$local_json"
-
-docker compose \
-  --env-file "$repository_root/docker/acceptance.env.example" \
-  --file "$repository_root/docker/docker-compose.acceptance.yml" \
-  config --format json >"$acceptance_json"
+  config --format json >"$development_json"
 
 python3 - \
   "$production_json" \
-  "$local_json" \
-  "$acceptance_json" <<'PY'
+  "$development_json" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 
-production, local, acceptance = (
+production, development = (
     json.loads(Path(path).read_text(encoding="utf-8"))
     for path in sys.argv[1:]
 )
 
-for compose in (production, local, acceptance):
+for compose in (production, development):
     migrate = compose["services"]["migrate"]
     assert migrate["restart"] == "no"
     assert migrate["command"] == ["python", "migrate.py", "upgrade"]
@@ -61,10 +54,21 @@ assert (
     production["services"]["backend"]["environment"]["DB_USER"]
     != production["services"]["migrate"]["environment"]["DB_USER"]
 )
-assert local["services"]["bootstrap"]["profiles"] == ["bootstrap"]
+assert development["services"]["bootstrap"]["profiles"] == ["bootstrap"]
 assert (
-    acceptance["services"]["backend"]["depends_on"]["migrate"]["condition"]
+    development["services"]["backend"]["depends_on"]["migrate"]["condition"]
     == "service_completed_successfully"
+)
+assert (
+    development["services"]["backend"]["environment"]["DB_USER"]
+    != development["services"]["migrate"]["environment"]["DB_USER"]
+)
+development_db_environment = development["services"]["db"]["environment"]
+assert development_db_environment["TEST_DB_USER"].startswith("pastexam_test_")
+assert development_db_environment["TEST_DATABASE_NAME"].startswith("pastexam_test_")
+assert (
+    development_db_environment["TEST_DB_USER"]
+    != development["services"]["backend"]["environment"]["DB_USER"]
 )
 PY
 

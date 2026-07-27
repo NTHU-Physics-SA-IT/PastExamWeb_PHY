@@ -110,7 +110,7 @@ verify_candidate() {
   configured_images="$(
     docker compose \
       --env-file "$candidate_root/.env" \
-      --file "$candidate_root/docker/docker-compose.yml" \
+      --file "$candidate_root/docker/docker-compose.prod.yml" \
       config --images
   )"
 
@@ -167,13 +167,13 @@ install -m 600 "$backend_env" "$staging_root/backend/.env"
 
 docker compose \
   --env-file "$staging_root/.env" \
-  --file "$staging_root/docker/docker-compose.yml" \
+  --file "$staging_root/docker/docker-compose.prod.yml" \
   config --quiet
 
 configured_images="$(
   docker compose \
     --env-file "$staging_root/.env" \
-    --file "$staging_root/docker/docker-compose.yml" \
+    --file "$staging_root/docker/docker-compose.prod.yml" \
     config --images
 )"
 

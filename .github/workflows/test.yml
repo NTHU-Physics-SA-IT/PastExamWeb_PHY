@@ -139,15 +139,18 @@ jobs:
               done
 
               echo "Recreating isolated test database..."
-              dropdb --if-exists -U "$POSTGRES_USER" test_archive_db
-              createdb -U "$POSTGRES_USER" test_archive_db
+              dropdb --if-exists -U "$POSTGRES_USER" "$TEST_DATABASE_NAME"
+              createdb \
+                -U "$POSTGRES_USER" \
+                -O "$TEST_DB_USER" \
+                "$TEST_DATABASE_NAME"
 
               database_name="$(
-                psql -U "$POSTGRES_USER" -d test_archive_db -tAc \
+                psql -U "$POSTGRES_USER" -d "$TEST_DATABASE_NAME" -tAc \
                   "SELECT current_database()"
               )"
-              if [ "$database_name" != "test_archive_db" ]; then
-                echo "Failed to verify test_archive_db" >&2
+              if [ "$database_name" != "$TEST_DATABASE_NAME" ]; then
+                echo "Failed to verify $TEST_DATABASE_NAME" >&2
                 exit 1
               fi
               echo "Test database is ready: $database_name"
@@ -162,21 +165,29 @@ jobs:
       - name: Run migrations
         run: |
           docker compose -f docker/docker-compose.dev.yml run --rm \
-            -e DB_NAME=test_archive_db \
+            -e DB_NAME=pastexam_test_local \
+            -e DB_USER=pastexam_test_local \
+            -e DB_PASSWORD=local-test-only \
             backend uv run python migrate.py upgrade
 
       - name: Seed database
         run: |
           docker compose -f docker/docker-compose.dev.yml run --rm \
-            -e DB_NAME=test_archive_db \
+            -e DB_NAME=pastexam_test_local \
+            -e DB_USER=pastexam_test_local \
+            -e DB_PASSWORD=local-test-only \
             -e ALLOW_DATABASE_BOOTSTRAP=true \
             backend uv run python app/scripts/seed_db.py \
-              --confirm-database-name test_archive_db
+              --confirm-database-name pastexam_test_local
 
       - name: Run backend tests with coverage
         run: |
-          docker compose -f docker/docker-compose.dev.yml run --rm backend \
-            sh -c 'TEST_DATABASE_URL="postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/test_archive_db" \
+          docker compose -f docker/docker-compose.dev.yml run --rm \
+            -e DB_NAME=pastexam_test_local \
+            -e DB_USER=pastexam_test_local \
+            -e DB_PASSWORD=local-test-only \
+            backend \
+            sh -c 'TEST_DATABASE_URL="postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}" \
               uv run pytest --cov=app --cov-report=term-missing --cov-report=html'
 
       - name: Upload backend coverage report

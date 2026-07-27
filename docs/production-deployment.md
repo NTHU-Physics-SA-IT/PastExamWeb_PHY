@@ -34,9 +34,20 @@ All three files must be root-owned deployment inputs with mode `0600`.
 Secrets are neither copied into an immutable release nor printed. Runtime and
 migrator credentials must be different.
 
+`docker/production.env.example` documents the non-secret Compose variable
+contract. A release is rendered explicitly with the production definition and
+the external environment file:
+
+```bash
+docker compose \
+  --env-file /opt/pastexam-config/.env \
+  --file docker/docker-compose.prod.yml \
+  config
+```
+
 ## Migration and activation order
 
-`docker/docker-compose.yml` defines a non-restarting one-shot `migrate`
+`docker/docker-compose.prod.yml` defines a non-restarting one-shot `migrate`
 service with migrator credentials. The backend depends on its successful
 completion and therefore cannot start after a failed preflight, migration, or
 postflight. Runtime credentials have DML and sequence access but no schema

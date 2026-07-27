@@ -99,7 +99,7 @@ postflight must already pass, and the first run permits only the six
 migration-created canonical categories with otherwise empty application
 tables. A durable marker makes later explicit runs idempotent.
 
-Acceptance, normal local runtime, and production Compose definitions use a
+Development and production Compose definitions use a
 one-shot `migrate` service running `python migrate.py upgrade`. Backend
 startup depends on `service_completed_successfully`; the migrate service has
 no seed command, fixed container name, or restart loop.

@@ -85,7 +85,7 @@ cd PastExamWeb_PHY
 範例值僅供本地開發；部署時請改用安全且獨立的密碼與金鑰。
 
 ```bash
-cp docker/.env.example .env
+cp docker/.env.example docker/.env
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 ```
@@ -93,23 +93,25 @@ cp frontend/.env.example frontend/.env
 ### 3. 建置並啟動開發環境
 
 ```bash
-./scripts/dev-compose.sh build
-./scripts/dev-compose.sh up -d
+./scripts/dev-compose.sh start
 ```
 
 啟動後可使用：
 
 - 網站與 API 反向代理：<http://localhost:8080>（API 位於 `/api/`）
-- pgAdmin：<http://localhost:8081>
-- MinIO S3 API：<http://localhost:9000>
-- MinIO Console：<http://localhost:9001>
-
-PostgreSQL、Redis、後端及前端開發伺服器預設在 Docker Compose 網路內互通，不另外暴露主機連接埠。可用下列指令查看狀態與停止服務：
+PostgreSQL、Redis、MinIO、後端及前端開發伺服器預設在 Docker Compose
+網路內互通，不另外暴露主機連接埠。可用下列指令查看狀態與停止服務：
 
 ```bash
-./scripts/dev-compose.sh ps
-./scripts/dev-compose.sh down
+./scripts/dev-compose.sh status
+./scripts/dev-compose.sh stop
 ```
+
+本機開發使用 `docker/docker-compose.dev.yml`；正式 VPS 部署使用
+`docker/docker-compose.prod.yml` 與 repository 外的 production env。
+測試必須使用通過隔離 guard 的專用 test database。資料恢復則依
+`docs/data-recovery-2026-07.md` 與外部 backups 執行，不保留常駐
+Recovery Compose。
 
 ## 參與貢獻
 

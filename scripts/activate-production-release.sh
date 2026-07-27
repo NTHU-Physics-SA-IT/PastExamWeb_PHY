@@ -61,7 +61,7 @@ if ! flock -n 9; then
   exit 2
 fi
 
-compose_file="$RELEASE_DIRECTORY/docker/docker-compose.yml"
+compose_file="$RELEASE_DIRECTORY/docker/docker-compose.prod.yml"
 compose=(
   docker compose
   --env-file "$PRODUCTION_COMPOSE_ENV_FILE"
