@@ -825,6 +825,8 @@
               <Button
                 :label="isFinal(data.status) ? '檢視' : '檢視／審核'"
                 icon="pi pi-search"
+                aria-label="檢視或審核考古題回報"
+                title="檢視或審核考古題回報"
                 size="small"
                 outlined
                 @click="openArchiveReport(data.id)"
@@ -833,6 +835,8 @@
                 label="刪除"
                 icon="pi pi-trash"
                 severity="danger"
+                aria-label="刪除考古題回報"
+                title="刪除考古題回報"
                 size="small"
                 outlined
                 :loading="deletingArchiveId === data.id"
