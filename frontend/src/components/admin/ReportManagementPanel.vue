@@ -76,7 +76,7 @@
         :sortField="systemPage.sortField"
         :sortOrder="systemPage.sortOrder"
         responsiveLayout="stack"
-        breakpoint="1399px"
+        breakpoint="1399.98px"
         class="report-management__table report-management__system-table admin-data-table"
         tableStyle="table-layout: fixed; min-width: 60rem"
         @page="onSystemPage"
@@ -269,13 +269,17 @@
               <dd>{{ selectedSystemReport.contact || '未提供' }}</dd>
             </div>
           </dl>
-          <section class="report-review__content-block system-report-detail__content">
-            <strong>問題標題</strong>
-            <p>{{ selectedSystemReport.title || '未命名回報' }}</p>
+          <section class="report-review__content-field system-report-detail__content">
+            <strong class="report-review__content-label">問題標題</strong>
+            <div class="report-review__content-block">
+              <p>{{ selectedSystemReport.title || '未命名回報' }}</p>
+            </div>
           </section>
-          <section class="report-review__content-block system-report-detail__content">
-            <strong>完整詳細描述</strong>
-            <p>{{ selectedSystemReport.description || '—' }}</p>
+          <section class="report-review__content-field system-report-detail__content">
+            <strong class="report-review__content-label">完整詳細描述</strong>
+            <div class="report-review__content-block">
+              <p>{{ selectedSystemReport.description || '—' }}</p>
+            </div>
           </section>
           <section class="system-report-detail__note">
             <Tag severity="secondary" value="本地摘要" />
@@ -379,7 +383,7 @@
         :sortField="commentPage.sortField"
         :sortOrder="commentPage.sortOrder"
         responsiveLayout="stack"
-        breakpoint="1399px"
+        breakpoint="1399.98px"
         class="report-management__table report-management__comment-table admin-data-table"
         tableStyle="table-layout: fixed; min-width: 75rem"
         @page="onCommentPage"
@@ -476,7 +480,7 @@
                   </div>
                   <div class="report-mobile-info-item">
                     <dt>審核時間</dt>
-                    <dd>{{ formatDateTime(data.reviewed_at, true) }}</dd>
+                    <dd>{{ formatReviewTime(data.reviewed_at) }}</dd>
                   </div>
                 </dl>
               </div>
@@ -565,7 +569,7 @@
               >
                 {{ formatDateTime(data.reviewed_at, true) }}
               </time>
-              <span v-else class="report-person-time__time">—</span>
+              <span v-else class="report-person-time__time">--</span>
             </div>
           </template>
         </Column>
@@ -665,7 +669,7 @@
         :sortField="archiveListState.sortField"
         :sortOrder="archiveListState.sortOrder"
         responsiveLayout="stack"
-        breakpoint="1399px"
+        breakpoint="1399.98px"
         class="report-management__table report-management__archive-table admin-data-table"
         tableStyle="table-layout: fixed; min-width: 72rem"
         @page="onArchivePage"
@@ -722,16 +726,20 @@
                     <dd>{{ data.reporter_name }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
-                    <dt>時間</dt>
+                    <dt>回報時間</dt>
                     <dd>{{ formatDateTime(data.created_at, true) }}</dd>
                   </div>
-                  <div class="report-mobile-info-item report-mobile-info-item--wide">
-                    <dt>課程／考古題</dt>
-                    <dd>
-                      {{ data.course_name }} · {{ data.archive_name }} #{{
-                        data.archive_id_snapshot
-                      }}
-                    </dd>
+                  <div class="report-mobile-info-item">
+                    <dt>課程名稱</dt>
+                    <dd>{{ data.course_name }}</dd>
+                  </div>
+                  <div class="report-mobile-info-item">
+                    <dt>考試名稱</dt>
+                    <dd>{{ data.archive_name }}</dd>
+                  </div>
+                  <div class="report-mobile-info-item">
+                    <dt>考古題編號</dt>
+                    <dd>#{{ data.archive_id_snapshot }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
                     <dt>審核人</dt>
@@ -739,7 +747,7 @@
                   </div>
                   <div class="report-mobile-info-item">
                     <dt>審核時間</dt>
-                    <dd>{{ formatDateTime(data.reviewed_at, true) }}</dd>
+                    <dd>{{ formatReviewTime(data.reviewed_at) }}</dd>
                   </div>
                 </dl>
               </div>
@@ -748,6 +756,8 @@
                   <Button
                     :label="isFinal(data.status) ? '檢視' : '檢視／審核'"
                     icon="pi pi-search"
+                    aria-label="檢視或審核考古題回報"
+                    title="檢視或審核考古題回報"
                     size="small"
                     outlined
                     @click="openArchiveReport(data.id)"
@@ -756,6 +766,8 @@
                     label="刪除"
                     icon="pi pi-trash"
                     severity="danger"
+                    aria-label="刪除考古題回報"
+                    title="刪除考古題回報"
                     size="small"
                     outlined
                     :loading="deletingArchiveId === data.id"
@@ -803,6 +815,7 @@
               >
                 {{ formatDateTime(data.reviewed_at, true) }}
               </time>
+              <span v-else class="report-person-time__time">--</span>
             </div>
           </template>
         </Column>
@@ -883,10 +896,12 @@
             </dd>
           </div>
         </dl>
-        <section class="report-review__content-block">
-          <strong>留言內容快照</strong>
-          <p>{{ selectedReport.comment_content_snapshot }}</p>
-          <small>{{ formatDateTime(selectedReport.comment_created_at_snapshot) }}</small>
+        <section class="report-review__content-field">
+          <strong class="report-review__content-label">留言內容快照</strong>
+          <div class="report-review__content-block">
+            <p>{{ selectedReport.comment_content_snapshot }}</p>
+            <small>{{ formatDateTime(selectedReport.comment_created_at_snapshot) }}</small>
+          </div>
         </section>
         <Message
           v-if="!selectedReport.source_exists"
@@ -896,9 +911,11 @@
         >
           來源留言已不存在；仍可根據快照完成審核。
         </Message>
-        <section class="report-review__content-block">
-          <strong>回報者補充</strong>
-          <p>{{ selectedReport.custom_message || '未提供補充說明' }}</p>
+        <section class="report-review__content-field">
+          <strong class="report-review__content-label">回報者補充</strong>
+          <div class="report-review__content-block">
+            <p>{{ selectedReport.custom_message || '未提供補充' }}</p>
+          </div>
         </section>
         <p v-if="isFinal(selectedReport.status)" class="report-review__response">
           <strong>管理員答覆：</strong>{{ selectedReport.admin_response || '未提供答覆' }}
@@ -1026,12 +1043,14 @@
           </div>
           <div>
             <dt>審核時間</dt>
-            <dd>{{ formatDateTime(selectedArchiveReport.reviewed_at) }}</dd>
+            <dd>{{ formatReviewTime(selectedArchiveReport.reviewed_at) }}</dd>
           </div>
         </dl>
-        <section class="report-review__content-block">
-          <strong>補充說明</strong>
-          <p>{{ selectedArchiveReport.supplementary_detail || '未提供補充說明' }}</p>
+        <section class="report-review__content-field">
+          <strong class="report-review__content-label">補充說明</strong>
+          <div class="report-review__content-block">
+            <p>{{ selectedArchiveReport.supplementary_detail || '未提供補充說明' }}</p>
+          </div>
         </section>
         <p v-if="isFinal(selectedArchiveReport.status)" class="report-review__response">
           <strong>管理員答覆：</strong>{{ selectedArchiveReport.admin_response || '未提供答覆' }}
@@ -1122,12 +1141,9 @@ import { formatRelativeOrAbsoluteDateTime } from '@/utils/time'
 const confirm = useConfirm()
 const toast = useToast()
 const router = useRouter()
-const REPORT_CARD_MEDIA_QUERY = '(max-width: 1399px)'
-const reportCardMediaQuery =
-  typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-    ? window.matchMedia(REPORT_CARD_MEDIA_QUERY)
-    : null
-const isCardLayout = ref(reportCardMediaQuery?.matches ?? false)
+const REPORT_CARD_MEDIA_QUERY = '(max-width: 1399.98px)'
+let reportCardMediaQuery = null
+const isCardLayout = ref(false)
 const loadingSystem = ref(false)
 const loadingComments = ref(false)
 const archiveReports = ref([])
@@ -1730,19 +1746,30 @@ function isFinal(value) {
   return ['upheld', 'dismissed'].includes(value)
 }
 const formatDateTime = (value) => formatRelativeOrAbsoluteDateTime(value)
+const formatReviewTime = (value) => (value ? formatDateTime(value, true) : '--')
 
 function syncCardLayout(event) {
   isCardLayout.value = event.matches
 }
 
 function setupCardLayout() {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+  reportCardMediaQuery = window.matchMedia(REPORT_CARD_MEDIA_QUERY)
   if (!reportCardMediaQuery) return
   isCardLayout.value = reportCardMediaQuery.matches
-  reportCardMediaQuery.addEventListener?.('change', syncCardLayout)
+  if (typeof reportCardMediaQuery.addEventListener === 'function') {
+    reportCardMediaQuery.addEventListener('change', syncCardLayout)
+  } else {
+    reportCardMediaQuery.addListener?.(syncCardLayout)
+  }
 }
 
 function teardownCardLayout() {
-  reportCardMediaQuery?.removeEventListener?.('change', syncCardLayout)
+  if (typeof reportCardMediaQuery?.removeEventListener === 'function') {
+    reportCardMediaQuery.removeEventListener('change', syncCardLayout)
+  } else {
+    reportCardMediaQuery?.removeListener?.(syncCardLayout)
+  }
 }
 
 onMounted(() => {
@@ -1814,7 +1841,7 @@ onBeforeUnmount(teardownCardLayout)
   container-type: inline-size;
   min-width: 0;
   padding-block: 1.25rem;
-  border-bottom: 1px solid var(--surface-border);
+  border-bottom: 1px solid var(--border-color);
 }
 .report-section:first-of-type {
   padding-top: 0;
@@ -2190,7 +2217,8 @@ onBeforeUnmount(teardownCardLayout)
   min-width: 0;
   padding: 0.5rem;
   border-radius: var(--content-border-radius);
-  background: var(--surface-50);
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
 }
 .report-review__meta dt {
   color: var(--text-color-secondary);
@@ -2223,18 +2251,33 @@ onBeforeUnmount(teardownCardLayout)
   font-weight: 400;
   line-height: 1.3;
 }
-.report-review__content-block {
+.report-review__content-field {
+  display: grid;
   min-width: 0;
   max-width: 100%;
+  gap: 0.4rem;
+}
+.report-review__content-label {
+  line-height: 1.35;
+}
+.report-review__content-block {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 0.75rem;
   overflow: hidden;
-  border: 1px solid var(--surface-border);
+  border: 1px solid var(--border-color);
   border-radius: var(--content-border-radius);
-  background: color-mix(in srgb, var(--surface-50) 82%, transparent);
+  background: var(--bg-secondary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border-color) 24%, transparent);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .report-review__content-block p {
   max-width: 100%;
-  margin: 0.45rem 0 0;
+  margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -2265,25 +2308,25 @@ onBeforeUnmount(teardownCardLayout)
 .system-report-detail__content,
 .system-report-detail__note {
   min-width: 0;
-  padding: 0.75rem;
-  border-radius: var(--content-border-radius);
-  background: var(--surface-50);
 }
-.system-report-detail__content p,
 .system-report-detail__note p {
   margin: 0.45rem 0 0;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 .system-report-detail__note {
-  border: 1px solid var(--surface-border);
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--content-border-radius);
+  background: var(--bg-secondary);
 }
 .system-report-detail__read-state {
   display: grid;
   gap: 0.65rem;
   padding: 0.75rem;
-  border: 1px solid var(--surface-border);
+  border: 1px solid var(--border-color);
   border-radius: var(--content-border-radius);
+  background: var(--bg-secondary);
 }
 .system-report-detail__read-heading,
 .system-report-detail__read-option {
@@ -2346,7 +2389,7 @@ onBeforeUnmount(teardownCardLayout)
   font-size: var(--app-font-size-sm) !important;
   line-height: 1.4;
 }
-@media (max-width: 1399px) {
+@media (max-width: 1399.98px) {
   .report-section__header:not(.report-section__header--system) {
     align-items: flex-start;
     flex-direction: column;
@@ -2394,7 +2437,8 @@ onBeforeUnmount(teardownCardLayout)
     display: none !important;
   }
   :deep(.report-management__system-table .p-datatable-tbody > tr > td:nth-child(2)),
-  :deep(.report-management__comment-table .p-datatable-tbody > tr > td:nth-child(2)) {
+  :deep(.report-management__comment-table .p-datatable-tbody > tr > td:nth-child(2)),
+  :deep(.report-management__archive-table .p-datatable-tbody > tr > td:nth-child(2)) {
     display: flex !important;
     flex-direction: column;
     align-items: stretch;
@@ -2404,7 +2448,8 @@ onBeforeUnmount(teardownCardLayout)
     box-sizing: border-box;
   }
   :deep(.report-management__system-table .p-datatable-tbody > tr > td:nth-child(2)),
-  :deep(.report-management__comment-table .p-datatable-tbody > tr > td:nth-child(2)) {
+  :deep(.report-management__comment-table .p-datatable-tbody > tr > td:nth-child(2)),
+  :deep(.report-management__archive-table .p-datatable-tbody > tr > td:nth-child(2)) {
     order: 1;
   }
   :deep(.report-management__table .p-datatable-empty-message > td) {

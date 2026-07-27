@@ -75,13 +75,16 @@ const rowDataTableStub = {
   },
 }
 
-function mountPanel({ renderRows = false, cardLayout = false } = {}) {
+function mountPanel({ renderRows = false, cardLayout = false, mediaQuery = null } = {}) {
   if (renderRows) {
-    window.matchMedia = vi.fn(() => ({
-      matches: cardLayout,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    }))
+    window.matchMedia = vi.fn(
+      () =>
+        mediaQuery || {
+          matches: cardLayout,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        }
+    )
   }
   return mount(ReportManagementPanel, {
     global: {
@@ -202,6 +205,21 @@ describe('ReportManagementPanel', () => {
     expect(wrapper.text()).toContain('考古題回報者')
     expect(wrapper.text()).toContain('第三頁模糊')
     expect(wrapper.text()).toContain('電磁學')
+    const archiveCard = wrapper.get('.report-management__archive-table .report-mobile-card')
+    expect(archiveCard.text()).toContain('檔案模糊、缺頁或內容不完整')
+    expect(archiveCard.text()).toContain('待審核')
+    expect(archiveCard.text()).toContain('期中考')
+    expect(archiveCard.text()).toContain('#88')
+    expect(
+      archiveCard
+        .findAll('.report-mobile-info-item')
+        .find((item) => item.text().includes('審核時間'))
+        ?.text()
+    ).toContain('--')
+    expect(archiveCard.findAll('button').map((button) => button.text())).toEqual([
+      '檢視／審核',
+      '刪除',
+    ])
 
     await wrapper.vm.openArchiveReport(report.id)
     wrapper.vm.archiveReviewForm.status = 'upheld'
@@ -263,9 +281,14 @@ describe('ReportManagementPanel', () => {
     expect(wrapper.text()).toContain('無法確認使用者是否已在 GitHub 正式建立 Issue')
     expect(reportManagementSource).not.toContain('v-html')
     expect(reportManagementSource).toContain('aria-label="檢視系統問題回報"')
-    expect(
-      wrapper.findAll('.system-report-detail__content.report-review__content-block')
-    ).toHaveLength(2)
+    const fields = wrapper.findAll('.system-report-detail__content.report-review__content-field')
+    expect(fields).toHaveLength(2)
+    expect(fields[0].get('.report-review__content-label').text()).toBe('問題標題')
+    expect(fields[0].get('.report-review__content-block').text()).toBe('完整標題')
+    expect(fields[1].get('.report-review__content-label').text()).toBe('完整詳細描述')
+    expect(fields[1].get('.report-review__content-block').text()).toContain(
+      '第一行\n第二行很長的完整內容'
+    )
     expect(reportManagementSource).toContain('overflow-wrap: anywhere')
     expect(reportManagementSource).toContain('word-break: break-word')
     expect(reportManagementSource).toContain('white-space: pre-wrap')
@@ -294,11 +317,14 @@ describe('ReportManagementPanel', () => {
     await wrapper.vm.openCommentReport(71)
     await flushPromises()
 
+    let fields = wrapper.findAll('.report-review__content-field')
     let blocks = wrapper.findAll('.report-review__content-block')
+    expect(fields).toHaveLength(2)
     expect(blocks).toHaveLength(2)
-    expect(blocks[0].text()).toContain('留言內容快照')
-    expect(blocks[1].text()).toContain('回報者補充')
-    expect(blocks[1].text()).toContain('未提供補充說明')
+    expect(fields[0].get('.report-review__content-label').text()).toBe('留言內容快照')
+    expect(blocks[0].text()).toContain('snapshot\nwith-a-very-long-token-abcdef')
+    expect(fields[1].get('.report-review__content-label').text()).toBe('回報者補充')
+    expect(blocks[1].text()).toContain('未提供補充')
     wrapper.vm.selectedReport = null
 
     mocks.getArchive.mockResolvedValueOnce({
@@ -322,11 +348,16 @@ describe('ReportManagementPanel', () => {
     await wrapper.vm.openArchiveReport(72)
     await flushPromises()
 
+    fields = wrapper.findAll('.report-review__content-field')
     blocks = wrapper.findAll('.report-review__content-block')
+    expect(fields).toHaveLength(1)
     expect(blocks).toHaveLength(1)
-    expect(blocks[0].text()).toContain('補充說明')
+    expect(fields[0].get('.report-review__content-label').text()).toBe('補充說明')
     expect(blocks[0].text()).toContain('未提供補充說明')
-    expect(reportManagementSource).toContain('border: 1px solid var(--surface-border)')
+    expect(reportManagementSource).toContain('border: 1px solid var(--border-color)')
+    expect(reportManagementSource).toContain('background: var(--bg-secondary)')
+    expect(reportManagementSource).not.toContain('var(--surface-border)')
+    expect(reportManagementSource).not.toContain('var(--surface-50)')
     expect(reportManagementSource).toContain('var(--app-font-size-base)')
   })
 
@@ -451,7 +482,7 @@ describe('ReportManagementPanel', () => {
     )
     expect(reportManagementSource).toContain("data.reviewer_name || '尚未審核'")
     expect(reportManagementSource).toContain(
-      '<span v-else class="report-person-time__time">—</span>'
+      '<span v-else class="report-person-time__time">--</span>'
     )
   })
 
@@ -476,7 +507,7 @@ describe('ReportManagementPanel', () => {
       ':deep(.report-management__table .p-datatable-tbody > tr > td:last-child)'
     )
     expect(reportManagementSource).not.toContain('justify-content: flex-end;\n  flex-wrap: nowrap')
-    expect(reportManagementSource.match(/breakpoint="1399px"/g)).toHaveLength(3)
+    expect(reportManagementSource.match(/breakpoint="1399\.98px"/g)).toHaveLength(3)
   })
 
   it('keeps pagination and server sorting independent for each report list', async () => {
@@ -852,8 +883,11 @@ describe('ReportManagementPanel', () => {
   })
 
   it('uses responsive filter grids and dedicated full-width mobile summaries', () => {
-    expect(reportManagementSource.match(/breakpoint="1399px"/g)).toHaveLength(3)
-    expect(reportManagementSource).toContain('@media (max-width: 1399px)')
+    expect(reportManagementSource.match(/breakpoint="1399\.98px"/g)).toHaveLength(3)
+    expect(reportManagementSource).toContain('@media (max-width: 1399.98px)')
+    expect(reportManagementSource).toContain(
+      "const REPORT_CARD_MEDIA_QUERY = '(max-width: 1399.98px)'"
+    )
     expect(reportManagementSource).not.toContain('@media (max-width: 899px)')
     expect(reportManagementSource.match(/class="report-filter-search"/g)).toHaveLength(3)
     expect(
@@ -912,8 +946,11 @@ describe('ReportManagementPanel', () => {
     expect(reportManagementSource).toMatch(
       /\.report-management__table \.p-datatable-tbody > tr > td\)\s*\{[^}]*display:\s*none !important;[^}]*min-height:\s*0;/
     )
-    expect(reportManagementSource).toMatch(
-      /\.report-management__comment-table \.p-datatable-tbody > tr > td:nth-child\(2\)\)\s*\{[^}]*display:\s*flex !important;/
+    expect(reportManagementSource).toContain(
+      ':deep(.report-management__comment-table .p-datatable-tbody > tr > td:nth-child(2)),'
+    )
+    expect(reportManagementSource).toContain(
+      ':deep(.report-management__archive-table .p-datatable-tbody > tr > td:nth-child(2)) {'
     )
     expect(reportManagementSource).toMatch(
       /\.report-mobile-card__header\s*\{[^}]*grid-area:\s*header;[^}]*min-height:\s*0;[^}]*margin-top:\s*0;[^}]*align-self:\s*start;/
@@ -945,6 +982,32 @@ describe('ReportManagementPanel', () => {
       /\.report-row-actions\s*\{[\s\S]*?justify-content:\s*flex-end;/
     )
     expect(reportManagementSource).not.toContain('GitHub Issue</')
+  })
+
+  it('updates all report layouts when the shared media query changes', async () => {
+    let changeListener
+    const mediaQuery = {
+      matches: false,
+      addEventListener: vi.fn((event, listener) => {
+        if (event === 'change') changeListener = listener
+      }),
+      removeEventListener: vi.fn(),
+    }
+    const wrapper = mountPanel({ renderRows: true, mediaQuery })
+    await flushPromises()
+
+    expect(window.matchMedia).toHaveBeenCalledWith('(max-width: 1399.98px)')
+    expect(wrapper.vm.isCardLayout).toBe(false)
+
+    mediaQuery.matches = true
+    changeListener?.({ matches: true })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.vm.isCardLayout).toBe(true)
+
+    mediaQuery.matches = false
+    changeListener?.({ matches: false })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.vm.isCardLayout).toBe(false)
   })
 
   it('renders each system and comment report field exactly once in card layout', async () => {
