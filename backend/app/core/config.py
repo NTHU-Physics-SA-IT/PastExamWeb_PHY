@@ -1,4 +1,9 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -37,7 +42,8 @@ class Settings(BaseSettings):
     RECOVERY_REVIEW_ADMIN_NAME: str = ""
 
     class Config:
-        env_file = ".env"
+        # Resolve independently of the caller's current working directory.
+        env_file = BACKEND_ROOT / ".env"
         from_attributes = True
 
 

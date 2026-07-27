@@ -133,6 +133,9 @@ ignore、適當檔案權限及 secrets 管理。Compose interpolation env 與
 backend runtime env 是不同邊界，migrator credentials 也不得提供給
 一般 backend runtime 使用。
 
+Repository root 的 `.env` 沒有 consumer，僅保留 Git ignore 規則以防
+未來誤提交 secrets；各子系統應使用上表所列的專屬 env。
+
 ## 參與貢獻
 
 1. 先查看目前 repository 的 [Issues](https://github.com/NTHU-Physics-SA-IT/PastExamWeb_PHY/issues)，確認是否已有相關討論。
