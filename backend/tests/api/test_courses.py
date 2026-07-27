@@ -838,6 +838,10 @@ async def test_archive_preview_and_download_direct(
         "app.api.services.courses.presigned_get_url",
         fake_presigned,
     )
+    monkeypatch.setattr(
+        "app.api.services.courses.get_minio_client",
+        lambda: type("MinioStub", (), {"stat_object": lambda *_args: None})(),
+    )
 
     try:
         async with session_maker() as session:

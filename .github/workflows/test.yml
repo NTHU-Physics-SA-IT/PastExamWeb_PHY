@@ -36,6 +36,9 @@ jobs:
       DB_USER: migration_test
       DB_PASSWORD: migration_test_password
       DB_NAME: migration_test
+      TEST_DB_USER: pastexam_test_migration_guard
+      TEST_DB_PASSWORD: migration-test-isolated-password
+      TEST_DATABASE_NAME: pastexam_test_migration_guard
       SECRET_KEY: migration-test-secret
       FRONTEND_URL: http://localhost
       MINIO_ENDPOINT: localhost:9000
@@ -78,7 +81,19 @@ jobs:
           connection.autocommit = True
           try:
               with connection.cursor() as cursor:
-                  cursor.execute("CREATE DATABASE test_migration_guard")
+                  cursor.execute(
+                      """
+                      CREATE ROLE pastexam_test_migration_guard
+                      LOGIN PASSWORD 'migration-test-isolated-password'
+                      NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
+                      """
+                  )
+                  cursor.execute(
+                      """
+                      CREATE DATABASE pastexam_test_migration_guard
+                      OWNER pastexam_test_migration_guard
+                      """
+                  )
           finally:
               connection.close()
           PY
@@ -86,7 +101,8 @@ jobs:
       - name: Run isolated migration safety scenarios
         working-directory: backend
         run: |
-          export TEST_DATABASE_URL="postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/test_migration_guard"
+          export TEST_DATABASE_URL="postgresql+asyncpg://${TEST_DB_USER}:${TEST_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${TEST_DATABASE_NAME}"
+          export PASTEXAM_TEST_DATABASE_ISOLATED=true
           uv run python -m pytest -q tests/integration/test_migration_safety.py
 
   backend:
@@ -204,12 +220,10 @@ jobs:
             --env-file docker/.env \
             -f docker/docker-compose.dev.yml \
             run --rm \
-            -e DB_NAME=pastexam_test_local \
-            -e DB_USER=pastexam_test_local \
-            -e DB_PASSWORD=local-test-only \
+            -e TEST_DATABASE_URL=postgresql+asyncpg://pastexam_test_local:local-test-only@db:5432/pastexam_test_local \
+            -e PASTEXAM_TEST_DATABASE_ISOLATED=true \
             backend \
-            sh -c 'TEST_DATABASE_URL="postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}" \
-              uv run pytest --cov=app --cov-report=term-missing --cov-report=html'
+            uv run pytest --cov=app --cov-report=term-missing --cov-report=html
 
       - name: Upload backend coverage report
         if: always()
