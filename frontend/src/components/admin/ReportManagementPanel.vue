@@ -269,11 +269,11 @@
               <dd>{{ selectedSystemReport.contact || '未提供' }}</dd>
             </div>
           </dl>
-          <section class="system-report-detail__content">
+          <section class="report-review__content-block system-report-detail__content">
             <strong>問題標題</strong>
             <p>{{ selectedSystemReport.title || '未命名回報' }}</p>
           </section>
-          <section class="system-report-detail__content">
+          <section class="report-review__content-block system-report-detail__content">
             <strong>完整詳細描述</strong>
             <p>{{ selectedSystemReport.description || '—' }}</p>
           </section>
@@ -883,7 +883,7 @@
             </dd>
           </div>
         </dl>
-        <section class="report-review__quote">
+        <section class="report-review__content-block">
           <strong>留言內容快照</strong>
           <p>{{ selectedReport.comment_content_snapshot }}</p>
           <small>{{ formatDateTime(selectedReport.comment_created_at_snapshot) }}</small>
@@ -896,9 +896,10 @@
         >
           來源留言已不存在；仍可根據快照完成審核。
         </Message>
-        <p v-if="selectedReport.custom_message">
-          <strong>回報者補充：</strong>{{ selectedReport.custom_message }}
-        </p>
+        <section class="report-review__content-block">
+          <strong>回報者補充</strong>
+          <p>{{ selectedReport.custom_message || '未提供補充說明' }}</p>
+        </section>
         <p v-if="isFinal(selectedReport.status)" class="report-review__response">
           <strong>管理員答覆：</strong>{{ selectedReport.admin_response || '未提供答覆' }}
         </p>
@@ -1028,7 +1029,7 @@
             <dd>{{ formatDateTime(selectedArchiveReport.reviewed_at) }}</dd>
           </div>
         </dl>
-        <section class="report-review__quote">
+        <section class="report-review__content-block">
           <strong>補充說明</strong>
           <p>{{ selectedArchiveReport.supplementary_detail || '未提供補充說明' }}</p>
         </section>
@@ -1061,6 +1062,7 @@
             v-model="archiveReviewForm.admin_response"
             rows="4"
             maxlength="1000"
+            placeholder="可留空；若未提供答覆，通知中將顯示「未提供答覆」。"
             :disabled="archiveReviewSaving"
           />
           <small>{{ archiveReviewForm.admin_response.length }}/1000</small>
@@ -2221,13 +2223,26 @@ onBeforeUnmount(teardownCardLayout)
   font-weight: 400;
   line-height: 1.3;
 }
-.report-review__quote {
-  padding: 0.7rem;
-  border-left: 3px solid var(--surface-border);
-  background: var(--surface-50);
+.report-review__content-block {
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.75rem;
+  overflow: hidden;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--content-border-radius);
+  background: color-mix(in srgb, var(--surface-50) 82%, transparent);
 }
-.report-review__quote p {
+.report-review__content-block p {
+  max-width: 100%;
+  margin: 0.45rem 0 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.report-review__content-block small {
+  display: block;
+  margin-top: 0.45rem;
+  color: var(--text-color-secondary);
   overflow-wrap: anywhere;
 }
 .report-review__field {
@@ -2323,7 +2338,7 @@ onBeforeUnmount(teardownCardLayout)
   line-height: 1.35;
 }
 :global(.report-management-dialog .system-report-detail__note p),
-:global(.report-management-dialog .report-review__quote small) {
+:global(.report-management-dialog .report-review__content-block small) {
   font-size: var(--app-font-size-sm) !important;
   line-height: 1.35;
 }

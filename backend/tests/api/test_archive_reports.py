@@ -372,3 +372,75 @@ async def test_archive_report_concurrent_create_and_review_have_single_winner(
         await _cleanup_context(
             session_maker, course_id=course.id, archive_id=archive.id
         )
+
+
+@pytest.mark.asyncio
+async def test_archive_report_review_accepts_missing_or_blank_admin_response(
+    client, session_maker, make_user
+):
+    reporter = await make_user(name="archive-optional-response-reporter")
+    requester = await make_user(name="archive-optional-response-requester")
+    admin = await make_user(name="archive-optional-response-admin", is_admin=True)
+    course, archive, _ = await _create_archive_context(
+        session_maker, requester_id=requester.id
+    )
+    path = f"/reports/courses/{course.id}/archives/{archive.id}"
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(reporter.id)
+        upheld_report = (
+            await client.post(path, json={"report_reason": "metadata_mismatch"})
+        ).json()
+
+        app.dependency_overrides[get_current_user] = _override_user(
+            admin.id, is_admin=True
+        )
+        upheld = await client.patch(
+            f"/reports/admin/archives/{upheld_report['id']}",
+            json={"status": "upheld", "admin_response": None},
+        )
+        assert upheld.status_code == 200
+        assert upheld.json()["admin_response"] is None
+
+        app.dependency_overrides[get_current_user] = _override_user(reporter.id)
+        dismissed_report = (
+            await client.post(
+                path, json={"report_reason": "file_unavailable_or_corrupt"}
+            )
+        ).json()
+
+        app.dependency_overrides[get_current_user] = _override_user(
+            admin.id, is_admin=True
+        )
+        dismissed = await client.patch(
+            f"/reports/admin/archives/{dismissed_report['id']}",
+            json={"status": "dismissed", "admin_response": "   "},
+        )
+        assert dismissed.status_code == 200
+        assert dismissed.json()["admin_response"] is None
+
+        async with session_maker() as session:
+            notifications = list(
+                (
+                    await session.execute(
+                        select(PersonalNotification).where(
+                            PersonalNotification.notification_type
+                            == "archive_report_result",
+                            PersonalNotification.source_id.in_(
+                                [upheld_report["id"], dismissed_report["id"]]
+                            ),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(notifications) == 2
+            assert all(
+                "管理員答覆：未提供答覆" in item.message
+                for item in notifications
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_context(
+            session_maker, course_id=course.id, archive_id=archive.id
+        )

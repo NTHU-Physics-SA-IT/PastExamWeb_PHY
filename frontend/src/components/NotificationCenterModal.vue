@@ -298,6 +298,7 @@ function notificationIcon(type) {
     archive_submission_approved: 'pi pi-check-circle',
     archive_submission_rejected: 'pi pi-undo',
     archive_submission_takedown: 'pi pi-eye-slash',
+    archive_submission_republished: 'pi pi-eye',
     comment_report_submitted: 'pi pi-flag',
     comment_report_result: 'pi pi-verified',
     archive_report_submitted: 'pi pi-flag-fill',

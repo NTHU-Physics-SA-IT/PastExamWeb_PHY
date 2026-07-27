@@ -17,76 +17,90 @@
       </div>
     </header>
 
-    <Message v-if="pendingReport" severity="warn" :closable="false">
-      此考古題已有待審核回報，請等待管理員處理。
-    </Message>
-    <Message v-else-if="errorMessage" severity="error" :closable="false">
-      {{ errorMessage }}
-    </Message>
+    <div class="archive-report-panel__content">
+      <Message
+        v-if="pendingReport"
+        class="archive-report-panel__message"
+        severity="warn"
+        :closable="false"
+      >
+        此考古題已有待審核回報，請等待管理員處理。
+      </Message>
+      <Message
+        v-else-if="errorMessage"
+        class="archive-report-panel__message"
+        severity="error"
+        :closable="false"
+      >
+        {{ errorMessage }}
+      </Message>
 
-    <form class="archive-report-panel__form" @submit.prevent="submit">
-      <div class="archive-report-panel__field">
-        <label for="archive-report-reason">回報原因<span aria-hidden="true"> *</span></label>
-        <Select
-          inputId="archive-report-reason"
-          v-model="reason"
-          :options="ARCHIVE_REPORT_REASONS"
-          optionLabel="label"
-          optionValue="value"
-          placeholder="請選擇原因"
-          :disabled="submitting || Boolean(pendingReport)"
-          @change="validate"
-        />
-        <small v-if="errors.reason" class="archive-report-panel__error">{{ errors.reason }}</small>
-      </div>
-
-      <div class="archive-report-panel__field">
-        <label for="archive-report-detail">
-          補充說明
-          <span v-if="reason === ARCHIVE_REPORT_OTHER_REASON" aria-hidden="true"> *</span>
-        </label>
-        <Textarea
-          id="archive-report-detail"
-          v-model="detail"
-          rows="6"
-          :maxlength="ARCHIVE_REPORT_DETAIL_MAX_LENGTH"
-          placeholder="請補充檔案頁面、資訊落差或其他有助於審核的內容"
-          :disabled="submitting || Boolean(pendingReport)"
-          @blur="validate"
-        />
-        <div class="archive-report-panel__field-meta">
-          <small v-if="errors.detail" class="archive-report-panel__error">{{
-            errors.detail
+      <form class="archive-report-panel__form" @submit.prevent="submit">
+        <div class="archive-report-panel__field">
+          <label for="archive-report-reason">回報原因<span aria-hidden="true"> *</span></label>
+          <Select
+            inputId="archive-report-reason"
+            v-model="reason"
+            :options="ARCHIVE_REPORT_REASONS"
+            optionLabel="label"
+            optionValue="value"
+            placeholder="請選擇原因"
+            :disabled="submitting || Boolean(pendingReport)"
+            @change="validate"
+          />
+          <small v-if="errors.reason" class="archive-report-panel__error">{{
+            errors.reason
           }}</small>
-          <small
-            :class="{
-              'archive-report-panel__count--limit':
-                detail.length >= ARCHIVE_REPORT_DETAIL_MAX_LENGTH,
-            }"
-          >
-            {{ detail.length }}/{{ ARCHIVE_REPORT_DETAIL_MAX_LENGTH }}
-          </small>
         </div>
-      </div>
 
-      <div class="archive-report-panel__actions">
-        <Button
-          type="button"
-          label="返回留言區"
-          severity="secondary"
-          outlined
-          :disabled="submitting"
-          @click="$emit('back')"
-        />
-        <Button
-          type="submit"
-          label="送出回報"
-          icon="pi pi-send"
-          :loading="submitting"
-          :disabled="submitting || Boolean(pendingReport)"
-        />
-      </div>
-    </form>
+        <div class="archive-report-panel__field">
+          <label for="archive-report-detail">
+            補充說明
+            <span v-if="reason === ARCHIVE_REPORT_OTHER_REASON" aria-hidden="true"> *</span>
+          </label>
+          <Textarea
+            id="archive-report-detail"
+            v-model="detail"
+            rows="6"
+            :maxlength="ARCHIVE_REPORT_DETAIL_MAX_LENGTH"
+            placeholder="請補充檔案頁面、資訊落差或其他有助於審核的內容"
+            :disabled="submitting || Boolean(pendingReport)"
+            @blur="validate"
+          />
+          <div class="archive-report-panel__field-meta">
+            <small v-if="errors.detail" class="archive-report-panel__error">{{
+              errors.detail
+            }}</small>
+            <small
+              :class="{
+                'archive-report-panel__count--limit':
+                  detail.length >= ARCHIVE_REPORT_DETAIL_MAX_LENGTH,
+              }"
+            >
+              {{ detail.length }}/{{ ARCHIVE_REPORT_DETAIL_MAX_LENGTH }}
+            </small>
+          </div>
+        </div>
+
+        <div class="archive-report-panel__actions">
+          <Button
+            type="button"
+            label="返回留言區"
+            severity="secondary"
+            outlined
+            :disabled="submitting"
+            @click="$emit('back')"
+          />
+          <Button
+            type="submit"
+            label="送出回報"
+            icon="pi pi-send"
+            :loading="submitting"
+            :disabled="submitting || Boolean(pendingReport)"
+          />
+        </div>
+      </form>
+    </div>
   </section>
 </template>
 
@@ -184,17 +198,21 @@ onMounted(loadPendingReport)
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  padding: 1rem;
-  overflow-y: auto;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
   color: var(--text-color);
-  background: var(--surface-card);
+  background: var(--bg-primary);
 }
 
 .archive-report-panel__header {
+  flex: 0 0 auto;
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
+  padding: 0.85rem;
+  border-bottom: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-primary) 88%, var(--surface-100) 12%);
 }
 
 .archive-report-panel__header h3,
@@ -210,6 +228,21 @@ onMounted(loadPendingReport)
   margin-top: 0.25rem;
   color: var(--text-secondary);
   font-size: var(--app-font-size-sm);
+}
+
+.archive-report-panel__content {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.85rem;
+  overflow-y: auto;
+  padding: 0.85rem;
+  background: color-mix(in srgb, var(--bg-primary) 94%, var(--surface-100) 6%);
+}
+
+.archive-report-panel__message {
+  flex: 0 0 auto;
 }
 
 .archive-report-panel__form,
@@ -253,7 +286,8 @@ onMounted(loadPendingReport)
 }
 
 @media (max-width: 480px) {
-  .archive-report-panel {
+  .archive-report-panel__header,
+  .archive-report-panel__content {
     padding: 0.75rem;
   }
 

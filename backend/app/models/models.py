@@ -55,6 +55,7 @@ class PersonalNotificationType(str, PyEnum):
     ARCHIVE_SUBMISSION_APPROVED = "archive_submission_approved"
     ARCHIVE_SUBMISSION_REJECTED = "archive_submission_rejected"
     ARCHIVE_SUBMISSION_TAKEDOWN = "archive_submission_takedown"
+    ARCHIVE_SUBMISSION_REPUBLISHED = "archive_submission_republished"
 
 
 class CommentReportReason(str, PyEnum):

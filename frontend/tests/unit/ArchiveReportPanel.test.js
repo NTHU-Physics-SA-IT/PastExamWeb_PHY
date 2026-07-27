@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import ArchiveReportPanel from '@/components/ArchiveReportPanel.vue'
+import archiveReportPanelSource from '@/components/ArchiveReportPanel.vue?raw'
 
 const mocks = vi.hoisted(() => ({
   pending: vi.fn(),
@@ -112,5 +113,20 @@ describe('ArchiveReportPanel', () => {
     expect(wrapper.text()).toContain('已有待審核回報')
     await wrapper.find('form').trigger('submit')
     expect(mocks.create).not.toHaveBeenCalled()
+  })
+
+  it('uses the discussion panel visual hierarchy and theme-aware tokens', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.get('.archive-report-panel__header').text()).toContain('回報考古題')
+    expect(wrapper.get('.archive-report-panel__header').text()).toContain('量子力學 · 期末考')
+    expect(wrapper.get('.archive-report-panel__content').find('form').exists()).toBe(true)
+    expect(archiveReportPanelSource).toContain('border: 1px solid var(--border-color)')
+    expect(archiveReportPanelSource).toContain('background: var(--bg-primary)')
+    expect(archiveReportPanelSource).toContain('border-bottom: 1px solid var(--border-color)')
+    expect(archiveReportPanelSource).toContain('font-size: var(--app-font-size-lg)')
+    expect(archiveReportPanelSource).toContain('font-size: var(--app-control-font-size)')
+    expect(archiveReportPanelSource).not.toMatch(/safari|webkit|chrome/i)
   })
 })

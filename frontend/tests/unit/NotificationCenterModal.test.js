@@ -158,6 +158,25 @@ describe('NotificationCenterModal', () => {
     expect(wrapper.emitted('open-personal-source')).toEqual([[item]])
   })
 
+  it('uses a visible icon for republished archive submission notifications', () => {
+    const wrapper = mount(NotificationCenterModal, {
+      props: { visible: true },
+      global: {
+        stubs: {
+          Dialog: slotStub,
+          Tabs: tabsStub,
+          TabList: tabsStub,
+          Tab: tabsStub,
+          TabPanels: tabsStub,
+          TabPanel: tabsStub,
+          Button: buttonStub,
+        },
+      },
+    })
+
+    expect(wrapper.vm.notificationIcon('archive_submission_republished')).toContain('pi-eye')
+  })
+
   it('groups each card list by month and sorts groups and items newest first', () => {
     const wrapper = mount(NotificationCenterModal, {
       props: {

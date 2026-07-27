@@ -57,6 +57,7 @@ from app.api.services.submission_statistics import (
 from app.services.archive_submission_status import (
     enqueue_submission_status_notification,
     normalize_submission_status,
+    republish_archive_submission,
     take_down_archive_submission,
 )
 
@@ -1134,7 +1135,7 @@ async def takedown_archive_submission(
 
 
 @router.post("/admin/submissions/{submission_id}/republish", response_model=ArchiveSubmissionRead)
-async def republish_archive_submission(
+async def republish_archive_submission_endpoint(
     submission_id: int,
     decision: SubmissionDecision | None = None,
     current_user: User = Depends(get_current_user),
@@ -1143,7 +1144,13 @@ async def republish_archive_submission(
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
-    submission = await db.get(ArchiveSubmission, submission_id)
+    submission = (
+        await db.execute(
+            select(ArchiveSubmission)
+            .where(ArchiveSubmission.id == submission_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
     if not submission:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
     normalized_status = _normalize_submission_status(submission.status)
@@ -1205,11 +1212,12 @@ async def republish_archive_submission(
             detail="無法重新上架：此投稿先前因關聯課程刪除而下架",
         )
 
-    submission.status = SubmissionStatus.APPROVED
-    submission.lifecycle_reason = None
-    submission.reviewer_id = current_user.user_id
-    submission.review_note = decision.note if decision else submission.review_note
-    submission.reviewed_at = datetime.now(timezone.utc)
+    await republish_archive_submission(
+        db,
+        submission,
+        reviewer_id=current_user.user_id,
+        note=decision.note if decision else None,
+    )
     await db.commit()
     await db.refresh(submission)
     return submission
