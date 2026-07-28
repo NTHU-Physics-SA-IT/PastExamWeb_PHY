@@ -23,9 +23,17 @@ Each rule or topic should have exactly one canonical source.
 | [`../README.md`](../README.md) | Public project overview | Active | Not a complete internal runbook. |
 | [`../AGENTS.md`](../AGENTS.md) | Repository Agent constraints | Active | Applies to Agent work in this repository. |
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Human contribution, PR, CI, and release gates | Active | Human contributor workflow. |
+| [`development/local-environment.md`](development/local-environment.md) | Local environment identities and safe Compose boundaries | Active | Canonical local environment contract; not a recovery runbook. |
+| [`development/code-organization.md`](development/code-organization.md) | Code responsibility and pattern consistency | Active | Records current structure and intended ownership direction. |
+| [`development/validation.md`](development/validation.md) | Risk-proportional verification and CI completion policy | Active | Canonical validation budget, retry, and reporting rules. |
+| [`ui/guidelines.md`](ui/guidelines.md) | UI presentation and responsive consistency | Active | Canonical UI-level decisions; Domain meaning is linked, not duplicated. |
+| [`domain/README.md`](domain/README.md) | Domain terminology, evidence labels, and contract map | Active | Entry point for product behavior contracts. |
+| [`domain/entity-relationships.md`](domain/entity-relationships.md) | Entity ownership, grouping, and lifecycle relationships | Active | Distinguishes current implementation from intended product relations. |
+| [`domain/state-transitions.md`](domain/state-transitions.md) | Domain states, authorization, visibility, and business errors | Active | Canonical state and action contract. |
+| [`domain/notifications-and-side-effects.md`](domain/notifications-and-side-effects.md) | Notifications, transactions, storage, and external effects | Active | Canonical side-effect and deletion-result contract. |
 | [`migration-safety.md`](migration-safety.md) | Migration policy and safe operations | Active | Canonical migration safety policy. |
 | [`production-deployment.md`](production-deployment.md) | Production candidate, activation, backup, and deployment safety | Active | Canonical production deployment guidance. |
-| [`umami-screenshot-automation.md`](umami-screenshot-automation.md) | Umami screenshot automation runbook | Active | Some outdated descriptions are planned for a later update. |
+| [`umami-screenshot-automation.md`](umami-screenshot-automation.md) | Umami screenshot automation runbook | Active | Canonical screenshot schedule and asset publication flow. |
 | [`governance/codex-skill-security-review.md`](governance/codex-skill-security-review.md) | Codex Skill provenance and security review background | Historical | Not a day-to-day Agent execution policy. |
 | [`screenshots/`](screenshots/) | Tracked screenshots used by the public README | Active assets | Keep these paths stable. |
 
@@ -36,14 +44,6 @@ authority before the files are created and adopted. Update this index when that
 happens.
 
 ```text
-docs/development/local-environment.md
-docs/development/code-organization.md
-docs/development/validation.md
-docs/ui/guidelines.md
-docs/domain/README.md
-docs/domain/entity-relationships.md
-docs/domain/state-transitions.md
-docs/domain/notifications-and-side-effects.md
 .agents/skills/pastexam-web/SKILL.md
 ```
 
