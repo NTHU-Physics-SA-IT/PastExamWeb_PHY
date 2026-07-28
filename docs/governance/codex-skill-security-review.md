@@ -4,30 +4,32 @@ Reviewed 2026-07-12 before installation. Repository revisions were obtained with
 
 As of 2026-07-24, the reviewed Skills are no longer stored in this repository. They may be installed independently as optional user-level Codex Skills under `$CODEX_HOME/skills` (normally `~/.codex/skills`). The application does not depend on these Skills to build, test, deploy, or operate. This document is retained as a historical security and provenance record.
 
-## Current policy
+## Current status
 
-- The installed Codex version currently loads the legacy user path
-  `~/.codex/skills/`; both `pastexam-web` and `ui-ux-pro-max` remain
-  user-scoped there.
-- The future canonical repository path is
-  `.agents/skills/pastexam-web/SKILL.md`. Repository `.codex/skills/` must not
-  be restored as an alternative location.
-- The project-specific `pastexam-web` migration is a separate fourth-stage
-  task. It has not happened yet, and this governance stage does not create or
-  disable a Skill.
-- User and repository copies with the same `pastexam-web` name must not be
-  active simultaneously. The user-scoped copy must be disabled or removed as
-  part of the controlled repository migration, after repository loading is
-  verified.
-- The first repository-local Skill will be instruction-only and contain no
-  executable scripts. `AGENTS.md` and the canonical documents under `docs/`
-  remain the specification authorities; the Skill only routes an Agent through
-  the appropriate workflow and references.
+- The canonical repository path is
+  `.agents/skills/pastexam-web/SKILL.md`. The Skill is tracked by Git and is
+  Active for PastExamWeb_PHY task routing.
+- The repository Skill is instruction-only and contains exactly `SKILL.md` and
+  `agents/openai.yaml`. It has no scripts, references, assets, MCP dependencies,
+  hooks, or network actions.
+- Detailed architecture, frontend, backend, and validation guidance now lives
+  in the Active canonical documents indexed by `docs/README.md`; the old Skill
+  references are not copied into the repository Skill.
+- `AGENTS.md` and the Active canonical documents remain the specification
+  authorities. The Skill is a workflow router and cannot replace them.
+- During Stage 4A, the legacy user-level `pastexam-web` copy remains in its
+  active path only until the repository commits pass CI. It is then moved
+  intact outside known Skill scan roots, with its sorted file manifest and
+  tree checksum verified before and after the move.
 - `ui-ux-pro-max` remains an optional user-scoped general design reference. It
-  is not a project contract and is not part of the `pastexam-web` migration.
-- This plan does not migrate every user Skill from `~/.codex/skills/` to
-  `~/.agents/skills/`. User-scope path normalization, if needed, is a separate
-  Codex environment task.
+  is advisory, is not a project contract, and is not part of this migration.
+- This stage does not migrate the overall user Skill location from
+  `~/.codex/skills/` to `~/.agents/skills/`.
+- Repository `.codex/skills/` remains unused and must not be restored as an
+  alternative location.
+- **Fresh-session repository load verification: Pending.** Catalog source,
+  explicit invocation, implicit triggering, and duplicate-name absence have
+  not been claimed or verified in this session.
 
 ## nextlevelbuilder/ui-ux-pro-max-skill
 
@@ -52,8 +54,10 @@ As of 2026-07-24, the reviewed Skills are no longer stored in this repository. T
 
 - `ui-ux-pro-max` is an optional, reviewed third-party UI/UX reference Skill in
   the legacy user directory and remains advisory only.
-- `pastexam-web` is still a user-level workflow Skill in
-  `~/.codex/skills/pastexam-web/`. Its repository-local replacement is only
-  Planned.
+- The repository-local `pastexam-web` replacement is tracked under
+  `.agents/skills/pastexam-web/` and is Active as the project workflow source.
+- Stage 4A treats the legacy user-level copy as a migration source only: it
+  stays in place through CI, then is archived intact outside known scan roots
+  with checksum verification.
 - Shared project requirements belong in `AGENTS.md` and canonical `docs/`.
   They take precedence and must not be copied into a second Skill policy.

@@ -178,8 +178,10 @@ evidence.
 - [Domain contracts](docs/domain/README.md)
 - [Migration safety](docs/migration-safety.md)
 - [Production deployment](docs/production-deployment.md)
+- [Repository workflow Skill](.agents/skills/pastexam-web/SKILL.md)
 
-The repository-local `.agents/skills/pastexam-web/SKILL.md` is **Planned**, not
-an active repository authority. Optional user-level Skills are advisory,
-cannot override this file or canonical docs, and are not application runtime
-dependencies.
+The repository-local `.agents/skills/pastexam-web/SKILL.md` is the **Active**
+PastExamWeb_PHY workflow router. It does not replace this agreement or preserve
+project facts that belong in canonical documents. Optional user-level Skills
+are advisory, cannot override this file or canonical docs, and are not
+application runtime dependencies.
