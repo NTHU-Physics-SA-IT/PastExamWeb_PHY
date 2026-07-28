@@ -150,7 +150,7 @@ claim build, test, migration, browser, or deployment success without evidence.
 ## Test evidence
 
 - `frontend/package.json` defines the current frontend scripts.
-- `frontend/playwright.config.js` defines browser projects, retries, and
+- `frontend/playwright.config.ts` defines browser projects, retries, and
   artifacts.
 - `backend/pyproject.toml` defines backend test and lint dependencies.
 - `backend/tests/conftest.py` implements the isolated-database guard.
