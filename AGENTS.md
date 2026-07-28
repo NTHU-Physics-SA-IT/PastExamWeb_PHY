@@ -168,6 +168,19 @@ evidence.
 - Never force-push, merge without authorization, rewrite published history,
   reset, clean, or bypass hooks to complete a task.
 
+### Merge strategy
+
+- Follow the detailed [merge strategy](CONTRIBUTING.md#merge-strategy).
+- Use `--no-ff` when integrating completed milestone branches whose boundaries
+  should remain visible in project history.
+- Use fast-forward only for small linear changes without meaningful milestone
+  boundaries.
+- Do not squash milestone branches unless explicitly requested.
+- After a `--no-ff` merge, push the destination branch and wait for the merge
+  commit's CI run to complete successfully.
+- Do not rewrite already-pushed history merely to manufacture or remove a
+  merge boundary.
+
 ## Canonical documents and Skills
 
 - [Documentation index and authority map](docs/README.md)
@@ -178,8 +191,10 @@ evidence.
 - [Domain contracts](docs/domain/README.md)
 - [Migration safety](docs/migration-safety.md)
 - [Production deployment](docs/production-deployment.md)
+- [Repository workflow Skill](.agents/skills/pastexam-web/SKILL.md)
 
-The repository-local `.agents/skills/pastexam-web/SKILL.md` is **Planned**, not
-an active repository authority. Optional user-level Skills are advisory,
-cannot override this file or canonical docs, and are not application runtime
-dependencies.
+The repository-local `.agents/skills/pastexam-web/SKILL.md` is the **Active**
+PastExamWeb_PHY workflow router. It does not replace this agreement or preserve
+project facts that belong in canonical documents. Optional user-level Skills
+are advisory, cannot override this file or canonical docs, and are not
+application runtime dependencies.
