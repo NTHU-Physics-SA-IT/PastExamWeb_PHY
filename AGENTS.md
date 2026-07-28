@@ -168,6 +168,19 @@ evidence.
 - Never force-push, merge without authorization, rewrite published history,
   reset, clean, or bypass hooks to complete a task.
 
+### Merge strategy
+
+- Follow the detailed [merge strategy](CONTRIBUTING.md#merge-strategy).
+- Use `--no-ff` when integrating completed milestone branches whose boundaries
+  should remain visible in project history.
+- Use fast-forward only for small linear changes without meaningful milestone
+  boundaries.
+- Do not squash milestone branches unless explicitly requested.
+- After a `--no-ff` merge, push the destination branch and wait for the merge
+  commit's CI run to complete successfully.
+- Do not rewrite already-pushed history merely to manufacture or remove a
+  merge boundary.
+
 ## Canonical documents and Skills
 
 - [Documentation index and authority map](docs/README.md)
