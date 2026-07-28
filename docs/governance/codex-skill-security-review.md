@@ -17,19 +17,57 @@ As of 2026-07-24, the reviewed Skills are no longer stored in this repository. T
   references are not copied into the repository Skill.
 - `AGENTS.md` and the Active canonical documents remain the specification
   authorities. The Skill is a workflow router and cannot replace them.
-- During Stage 4A, the legacy user-level `pastexam-web` copy remains in its
-  active path only until the repository commits pass CI. It is then moved
-  intact outside known Skill scan roots, with its sorted file manifest and
-  tree checksum verified before and after the move.
+- Following successful repository-branch CI and checksum verification, the
+  legacy user-level `pastexam-web` copy was moved intact outside known Skill
+  scan roots. No active user-level copy remains at
+  `$CODEX_HOME/skills/pastexam-web`.
 - `ui-ux-pro-max` remains an optional user-scoped general design reference. It
   is advisory, is not a project contract, and is not part of this migration.
 - This stage does not migrate the overall user Skill location from
   `~/.codex/skills/` to `~/.agents/skills/`.
 - Repository `.codex/skills/` remains unused and must not be restored as an
   alternative location.
-- **Fresh-session repository load verification: Pending.** Catalog source,
-  explicit invocation, implicit triggering, and duplicate-name absence have
-  not been claimed or verified in this session.
+- **Fresh-session repository load verification: Passed.** Explicit and
+  implicit runtime verification results are recorded below.
+
+## Fresh-session verification
+
+### Explicit trigger
+
+- **Status:** Passed.
+- **Skill name:** `pastexam-web`.
+- **Runtime source:** `.agents/skills/pastexam-web/SKILL.md`.
+- **Repository-local:** Yes.
+- **Duplicate active Skill:** None observed.
+- **Legacy user Skill:** Not loaded. The old active path was absent, and the
+  retained backup was outside the active scan path.
+- **Workflow routing:** Conformed to `AGENTS.md` and the Active canonical
+  documents.
+
+### Implicit trigger
+
+- **Status:** Passed.
+- The user did not explicitly name a Skill, and the runtime selected the
+  repository `pastexam-web` workflow automatically.
+- The runtime source remained `.agents/skills/pastexam-web/SKILL.md`, with no
+  same-named active user workflow observed.
+- The legacy user Skill and its retained backup were not loaded.
+- `ui-ux-pro-max` remained visible as a user-scoped advisory Skill but was not
+  loaded.
+- Document routing followed the minimum-necessary principle.
+- A hypothetical responsive UI task was correctly classified as
+  **Domain impact: No**.
+
+### Verified migration state
+
+- The repository Skill has completed static and fresh-session runtime
+  verification.
+- The old user Skill has exited the active scan path.
+- The legacy backup is retained outside active scan roots and was not loaded
+  by the runtime.
+- The repository Skill can now serve as the Active workflow router.
+- `AGENTS.md` and the Active canonical documents remain the specification
+  authorities.
 
 ## nextlevelbuilder/ui-ux-pro-max-skill
 
@@ -56,8 +94,8 @@ As of 2026-07-24, the reviewed Skills are no longer stored in this repository. T
   the legacy user directory and remains advisory only.
 - The repository-local `pastexam-web` replacement is tracked under
   `.agents/skills/pastexam-web/` and is Active as the project workflow source.
-- Stage 4A treats the legacy user-level copy as a migration source only: it
-  stays in place through CI, then is archived intact outside known scan roots
-  with checksum verification.
+- The legacy user-level copy is archived intact under
+  `$CODEX_HOME/skill-backups/pastexam-web-legacy-3e776e58dc4a`, outside known
+  scan roots, and is not loaded by the runtime.
 - Shared project requirements belong in `AGENTS.md` and canonical `docs/`.
   They take precedence and must not be copied into a second Skill policy.
