@@ -45,7 +45,8 @@ Reviewed manifests currently cover:
   read-only restore;
 - `a4c7e9d2f6b1`: the reviewed pre-canonicalization test baseline;
 - `c9e4f1a7b2d6`: the canonical-category schema before metadata alignment;
-- `e3b7c1d9f5a2`: the current SQLModel/head contract.
+- `e3b7c1d9f5a2`: the reviewed schema before the archive-report workflow;
+- `a7c3e9f1b5d2`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,

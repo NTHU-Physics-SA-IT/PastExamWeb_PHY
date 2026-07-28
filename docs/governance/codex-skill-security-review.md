@@ -4,6 +4,31 @@ Reviewed 2026-07-12 before installation. Repository revisions were obtained with
 
 As of 2026-07-24, the reviewed Skills are no longer stored in this repository. They may be installed independently as optional user-level Codex Skills under `$CODEX_HOME/skills` (normally `~/.codex/skills`). The application does not depend on these Skills to build, test, deploy, or operate. This document is retained as a historical security and provenance record.
 
+## Current policy
+
+- The installed Codex version currently loads the legacy user path
+  `~/.codex/skills/`; both `pastexam-web` and `ui-ux-pro-max` remain
+  user-scoped there.
+- The future canonical repository path is
+  `.agents/skills/pastexam-web/SKILL.md`. Repository `.codex/skills/` must not
+  be restored as an alternative location.
+- The project-specific `pastexam-web` migration is a separate fourth-stage
+  task. It has not happened yet, and this governance stage does not create or
+  disable a Skill.
+- User and repository copies with the same `pastexam-web` name must not be
+  active simultaneously. The user-scoped copy must be disabled or removed as
+  part of the controlled repository migration, after repository loading is
+  verified.
+- The first repository-local Skill will be instruction-only and contain no
+  executable scripts. `AGENTS.md` and the canonical documents under `docs/`
+  remain the specification authorities; the Skill only routes an Agent through
+  the appropriate workflow and references.
+- `ui-ux-pro-max` remains an optional user-scoped general design reference. It
+  is not a project contract and is not part of the `pastexam-web` migration.
+- This plan does not migrate every user Skill from `~/.codex/skills/` to
+  `~/.agents/skills/`. User-scope path normalization, if needed, is a separate
+  Codex environment task.
+
 ## nextlevelbuilder/ui-ux-pro-max-skill
 
 - Source: `https://github.com/nextlevelbuilder/ui-ux-pro-max-skill`
@@ -25,6 +50,10 @@ As of 2026-07-24, the reviewed Skills are no longer stored in this repository. T
 
 ## Current installation status
 
-- `ui-ux-pro-max` is an optional, reviewed third-party UI/UX reference Skill. When installed, it belongs in the user's Codex Skill directory and remains advisory only.
-- `pastexam-web` is an optional user-level workflow Skill covering architecture discovery, frontend consistency, backend/API/database changes, risk-based validation, browser retry limits, and Git workflow.
-- The shared project requirements formerly duplicated by these Skills remain in `AGENTS.md`, which takes precedence over optional user-level guidance.
+- `ui-ux-pro-max` is an optional, reviewed third-party UI/UX reference Skill in
+  the legacy user directory and remains advisory only.
+- `pastexam-web` is still a user-level workflow Skill in
+  `~/.codex/skills/pastexam-web/`. Its repository-local replacement is only
+  Planned.
+- Shared project requirements belong in `AGENTS.md` and canonical `docs/`.
+  They take precedence and must not be copied into a second Skill policy.
