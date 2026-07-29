@@ -31,6 +31,295 @@ def _override_admin(user_id: int):
     return _get_current_user
 
 
+async def _create_pending_review_context(
+    session_maker,
+    *,
+    requester_id: int,
+):
+    unique = uuid.uuid4().hex
+    async with session_maker() as session:
+        course = Course(
+            name=f"Lifecycle Course {unique}",
+            category=CourseCategory.FRESHMAN,
+        )
+        session.add(course)
+        await session.flush()
+        submission = ArchiveSubmission(
+            subject=course.name,
+            category=CourseCategory.FRESHMAN.value,
+            name=f"Lifecycle Exam {unique}",
+            academic_year=2026,
+            archive_type=ArchiveType.FINAL,
+            professor="Lifecycle Professor",
+            object_name=f"submissions/lifecycle-{unique}.pdf",
+            requester_id=requester_id,
+            status=SubmissionStatus.PENDING,
+        )
+        session.add(submission)
+        await session.commit()
+        await session.refresh(course)
+        await session.refresh(submission)
+    return course, submission
+
+
+async def _cleanup_review_context(
+    session_maker,
+    *,
+    course_id: int,
+    submission_id: int,
+):
+    async with session_maker() as session:
+        archive_ids = list(
+            (
+                await session.execute(
+                    select(Archive.id).where(Archive.course_id == course_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        await session.execute(
+            delete(PersonalNotification).where(
+                PersonalNotification.source_type == "archive_submission",
+                PersonalNotification.source_id == submission_id,
+            )
+        )
+        await session.execute(
+            delete(ArchiveSubmission).where(ArchiveSubmission.id == submission_id)
+        )
+        if archive_ids:
+            await session.execute(delete(Archive).where(Archive.id.in_(archive_ids)))
+        await session.execute(delete(Course).where(Course.id == course_id))
+        await session.commit()
+
+        assert await session.get(ArchiveSubmission, submission_id) is None
+        assert await session.get(Course, course_id) is None
+        if archive_ids:
+            remaining_archives = int(
+                await session.scalar(
+                    select(func.count(Archive.id)).where(Archive.id.in_(archive_ids))
+                )
+                or 0
+            )
+            assert remaining_archives == 0
+
+
+@pytest.mark.parametrize(
+    ("action", "target_status", "notification_type"),
+    [
+        ("reject", SubmissionStatus.REJECTED, "archive_submission_rejected"),
+        ("takedown", SubmissionStatus.TAKEDOWN, "archive_submission_takedown"),
+    ],
+    ids=["rejected", "takedown"],
+)
+@pytest.mark.asyncio
+async def test_approved_submission_can_be_rejected_or_taken_down(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    action,
+    target_status,
+    notification_type,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    course, submission = await _create_pending_review_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        approved_response = await client.post(
+            f"/archives/admin/submissions/{submission.id}/approve",
+            json={"note": "initial approval"},
+        )
+        assert approved_response.status_code == 200
+        assert approved_response.json()["status"] == SubmissionStatus.APPROVED.value
+
+        async with session_maker() as session:
+            approved = await session.get(ArchiveSubmission, submission.id)
+            archive = await session.get(Archive, approved.created_archive_id)
+            assert archive is not None
+            approved_reviewed_at = approved.reviewed_at
+            archive_id = archive.id
+            archive_object_name = archive.object_name
+            notification_baseline = int(
+                await session.scalar(
+                    select(func.count(PersonalNotification.id)).where(
+                        PersonalNotification.user_id == requester.id,
+                        PersonalNotification.source_type == "archive_submission",
+                        PersonalNotification.source_id == submission.id,
+                    )
+                )
+                or 0
+            )
+
+        response = await client.post(
+            f"/archives/admin/submissions/{submission.id}/{action}",
+            json={"note": f"move to {target_status.value}"},
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == target_status.value
+
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, submission.id)
+            paired_archive = await session.get(Archive, archive_id)
+            assert stored.status == target_status
+            assert stored.reviewer_id == admin.id
+            assert stored.reviewed_at is not None
+            assert stored.reviewed_at > approved_reviewed_at
+            assert stored.review_note == f"move to {target_status.value}"
+            assert stored.lifecycle_reason is None
+            assert stored.created_archive_id == archive_id
+            assert paired_archive is not None
+            assert paired_archive.deleted_at is None
+            assert paired_archive.object_name == archive_object_name
+
+            notifications = list(
+                (
+                    await session.execute(
+                        select(PersonalNotification)
+                        .where(
+                            PersonalNotification.user_id == requester.id,
+                            PersonalNotification.source_type == "archive_submission",
+                            PersonalNotification.source_id == submission.id,
+                        )
+                        .order_by(PersonalNotification.created_at)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(notifications) == notification_baseline + 1
+            assert {item.notification_type for item in notifications} == {
+                "archive_submission_approved",
+                notification_type,
+            }
+            target_notifications = [
+                item
+                for item in notifications
+                if item.notification_type == notification_type
+            ]
+            assert len(target_notifications) == 1
+            notification = target_notifications[0]
+            assert notification.user_id == requester.id
+            assert notification.source_type == "archive_submission"
+            assert notification.source_id == submission.id
+            assert notification.metadata_json["status"] == target_status.value
+            assert notification.metadata_json["archive_id"] == archive_id
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_review_context(
+            session_maker,
+            course_id=course.id,
+            submission_id=submission.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_rejected_submission_can_be_approved(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    course, submission = await _create_pending_review_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        rejected_response = await client.post(
+            f"/archives/admin/submissions/{submission.id}/reject",
+            json={"note": "initial rejection"},
+        )
+        assert rejected_response.status_code == 200
+        assert rejected_response.json()["status"] == SubmissionStatus.REJECTED.value
+
+        async with session_maker() as session:
+            rejected = await session.get(ArchiveSubmission, submission.id)
+            assert rejected.created_archive_id is None
+            rejected_reviewed_at = rejected.reviewed_at
+            notification_baseline = int(
+                await session.scalar(
+                    select(func.count(PersonalNotification.id)).where(
+                        PersonalNotification.user_id == requester.id,
+                        PersonalNotification.source_type == "archive_submission",
+                        PersonalNotification.source_id == submission.id,
+                    )
+                )
+                or 0
+            )
+
+        response = await client.post(
+            f"/archives/admin/submissions/{submission.id}/approve",
+            json={"note": "approved after rejection"},
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == SubmissionStatus.APPROVED.value
+
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, submission.id)
+            assert stored.status == SubmissionStatus.APPROVED
+            assert stored.reviewer_id == admin.id
+            assert stored.reviewed_at is not None
+            assert stored.reviewed_at > rejected_reviewed_at
+            assert stored.review_note == "approved after rejection"
+            assert stored.created_archive_id is not None
+            assert stored.lifecycle_reason is None
+
+            archive = await session.get(Archive, stored.created_archive_id)
+            assert archive is not None
+            assert archive.deleted_at is None
+            assert archive.object_name == submission.object_name
+            archive_count = int(
+                await session.scalar(
+                    select(func.count(Archive.id)).where(
+                        Archive.object_name == submission.object_name
+                    )
+                )
+                or 0
+            )
+            assert archive_count == 1
+
+            notifications = list(
+                (
+                    await session.execute(
+                        select(PersonalNotification).where(
+                            PersonalNotification.user_id == requester.id,
+                            PersonalNotification.source_type == "archive_submission",
+                            PersonalNotification.source_id == submission.id,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(notifications) == notification_baseline + 1
+            approved_notifications = [
+                item
+                for item in notifications
+                if item.notification_type == "archive_submission_approved"
+            ]
+            assert len(approved_notifications) == 1
+            notification = approved_notifications[0]
+            assert notification.user_id == requester.id
+            assert notification.source_type == "archive_submission"
+            assert notification.source_id == submission.id
+            assert notification.metadata_json["status"] == "approved"
+            assert notification.metadata_json["archive_id"] == archive.id
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_review_context(
+            session_maker,
+            course_id=course.id,
+            submission_id=submission.id,
+        )
+
+
 @pytest.mark.asyncio
 async def test_archive_review_statuses_create_deduplicated_notifications(
     client: AsyncClient, session_maker, make_user

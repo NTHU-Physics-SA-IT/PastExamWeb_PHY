@@ -71,6 +71,15 @@ without the complete no-op response and side-effect guarantees above.
 `test_archive_review_statuses_create_deduplicated_notifications` and
 `test_republish_restores_approved_and_notifies_requester_once` cover parts of
 the current behavior, not the complete intended matrix.
+`test_approved_submission_can_be_rejected_or_taken_down` directly protects the
+legal `approved` to `rejected` and `approved` to administrator `takedown`
+edges, including review audit changes, the still-linked Archive identity, and
+one matching notification per transition.
+`test_rejected_submission_can_be_approved` directly protects the legal
+`pending` to `rejected` to `approved` flow, including creation of exactly one
+paired Archive and one approval notification after the rejection baseline.
+These tests do not cover same-target retries, repeated transition cycles, or
+sibling visibility.
 
 ## Report states
 
