@@ -80,13 +80,67 @@ Before application changes, complete:
 
 - Identify the canonical source of expected behavior before treating observed
   code as correct.
-- Add the smallest focused test that fails for the contract deviation and
-  confirm that it fails for the expected reason.
+- Establish the smallest focused failing evidence before application changes.
+- Prefer an automated failing test when it can faithfully and stably reproduce
+  the contract deviation. Confirm that it fails because of that deviation,
+  rather than an environment, fixture, selector, or stale-bundle problem.
 - Make the smallest repair and add justified neighboring regressions.
 - Do not write an observed bug back into a Domain contract as the intended
   behavior.
 
 A Domain or cross-layer bug fix also uses the Class 2 pre-implementation gate.
+
+#### Browser or platform-specific failing evidence
+
+A precise, reproducible browser or manual scenario may serve as red evidence
+only when all of these conditions are met:
+
+1. the problem depends on a browser, operating system, device, font, rendering
+   engine, or real layout environment;
+2. the existing unit, component, Playwright, or WebKit coverage cannot
+   faithfully and stably reproduce it;
+3. the plan states the concrete reason automation cannot represent the
+   failure;
+4. the scenario has exact, repeatable reproduction conditions;
+5. the test matrix marks the automated case `Not applicable` or `Deferred with
+   reason`; and
+6. manual evidence is not replacing a reasonably automatable backend or Domain
+   contract test.
+
+Record the reproduction context needed for another person or Agent to repeat
+the failure:
+
+- browser and version;
+- operating system and device context;
+- CSS viewport, device pixel ratio, and browser zoom;
+- font scale and font-loading state;
+- theme and relevant UI state;
+- route and commit or bundle identity;
+- reproduction steps;
+- expected and actual results;
+- at least one appropriate screenshot, recording, or computed-style capture;
+  and
+- a neighboring browser or desktop comparison.
+
+The evidence does not need a separate screenshot for every recorded field, but
+it must be sufficient to reproduce the failure. After the repair, add or update
+the nearest stable automated regression when one can faithfully protect the
+same behavior. If the problem still cannot be automated, rerun the same browser
+scenario as completion evidence and execute the feasible neighboring automated
+regressions.
+
+Do not create source-string assertions, CSS-text-presence assertions,
+always-true assertions, or placeholder tests unrelated to the observed visual
+failure. Manual evidence is not a general reason to omit test design.
+
+When they can reasonably be represented by an automated test, authorization,
+state transitions, public-visibility queries, database persistence,
+transaction or rollback behavior, notification or deduplication,
+concurrency, trash or restore, storage-call semantics, migration or schema
+behavior, and API business-error semantics require focused automated
+evidence. A missing required environment is `Unavailable`, not `Not
+applicable`; stop or prepare the safe environment instead of substituting
+manual evidence.
 
 ### Refactor
 
@@ -253,16 +307,17 @@ existing coverage. Select commands and escalation rules from
 
 For new behavior or a bug fix:
 
-1. Add the smallest focused test.
-2. Run it and confirm that the failure is caused by the missing expected
-   behavior.
-3. If the failure is caused by a fixture or environment problem, repair the
-   test foundation before application code.
-4. Make the smallest application implementation.
-5. Turn the focused test green.
-6. Run neighboring regressions.
-7. Add the other required matrix cases.
-8. Finish with risk-proportional verification.
+1. Establish the smallest focused failing evidence.
+2. Prefer and run a stable automated failing test.
+3. When the limited browser or platform-specific fallback applies, record the
+   reproducible scenario instead.
+4. Confirm that the red evidence has the expected cause.
+5. Make the smallest application implementation.
+6. Make the focused automated test pass or confirm that the reproduced failure
+   is resolved.
+7. Run neighboring regressions.
+8. Add the other required matrix cases.
+9. Finish with risk-proportional verification.
 
 Red evidence may be a temporary local state; it does not require a failing
 commit or remote push. Do not complete work with a known failing test or a

@@ -31,9 +31,13 @@
 - Class 0 and Class 1 work use the lighter process proportionate to their
   behavior and risk; do not force a full Feature contract onto a proven
   non-behavioral change.
-- A bug fix first uses the smallest focused failing test to demonstrate the
-  deviation from its canonical contract. A refactor preserves observable
-  behavior by default and must be reclassified if behavior needs to change.
+- Before application changes, a bug fix establishes focused failing evidence
+  and prefers a faithful, stable automated failing test. Only the browser or
+  platform-specific exception defined by the canonical workflow may use
+  reproducible browser evidence; it cannot bypass reasonably automatable
+  Domain, backend, transaction, or storage tests.
+- A refactor preserves observable behavior by default and must be reclassified
+  if behavior needs to change.
 - Do not complete work with known failing tests or long-lived `xfail` or skip
   markers. The detailed classification, planning, and red-green procedure
   belongs only in the canonical workflow.

@@ -47,6 +47,20 @@ As of 2026-07-24, the reviewed Skills are no longer stored in this repository. T
 - **Fresh-session explicit feature-workflow verification:** Pending.
 - **Fresh-session implicit feature-workflow verification:** Pending.
 
+### First feature-workflow explicit dry run
+
+- **Runtime source:** Repository-local
+  `.agents/skills/pastexam-web/SKILL.md`.
+- **Explicit trigger:** Passed.
+- **Classification, authority, and Class 2 gate:** Passed.
+- **Finding:** Browser-only bugs lacked a limited non-automated,
+  reproducible red-evidence fallback.
+- **Result:** Feature-workflow runtime verification is not yet complete.
+- **Action:** Apply the minimum correction to the canonical workflow,
+  `AGENTS.md`, and `CONTRIBUTING.md`.
+- **Explicit rerun:** Pending.
+- **Implicit verification:** Pending.
+
 The earlier runtime evidence below remains valid for repository discovery and
 precedence. It does not claim that this new routing has been exercised in a
 fresh session.
