@@ -60,7 +60,13 @@ or restored.
 
 Status helpers create the four notification types. Rejection copy still uses
 `已退回` in backend code. Course/archive lifecycle helpers generally avoid
-review notifications, but later conformance tests must protect that boundary.
+review notifications.
+`test_archive_trash_restore_temporarily_takes_down_submission_without_notification`
+and `test_submission_trash_moves_only_its_paired_archive_to_trash` protect the
+focused approved, independent-pair paths with notification counts recorded
+after approval setup: Archive trash/restore and Submission trash add no
+personal notification. Shared-Archive sibling behavior remains outside this
+evidence.
 
 `test_archive_review_statuses_create_deduplicated_notifications` and
 `test_republish_restores_approved_and_notifies_requester_once` provide partial

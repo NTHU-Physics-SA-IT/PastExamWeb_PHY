@@ -91,6 +91,15 @@ backend sibling-visibility query or object-storage availability.
 archive/submission groups. `trash.py` dispatches entity-specific restore and
 permanent deletion.
 
+`test_archive_trash_restore_temporarily_takes_down_submission_without_notification`
+directly protects the approved single-pair path: Archive trash leaves its
+Submission outside submission trash, marks it as a system-induced temporary
+takedown, and Archive restore returns it to approved.
+`test_submission_trash_moves_only_its_paired_archive_to_trash` directly
+protects two independent pairs: trashing Submission A trashes Archive A while
+Submission B, Archive B, and B's object identity remain unchanged. These tests
+do not cover sibling submissions that share one Archive.
+
 ### Known gap
 
 Submission-group restore can set a linked submission to approved without
