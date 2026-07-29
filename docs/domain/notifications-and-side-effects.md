@@ -67,6 +67,11 @@ focused approved, independent-pair paths with notification counts recorded
 after approval setup: Archive trash/restore and Submission trash add no
 personal notification. Shared-Archive sibling behavior remains outside this
 evidence.
+`test_course_trash_restore_preserves_approved_submission_without_notification`
+and `test_course_trash_restore_preserves_rejected_submission_without_notification`
+record their notification baselines after the legal review setup and protect
+that Course trash/restore adds no personal notification for either prior
+state.
 
 `test_archive_review_statuses_create_deduplicated_notifications` and
 `test_republish_restores_approved_and_notifies_requester_once` provide partial

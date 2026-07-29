@@ -147,6 +147,14 @@ Lifecycle reasons such as archive/course trash are stored on
 `ArchiveSubmission`; `trash.py` and `archive_submission_lifecycle.py` perform
 restore. Coverage is partial, including
 `test_admin_delete_course_soft_deletes_archives` and trash dispatch tests.
+`test_course_trash_restore_preserves_approved_submission_without_notification`
+directly protects the approved prior-state path through Course trash and
+restore.
+`test_course_trash_restore_preserves_rejected_submission_without_notification`
+uses the legal `pending` to `approved` to `rejected` review flow before Course
+trash, and directly protects restoration to rejected. Both tests verify the
+persisted Course lifecycle reason and previous-status marker; they do not
+cover pending, administrator-takedown, or sibling-group cases.
 
 ### Known gap
 
