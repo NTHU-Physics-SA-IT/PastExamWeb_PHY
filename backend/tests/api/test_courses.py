@@ -35,6 +35,7 @@ from app.models.models import (
     ArchiveUpdateCourse,
     Course,
     CourseCategory,
+    CourseCategoryConfig,
     CourseCategoryCreate,
     CourseCreate,
     CourseSubmission,
@@ -45,6 +46,10 @@ from app.models.models import (
     UserRoles,
 )
 from app.utils.auth import get_current_user
+from app.utils.course_text import (
+    normalize_course_search_text,
+    normalized_course_text_expr,
+)
 
 
 async def _create_course(
@@ -383,6 +388,136 @@ async def test_course_request_canonicalizes_legacy_category_alias(
             delete(CourseSubmission).where(CourseSubmission.id == submission.id)
         )
         await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_course_request_approval_reuses_existing_course_without_duplicates(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    course_name = f"Approval Reuse Course {uuid.uuid4().hex}"
+    category_key = CourseCategory.FRESHMAN.value
+    normalized_name = normalize_course_search_text(course_name)
+    submission_id = None
+    existing_course_id = None
+
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(requester)
+        request_response = await client.post(
+            "/courses/requests",
+            json={"name": course_name, "category": category_key},
+        )
+        assert request_response.status_code == 200
+        assert request_response.json()["status"] == SubmissionStatus.PENDING.value
+        submission_id = request_response.json()["id"]
+
+        app.dependency_overrides[get_current_user] = _override_user(admin)
+        course_response = await client.post(
+            "/courses/admin/courses",
+            json={"name": course_name, "category": category_key},
+        )
+        assert course_response.status_code == 200
+        existing_course_id = course_response.json()["id"]
+
+        async with session_maker() as session:
+            category_count_before = int(
+                await session.scalar(
+                    select(func.count(CourseCategoryConfig.id)).where(
+                        CourseCategoryConfig.key == category_key
+                    )
+                )
+                or 0
+            )
+            course_count_before = int(
+                await session.scalar(
+                    select(func.count(Course.id)).where(
+                        normalized_course_text_expr(Course.name)
+                        == normalized_name,
+                        Course.category == category_key,
+                    )
+                )
+                or 0
+            )
+            assert category_count_before == 1
+            assert course_count_before == 1
+
+        approve_response = await client.post(
+            f"/courses/admin/requests/{submission_id}/approve",
+            json={"note": "reuse existing course"},
+        )
+        assert approve_response.status_code == 200
+        assert approve_response.json()["status"] == SubmissionStatus.APPROVED.value
+        assert approve_response.json()["created_course_id"] == existing_course_id
+
+        async with session_maker() as session:
+            stored_submission = await session.get(
+                CourseSubmission, submission_id
+            )
+            stored_course = await session.get(Course, existing_course_id)
+            assert stored_submission.status == SubmissionStatus.APPROVED
+            assert stored_submission.reviewer_id == admin.id
+            assert stored_submission.reviewed_at is not None
+            assert stored_submission.review_note == "reuse existing course"
+            assert stored_submission.created_course_id == existing_course_id
+            assert stored_course is not None
+            assert stored_course.name == course_name
+            assert stored_course.category == category_key
+
+            category_count_after = int(
+                await session.scalar(
+                    select(func.count(CourseCategoryConfig.id)).where(
+                        CourseCategoryConfig.key == category_key
+                    )
+                )
+                or 0
+            )
+            course_count_after = int(
+                await session.scalar(
+                    select(func.count(Course.id)).where(
+                        normalized_course_text_expr(Course.name)
+                        == normalized_name,
+                        Course.category == category_key,
+                    )
+                )
+                or 0
+            )
+            assert category_count_after == category_count_before
+            assert course_count_after == course_count_before
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            if submission_id is not None:
+                await session.execute(
+                    delete(CourseSubmission).where(
+                        CourseSubmission.id == submission_id
+                    )
+                )
+            await session.execute(
+                delete(Course).where(
+                    normalized_course_text_expr(Course.name)
+                    == normalized_name,
+                    Course.category == category_key,
+                )
+            )
+            await session.commit()
+            if submission_id is not None:
+                assert await session.get(CourseSubmission, submission_id) is None
+            assert (
+                int(
+                    await session.scalar(
+                        select(func.count(Course.id)).where(
+                            normalized_course_text_expr(Course.name)
+                            == normalized_name,
+                            Course.category == category_key,
+                        )
+                    )
+                    or 0
+                )
+                == 0
+            )
 
 
 @pytest.mark.asyncio

@@ -209,6 +209,12 @@ Archive approval paths normalize category/course identities, use advisory
 locking, and reuse existing rows. Multi-step commits and the separate
 `CourseSubmission` model leave the end-to-end idempotency contract only
 partially implemented.
+`test_course_request_approval_reuses_existing_course_without_duplicates`
+directly protects the separate `CourseSubmission` model's first
+`pending`-to-`approved` path when a matching Course exists by approval time:
+the request resolves to that Course and matching Category/Course counts do not
+increase. It does not prescribe repeat-approval responses, notification
+behavior, request trash, or the later lifecycle of the resolved Course.
 
 ## Authorization
 
