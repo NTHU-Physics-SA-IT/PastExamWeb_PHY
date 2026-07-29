@@ -126,9 +126,14 @@ cleanup behavior is governed by
 ## Test evidence
 
 Current responsibility boundaries are exercised by API tests under
-`backend/tests/api/`, frontend tests under `frontend/src/**/__tests__/`, and
-migration tests under `backend/tests/integration/`. Those tests are evidence
-for behavior, not proof that transaction ownership is already consolidated.
+`backend/tests/api/`, Vitest unit and component evidence under
+`frontend/tests/unit/`, Playwright browser and journey evidence under
+`frontend/tests/e2e/`, and migration tests under
+`backend/tests/integration/`. The required test levels are selected through
+the [Feature development workflow](feature-development-workflow.md) and
+[Validation policy](validation.md); this location map does not require every
+frontend change to add both unit and E2E coverage. Those tests are evidence for
+behavior, not proof that transaction ownership is already consolidated.
 
 ## Required follow-up
 

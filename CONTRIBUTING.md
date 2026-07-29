@@ -7,7 +7,26 @@ Use these sources instead of duplicating their rules here:
 - [Repository Agent and automation rules](AGENTS.md)
 - [Documentation index and authority map](docs/README.md)
 - [Local development environment](docs/development/local-environment.md)
+- [Feature development workflow](docs/development/feature-development-workflow.md)
 - [Validation policy](docs/development/validation.md)
+
+## Feature and behavior changes
+
+Before adding a feature or changing behavior, classify the scope as Class 0,
+Class 1, or Class 2 and use the proportionate process in the
+[Feature development workflow](docs/development/feature-development-workflow.md).
+Class 2 work completes its Feature contract, impact map, responsibility
+placement, and test matrix before application changes.
+
+A bug fix starts with focused failing evidence; a faithful, stable automated
+failing test is the default and preferred choice. A browser-only problem that
+automation cannot faithfully and stably reproduce may use the canonical
+workflow's limited reproducible browser scenario, but manual evidence cannot
+replace a reasonably automatable contract test. A refactor must state and
+protect the behavior that remains unchanged; if behavior needs to change,
+reclassify the work. The canonical workflow contains the detailed conditions,
+planning, and implementation procedure, while the merge strategy remains in
+this document.
 
 ## Branches and commits
 
