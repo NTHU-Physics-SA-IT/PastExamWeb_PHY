@@ -44,8 +44,10 @@ As of 2026-07-24, the reviewed Skills are no longer stored in this repository. T
   `docs/feature-development-workflow`; Markdown, link/path, frontmatter,
   instruction-only structure, authority-boundary, and protected-path checks
   passed.
-- **Fresh-session explicit feature-workflow verification:** Pending.
-- **Fresh-session implicit feature-workflow verification:** Pending.
+- **Fresh-session explicit feature-workflow verification after the current
+  router correction:** Pending.
+- **Fresh-session implicit feature-workflow verification after the current
+  router correction:** Pending.
 
 ### First feature-workflow explicit dry run
 
@@ -79,9 +81,41 @@ As of 2026-07-24, the reviewed Skills are no longer stored in this repository. T
 - **Explicit rerun after correction:** Pending.
 - **Implicit verification:** Pending.
 
+### Third feature-workflow explicit dry run
+
+- **Runtime source:** Repository-local
+  `.agents/skills/pastexam-web/SKILL.md`.
+- **Explicit trigger:** Passed.
+- **Same-name active Skill:** None observed.
+- **Class 0, Class 1, Class 2, bug-fix, and refactor routing:** Passed.
+- **Browser red-evidence policy and automated-evidence priority:** Passed.
+- **Backend and Domain manual-fallback restriction:** Passed.
+- **Test-matrix `Unavailable` routing and frontend test roots:** Passed.
+- **Overall explicit dry run:** Passed.
+
+### First feature-workflow implicit dry run
+
+- **User selection:** The user did not explicitly select a Skill.
+- **Repository `pastexam-web` auto-selection:** Passed.
+- **Runtime source:** Repository-local
+  `.agents/skills/pastexam-web/SKILL.md`.
+- **Same-name duplicate:** None observed.
+- **Classification:** Class 2, Passed.
+- **Product-decision gate:** Passed.
+- **Impact map, test matrix, and red-evidence routing:** Passed.
+- **Optional advisory isolation:** Passed; `ui-ux-pro-max` was not loaded.
+- **Finding 1:** Instruction precedence omitted the precise developer and
+  current-user wording.
+- **Finding 2:** The Standard workflow placed gate completion before canonical
+  document reading and existing-implementation search.
+- **Overall implicit verification:** Not complete.
+- **Action:** Apply the minimum Repository Skill router correction.
+- **Explicit verification after Skill correction:** Pending.
+- **Implicit verification after Skill correction:** Pending.
+
 The earlier runtime evidence below remains valid for repository discovery and
-precedence. It does not claim that this new routing has been exercised in a
-fresh session.
+precedence. It does not substitute for the focused explicit and implicit
+reruns required after the current router correction.
 
 ## Fresh-session verification
 
@@ -116,7 +150,7 @@ fresh session.
 - The repository Skill completed static and fresh-session runtime verification
   for the earlier migration scope.
 - The 2026-07-29 feature-workflow routing expansion remains pending the
-  explicit and implicit fresh-session checks listed above.
+  post-correction explicit and implicit fresh-session checks listed above.
 - The old user Skill has exited the active scan path.
 - The legacy backup is retained outside active scan roots and was not loaded
   by the runtime.

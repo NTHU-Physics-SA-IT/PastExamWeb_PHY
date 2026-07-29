@@ -18,7 +18,7 @@ description: Route and execute work only in the PastExamWeb_PHY repository. Use 
 
 Apply instructions in this order:
 
-1. System and user instructions.
+1. System, developer, and current user instructions.
 2. Repository `AGENTS.md`.
 3. Active canonical documents in `docs/README.md`.
 4. This Skill workflow.
@@ -77,18 +77,40 @@ rules remain in their canonical documents.
 
 ## Standard workflow
 
-1. Confirm the repository root, branch, HEAD, and working-tree state.
-2. Define the files and operations that are allowed and prohibited.
-3. Classify feature or behavior work and complete its applicable canonical
-   pre-implementation gate.
-4. Search for the nearest existing implementation of the same responsibility.
-5. Read the minimum canonical documents selected by task routing.
-6. Determine and report whether the task has Domain impact.
-7. Implement the smallest coherent change across every affected layer.
-8. Apply bounded verification from the canonical validation policy.
-9. When CI evidence is required, wait for the selected run to reach a terminal
-   state.
-10. Report completion using the contract in `AGENTS.md`.
+1. Complete repository preflight: confirm the root, branch, HEAD, and
+   working-tree state, then define the files and operations that are allowed
+   and prohibited.
+2. Make an initial Class 0, 1, or 2 classification and identify any bug-fix or
+   refactor overlay and its applicable gate. Do not claim that gate complete
+   yet. Reclassify if later reading or search reveals higher risk.
+3. Read the minimum canonical documents selected by task routing. Do not load
+   unrelated guidance.
+4. Search for the canonical implementation, responsibility owner, analogous
+   routes, services, policies, components, tests, and fixtures. Identify
+   parallel logic to avoid; similarity alone is not permission to copy.
+5. Determine Domain impact and the necessary impact scope. Separate rules
+   already answered by canonical documents from genuinely blocking product
+   decisions; do not repeatedly ask the user about internal implementation
+   details.
+6. Only after the preceding reading, search, and impact analysis, complete the
+   applicable canonical pre-implementation gate. Class 0 uses its lightweight
+   scope and verification gate; Class 1 uses its concise contract, focused
+   search, and matrix; Class 2 completes the Feature contract, product-decision
+   gate, existing-implementation decision, impact map, responsibility
+   placement, test matrix, and implementation slices. A bug fix adds focused
+   failing evidence; a refactor states its behavior-preservation invariant and
+   existing safety net. Do not modify application code while a blocking gate
+   remains incomplete.
+7. Implement the smallest coherent slice under the canonical responsibility
+   owner. Do not create parallel logic or expand into opportunistic
+   repository-wide refactoring; synchronize product behavior and its
+   canonical documents.
+8. Apply targeted-first bounded verification, neighboring regressions, finite
+   retries, and terminal CI waiting as required by
+   `docs/development/validation.md`.
+9. Report completion using `AGENTS.md`. Perform commit, push, or merge only
+   with user authorization, and route milestone integration and merge-commit
+   CI through `CONTRIBUTING.md`.
 
 ## Domain impact routing
 
