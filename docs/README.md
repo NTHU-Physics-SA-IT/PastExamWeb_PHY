@@ -26,6 +26,7 @@ Each rule or topic should have exactly one canonical source.
 | [`../.agents/skills/pastexam-web/SKILL.md`](../.agents/skills/pastexam-web/SKILL.md) | PastExamWeb_PHY task routing and workflow | Active | Does not store project facts; follows `AGENTS.md` and canonical documents. |
 | [`development/local-environment.md`](development/local-environment.md) | Local environment identities and safe Compose boundaries | Active | Canonical local environment contract; not a recovery runbook. |
 | [`development/code-organization.md`](development/code-organization.md) | Code responsibility and pattern consistency | Active | Records current structure and intended ownership direction. |
+| [`development/feature-development-workflow.md`](development/feature-development-workflow.md) | Feature and behavior-change planning, implementation, and test-design workflow | Active | Procedural authority; does not store product contracts or replace validation, Domain, UI, migration, or production guidance. |
 | [`development/validation.md`](development/validation.md) | Risk-proportional verification and CI completion policy | Active | Canonical validation budget, retry, and reporting rules. |
 | [`ui/guidelines.md`](ui/guidelines.md) | UI presentation and responsive consistency | Active | Canonical UI-level decisions; Domain meaning is linked, not duplicated. |
 | [`domain/README.md`](domain/README.md) | Domain terminology, evidence labels, and contract map | Active | Entry point for product behavior contracts. |
