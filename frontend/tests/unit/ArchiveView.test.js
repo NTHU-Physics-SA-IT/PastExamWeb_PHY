@@ -222,6 +222,79 @@ describe('ArchiveView', () => {
     window.URL.revokeObjectURL = originalRevokeObjectURL
   })
 
+  it('renders each archive when exam metadata matches but ids differ', async () => {
+    const matchingArchives = [
+      {
+        ...baseArchives[0],
+        id: 'matching-a',
+        academic_year: '20231',
+        name: 'Midterm',
+        archive_type: 'midterm',
+        professor: 'Prof. Chen',
+        object_name: 'archives/matching-a.pdf',
+      },
+      {
+        ...baseArchives[0],
+        id: 'matching-b',
+        academic_year: '20231',
+        name: 'Midterm',
+        archive_type: 'midterm',
+        professor: 'Prof. Chen',
+        object_name: 'archives/matching-b.pdf',
+      },
+    ]
+    getCourseArchivesMock.mockReset()
+    getCourseArchivesMock.mockResolvedValue({ data: matchingArchives })
+    getArchiveDownloadUrlMock.mockImplementation((_courseId, archiveId) =>
+      Promise.resolve({
+        data: { url: `https://example.com/${archiveId}.pdf` },
+      })
+    )
+    globalThis.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['dummy'])),
+      })
+    )
+    const wrapper = mount(ArchiveView, {
+      global: {
+        provide: {
+          toast: { add: toastAddMock },
+          confirm: { require: confirmRequireMock },
+          sidebarVisible: ref(true),
+        },
+        stubs: componentStubs,
+      },
+    })
+
+    await flushPromises()
+    wrapper.vm.filterBySubject({ label: 'Calculus I', id: 'c1' })
+    await flushPromises()
+
+    const renderedIds = wrapper.vm.groupedArchives.flatMap((group) =>
+      group.list.map((archive) => archive.id)
+    )
+    const archiveCards = wrapper.findAll('.archive-record-card')
+    const downloadActions = wrapper.findAll('.archive-action-download')
+    expect(renderedIds).toEqual(['matching-a', 'matching-b'])
+    expect(archiveCards).toHaveLength(2)
+    expect(archiveCards.every((card) => card.text().includes('Midterm'))).toBe(true)
+    expect(downloadActions).toHaveLength(2)
+    expect(downloadActions.every((action) => action.attributes('aria-label') === '下載')).toBe(true)
+
+    await wrapper.vm.downloadArchive(wrapper.vm.groupedArchives[0].list[0])
+    await wrapper.vm.downloadArchive(wrapper.vm.groupedArchives[0].list[1])
+    await flushPromises()
+
+    expect(getArchiveDownloadUrlMock).toHaveBeenNthCalledWith(1, 'c1', 'matching-a')
+    expect(getArchiveDownloadUrlMock).toHaveBeenNthCalledWith(2, 'c1', 'matching-b')
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(1, 'https://example.com/matching-a.pdf')
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(2, 'https://example.com/matching-b.pdf')
+
+    vi.runAllTimers()
+    wrapper.unmount()
+  })
+
   it('handles core archive interactions', async () => {
     const sidebarInjected = ref(true)
 

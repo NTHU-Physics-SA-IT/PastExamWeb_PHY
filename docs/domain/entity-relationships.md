@@ -63,6 +63,14 @@ shared `Archive`, so a non-approved sibling can hide an approved file or a
 delete/restore operation can change multiple submissions. This is an
 implementation gap, not intended grouping behavior.
 
+### Frontend rendering evidence
+
+`renders_each_archive_when_exam_metadata_matches_but_ids_differ` confirms that,
+when the Archive list response contains two records with matching exam
+metadata but different Archive identities, the frontend preserves two cards
+and two identity-specific download operations. This test does not protect the
+backend sibling-visibility query or object-storage availability.
+
 ## Trash relationship
 
 ### Intended invariant
