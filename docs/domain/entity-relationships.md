@@ -155,7 +155,11 @@ authenticated user and can be taken down directly by an administrator.
 ### Current implementation and gap
 
 `reports.py` permits creation of an archive report when no linked submission
-exists and retains archive snapshots. The current optional report-takedown path
+exists and retains archive snapshots.
+`test_legacy_archive_can_be_reported_without_submission` confirms that an
+authenticated reporter can create the pending report with no submission link,
+the Archive snapshots and report-submission audit are retained, and one
+submitted notification is created. The current optional report-takedown path
 expects a linked active submission, so direct legacy takedown is not complete.
 Whether later implementation manages the `Archive` directly or creates a
 system-generated submission record is a decision required; this document does
