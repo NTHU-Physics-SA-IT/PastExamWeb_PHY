@@ -24,13 +24,21 @@ Related documents:
 | `takedown` | `approved` through republish |
 | `deleted` | Trash restore lifecycle only |
 
-The following are invalid:
+Requesting the current target state is a successful, idempotent retry:
 
-- `rejected` to `takedown`;
-- `approved` to `approved`;
-- `rejected` to `rejected`;
-- `takedown` to `takedown`;
-- any review request that does not produce a real state change.
+- the result is a no-op that the caller can distinguish from a new transition;
+- it creates no new data, notification, statistical event, or audit event;
+- it does not overwrite the actor or time of the transition that established
+  the current state;
+- the response must expose the distinction, but this contract does not yet
+  prescribe a JSON field name.
+
+A request for a different target not listed in the matrix is invalid and
+returns `409 Conflict`. This includes `rejected` to `takedown`.
+
+Leaving a state through a legal transition and later returning to it, for
+example `approved` to `takedown` to `approved`, is a new lifecycle event rather
+than a retry.
 
 `pending` to `takedown` lets an administrator stop processing a pending
 duplicate or otherwise ineligible file after comparing its detail.
@@ -48,18 +56,30 @@ duplicate or otherwise ineligible file after comparing its detail.
 `backend/app/services/archive_submission_status.py` implements takedown and
 republish helpers. Review endpoints in `archives.py` implement approve/reject.
 Republish requires `takedown`, but approve/reject mutability checks and the
-takedown helper currently permit some same-state or disallowed transitions.
+takedown helper currently permit some same-state or disallowed transitions
+without the complete no-op response and side-effect guarantees above.
 
 ### Implementation gaps
 
 - `rejected` can currently be taken down.
-- Repeated approve/reject paths can be accepted.
+- Repeated approve/reject paths can be accepted, but do not yet provide a
+  confirmed distinguishable no-op contract or complete audit/side-effect
+  protection.
 - Backend rejection notification copy and `frontend/src/views/Admin.vue` still
   use `已退回` in places.
 
 `test_archive_review_statuses_create_deduplicated_notifications` and
 `test_republish_restores_approved_and_notifies_requester_once` cover parts of
 the current behavior, not the complete intended matrix.
+`test_approved_submission_can_be_rejected_or_taken_down` directly protects the
+legal `approved` to `rejected` and `approved` to administrator `takedown`
+edges, including review audit changes, the still-linked Archive identity, and
+one matching notification per transition.
+`test_rejected_submission_can_be_approved` directly protects the legal
+`pending` to `rejected` to `approved` flow, including creation of exactly one
+paired Archive and one approval notification after the rejection baseline.
+These tests do not cover same-target retries, repeated transition cycles, or
+sibling visibility.
 
 ## Report states
 
@@ -85,6 +105,15 @@ domains.
 
 ### Intended invariant
 
+- A public Archive is public only to an authenticated user who may use the
+  system; it is not anonymously accessible on the internet.
+- Authentication is required for Archive browsing, list-carried detail data,
+  preview metadata, preview-file streaming, and download/download-URL access.
+- There is no independent Archive detail `GET` route in the current API;
+  Archive detail data is carried by the authenticated list response.
+- Authentication must reject access before object storage is read. Existing
+  API authentication semantics may return `401` or `403`; this contract does
+  not standardize those two statuses in this stage.
 - Every effective approved submission can be public independently.
 - One logical exam group can show several approved PDFs.
 - Pending, rejected, takedown, or deleted siblings do not hide an approved PDF.
@@ -118,6 +147,14 @@ Lifecycle reasons such as archive/course trash are stored on
 `ArchiveSubmission`; `trash.py` and `archive_submission_lifecycle.py` perform
 restore. Coverage is partial, including
 `test_admin_delete_course_soft_deletes_archives` and trash dispatch tests.
+`test_course_trash_restore_preserves_approved_submission_without_notification`
+directly protects the approved prior-state path through Course trash and
+restore.
+`test_course_trash_restore_preserves_rejected_submission_without_notification`
+uses the legal `pending` to `approved` to `rejected` review flow before Course
+trash, and directly protects restoration to rejected. Both tests verify the
+persisted Course lifecycle reason and previous-status marker; they do not
+cover pending, administrator-takedown, or sibling-group cases.
 
 ### Known gap
 
@@ -172,12 +209,18 @@ Archive approval paths normalize category/course identities, use advisory
 locking, and reuse existing rows. Multi-step commits and the separate
 `CourseSubmission` model leave the end-to-end idempotency contract only
 partially implemented.
+`test_course_request_approval_reuses_existing_course_without_duplicates`
+directly protects the separate `CourseSubmission` model's first
+`pending`-to-`approved` path when a matching Course exists by approval time:
+the request resolves to that Course and matching Category/Course counts do not
+increase. It does not prescribe repeat-approval responses, notification
+behavior, request trash, or the later lifecycle of the resolved Course.
 
 ## Authorization
 
 | Operation | Anonymous | Authenticated user | Owner | Administrator | System |
 | --- | --- | --- | --- | --- | --- |
-| View public effective archive | Allowed | Allowed | Allowed | Allowed | Allowed |
+| View public effective archive | Denied | Allowed | Allowed | Allowed | Allowed |
 | Create archive/comment report | Denied | Allowed | Allowed | Allowed | Allowed when explicitly designed |
 | Submit archive | Denied | Allowed | Allowed | Allowed | Explicit system imports only |
 | Review submission/report | Denied | Denied | Denied unless also admin | Allowed | Explicit automation only |
@@ -188,8 +231,13 @@ partially implemented.
 ### Current implementation
 
 Authentication dependencies and `is_admin`/owner checks are enforced in the
-backend, often inline in endpoint modules. The frontend also hides controls but
-is not an authorization boundary.
+backend, often inline in endpoint modules. The Archive list, preview,
+preview-file, and download routes depend on `get_current_user`; the list route
+has focused anonymous-access test evidence, and
+`test_archive_file_endpoints_require_authentication` confirms that anonymous
+preview, preview-file, and download requests are rejected before object
+storage access. The frontend also hides controls but is not an authorization
+boundary.
 
 ### Known gap
 
@@ -201,16 +249,17 @@ tests before centralization.
 
 | Condition | Intended semantic result | Current status |
 | --- | --- | --- |
-| Invalid or repeated transition | Reject without writes or notification | Partially implemented; exact HTTP status requires follow-up |
+| Same-target retry | Successful distinguishable no-op without writes, notification, statistics, or audit changes | Partially implemented; response schema and full side-effect protection require follow-up |
+| Different invalid transition | `409 Conflict` without writes or notification | Partially implemented |
 | Permission denied | Deny without revealing protected resource details | Backend enforcement exists; consistency requires review |
 | Missing entity | Not found/unavailable without side effects | Generally implemented |
 | Active uniqueness conflict | Explicit conflict and no duplicate row | Implemented for several report paths; soft-delete predicate has a gap |
 | Restore conflict | Explicitly block restore and retain trashed row | Required follow-up for pending reports and previous-state restoration |
 | Storage deletion failure | Do not report the single item as fully deleted; preserve retry evidence | Implementation gap; current cleanup may emit only a warning |
 
-This contract does not assign a new HTTP status where product/API behavior has
-not yet been approved. Future conformance work must coordinate API responses,
-frontend handling, and tests.
+This contract does not standardize the precise `401`/`403` authentication
+status or prescribe the same-target no-op response field name. Future
+conformance work must coordinate API responses, frontend handling, and tests.
 
 ## Required follow-up
 

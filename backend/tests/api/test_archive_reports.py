@@ -198,6 +198,126 @@ async def test_archive_report_creation_auth_validation_duplicate_and_notificatio
 
 
 @pytest.mark.asyncio
+async def test_legacy_archive_can_be_reported_without_submission(
+    client, session_maker, make_user
+):
+    reporter = await make_user(name=f"legacy-reporter-{uuid.uuid4().hex[:8]}")
+    uploader = await make_user(name=f"legacy-uploader-{uuid.uuid4().hex[:8]}")
+    course, archive, submission = await _create_archive_context(
+        session_maker,
+        requester_id=uploader.id,
+        with_submission=False,
+    )
+    assert submission is None
+    path = f"/reports/courses/{course.id}/archives/{archive.id}"
+
+    async with session_maker() as session:
+        notifications_before = int(
+            await session.scalar(
+                select(func.count(PersonalNotification.id)).where(
+                    PersonalNotification.user_id == reporter.id,
+                    PersonalNotification.notification_type
+                    == "archive_report_submitted",
+                )
+            )
+            or 0
+        )
+
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(reporter.id)
+        response = await client.post(
+            path,
+            json={"report_reason": "duplicate_archive"},
+        )
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body["status"] == "pending"
+        assert body["archive_submission_id"] is None
+        assert body["archive_id_snapshot"] == archive.id
+        assert body["archive_name"] == archive.name
+        assert body["course_name"] == course.name
+        assert body["academic_year"] == archive.academic_year
+        assert body["archive_type"] == archive.archive_type.value
+        assert body["professor"] == archive.professor
+        assert body["reporter_user_id"] == reporter.id
+        assert body["reviewed_by"] is None
+        assert body["reviewed_at"] is None
+
+        async with session_maker() as session:
+            persisted = await session.get(ArchiveReport, body["id"])
+            assert persisted is not None
+            assert persisted.status == "pending"
+            assert persisted.archive_submission_id is None
+            assert persisted.archive_id_snapshot == archive.id
+            assert persisted.archive_name_snapshot == archive.name
+            assert persisted.course_name_snapshot == course.name
+            assert persisted.academic_year_snapshot == archive.academic_year
+            assert persisted.archive_type_snapshot == archive.archive_type.value
+            assert persisted.professor_snapshot == archive.professor
+            assert persisted.reporter_user_id == reporter.id
+            assert persisted.reporter_name_snapshot == reporter.name
+            assert persisted.reviewed_by is None
+            assert persisted.reviewed_at is None
+            assert persisted.created_at is not None
+
+            notifications = list(
+                (
+                    await session.execute(
+                        select(PersonalNotification).where(
+                            PersonalNotification.user_id == reporter.id,
+                            PersonalNotification.notification_type
+                            == "archive_report_submitted",
+                            PersonalNotification.source_type == "archive_report",
+                            PersonalNotification.source_id == body["id"],
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            notifications_after = int(
+                await session.scalar(
+                    select(func.count(PersonalNotification.id)).where(
+                        PersonalNotification.user_id == reporter.id,
+                        PersonalNotification.notification_type
+                        == "archive_report_submitted",
+                    )
+                )
+                or 0
+            )
+            assert notifications_after == notifications_before + 1
+            assert len(notifications) == 1
+            assert notifications[0].dedupe_key == (
+                f"archive_report_submitted:{body['id']}"
+            )
+            assert notifications[0].metadata_json["archive_id"] == archive.id
+            assert notifications[0].metadata_json["course_id"] == course.id
+            assert notifications[0].metadata_json["status"] == "pending"
+            assert course.name in notifications[0].message
+            assert archive.name in notifications[0].message
+            assert "待審核" in notifications[0].message
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_context(
+            session_maker,
+            course_id=course.id,
+            archive_id=archive.id,
+        )
+        async with session_maker() as session:
+            assert await session.get(Archive, archive.id) is None
+            assert await session.get(Course, course.id) is None
+            assert (
+                await session.scalar(
+                    select(func.count(ArchiveReport.id)).where(
+                        ArchiveReport.archive_id_snapshot == archive.id
+                    )
+                )
+                or 0
+            ) == 0
+
+
+@pytest.mark.asyncio
 async def test_archive_report_review_optional_takedown_is_atomic_and_non_destructive(
     client, session_maker, make_user, monkeypatch
 ):

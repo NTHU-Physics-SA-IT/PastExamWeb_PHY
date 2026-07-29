@@ -60,7 +60,18 @@ or restored.
 
 Status helpers create the four notification types. Rejection copy still uses
 `已退回` in backend code. Course/archive lifecycle helpers generally avoid
-review notifications, but later conformance tests must protect that boundary.
+review notifications.
+`test_archive_trash_restore_temporarily_takes_down_submission_without_notification`
+and `test_submission_trash_moves_only_its_paired_archive_to_trash` protect the
+focused approved, independent-pair paths with notification counts recorded
+after approval setup: Archive trash/restore and Submission trash add no
+personal notification. Shared-Archive sibling behavior remains outside this
+evidence.
+`test_course_trash_restore_preserves_approved_submission_without_notification`
+and `test_course_trash_restore_preserves_rejected_submission_without_notification`
+record their notification baselines after the legal review setup and protect
+that Course trash/restore adds no personal notification for either prior
+state.
 
 `test_archive_review_statuses_create_deduplicated_notifications` and
 `test_republish_restores_approved_and_notifies_requester_once` provide partial
@@ -72,7 +83,12 @@ test evidence.
 
 - Leaving a state and later entering it again is a new transition cycle and
   sends another notification.
-- Repeating a request for the current state is invalid and sends nothing.
+- Repeating a request for the current target state is a successful no-op and
+  sends nothing.
+- A same-target retry creates no other data, statistical event, or audit event
+  and does not overwrite the original transition actor or time.
+- The caller can distinguish the no-op from a new transition, without this
+  stage prescribing the response field name.
 - A dedupe key distinguishes a retry of one event from a later real cycle.
 
 ### Implementation gap
@@ -106,14 +122,18 @@ logical create/review event.
 
 ## Source availability
 
-### Intended direction
+### Intended invariant
 
 | Source state | Link behavior |
 | --- | --- |
 | Active and authorized | Link may open the source |
 | Soft-deleted | Do not expose an active link; an authorized historical view may be designed separately |
-| Hard-deleted | No active link; retain safe notification text/snapshots |
+| Hard-deleted | Retain the notification, mark the source unavailable, display `來源已不存在`, and expose no active source action or navigation |
 | Missing or unauthorized | Mark unavailable without revealing protected existence |
+
+Permanent source deletion does not delete durable notification history. A
+replacement or historical source view may be designed later, but no operation
+may continue to navigate to the deleted source.
 
 ### Current implementation and gap
 
@@ -122,6 +142,8 @@ notification type. Discussion, submission, and archive-report sources use
 different queries and soft-delete checks. Frontend handling in
 `NotificationCenterModal.vue` opens only selected available source types.
 Hard-delete and legacy-source behavior is not yet one consistent contract.
+The complete source-availability API and `來源已不存在` UI presentation remain
+an implementation gap and are not yet protected by a focused test.
 
 ## ArchiveSubmissionEvent side effect
 
@@ -185,6 +207,13 @@ different items in the batch may have different final results.
 and failures. This supports cross-item partial success. The single-item
 PostgreSQL/MinIO guarantee remains incomplete because storage errors can be
 warnings rather than failed item results.
+
+`test_bulk_permanent_delete_commits_successes_and_reports_item_failures`
+protects the bulk orchestration boundary with mocked items: every item is
+attempted, one item's commit is retained when a later item rolls back, and the
+response identifies both the success and the failure reason. It does not prove
+single-item PostgreSQL/MinIO atomicity, staged deletion, or real storage
+integration.
 
 ## Transaction boundaries
 
