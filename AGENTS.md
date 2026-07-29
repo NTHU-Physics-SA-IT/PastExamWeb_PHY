@@ -21,6 +21,23 @@
 4. Assign a verification risk level and finite budget before running checks.
 5. Determine whether the task has Domain impact as defined below.
 
+## Feature and behavior workflow
+
+- Before adding a feature or changing product behavior, follow the canonical
+  [Feature development workflow](docs/development/feature-development-workflow.md).
+- Class 2 feature, cross-layer, or Domain work must complete its Feature
+  contract, product-decision gate, existing-implementation search, impact map,
+  responsibility placement, and test matrix before application changes.
+- Class 0 and Class 1 work use the lighter process proportionate to their
+  behavior and risk; do not force a full Feature contract onto a proven
+  non-behavioral change.
+- A bug fix first uses the smallest focused failing test to demonstrate the
+  deviation from its canonical contract. A refactor preserves observable
+  behavior by default and must be reclassified if behavior needs to change.
+- Do not complete work with known failing tests or long-lived `xfail` or skip
+  markers. The detailed classification, planning, and red-green procedure
+  belongs only in the canonical workflow.
+
 ## Workspace and Git safety
 
 - Preserve all user changes. Never discard, overwrite, stage, reformat, stash,
@@ -186,6 +203,7 @@ evidence.
 - [Documentation index and authority map](docs/README.md)
 - [Local development environment](docs/development/local-environment.md)
 - [Code organization](docs/development/code-organization.md)
+- [Feature development workflow](docs/development/feature-development-workflow.md)
 - [Validation policy](docs/development/validation.md)
 - [UI guidelines](docs/ui/guidelines.md)
 - [Domain contracts](docs/domain/README.md)
