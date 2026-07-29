@@ -24,7 +24,7 @@ current implementation separately from the intended product relation.
 | `CourseCategoryConfig` | `Course.category` stores its key as a string rather than an FK; submissions also retain category snapshots | Category controls discovery and creation choices, but its soft-delete lifecycle is independent from historical submissions | Confirmed by code; no DB FK means application checks carry integrity |
 | `Course` | Required parent of `Archive`; category is a string key; has soft-delete metadata | Groups archives for navigation; course trash may hide/deactivate children but must not rewrite independent submission review results | Confirmed by code in `courses.py` and `trash.py` |
 | `CourseSubmission` | Requester/reviewer and optional `created_course_id`; no soft-delete metadata in the current model | A course/category request attached to an archive-submission flow; created category/course becomes independent after approval | Implementation gap: current model is a separate review record and has no defined trash lifecycle |
-| `Archive` | Required `course_id`, optional uploader, one `object_name`, optional soft-delete metadata; submissions point to it with `created_archive_id` | One independently accessible approved public file, within a logical exam group | Current naming can be mistaken for the whole logical group |
+| `Archive` | Required `course_id`, optional uploader, one `object_name`, optional soft-delete metadata; submissions point to it with `created_archive_id` | One independently accessible approved public file for authenticated system users, within a logical exam group | Current naming can be mistaken for the whole logical group |
 | `ArchiveSubmission` | Required requester and object name; optional reviewer, owner, and `created_archive_id`; review and trash fields coexist | One independent submission and PDF. Its review/lifecycle must not alter siblings | Partially implemented; group lifecycle helpers can affect linked siblings |
 | `ArchiveSubmissionEvent` | Unique `submission_id` integer and timestamp, without a declared FK | Immutable statistical event retained after submission deletion, with active link/PII detached as needed | Implementation gap: permanent-delete helper currently deletes events |
 | `ArchiveDiscussionMessage` / `ArchiveDiscussionLike` | Message requires archive and user IDs; parent/reply references form a thread; likes cascade with message/user deletion | Discussion belongs to the referenced public item; soft-deleted messages should not remain an active source | Confirmed by code and `test_archive_discussion.py` |
@@ -32,7 +32,7 @@ current implementation separately from the intended product relation.
 | `ArchiveReport` | Optional archive/submission/user FKs with `SET NULL`; required snapshots preserve archive context | May report both submission-backed and legacy archives; review can optionally take down the target | Legacy creation is supported; legacy direct takedown remains an implementation gap |
 | `SystemIssueReport` | Optional reporter, read/review metadata, GitHub-sync metadata, independent soft delete | Operational report independent of archive/submission lifecycle | Confirmed by code and tests |
 | `Notification` / announcement receipts | Global announcement plus per-user read receipt | Site-wide announcement, distinct from a personal event notification | Confirmed by code |
-| `PersonalNotification` | Required recipient; optional actor/source fields; unique `dedupe_key`; source message FK uses `SET NULL` | Durable, recipient-owned event record whose link availability follows source lifecycle | Confirmed by code; source resolution differs by Domain |
+| `PersonalNotification` | Required recipient; optional actor/source fields; unique `dedupe_key`; source message FK uses `SET NULL` | Durable, recipient-owned event record retained when its source is permanently deleted; source availability and actions follow source lifecycle | Confirmed by code; unavailable-source presentation and source resolution differ by Domain |
 | MinIO object | Referenced by `Archive.object_name` and `ArchiveSubmission.object_name`; no dedicated database entity | One stored object belongs to one independent PDF lifecycle; deletion result must be reconciled with DB state | No cross-system transaction; current cleanup can partially succeed |
 
 ## Independent approved files
@@ -165,8 +165,9 @@ not choose the mechanism.
 
 - String category keys can orphan logical relationships without an application
   guard.
-- `SET NULL` report/source FKs preserve history but require snapshots and
-  explicit unavailable-link behavior.
+- `SET NULL` report/source FKs preserve history, but a permanently deleted
+  source must render as `來源已不存在` without an active source action or
+  navigation. The complete API/UI treatment remains an implementation gap.
 - Shared archive/object references create sibling-deletion risk until the
   independent-file model is enforced.
 - PostgreSQL rows and MinIO objects can diverge because no atomic transaction

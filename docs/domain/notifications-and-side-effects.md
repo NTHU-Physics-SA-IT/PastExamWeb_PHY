@@ -72,7 +72,12 @@ test evidence.
 
 - Leaving a state and later entering it again is a new transition cycle and
   sends another notification.
-- Repeating a request for the current state is invalid and sends nothing.
+- Repeating a request for the current target state is a successful no-op and
+  sends nothing.
+- A same-target retry creates no other data, statistical event, or audit event
+  and does not overwrite the original transition actor or time.
+- The caller can distinguish the no-op from a new transition, without this
+  stage prescribing the response field name.
 - A dedupe key distinguishes a retry of one event from a later real cycle.
 
 ### Implementation gap
@@ -106,14 +111,18 @@ logical create/review event.
 
 ## Source availability
 
-### Intended direction
+### Intended invariant
 
 | Source state | Link behavior |
 | --- | --- |
 | Active and authorized | Link may open the source |
 | Soft-deleted | Do not expose an active link; an authorized historical view may be designed separately |
-| Hard-deleted | No active link; retain safe notification text/snapshots |
+| Hard-deleted | Retain the notification, mark the source unavailable, display `來源已不存在`, and expose no active source action or navigation |
 | Missing or unauthorized | Mark unavailable without revealing protected existence |
+
+Permanent source deletion does not delete durable notification history. A
+replacement or historical source view may be designed later, but no operation
+may continue to navigate to the deleted source.
 
 ### Current implementation and gap
 
@@ -122,6 +131,8 @@ notification type. Discussion, submission, and archive-report sources use
 different queries and soft-delete checks. Frontend handling in
 `NotificationCenterModal.vue` opens only selected available source types.
 Hard-delete and legacy-source behavior is not yet one consistent contract.
+The complete source-availability API and `來源已不存在` UI presentation remain
+an implementation gap and are not yet protected by a focused test.
 
 ## ArchiveSubmissionEvent side effect
 
