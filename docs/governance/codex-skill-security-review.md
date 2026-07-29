@@ -61,6 +61,24 @@ As of 2026-07-24, the reviewed Skills are no longer stored in this repository. T
 - **Explicit rerun:** Pending.
 - **Implicit verification:** Pending.
 
+### Second feature-workflow explicit dry run
+
+- **Runtime source:** Repository-local
+  `.agents/skills/pastexam-web/SKILL.md`.
+- **Explicit trigger:** Passed.
+- **Browser red-evidence correction:** Passed.
+- **Automated priority:** Passed.
+- **Backend and Domain evidence restriction:** Passed.
+- **Classification, authority, and Class 2 gate:** Passed.
+- **Finding 1:** The test matrix vocabulary lacked `Unavailable with reason`.
+- **Finding 2:** The frontend test path in
+  `docs/development/code-organization.md` was stale.
+- **Overall workflow verification:** Not complete.
+- **Action:** Apply the minimum corrections to the canonical matrix vocabulary
+  and test-path documentation.
+- **Explicit rerun after correction:** Pending.
+- **Implicit verification:** Pending.
+
 The earlier runtime evidence below remains valid for repository discovery and
 precedence. It does not claim that this new routing has been exercised in a
 fresh session.

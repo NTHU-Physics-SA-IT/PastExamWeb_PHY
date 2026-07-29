@@ -268,8 +268,39 @@ into an opportunistic architecture-wide consolidation.
 ## Test matrix
 
 Evaluate each row and mark it `Required`, `Existing coverage`, `Add`,
-`Not required`, `Not applicable`, or `Deferred with reason`. A row may use
-more than one mark when, for example, existing evidence needs one added case.
+`Not required`, `Not applicable`, `Deferred with reason`, or `Unavailable with
+reason`. A row may use more than one mark when, for example, existing evidence
+needs one added case.
+
+Use the marks as follows:
+
+- `Required`: The behavior needs evidence.
+- `Existing coverage`: Existing tests already provide sufficient, matching
+  evidence, so duplicate coverage does not need to be added.
+- `Add`: A new test or other formal evidence is needed.
+- `Not required`: The current risk and contract do not require adding this
+  evidence, although the test level may be appropriate for other work.
+- `Not applicable`: The test level or behavior is genuinely unrelated to this
+  task.
+- `Deferred with reason`: The evidence is intentionally assigned to an
+  explicit later slice or milestone, and the deferral does not make the current
+  completion claim inaccurate. Record the reason, the follow-up owner or
+  location, and whether it blocks the current slice.
+- `Unavailable with reason`: The evidence remains `Required` or otherwise
+  expected, but a necessary environment, service, permission, or tool is
+  missing. Record the specific missing condition, why the evidence cannot be
+  obtained safely, what would unblock it, and whether the current work must
+  stop.
+
+`Unavailable with reason` does not reduce or cancel a test requirement and
+must not be relabeled as `Not applicable`. Do not use `Deferred with reason` as
+a generic substitute for a missing environment in order to claim completion.
+A normal test assertion failure, application failure, or fixture defect is a
+failure to diagnose under the validation policy, not unavailable evidence. If
+required evidence is unavailable and affects the completion decision, stop or
+prepare the safe environment before continuing. Execution, retry, completion
+reporting, and their `Unavailable` category remain governed by
+[Validation policy](validation.md).
 
 | Behavior | Status and evidence |
 | --- | --- |
@@ -385,6 +416,8 @@ Before reporting a behavior change complete, confirm as applicable:
 - product decisions are resolved;
 - existing implementation and responsibility owners were identified;
 - the impact map and test matrix are complete;
+- no required evidence that affects completion remains `Unavailable with
+  reason`;
 - affected Domain documents are synchronized;
 - every committed test is green and neighboring regressions pass;
 - application, migration, and storage risks are classified;
