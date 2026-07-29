@@ -210,8 +210,11 @@ partially implemented.
 Authentication dependencies and `is_admin`/owner checks are enforced in the
 backend, often inline in endpoint modules. The Archive list, preview,
 preview-file, and download routes depend on `get_current_user`; the list route
-already has focused anonymous-access test evidence. The frontend also hides
-controls but is not an authorization boundary.
+has focused anonymous-access test evidence, and
+`test_archive_file_endpoints_require_authentication` confirms that anonymous
+preview, preview-file, and download requests are rejected before object
+storage access. The frontend also hides controls but is not an authorization
+boundary.
 
 ### Known gap
 

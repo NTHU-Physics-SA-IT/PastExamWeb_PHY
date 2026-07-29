@@ -281,6 +281,60 @@ async def test_get_course_archives_limits_submission_ids_to_owner_or_admin(
             await session.commit()
 
 
+@pytest.mark.parametrize("endpoint", ["preview", "preview-file", "download"])
+@pytest.mark.asyncio
+async def test_archive_file_endpoints_require_authentication(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    monkeypatch,
+    endpoint,
+):
+    uploader = await make_user()
+    course = await _create_course(
+        session_maker,
+        name=f"Archive auth {uuid.uuid4().hex}",
+    )
+    archive = await _create_archive(
+        session_maker,
+        course_id=course.id,
+        uploader_id=uploader.id,
+    )
+    storage_accessed = False
+
+    def fail_if_storage_is_accessed():
+        nonlocal storage_accessed
+        storage_accessed = True
+        raise AssertionError("anonymous request reached object storage")
+
+    monkeypatch.setattr(
+        "app.api.services.courses.get_minio_client",
+        fail_if_storage_is_accessed,
+    )
+    app.dependency_overrides.pop(get_current_user, None)
+    try:
+        response = await client.get(
+            f"/courses/{course.id}/archives/{archive.id}/{endpoint}"
+        )
+
+        assert response.status_code in {401, 403}
+        assert not storage_accessed
+        assert "url" not in response.text
+        assert not response.headers.get("content-type", "").startswith(
+            "application/pdf"
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(Archive).where(Archive.id == archive.id)
+            )
+            await session.execute(
+                delete(Course).where(Course.id == course.id)
+            )
+            await session.commit()
+
+
 @pytest.mark.asyncio
 async def test_get_archive_preview_url_returns_presigned_link(
     client: AsyncClient,
