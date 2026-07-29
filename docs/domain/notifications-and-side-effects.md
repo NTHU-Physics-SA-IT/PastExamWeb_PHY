@@ -197,6 +197,13 @@ and failures. This supports cross-item partial success. The single-item
 PostgreSQL/MinIO guarantee remains incomplete because storage errors can be
 warnings rather than failed item results.
 
+`test_bulk_permanent_delete_commits_successes_and_reports_item_failures`
+protects the bulk orchestration boundary with mocked items: every item is
+attempted, one item's commit is retained when a later item rolls back, and the
+response identifies both the success and the failure reason. It does not prove
+single-item PostgreSQL/MinIO atomicity, staged deletion, or real storage
+integration.
+
 ## Transaction boundaries
 
 | Operation | Current boundary | Risk/status |
