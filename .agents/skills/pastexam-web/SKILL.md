@@ -30,6 +30,12 @@ Never use this Skill to override `AGENTS.md` or a Domain contract.
 
 Read only the smallest set needed for the task:
 
+- Feature or behavior work: start with
+  `docs/development/feature-development-workflow.md` when the task adds a
+  feature or API; changes product behavior; crosses frontend and backend;
+  affects state, permissions, notifications, visibility, trash, restore,
+  permanent deletion, storage, transactions, migrations, or other Domain
+  side effects; fixes a Domain bug; or performs an architectural refactor.
 - General development, architecture, or code responsibility:
   `docs/development/code-organization.md`.
 - Local environment, Docker, or environment configuration:
@@ -46,18 +52,43 @@ Read only the smallest set needed for the task:
 
 Do not load every document for every task.
 
+### Feature and behavior classification
+
+- Class 0 non-behavioral work uses the minimum applicable documentation and
+  verification; it does not need the full feature gate.
+- Class 1 localized behavior uses the workflow's concise contract, focused
+  search, impact, tests, and bounded verification.
+- Class 2 feature, cross-layer, or Domain work must complete the workflow's
+  pre-implementation gate before application changes.
+- A bug fix identifies the canonical expected behavior and begins with focused
+  failing evidence. Domain or cross-layer bug fixes also use the Class 2 gate.
+- A refactor declares behavior unchanged and uses characterization evidence as
+  needed; stop and reclassify if behavior must change.
+
+Add only the documents selected by the task: code organization for placement,
+validation for checks and CI, UI guidance for presentation, affected Domain
+documents for product behavior, migration safety for persisted schema or data,
+and production safety only for production work.
+
+This Skill identifies the task, selects documents, confirms the applicable
+pre-implementation gate, and applies stop conditions. Contract templates,
+test matrices, red-green details, validation commands, and Domain transition
+rules remain in their canonical documents.
+
 ## Standard workflow
 
 1. Confirm the repository root, branch, HEAD, and working-tree state.
 2. Define the files and operations that are allowed and prohibited.
-3. Search for the nearest existing implementation of the same responsibility.
-4. Read the minimum canonical documents selected by task routing.
-5. Determine and report whether the task has Domain impact.
-6. Implement the smallest coherent change across every affected layer.
-7. Apply bounded verification from the canonical validation policy.
-8. When CI evidence is required, wait for the selected run to reach a terminal
+3. Classify feature or behavior work and complete its applicable canonical
+   pre-implementation gate.
+4. Search for the nearest existing implementation of the same responsibility.
+5. Read the minimum canonical documents selected by task routing.
+6. Determine and report whether the task has Domain impact.
+7. Implement the smallest coherent change across every affected layer.
+8. Apply bounded verification from the canonical validation policy.
+9. When CI evidence is required, wait for the selected run to reach a terminal
    state.
-9. Report completion using the contract in `AGENTS.md`.
+10. Report completion using the contract in `AGENTS.md`.
 
 ## Domain impact routing
 
@@ -97,6 +128,8 @@ Stop and report when:
 
 - the working tree contains changes of unknown ownership;
 - completing the task requires expanding beyond its authorized scope;
+- a Class 2 pre-implementation gate is incomplete;
+- a refactor requires an unresolved behavior change;
 - code, tests, and canonical documents disagree;
 - a product decision is required;
 - a destructive, production, or migration operation lacks explicit authority;

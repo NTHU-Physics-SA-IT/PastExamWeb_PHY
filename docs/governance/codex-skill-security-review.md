@@ -27,8 +27,29 @@ As of 2026-07-24, the reviewed Skills are no longer stored in this repository. T
   `~/.codex/skills/` to `~/.agents/skills/`.
 - Repository `.codex/skills/` remains unused and must not be restored as an
   alternative location.
-- **Fresh-session repository load verification: Passed.** Explicit and
-  implicit runtime verification results are recorded below.
+- **Base repository load verification: Passed.** Explicit and implicit runtime
+  verification results for the earlier Skill migration are recorded below.
+
+## 2026-07-29 feature-workflow routing update
+
+- Repository Skill routing now includes the Active
+  `docs/development/feature-development-workflow.md` procedure for feature,
+  behavior, Domain bug-fix, and architectural-refactor work.
+- The Skill remains instruction-only. This update adds no scripts, references,
+  assets, MCP dependencies, hooks, or network actions.
+- `AGENTS.md` and the Active canonical documents remain higher-priority
+  authorities; the Skill still only classifies tasks, selects documents,
+  confirms gates, and applies stop conditions.
+- **Static validation:** Completed on
+  `docs/feature-development-workflow`; Markdown, link/path, frontmatter,
+  instruction-only structure, authority-boundary, and protected-path checks
+  passed.
+- **Fresh-session explicit feature-workflow verification:** Pending.
+- **Fresh-session implicit feature-workflow verification:** Pending.
+
+The earlier runtime evidence below remains valid for repository discovery and
+precedence. It does not claim that this new routing has been exercised in a
+fresh session.
 
 ## Fresh-session verification
 
@@ -60,8 +81,10 @@ As of 2026-07-24, the reviewed Skills are no longer stored in this repository. T
 
 ### Verified migration state
 
-- The repository Skill has completed static and fresh-session runtime
-  verification.
+- The repository Skill completed static and fresh-session runtime verification
+  for the earlier migration scope.
+- The 2026-07-29 feature-workflow routing expansion remains pending the
+  explicit and implicit fresh-session checks listed above.
 - The old user Skill has exited the active scan path.
 - The legacy backup is retained outside active scan roots and was not loaded
   by the runtime.
