@@ -130,6 +130,17 @@ Do not guess which observed behavior should become the product invariant.
 - Production backup, candidate activation, deployment, and rollback follow
   [Production deployment](docs/production-deployment.md). Do not infer
   production authority from a development task.
+- A schema-changing milestone is not merge-ready from repository tests alone.
+  It must separately establish Repository Green, Environment Green, Human
+  Verification Green, and Merge Green as defined by the canonical feature
+  workflow. An unhealthy affected backend makes Environment Green and
+  merge-ready claims false.
+- Keep repository changes, data remediation, and environment operations in
+  separately authorized tasks and evidence chains. Never hide persistent-local
+  or production data mutation inside a code task.
+- Use only sealed repository audit adapters through the bounded read-only audit
+  runner. Do not pass arbitrary SQL, identifiers, or free-text output through
+  that interface.
 
 ## Bounded verification
 

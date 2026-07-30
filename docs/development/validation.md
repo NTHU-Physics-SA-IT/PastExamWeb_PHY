@@ -140,12 +140,26 @@ Report checks under:
 
 - **Passed**
 - **Failed**
-- **Skipped**
+- **Skipped by instruction**
 - **Unavailable**
 - **Not applicable**
 
 For each material check, state what it proved and what it did not prove. Never
 claim build, test, migration, browser, or deployment success without evidence.
+`Failed` is an executed check that found a defect. `Skipped by instruction`
+records an explicit scope restriction. `Unavailable` records a missing safe
+environment, permission, or dependency and does not cancel a requirement.
+`Not applicable` means there is no causal relationship to the task. A required
+item in any state other than `Passed` keeps its completion layer non-green.
+
+For the bounded database audit runner, `complete` additionally requires the
+expected environment, ledger, targeted schema and enum gates; a single
+non-interactive input stream; a confirmed read-only transaction; an explicit
+`ROLLBACK`; the completion sentinel; approved aggregate-only output; and
+mutual-exclusivity and conservation checks. A timeout, lock wait, SQL/type
+error, truncated transport, missing rollback/sentinel, unknown output label, or
+partial result is an audit error or incomplete transport, never successful
+evidence. The runner performs no implicit retry.
 
 ## Test evidence
 
