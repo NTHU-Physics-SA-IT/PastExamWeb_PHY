@@ -101,7 +101,9 @@ cannot be proven.
 ## Canonical Compose use
 
 - Prefer `scripts/dev-compose.sh preflight`, `config`, `start`, `status`,
-  `logs`, and `stop` for the normal local stack.
+  `logs`, `schema-status`, `backend-pause`, `backend-resume`, and `stop` for
+  the normal local stack. The schema commands operate only on existing exact
+  containers; they neither create a stack nor run a migration.
 - Do not create a second, vaguely named Compose project merely to bypass a
   fault in the canonical stack.
 - An additional Compose environment is allowed only when the task explicitly

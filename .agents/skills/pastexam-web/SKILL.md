@@ -52,6 +52,26 @@ Read only the smallest set needed for the task:
 
 Do not load every document for every task.
 
+For schema-changing milestones, route the work through the canonical completion
+layers instead of treating branch CI as sufficient:
+
+1. establish Repository Green on isolated PostgreSQL;
+2. use `scripts/dev-compose.sh schema-status` for the sealed persistent-local
+   aggregate preflight;
+3. keep remediation, guarded migration rehearsal, and runtime operations in
+   separately authorized tasks;
+4. require Environment Green and applicable Human Verification Green before
+   merge authorization; and
+5. require the milestone merge commit's own exact-SHA CI for Merge Green.
+
+When the repository head will move ahead of the persistent-local ledger, route
+through `backend-pause` before exposing the incompatible tree and
+`backend-resume` only after `schema-status` proves compatibility. Never
+automatically downgrade persistent local data. Production comparison always
+uses actual ledger, deployed-release expected head, and development head as
+three separate facts; only a separately authorized production aggregate audit
+may select the runner's production mode.
+
 ### Feature and behavior classification
 
 - Class 0 non-behavioral work uses the minimum applicable documentation and

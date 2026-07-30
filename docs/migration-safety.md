@@ -17,6 +17,9 @@ uv run python migrate.py preflight --json
 uv run python migrate.py upgrade
 uv run python migrate.py reconcile --check
 uv run python migrate.py reconcile --check --json
+uv run python audit.py run \
+  --audit archive-submission-self-delete-eligibility \
+  --mode isolated-test
 ```
 
 All preflight and reconciliation checks are read-only. Production-style
@@ -191,6 +194,12 @@ Modes remain separate:
 This runner is not a SQL shell, migration wrapper, schema reconciliation
 replacement, data remediation tool, production repair tool, or generic
 database console.
+
+For the persistent local stack, invoke the same sealed adapter through
+`scripts/dev-compose.sh schema-status`. `backend-resume` runs that compatibility
+gate before starting an existing paused backend; it never creates a container
+or performs an upgrade. `backend-pause` and `backend-resume` are deliberate
+schema-branch controls, not general restart shortcuts.
 
 ## Migration-chain rule
 
