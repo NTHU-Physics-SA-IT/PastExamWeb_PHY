@@ -176,14 +176,21 @@ non-null identities are invalid and must fail closed.
   because restore cleared its original deletion provenance;
 - a submission that is currently identifiable only as an administrator
   deletion is conservatively backfilled to `true`;
+- a historical, metadata-consistent recognized system/cascade deletion is
+  conservatively backfilled to `true`;
 - future administrator deletion preserves the existing value rather than
+  consuming eligibility;
+- future system/cascade deletion preserves the existing value rather than
   consuming eligibility;
 - restore, review transitions, and no-op operations never reset `true`.
 
-The historical administrator rule is migration-only. Recognized
-system/cascade deletion, unknown provenance, ownership conflicts, lifecycle
-contradictions, overlapping classifications, and unclassified rows abort the
-migration rather than selecting a value.
+The historical administrator and recognized system/cascade rules are
+migration-only. Only the tracked, internally consistent system/cascade format
+is accepted. Unknown provenance, mismatched system metadata, ownership
+conflicts, lifecycle contradictions, overlapping classifications, and
+unclassified rows abort the migration rather than selecting a value. Future
+administrator and system/cascade preservation remains part of the later
+application milestone.
 
 The persisted field and fail-closed historical backfill are only the schema
 prerequisite. Owner-delete authorization, retry/no-op responses, restore

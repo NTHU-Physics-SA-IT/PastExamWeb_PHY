@@ -121,13 +121,19 @@ Consequently:
 - consuming eligibility does not remove ownership or submission-number
   visibility;
 - restoring the submission or its paired Archive does not reset eligibility;
+- metadata-consistent historical system/cascade deletion is conservatively
+  backfilled as consumed, while a future system/cascade delete preserves the
+  submission's existing value;
+- conflicting requester and legacy owner identities remain invalid and fail
+  closed during migration;
 - sharing one Archive does not merge sibling eligibility or make that
   relationship a migration blocker;
 - the eligibility migration does not update Archive rows.
 
 This schema establishes durable state and historical backfill only. The later
 Stage 5A application milestone still owns route authorization, conflict/no-op
-responses, read capability projection, and frontend controls.
+responses, future administrator and system/cascade value preservation, read
+capability projection, and frontend controls.
 
 ## ArchiveSubmissionEvent
 

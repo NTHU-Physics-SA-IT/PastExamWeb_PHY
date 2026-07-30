@@ -119,12 +119,15 @@ The ArchiveSubmission owner-self-delete eligibility migration classifies the
 reviewed source rows before adding its non-null boolean. Historical owner
 self-deletes, active restored rows with cleared deletion provenance, and
 currently identifiable administrator-deleted rows are conservatively
-backfilled as consumed. Clean active rows are not consumed. System/cascade
-deletions, unknown actor/reason combinations, ownership or lifecycle
-contradictions, overlapping buckets, unclassified rows, and conservation
-failures abort the PostgreSQL transaction. The migration does not infer one
-submission's value from a shared Archive and does not modify Archive,
-ownership, review, delete, or restore metadata.
+backfilled as consumed. Metadata-consistent historical system/cascade rows
+using the tracked linked-Archive permanent-deletion format are also
+conservatively backfilled as consumed; future system/cascade deletion preserves
+the existing value and remains application-milestone work. Clean active rows
+are not consumed. Unknown actor/reason combinations, mismatched system
+metadata, ownership or lifecycle contradictions, overlapping buckets,
+unclassified rows, and conservation failures abort the PostgreSQL transaction.
+The migration does not infer one submission's value from a shared Archive and
+does not modify Archive, ownership, review, delete, or restore metadata.
 
 On the first bootstrap, one missing canonical key or any extra custom category
 is evidence that the database is not the expected clean initialized target,

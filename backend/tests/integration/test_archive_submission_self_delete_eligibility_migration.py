@@ -631,15 +631,74 @@ def test_supported_backfill_categories_and_shared_archive_are_independent(
         )
 
 
+def test_recognized_system_history_backfills_consumed_for_admin_and_owner_actors(
+    migration_engine: Engine,
+) -> None:
+    owner_id = _insert_user(migration_engine, suffix="system-history-owner")
+    admin_id = _insert_user(
+        migration_engine,
+        suffix="system-history-admin",
+        is_admin=True,
+    )
+    admin_actor_id = _insert_submission(
+        migration_engine,
+        suffix="system-history-admin-actor",
+        requester_id=owner_id,
+        status="DELETED",
+        deleted_at=NOW,
+        deleted_by_id=admin_id,
+        delete_reason="linked archive permanently deleted",
+        lifecycle_reason="linked_archive_permanently_deleted",
+    )
+    owner_actor_id = _insert_submission(
+        migration_engine,
+        suffix="system-history-owner-actor",
+        requester_id=owner_id,
+        status="DELETED",
+        deleted_at=NOW,
+        deleted_by_id=owner_id,
+        delete_reason="linked archive permanently deleted",
+        lifecycle_reason="linked_archive_permanently_deleted",
+    )
+    before = _source_snapshot(migration_engine)
+
+    command.upgrade(alembic_config(), NEW_REVISION)
+
+    assert _eligibility_values(migration_engine) == {
+        admin_actor_id: True,
+        owner_actor_id: True,
+    }
+    assert _source_snapshot(migration_engine) == before
+
+
 @pytest.mark.parametrize(
     ("case", "overrides"),
     [
         (
-            "system-cascade",
+            "system-reason-lifecycle-mismatch",
             {
                 "status": "DELETED",
                 "deleted_at": NOW,
                 "deleted_by_id": "other",
+                "delete_reason": "linked archive permanently deleted",
+            },
+        ),
+        (
+            "system-lifecycle-reason-mismatch",
+            {
+                "status": "DELETED",
+                "deleted_at": NOW,
+                "deleted_by_id": "other",
+                "delete_reason": "admin deleted",
+                "lifecycle_reason": "linked_archive_permanently_deleted",
+            },
+        ),
+        (
+            "system-actor-missing",
+            {
+                "status": "DELETED",
+                "deleted_at": NOW,
+                "deleted_by_id": 2_147_483_647,
                 "delete_reason": "linked archive permanently deleted",
                 "lifecycle_reason": "linked_archive_permanently_deleted",
             },
@@ -785,7 +844,7 @@ def test_postflight_statement_failure_rolls_back_ddl_backfill_and_ledger(
     assert _source_snapshot(migration_engine) == before
 
 
-def test_production_like_a4_path_backfills_ten_false_and_one_true(
+def test_production_like_a4_path_backfills_base_and_system_history(
     migration_engine: Engine,
 ) -> None:
     _reset_schema_to(migration_engine, PRODUCTION_BASE_REVISION)
@@ -812,14 +871,36 @@ def test_production_like_a4_path_backfills_ten_false_and_one_true(
         delete_reason="admin deleted",
         category="FRESHMAN",
     )
+    _insert_submission(
+        migration_engine,
+        suffix="production-like-system-admin-actor",
+        requester_id=owner_id,
+        status="DELETED",
+        deleted_at=NOW,
+        deleted_by_id=admin_id,
+        delete_reason="linked archive permanently deleted",
+        lifecycle_reason="linked_archive_permanently_deleted",
+        category="FRESHMAN",
+    )
+    _insert_submission(
+        migration_engine,
+        suffix="production-like-system-owner-actor",
+        requester_id=owner_id,
+        status="DELETED",
+        deleted_at=NOW,
+        deleted_by_id=owner_id,
+        delete_reason="linked archive permanently deleted",
+        lifecycle_reason="linked_archive_permanently_deleted",
+        category="FRESHMAN",
+    )
     before = _source_snapshot(migration_engine)
 
     command.upgrade(alembic_config(), NEW_REVISION)
 
     values = list(_eligibility_values(migration_engine).values())
-    assert len(values) == 11
+    assert len(values) == 13
     assert values.count(False) == 10
-    assert values.count(True) == 1
+    assert values.count(True) == 3
     assert _source_snapshot(migration_engine) == before
     assert _current_revision(migration_engine) == NEW_REVISION
 

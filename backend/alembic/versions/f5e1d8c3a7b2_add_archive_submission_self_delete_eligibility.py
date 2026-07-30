@@ -37,6 +37,11 @@ WITH base AS (
             SELECT 1
             FROM users AS actor
             WHERE actor.id = submission.deleted_by_id
+        ) AS deleted_actor_exists,
+        EXISTS (
+            SELECT 1
+            FROM users AS actor
+            WHERE actor.id = submission.deleted_by_id
               AND actor.is_admin IS TRUE
         ) AS deleted_by_admin,
         (
@@ -106,19 +111,13 @@ flags AS (
             ownership_valid
             AND status::text = 'DELETED'
             AND deleted_at IS NOT NULL
+            AND deleted_by_id IS NOT NULL
+            AND deleted_actor_exists
             AND restored_at IS NULL
             AND restored_by_id IS NULL
-            AND (
-                (
-                    delete_reason = 'linked archive permanently deleted'
-                    AND lifecycle_reason =
-                        'linked_archive_permanently_deleted'
-                )
-                OR (
-                    delete_reason = 'group hard delete'
-                    AND lifecycle_reason IS NULL
-                )
-            )
+            AND delete_reason = 'linked archive permanently deleted'
+            AND lifecycle_reason =
+                'linked_archive_permanently_deleted'
         ) AS recognized_system_delete
     FROM base
 ),
@@ -129,6 +128,7 @@ top_level AS (
             owner_self_delete
             OR active_restored_unknown
             OR historical_admin_delete
+            OR recognized_system_delete
         ) AS automatic_true,
         clean_active AS automatic_false,
         (
@@ -169,7 +169,6 @@ top_level AS (
                         'linked_archive_permanently_deleted'
                 )
             )
-            OR recognized_system_delete
             OR (
                 ownership_valid
                 AND status::text = 'DELETED'
