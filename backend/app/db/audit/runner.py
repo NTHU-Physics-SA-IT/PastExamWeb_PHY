@@ -92,9 +92,7 @@ def _identity_expression(request: AuditRequest) -> str:
             f"current_database() = {_sql_literal(expected_database or 'archive_db')}"
         )
         role_check = (
-            f"current_user = {_sql_literal(expected_role)}"
-            if expected_role
-            else "pg_get_userbyid(database.datdba) = current_user"
+            f"current_user = {_sql_literal(expected_role)}" if expected_role else "TRUE"
         )
         privilege_check = "TRUE"
     else:

@@ -252,6 +252,16 @@ def test_each_mode_has_a_separate_identity_gate(
     assert identity_fragment in sql
 
 
+def test_persistent_local_identity_uses_container_and_database_not_owner_role() -> None:
+    sql = build_transaction_sql(
+        request(AuditMode.PERSISTENT_LOCAL),
+        get_audit_adapter(ELIGIBILITY_AUDIT_ID, 1),
+    )
+
+    assert "current_database() = 'archive_db'" in sql
+    assert "pg_get_userbyid(database.datdba) = current_user" not in sql
+
+
 def test_human_summary_is_derived_without_another_process(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
