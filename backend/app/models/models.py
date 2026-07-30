@@ -400,6 +400,14 @@ class ArchiveSubmission(SQLModel, table=True):
     status: SubmissionStatus = Field(default=SubmissionStatus.PENDING, index=True)
     requester_id: int = Field(foreign_key="users.id", index=True)
     owner_id: Optional[int] = Field(default=None)
+    owner_self_delete_consumed: bool = Field(
+        default=False,
+        sa_column=Column(
+            Boolean,
+            nullable=False,
+            server_default=text("false"),
+        ),
+    )
     reviewer_id: Optional[int] = Field(default=None, foreign_key="users.id")
     review_note: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
     is_admin_upload: bool = Field(

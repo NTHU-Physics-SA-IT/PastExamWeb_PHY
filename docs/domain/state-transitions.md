@@ -161,6 +161,35 @@ cover pending, administrator-takedown, or sibling-group cases.
 Current grouped restore can approve linked submissions without reliably
 recovering a pending/rejected previous state.
 
+### Owner self-delete eligibility persistence
+
+Ownership and owner self-delete eligibility are separate persisted concepts.
+`ArchiveSubmission.requester_id` is the normal owner identity; legacy
+`owner_id` is a fallback only when a requester is genuinely absent. Conflicting
+non-null identities are invalid and must fail closed.
+
+`owner_self_delete_consumed` is a monotonic boolean:
+
+- new and historically clean active submissions start as `false`;
+- a historical owner self-delete is backfilled to `true`;
+- a historical active restored row is conservatively backfilled to `true`
+  because restore cleared its original deletion provenance;
+- a submission that is currently identifiable only as an administrator
+  deletion is conservatively backfilled to `true`;
+- future administrator deletion preserves the existing value rather than
+  consuming eligibility;
+- restore, review transitions, and no-op operations never reset `true`.
+
+The historical administrator rule is migration-only. Recognized
+system/cascade deletion, unknown provenance, ownership conflicts, lifecycle
+contradictions, overlapping classifications, and unclassified rows abort the
+migration rather than selecting a value.
+
+The persisted field and fail-closed historical backfill are only the schema
+prerequisite. Owner-delete authorization, retry/no-op responses, restore
+lockout, and frontend capability enforcement remain part of the later Stage 5A
+application milestone and are not claimed as implemented here.
+
 ## Category lifecycle
 
 ### Intended invariant

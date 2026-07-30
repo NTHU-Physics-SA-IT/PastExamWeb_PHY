@@ -25,7 +25,7 @@ current implementation separately from the intended product relation.
 | `Course` | Required parent of `Archive`; category is a string key; has soft-delete metadata | Groups archives for navigation; course trash may hide/deactivate children but must not rewrite independent submission review results | Confirmed by code in `courses.py` and `trash.py` |
 | `CourseSubmission` | Requester/reviewer and optional `created_course_id`; no soft-delete metadata in the current model | A course/category request attached to an archive-submission flow; created category/course becomes independent after approval | Implementation gap: current model is a separate review record and has no defined trash lifecycle |
 | `Archive` | Required `course_id`, optional uploader, one `object_name`, optional soft-delete metadata; submissions point to it with `created_archive_id` | One independently accessible approved public file for authenticated system users, within a logical exam group | Current naming can be mistaken for the whole logical group |
-| `ArchiveSubmission` | Required requester and object name; optional reviewer, owner, and `created_archive_id`; review and trash fields coexist | One independent submission and PDF. Its review/lifecycle must not alter siblings | Partially implemented; group lifecycle helpers can affect linked siblings |
+| `ArchiveSubmission` | Required requester and object name; optional reviewer, legacy owner, and `created_archive_id`; review/trash fields and monotonic owner-self-delete eligibility coexist | One independent submission and PDF. Ownership survives eligibility consumption, and its review/lifecycle must not alter siblings | Eligibility persistence is implemented as a schema prerequisite; application enforcement and group-lifecycle gaps remain |
 | `ArchiveSubmissionEvent` | Unique `submission_id` integer and timestamp, without a declared FK | Immutable statistical event retained after submission deletion, with active link/PII detached as needed | Implementation gap: permanent-delete helper currently deletes events |
 | `ArchiveDiscussionMessage` / `ArchiveDiscussionLike` | Message requires archive and user IDs; parent/reply references form a thread; likes cascade with message/user deletion | Discussion belongs to the referenced public item; soft-deleted messages should not remain an active source | Confirmed by code and `test_archive_discussion.py` |
 | `CommentReport` | Reporter FK cascades; target and actor/resource FKs mostly `SET NULL`; snapshots preserve context; independent soft delete | Report history survives source changes while active uniqueness and source availability remain explicit | Partially implemented |
@@ -105,6 +105,29 @@ do not cover sibling submissions that share one Archive.
 Submission-group restore can set a linked submission to approved without
 preserving every prior review state, and group operations can affect siblings.
 Characterization and transition tests are required before changing this code.
+
+## ArchiveSubmission ownership and self-delete eligibility
+
+The requester is the normal submission owner. Legacy `owner_id` applies only
+when requester identity is genuinely absent; two conflicting identities do not
+create two owners. Administrator authorization is independent.
+
+Owner self-delete eligibility belongs to one `ArchiveSubmission`, not to its
+paired Archive, a shared `created_archive_id` group, or sibling submissions.
+Consequently:
+
+- each submission stores and backfills
+  `owner_self_delete_consumed` independently;
+- consuming eligibility does not remove ownership or submission-number
+  visibility;
+- restoring the submission or its paired Archive does not reset eligibility;
+- sharing one Archive does not merge sibling eligibility or make that
+  relationship a migration blocker;
+- the eligibility migration does not update Archive rows.
+
+This schema establishes durable state and historical backfill only. The later
+Stage 5A application milestone still owns route authorization, conflict/no-op
+responses, read capability projection, and frontend controls.
 
 ## ArchiveSubmissionEvent
 

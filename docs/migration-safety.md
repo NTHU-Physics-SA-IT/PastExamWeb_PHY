@@ -46,7 +46,9 @@ Reviewed manifests currently cover:
 - `a4c7e9d2f6b1`: the reviewed pre-canonicalization test baseline;
 - `c9e4f1a7b2d6`: the canonical-category schema before metadata alignment;
 - `e3b7c1d9f5a2`: the reviewed schema before the archive-report workflow;
-- `a7c3e9f1b5d2`: the current repository head and SQLModel metadata contract.
+- `a7c3e9f1b5d2`: the reviewed schema before persisted ArchiveSubmission
+  owner-self-delete eligibility;
+- `f5e1d8c3a7b2`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,
@@ -112,6 +114,17 @@ references. They preserve administrator metadata and submission snapshot
 fields. Ambiguous canonical/legacy rows or normalized-name collisions abort
 the transaction; migrations never choose a row by ID or delete a conflicting
 row automatically.
+
+The ArchiveSubmission owner-self-delete eligibility migration classifies the
+reviewed source rows before adding its non-null boolean. Historical owner
+self-deletes, active restored rows with cleared deletion provenance, and
+currently identifiable administrator-deleted rows are conservatively
+backfilled as consumed. Clean active rows are not consumed. System/cascade
+deletions, unknown actor/reason combinations, ownership or lifecycle
+contradictions, overlapping buckets, unclassified rows, and conservation
+failures abort the PostgreSQL transaction. The migration does not infer one
+submission's value from a shared Archive and does not modify Archive,
+ownership, review, delete, or restore metadata.
 
 On the first bootstrap, one missing canonical key or any extra custom category
 is evidence that the database is not the expected clean initialized target,
