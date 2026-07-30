@@ -408,6 +408,51 @@ Merge strategy and merge readiness are owned by
 `--no-ff`, its new merge commit needs its own pushed, exact-SHA successful CI
 run; source-branch CI is not a substitute.
 
+## Milestone completion layers
+
+Use separate completion layers so one kind of evidence cannot silently replace
+another:
+
+| Layer | Required evidence | What it does not prove |
+| --- | --- | --- |
+| Repository Green | Focused red/green evidence, isolated PostgreSQL Level 3 when schema is affected, migration graph and manifest checks, bounded neighbor tests, final branch exact-SHA CI | Persistent historical data can upgrade; the running site is healthy; a user accepted the result |
+| Environment Green | Persistent-local aggregate preflight, blocker classification, guarded migration rehearsal when applicable, backend health, public/authentication/admin-boundary smoke, final environment inventory | Production data distribution; product acceptance; merge-commit CI |
+| Human Verification Green | Real login, relevant homepage/public/admin/trash flows, and the visible outcome recorded by the user | Automated regression safety or deployment safety |
+| Merge Green | Source exact-SHA CI, recorded required human verification, `--no-ff` milestone merge, source-tree equality, merge exact-SHA CI, and local runtime continuity | Production deployment or production migration |
+
+Evidence statuses are strict:
+
+- `Passed` means the exact required check completed and supported its claim.
+- `Failed` means the check ran and found a defect or violated condition.
+- `Skipped by instruction` means the task deliberately did not authorize it;
+  it cannot satisfy a required layer.
+- `Unavailable` means a required dependency or environment could not be
+  obtained safely; it remains blocking.
+- `Not applicable` means the check has no relationship to the task, never that
+  it was merely inconvenient.
+
+Schema-changing milestones require all four layers. Migration/audit tooling
+without product UI requires Repository, Environment, and Merge Green; record
+Human Verification as not applicable only when the tool cannot affect a user
+journey. Application behavior requires Repository, Human Verification, and
+Merge Green, plus Environment Green whenever it changes schema, startup,
+storage, authentication, or a persistent runtime dependency. A localized
+non-schema change may use only Repository and Merge Green when its impact map
+proves the other layers unrelated. No affected milestone may be described as
+merge-ready while its backend is unhealthy. Production activation is a later,
+separately authorized deployment state and is never part of Merge Green.
+
+## Repository, data, and operations task separation
+
+| Task type | May do | Must not do | Required report boundaries |
+| --- | --- | --- | --- |
+| Repository code | Change code, migrations, tests, and canonical docs; commit, push, and obtain CI when authorized | Mutate persistent-local or production data; conceal environment repair in a feature commit | Repository branch/SHA/diff, tests, CI, with data and container mutations explicitly `None` |
+| Data remediation | Apply one approved predicate in a bounded transaction with before/after aggregates and exact affected count | Modify repository files, use an unconditional update, expand to additional categories, or expose identifiers/PII | Repository state, environment identity, predicate category, count, commit/rollback, production impact |
+| Operations | Perform separately authorized container, backup, recovery, or deployment actions with a rollback boundary | Introduce product behavior or mix runtime changes into a feature commit | Repository state, container/resource changes, data mutation, rollback/recovery state, production impact |
+
+If a discovery changes task type, stop and open a separately scoped task
+instead of combining evidence chains.
+
 ## Completion gate
 
 Before reporting a behavior change complete, confirm as applicable:

@@ -17,6 +17,9 @@ uv run python migrate.py preflight --json
 uv run python migrate.py upgrade
 uv run python migrate.py reconcile --check
 uv run python migrate.py reconcile --check --json
+uv run python audit.py run \
+  --audit archive-submission-self-delete-eligibility \
+  --mode isolated-test
 ```
 
 All preflight and reconciliation checks are read-only. Production-style
@@ -152,6 +155,51 @@ Destructive tests additionally require an explicit `TEST_DATABASE_URL`, an
 isolation marker, approved host/database/role prefixes, a database owned by
 the connected non-superuser test role, and a target distinct from runtime
 configuration. They never fall back to `DATABASE_URL` or `archive_db`.
+
+## Bounded read-only aggregate audits
+
+`backend/audit.py` is the sealed audit entry point. It accepts only registered
+audit IDs and versions; callers cannot provide SQL, table names, output fields,
+retry behavior, or free-form predicates. A versioned adapter owns historical
+constants and aggregate predicates independently of application services, and
+focused parity tests keep a migration-specific adapter aligned with its
+reviewed migration classifier. Adding a classifier requires a new registered
+version and synthetic PostgreSQL evidence.
+
+Every execution sends one complete input stream to non-interactive `psql` and
+uses `ON_ERROR_STOP`, `REPEATABLE READ READ ONLY`, statement/lock/idle
+timeouts, environment identity checks, a one-row ledger check, targeted schema
+and enum continuity (including `pg_enum.enumlabel::text`), aggregate-only
+classification, mutual-exclusivity and conservation checks, explicit
+`ROLLBACK`, and a final completion sentinel. It creates no server file,
+temporary object, lock, function, or persistent state and never emits row IDs,
+PII, raw free-text reasons, or timestamps.
+
+The strict machine-readable result distinguishes `complete`, `data_blocked`,
+`audit_error`, and `incomplete_transport`. Human output is derived from the
+same validated object and does not query again. Unknown fields, more than the
+bounded combination count, an unexpected revision/environment/enum, a write
+token, a timeout, a psql error, missing rollback, or truncated transport fails
+closed. There is no implicit retry or repair operation.
+
+Modes remain separate:
+
+- isolated test mode reuses the destructive-test identity guard;
+- persistent-local mode requires the exact healthy `pastexam-dev` PostgreSQL
+  container and never migrates or repairs it; and
+- production aggregate-only mode requires both task-level authorization and
+  the explicit CLI production gate, plus the exact production container
+  identity. Merely selecting the mode is not production authority.
+
+This runner is not a SQL shell, migration wrapper, schema reconciliation
+replacement, data remediation tool, production repair tool, or generic
+database console.
+
+For the persistent local stack, invoke the same sealed adapter through
+`scripts/dev-compose.sh schema-status`. `backend-resume` runs that compatibility
+gate before starting an existing paused backend; it never creates a container
+or performs an upgrade. `backend-pause` and `backend-resume` are deliberate
+schema-branch controls, not general restart shortcuts.
 
 ## Migration-chain rule
 

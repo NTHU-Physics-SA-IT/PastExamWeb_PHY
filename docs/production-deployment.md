@@ -89,6 +89,43 @@ must not be dispatched until production revision discovery, role creation,
 external configuration, backup destinations, and approval rules have been
 reviewed in a separately authorized production change.
 
+## Production schema comparison contract
+
+Production schema readiness is a three-way comparison:
+
+1. the actual production `alembic_version` ledger and targeted schema
+   fingerprint;
+2. the migration head expected by the exact deployed backend commit, resolved
+   from that commit's migration graph; and
+3. the current development head, used only to describe a future upgrade path.
+
+Production first compares with the deployed release. A production ledger that
+differs from development is not by itself drift. A migration revision is not a
+Git commit ID, and the deployed graph must be read from the deployed commit
+tree. Classification constants needed by a later aggregate audit must be
+compared between the deployed and current versions. Only after the deployed
+head, one-row ledger, targeted schema and enum shape, and applicable constants
+are reconciled may a separately authorized aggregate-only production audit
+run.
+
+Use these readiness descriptions:
+
+- `matches deployed release`: ledger and targeted schema match the deployed
+  backend expectation;
+- `reviewed older state`: the state is a reviewed ancestor and no newer app is
+  claimed to be running;
+- `behind deployed app`: ledger/schema are older than the deployed backend
+  expectation;
+- `schema ahead of ledger` or `schema behind ledger`: the fingerprint and
+  ledger disagree in that direction;
+- `ahead of deployed app`: production schema is newer than the deployed
+  backend expectation; and
+- `untracked/divergent`: the state is absent from or incompatible with the
+  reviewed deployed graph.
+
+Development-head difference is reported separately and never substitutes for
+the deployed-release comparison.
+
 ## Backup and restore
 
 `scripts/postgres-logical-backup.sh` produces a custom-format `pg_dump`,

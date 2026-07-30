@@ -9,7 +9,7 @@ env_file="${PASTEXAM_DEV_COMPOSE_ENV_FILE:-${default_env_file}}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/dev-compose.sh <preflight|config|start|stop|status|logs>
+Usage: scripts/dev-compose.sh <preflight|config|start|stop|status|logs|schema-status|backend-pause|backend-resume>
 
 The development stack reads secrets and resource identities from the ignored
 docker/.env file. It never bootstraps, destroys volumes, or targets
@@ -80,6 +80,73 @@ compose() {
     "$@"
 }
 
+container_state() {
+  local container_name="$1"
+  docker inspect \
+    --format \
+    '{{.Name}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' \
+    "${container_name}"
+}
+
+require_container_state() {
+  local container_name="$1"
+  local service="$2"
+  local state="$3"
+  local health="$4"
+  local actual expected
+  actual="$(container_state "${container_name}")" \
+    || fail "cannot inspect ${container_name}"
+  expected="/${container_name}|${COMPOSE_PROJECT_NAME}|${service}|${state}|${health}"
+  [[ "${actual}" == "${expected}" ]] \
+    || fail "${container_name} identity/state is incompatible: ${actual}"
+}
+
+audit_python() {
+  local executable="${PASTEXAM_DEV_AUDIT_PYTHON:-${repo_root}/backend/.venv/bin/python}"
+  [[ -x "${executable}" ]] \
+    || fail "missing backend audit environment; run 'uv sync --locked' in backend"
+  printf '%s\n' "${executable}"
+}
+
+schema_status() {
+  preflight
+  require_container_state "pastexam-dev-postgres" "db" "running" "healthy"
+  local executable
+  executable="$(audit_python)"
+  (
+    cd "${repo_root}/backend"
+    "${executable}" audit.py run \
+      --audit archive-submission-self-delete-eligibility \
+      --mode persistent-local \
+      --output text
+  )
+}
+
+backend_pause() {
+  preflight
+  require_container_state "pastexam-dev-backend" "backend" "running" "healthy"
+  compose stop backend
+}
+
+backend_resume() {
+  schema_status
+  require_container_state "pastexam-dev-backend" "backend" "exited" ""
+  compose start backend
+
+  local attempt actual
+  for attempt in {1..30}; do
+    actual="$(container_state "pastexam-dev-backend")" \
+      || fail "cannot inspect pastexam-dev-backend after resume"
+    if [[ "${actual}" == \
+      "/pastexam-dev-backend|${COMPOSE_PROJECT_NAME}|backend|running|healthy" ]]; then
+      printf 'backend=running/healthy\n'
+      return
+    fi
+    sleep 2
+  done
+  fail "backend did not become healthy after guarded resume"
+}
+
 preflight() {
   require_local_docker
   require_env_file
@@ -134,6 +201,15 @@ case "${1:-}" in
   logs)
     preflight
     compose logs --tail "${DEV_LOG_TAIL:-200}" "${@:2}"
+    ;;
+  schema-status)
+    schema_status
+    ;;
+  backend-pause)
+    backend_pause
+    ;;
+  backend-resume)
+    backend_resume
     ;;
   *)
     usage

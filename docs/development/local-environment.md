@@ -61,10 +61,49 @@ The repository has no standalone test Compose contract. CI isolation therefore
 depends on explicit project, database, role, port, volume, and cleanup choices
 in the workflows rather than on a dedicated Compose file.
 
+## Environment responsibility matrix
+
+| Environment | Identity guards | Allowed purpose and operations | Forbidden use | Credentials and cleanup | Startup/shutdown owner and evidence |
+| --- | --- | --- | --- | --- | --- |
+| Isolated test PostgreSQL | Explicit `TEST_DATABASE_URL`; database and role use `pastexam_test_`; approved host; connected non-superuser owns only the test database; target differs from runtime | Red/green fixtures, migration atomicity and downgrade, manifest, classifier, and concurrency evidence | Persistent-history upgrade claims, manual UI, or production distribution claims | Private/CI secret input; only the test lifecycle may reset its schema and clean resources it created | Test fixture/CI owns lifecycle; produces focused PostgreSQL evidence |
+| Persistent local development | Project `pastexam-dev`; exact service/container labels; persistent database identity; repository head, ledger, backend health, and bind mount checked together | Aggregate preflight, guarded local upgrade rehearsal, health/proxy smoke, and manual UI | Replacing isolated atomicity tests or representing production | Local secret files are not printed; database, roles, volumes, and user data survive ordinary stop/start | `scripts/dev-compose.sh` and the developer own lifecycle; produces environment and human-verification evidence |
+| Acceptance | Explicit controlled acceptance project, database, ports, volumes, and teardown owner | E2E and acceptance behavior in its designed stack | Local data remediation, production audit, or arbitrary migration-rehearsal substitution | Acceptance credentials stay in its workflow; clean only resources created by that run | Acceptance workflow owns startup/shutdown and produces E2E evidence |
+| Production | Exact host/container/release identity, deployed-commit graph, actual ledger, targeted schema, and explicit task authorization | Separately authorized aggregate-only audit, deployment migration, backup, activation, and recovery | Red/green experimentation, exploratory row output, local rehearsal replacement, or automatic repair | External root-owned secrets; cleanup/rollback only through the production runbook | Authorized production operations own lifecycle and produce release/audit evidence |
+
+## Schema-changing branch runtime protocol
+
+Before developing or switching a schema-changing branch, record the repository
+migration head, persistent-local ledger, backend health, and whether the
+backend source is bind-mounted from the working tree. If the repository head
+will move ahead of the local ledger, the canonical default is to pause the
+existing backend with the guarded development wrapper before exposing the new
+tree. Do not leave a fail-fast backend presented as an available site.
+
+During implementation, use isolated PostgreSQL for red/green migration work.
+Keep the persistent stack paused or explicitly marked unavailable; do not
+repeatedly restart it against a known-incompatible ledger. Once the migration
+and branch evidence are green:
+
+1. run a sealed aggregate-only persistent-local preflight;
+2. classify every blocker without row identifiers or PII;
+3. perform any approved remediation in a separate data task;
+4. run the guarded local migration rehearsal;
+5. resume the backend only after ledger/schema compatibility passes;
+6. verify backend, proxy, public, authentication, and admin boundaries; and
+7. record the required manual UI verification.
+
+Switching back to a commit that expects an older schema is blocked until a
+separately reviewed compatibility or recovery plan exists. Never automatically
+downgrade the persistent-local database. The guarded wrapper reports schema
+status and refuses backend resume when repository and ledger compatibility
+cannot be proven.
+
 ## Canonical Compose use
 
 - Prefer `scripts/dev-compose.sh preflight`, `config`, `start`, `status`,
-  `logs`, and `stop` for the normal local stack.
+  `logs`, `schema-status`, `backend-pause`, `backend-resume`, and `stop` for
+  the normal local stack. The schema commands operate only on existing exact
+  containers; they neither create a stack nor run a migration.
 - Do not create a second, vaguely named Compose project merely to bypass a
   fault in the canonical stack.
 - An additional Compose environment is allowed only when the task explicitly

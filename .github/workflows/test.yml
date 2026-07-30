@@ -103,7 +103,22 @@ jobs:
         run: |
           export TEST_DATABASE_URL="postgresql+asyncpg://${TEST_DB_USER}:${TEST_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${TEST_DATABASE_NAME}"
           export PASTEXAM_TEST_DATABASE_ISOLATED=true
-          uv run python -m pytest -q tests/integration/test_migration_safety.py
+          export TEST_DATABASE_ALLOWED_HOSTS="127.0.0.1,localhost,db"
+          export PASTEXAM_AUDIT_TEST_CONTAINER="${{ job.services.postgres.id }}"
+          uv run python -m pytest -q \
+            tests/integration/test_migration_safety.py \
+            tests/unit/test_audit_policy.py \
+            tests/unit/test_read_only_audit.py \
+            tests/integration/test_read_only_audit_integration.py
+          uv run python audit.py run \
+            --audit archive-submission-self-delete-eligibility \
+            --mode isolated-test \
+            --expected-ledger f5e1d8c3a7b2 \
+            --repository-revision "${GITHUB_SHA}" \
+            --output json
+          uv run python -m pytest -q \
+            ../scripts/tests/test_dev_compose_schema_controls.py \
+            --confcutdir=../scripts/tests
 
   backend:
     if: ${{ inputs.run_checks }}
