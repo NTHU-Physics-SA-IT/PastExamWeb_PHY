@@ -217,14 +217,22 @@ def _metadata_for_variant(variant: str) -> MetaData:
     if variant == "head":
         return metadata
     if variant not in {
+        "pre_owner_self_delete_eligibility",
         "pre_archive_reports",
         "pre_metadata_alignment",
         "pre_category_canonicalization",
     }:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
 
+    archive_submissions = metadata.tables["archive_submissions"]
+    archive_submissions._columns.remove(
+        archive_submissions.c.owner_self_delete_consumed
+    )
+    if variant == "pre_owner_self_delete_eligibility":
+        return metadata
+
+    metadata.remove(metadata.tables["archive_reports"])
     if variant == "pre_archive_reports":
-        metadata.remove(metadata.tables["archive_reports"])
         return metadata
 
     # e3b7c1d9f5a2 adds these indexes and drops the no-longer-referenced enum.

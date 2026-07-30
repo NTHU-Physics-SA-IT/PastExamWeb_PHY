@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-HEAD_SCHEMA_REVISION = "a7c3e9f1b5d2"
+HEAD_SCHEMA_REVISION = "f5e1d8c3a7b2"
 
 
 @dataclass(frozen=True)
@@ -62,6 +62,11 @@ MANIFESTS = {
         revision="e3b7c1d9f5a2",
         description="schema before archive report workflow",
         metadata_variant="pre_archive_reports",
+    ),
+    "a7c3e9f1b5d2": ManifestSpec(
+        revision="a7c3e9f1b5d2",
+        description="schema before archive submission self-delete eligibility",
+        metadata_variant="pre_owner_self_delete_eligibility",
     ),
     HEAD_SCHEMA_REVISION: ManifestSpec(
         revision=HEAD_SCHEMA_REVISION,

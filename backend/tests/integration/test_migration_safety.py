@@ -248,6 +248,30 @@ def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
     assert after.schema_matches_head is True
 
 
+@pytest.mark.parametrize(
+    "source_revision",
+    [
+        "a4c7e9d2f6b1",
+        "c9e4f1a7b2d6",
+        "e3b7c1d9f5a2",
+        "a7c3e9f1b5d2",
+    ],
+)
+def test_model_derived_reviewed_sources_have_validated_forward_upgrade(
+    source_revision: str,
+) -> None:
+    upgrade(source_revision)
+
+    before = inspect_database()
+    assert before.alembic_versions == [source_revision]
+    assert before.upgrade_allowed is True
+    assert migrate.main(["upgrade", "--json"]) == 0
+
+    after = inspect_database()
+    assert after.current_revision == head_revision()
+    assert after.schema_matches_head is True
+
+
 def test_archive_report_revision_is_additive_and_reversible(
     clean_public_schema: Engine,
 ) -> None:
@@ -293,7 +317,11 @@ def test_archive_report_revision_is_additive_and_reversible(
     command.upgrade(config, new_revision)
     assert schema_signature() == upgraded
     _, heads = revision_graph(config)
-    assert heads == [new_revision]
+    assert heads == [head_revision()]
+    with clean_public_schema.connect() as connection:
+        assert connection.scalar(
+            text("SELECT version_num FROM alembic_version")
+        ) == new_revision
 
 
 def test_known_revision_without_manifest_is_blocked() -> None:
