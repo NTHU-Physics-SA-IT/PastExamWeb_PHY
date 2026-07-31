@@ -138,6 +138,7 @@ const notificationUpdateMock = vi.hoisted(() => vi.fn())
 const notificationRemoveMock = vi.hoisted(() => vi.fn())
 const listAdminSubmissionsMock = vi.hoisted(() => vi.fn())
 const getSubmissionStatisticsMock = vi.hoisted(() => vi.fn())
+const listSubmissionComparisonsMock = vi.hoisted(() => vi.fn())
 
 const trackEventMock = vi.hoisted(() => vi.fn())
 const isUnauthorizedErrorMock = vi.hoisted(() => vi.fn(() => false))
@@ -206,6 +207,7 @@ vi.mock('@/api', () => ({
   archiveService: {
     listAdminSubmissions: listAdminSubmissionsMock,
     getSubmissionStatistics: getSubmissionStatisticsMock,
+    listSubmissionComparisons: listSubmissionComparisonsMock,
   },
 }))
 
@@ -243,6 +245,7 @@ describe('AdminView', () => {
     notificationUpdateMock.mockResolvedValue()
     notificationRemoveMock.mockResolvedValue()
     listAdminSubmissionsMock.mockResolvedValue({ data: [] })
+    listSubmissionComparisonsMock.mockResolvedValue({ data: [] })
     getSubmissionStatisticsMock.mockImplementation((range) =>
       Promise.resolve({ data: makeSubmissionStatistics(range, { 0: 2, 1: 1 }) })
     )
@@ -363,6 +366,38 @@ describe('AdminView', () => {
     expect(wrapper.vm.formatAdminActorTime(now.toISOString())).not.toBe('—')
 
     wrapper.unmount()
+  })
+
+  it('preserves distinct comparison submission identities returned by the API', async () => {
+    const currentSubmissionId = 7001
+    const candidateIds = [7002, 7003]
+    const comparisons = [
+      {
+        id: candidateIds[0],
+        status: 'approved',
+        subject: '普通物理（一）',
+        name: 'final',
+        professor: '王進維',
+        academic_year: 1131,
+      },
+      {
+        id: candidateIds[1],
+        status: 'pending',
+        subject: '普通物理（一）',
+        name: 'final',
+        professor: '王進維',
+        academic_year: 1131,
+      },
+    ]
+    listSubmissionComparisonsMock.mockResolvedValueOnce({ data: comparisons })
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    await wrapper.vm.loadArchiveComparison({ id: currentSubmissionId })
+
+    expect(listSubmissionComparisonsMock).toHaveBeenCalledWith(currentSubmissionId)
+    expect(wrapper.vm.comparisonArchives.map(({ id }) => id)).toEqual(candidateIds)
+    expect(wrapper.vm.comparisonArchives).toEqual(comparisons)
   })
 
   it('keeps desktop actor-time columns while restoring compact mobile metadata', async () => {

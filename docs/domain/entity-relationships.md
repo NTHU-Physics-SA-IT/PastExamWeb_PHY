@@ -71,6 +71,25 @@ metadata but different Archive identities, the frontend preserves two cards
 and two identity-specific download operations. This test does not protect the
 backend sibling-visibility query or object-storage availability.
 
+## ArchiveSubmission comparison candidates
+
+### Intended invariant
+
+The administrator comparison view groups submissions by the existing
+course, academic term/year, teacher, and exam-name identity predicates.
+Within that group:
+
+- `pending`, `approved`, and `takedown` submissions are comparison candidates;
+- `rejected` and `deleted` submissions are excluded;
+- only the current `ArchiveSubmission` primary identity is excluded;
+- requester, owner, Archive, course, or matching metadata does not merge or
+  exclude a different submission; and
+- two different submission IDs remain two comparison candidates even when
+  every displayed metadata field is equal.
+
+The comparison response is read-only and preserves each candidate's submission
+identity and status for frontend rendering.
+
 ## Trash relationship
 
 ### Intended invariant

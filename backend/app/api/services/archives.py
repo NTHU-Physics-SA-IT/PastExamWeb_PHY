@@ -790,14 +790,6 @@ async def list_archive_submission_comparisons(
             ArchiveSubmission.academic_year == submission.academic_year,
         )
     )
-    if submission.requester_id is not None:
-        query = query.where(
-            or_(
-                ArchiveSubmission.requester_id.is_(None),
-                ArchiveSubmission.requester_id != submission.requester_id,
-            )
-        )
-
     result = await db.execute(query)
     status_order = {
         SubmissionStatus.PENDING: 1,
