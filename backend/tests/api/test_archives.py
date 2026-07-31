@@ -787,6 +787,245 @@ async def test_upload_archive_function_covers_creation_and_reuse(
 
 
 @pytest.mark.asyncio
+async def test_admin_upload_persists_requested_category_caller_transaction(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    monkeypatch,
+):
+    unique = uuid.uuid4().hex
+    category_key = f"admin-upload-{unique[:12]}"
+    category_name = f"Admin upload category {unique}"
+    course_name = f"Admin Upload Course {unique}"
+    archive_name = f"Admin Upload Exam {unique}"
+    admin = await make_user(is_admin=True)
+
+    class FakeMinio:
+        def put_object(self, **kwargs):
+            return None
+
+    monkeypatch.setattr(
+        "app.api.services.archives.get_minio_client",
+        lambda: FakeMinio(),
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        response = await client.post(
+            "/archives/upload",
+            files={
+                "file": (
+                    "admin-upload.pdf",
+                    io.BytesIO(b"%PDF-1.4 admin upload"),
+                    "application/pdf",
+                )
+            },
+            data={
+                "subject": course_name,
+                "category": category_key,
+                "professor": "Admin Upload Professor",
+                "archive_type": "final",
+                "has_answers": "false",
+                "filename": archive_name,
+                "academic_year": 2026,
+                "request_new_course": "true",
+                "request_new_category": "true",
+                "requested_course_name": course_name,
+                "requested_category_key": category_key,
+                "requested_category_name": category_name,
+                "requested_category_label": category_name,
+                "requested_category_icon": "pi pi-book",
+            },
+        )
+        assert response.status_code == 200
+
+        async with session_maker() as session:
+            category = (
+                await session.execute(
+                    select(CourseCategoryConfig).where(
+                        CourseCategoryConfig.key == category_key
+                    )
+                )
+            ).scalar_one()
+            course = (
+                await session.execute(
+                    select(Course).where(
+                        Course.category == category_key,
+                        Course.name == course_name,
+                    )
+                )
+            ).scalar_one()
+            archive = (
+                await session.execute(
+                    select(Archive).where(
+                        Archive.uploader_id == admin.id,
+                        Archive.name == archive_name,
+                    )
+                )
+            ).scalar_one()
+            submission = (
+                await session.execute(
+                    select(ArchiveSubmission).where(
+                        ArchiveSubmission.requester_id == admin.id,
+                        ArchiveSubmission.name == archive_name,
+                    )
+                )
+            ).scalar_one()
+
+            assert category.is_active is True
+            assert course.category == category.key
+            assert archive.course_id == course.id
+            assert submission.created_archive_id == archive.id
+            assert submission.status == SubmissionStatus.APPROVED
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(ArchiveSubmission).where(
+                    ArchiveSubmission.requester_id == admin.id,
+                    ArchiveSubmission.name == archive_name,
+                )
+            )
+            await session.execute(
+                delete(Archive).where(
+                    Archive.uploader_id == admin.id,
+                    Archive.name == archive_name,
+                )
+            )
+            await session.execute(
+                delete(Course).where(
+                    Course.category == category_key,
+                    Course.name == course_name,
+                )
+            )
+            await session.execute(
+                delete(CourseCategoryConfig).where(
+                    CourseCategoryConfig.key == category_key
+                )
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_admin_edit_persists_requested_category_caller_transaction(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    unique = uuid.uuid4().hex
+    original_course_name = f"Admin Edit Original Course {unique}"
+    new_category_key = f"admin-edit-{unique[:12]}"
+    new_category_name = f"Admin edit category {unique}"
+    new_course_name = f"Admin Edit New Course {unique}"
+    object_name = f"archive-submissions/admin-edit-{unique}.pdf"
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+
+    async with session_maker() as session:
+        original_course = Course(
+            name=original_course_name,
+            category=CourseCategory.FRESHMAN.value,
+        )
+        session.add(original_course)
+        await session.flush()
+        archive = Archive(
+            course_id=original_course.id,
+            name=f"Admin Edit Exam {unique}",
+            academic_year=2025,
+            archive_type=ArchiveType.MIDTERM,
+            professor="Original Professor",
+            object_name=object_name,
+            uploader_id=requester.id,
+        )
+        session.add(archive)
+        await session.flush()
+        submission = ArchiveSubmission(
+            subject=original_course_name,
+            category=CourseCategory.FRESHMAN.value,
+            name=archive.name,
+            academic_year=archive.academic_year,
+            archive_type=archive.archive_type,
+            professor=archive.professor,
+            object_name=object_name,
+            requester_id=requester.id,
+            created_archive_id=archive.id,
+            status=SubmissionStatus.PENDING,
+        )
+        session.add(submission)
+        await session.commit()
+        await session.refresh(original_course)
+        await session.refresh(archive)
+        await session.refresh(submission)
+        original_course_id = original_course.id
+        archive_id = archive.id
+        submission_id = submission.id
+
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        response = await client.put(
+            f"/archives/admin/submissions/{submission_id}",
+            json={
+                "subject": new_course_name,
+                "category": new_category_key,
+                "requested_course_name": new_course_name,
+                "requested_category_key": new_category_key,
+                "requested_category_name": new_category_name,
+                "requested_category_label": new_category_name,
+                "requested_category_icon": "pi pi-folder",
+            },
+        )
+        assert response.status_code == 200
+
+        async with session_maker() as session:
+            category = (
+                await session.execute(
+                    select(CourseCategoryConfig).where(
+                        CourseCategoryConfig.key == new_category_key
+                    )
+                )
+            ).scalar_one()
+            course = (
+                await session.execute(
+                    select(Course).where(
+                        Course.category == new_category_key,
+                        Course.name == new_course_name,
+                    )
+                )
+            ).scalar_one()
+            stored_archive = await session.get(Archive, archive_id)
+            stored_submission = await session.get(
+                ArchiveSubmission,
+                submission_id,
+            )
+
+            assert category.is_active is True
+            assert course.category == category.key
+            assert stored_archive.course_id == course.id
+            assert stored_submission.subject == new_course_name
+            assert stored_submission.category == new_category_key
+            assert stored_submission.requested_category_key == new_category_key
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(ArchiveSubmission).where(ArchiveSubmission.id == submission_id)
+            )
+            await session.execute(delete(Archive).where(Archive.id == archive_id))
+            await session.execute(
+                delete(Course).where(
+                    Course.category == new_category_key,
+                    Course.name == new_course_name,
+                )
+            )
+            await session.execute(delete(Course).where(Course.id == original_course_id))
+            await session.execute(
+                delete(CourseCategoryConfig).where(
+                    CourseCategoryConfig.key == new_category_key
+                )
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
 async def test_upload_archive_requires_pdf(
     client: AsyncClient,
     make_user,

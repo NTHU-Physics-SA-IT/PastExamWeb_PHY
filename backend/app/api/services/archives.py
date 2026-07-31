@@ -169,6 +169,8 @@ async def _ensure_or_create_requested_category(
     name: str | None,
     label: str | None,
     icon: str | None,
+    *,
+    commit: bool,
 ) -> CourseCategoryConfig:
     category_key = _normalize_category_key(key)
     result = await db.execute(
@@ -192,7 +194,10 @@ async def _ensure_or_create_requested_category(
         is_active=True,
     )
     db.add(category)
-    await db.commit()
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
     await db.refresh(category)
     return category
 
@@ -223,6 +228,7 @@ async def _ensure_or_create_requested_category_for_approval(
         name=name,
         label=label,
         icon=icon,
+        commit=False,
     )
 
 
@@ -344,6 +350,7 @@ async def upload_archive(
                 requested_category_name,
                 requested_category_label,
                 requested_category_icon,
+                commit=True,
             )
         query = select(Course).where(
             normalized_course_text_expr(Course.name) == normalize_course_search_text(subject),
@@ -933,6 +940,7 @@ async def update_archive_submission_for_admin(
                 submission.requested_category_name,
                 submission.requested_category_label,
                 submission.requested_category_icon,
+                commit=True,
             )
         else:
             await _ensure_category(db, category_key)
@@ -979,108 +987,131 @@ async def approve_archive_submission(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
-
-    submission = await db.get(ArchiveSubmission, submission_id)
-    if not submission:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
-    _ensure_review_submission_mutable(submission)
-
-    formatted_course_name = format_course_display_name(submission.requested_course_name or submission.subject)
-    course_name = _normalize_course_name(formatted_course_name)
-    category_key = submission.requested_category_key or submission.category
-
-    if not course_name:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid course name",
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
         )
 
-    await _acquire_course_approval_lock(db, category_key=category_key, course_name=course_name)
-
-    if submission.requested_category_key:
-        await _ensure_or_create_requested_category_for_approval(
-            db,
-            submission.requested_category_key,
-            submission.requested_category_name,
-            submission.requested_category_label,
-            submission.requested_category_icon,
-        )
-    else:
-        await _ensure_category(db, category_key)
-
-    course = (
-        await db.execute(
-            select(Course).where(
-                normalized_course_text_expr(Course.name) == course_name,
-                Course.category == category_key,
-                Course.deleted_at.is_(None),
+    try:
+        submission = await db.get(ArchiveSubmission, submission_id)
+        if not submission:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
             )
-        )
-    ).scalar_one_or_none()
+        _ensure_review_submission_mutable(submission)
 
-    if not course:
-        deleted_course = (
+        formatted_course_name = format_course_display_name(
+            submission.requested_course_name or submission.subject
+        )
+        course_name = _normalize_course_name(formatted_course_name)
+        category_key = submission.requested_category_key or submission.category
+
+        if not course_name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid course name",
+            )
+
+        await _acquire_course_approval_lock(
+            db,
+            category_key=category_key,
+            course_name=course_name,
+        )
+
+        if submission.requested_category_key:
+            await _ensure_or_create_requested_category_for_approval(
+                db,
+                submission.requested_category_key,
+                submission.requested_category_name,
+                submission.requested_category_label,
+                submission.requested_category_icon,
+            )
+        else:
+            await _ensure_category(db, category_key)
+
+        course = (
             await db.execute(
                 select(Course).where(
                     normalized_course_text_expr(Course.name) == course_name,
                     Course.category == category_key,
-                    Course.deleted_at.is_not(None),
+                    Course.deleted_at.is_(None),
                 )
             )
         ).scalar_one_or_none()
-        if deleted_course:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="已有同名課程在垃圾桶，請先復原或永久刪除後再通過。",
+
+        if not course:
+            deleted_course = (
+                await db.execute(
+                    select(Course).where(
+                        normalized_course_text_expr(Course.name) == course_name,
+                        Course.category == category_key,
+                        Course.deleted_at.is_not(None),
+                    )
+                )
+            ).scalar_one_or_none()
+            if deleted_course:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="已有同名課程在垃圾桶，請先復原或永久刪除後再通過。",
+                )
+
+            order_index = await _next_course_order_index(db, category_key)
+            course = Course(
+                name=formatted_course_name,
+                category=category_key,
+                order_index=order_index,
             )
+            db.add(course)
+            await db.flush()
+            await db.refresh(course)
 
-        order_index = await _next_course_order_index(db, category_key)
-        course = Course(
-            name=formatted_course_name,
-            category=category_key,
-            order_index=order_index,
+        archive = (
+            await db.get(Archive, submission.created_archive_id)
+            if submission.created_archive_id
+            else None
         )
-        db.add(course)
+        if archive:
+            archive.course_id = course.id
+            archive.name = submission.name
+            archive.academic_year = submission.academic_year
+            archive.archive_type = submission.archive_type
+            archive.professor = submission.professor
+            archive.has_answers = submission.has_answers
+            archive.object_name = submission.object_name
+            archive.uploader_id = submission.requester_id
+            archive.deleted_at = None
+            archive.updated_at = datetime.now(timezone.utc)
+        else:
+            archive = Archive(
+                course_id=course.id,
+                name=submission.name,
+                academic_year=submission.academic_year,
+                archive_type=submission.archive_type,
+                professor=submission.professor,
+                has_answers=submission.has_answers,
+                object_name=submission.object_name,
+                uploader_id=submission.requester_id,
+            )
+        db.add(archive)
+        await db.flush()
+        await db.refresh(archive)
+
+        submission.status = SubmissionStatus.APPROVED
+        submission.reviewer_id = current_user.user_id
+        submission.review_note = decision.note if decision else None
+        submission.created_archive_id = archive.id
+        submission.reviewed_at = datetime.now(timezone.utc)
+        await enqueue_submission_status_notification(
+            db,
+            submission,
+            SubmissionStatus.APPROVED,
+        )
+        await db.flush()
+        await db.refresh(submission)
         await db.commit()
-        await db.refresh(course)
-
-    archive = await db.get(Archive, submission.created_archive_id) if submission.created_archive_id else None
-    if archive:
-        archive.course_id = course.id
-        archive.name = submission.name
-        archive.academic_year = submission.academic_year
-        archive.archive_type = submission.archive_type
-        archive.professor = submission.professor
-        archive.has_answers = submission.has_answers
-        archive.object_name = submission.object_name
-        archive.uploader_id = submission.requester_id
-        archive.deleted_at = None
-        archive.updated_at = datetime.now(timezone.utc)
-    else:
-        archive = Archive(
-            course_id=course.id,
-            name=submission.name,
-            academic_year=submission.academic_year,
-            archive_type=submission.archive_type,
-            professor=submission.professor,
-            has_answers=submission.has_answers,
-            object_name=submission.object_name,
-            uploader_id=submission.requester_id,
-        )
-    db.add(archive)
-    await db.commit()
-    await db.refresh(archive)
-
-    submission.status = SubmissionStatus.APPROVED
-    submission.reviewer_id = current_user.user_id
-    submission.review_note = decision.note if decision else None
-    submission.created_archive_id = archive.id
-    submission.reviewed_at = datetime.now(timezone.utc)
-    await enqueue_submission_status_notification(db, submission, SubmissionStatus.APPROVED)
-    await db.commit()
-    await db.refresh(submission)
-    return submission
+        return submission
+    except Exception:
+        await db.rollback()
+        raise
 
 
 @router.post("/admin/submissions/{submission_id}/reject", response_model=ArchiveSubmissionRead)
