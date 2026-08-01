@@ -79,6 +79,11 @@ The administrator comparison view groups submissions by the existing
 course, academic term/year, teacher, and exam-name identity predicates.
 Within that group:
 
+- course snapshot identity uses the first normalized non-blank value from
+  `requested_course_name`, then `subject`; null, empty, and whitespace-only
+  values do not block the fallback;
+- current and candidate submissions use equivalent course normalization, while
+  the existing linked-Course identity path remains valid in both directions;
 - `pending`, `approved`, and `takedown` submissions are comparison candidates;
 - `rejected` and `deleted` submissions are excluded;
 - only the current `ArchiveSubmission` primary identity is excluded;

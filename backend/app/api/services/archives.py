@@ -44,6 +44,7 @@ from app.api.services.archive_submission_lifecycle import (
 from app.utils.auth import get_current_user
 from app.utils.course_text import (
     format_course_display_name,
+    normalize_first_course_search_text,
     normalize_course_search_text,
     normalized_course_text_expr,
 )
@@ -744,7 +745,10 @@ async def list_archive_submission_comparisons(
     if not submission:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
 
-    course_name = _normalize_course_match_text(submission.requested_course_name or submission.subject)
+    course_name = normalize_first_course_search_text(
+        submission.requested_course_name,
+        submission.subject,
+    )
     category_key = _normalize_match_text(submission.requested_category_key or submission.category)
     exam_name = _normalize_match_text(submission.name)
     professor = _normalize_match_text(submission.professor)

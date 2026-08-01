@@ -25,6 +25,14 @@ def normalize_course_search_text(value: str | None) -> str:
     return normalized
 
 
+def normalize_first_course_search_text(*values: str | None) -> str:
+    for value in values:
+        normalized = normalize_course_search_text(value)
+        if normalized:
+            return normalized
+    return ""
+
+
 def _normalize_course_search_expression(value):
     expression = func.lower(func.trim(value))
     expression = func.replace(expression, "（", "(")
@@ -43,7 +51,6 @@ def normalized_course_text_expr(*values):
         return func.lower("")
 
     normalized_values = [
-        _normalize_course_search_expression(func.coalesce(func.nullif(func.trim(value), ""), ""))
-        for value in values
+        func.nullif(_normalize_course_search_expression(value), "") for value in values
     ]
     return func.coalesce(*normalized_values, "")
