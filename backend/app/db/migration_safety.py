@@ -42,6 +42,10 @@ ARCHIVE_SUBMISSION_PREVIOUS_STATUS_CHECKS = {
     "ck_archive_submissions_previous_status_not_deleted",
     "ck_archive_submissions_active_previous_status_null",
 }
+IDENTIFIER_TEXT_CAST = re.compile(
+    r"\bcast\(\s*(?P<identifier>[a-z_]\w*(?:\.[a-z_]\w*)?)"
+    r"\s+as\s+text\s*\)"
+)
 
 
 @dataclass
@@ -321,6 +325,10 @@ def _normalize_predicate(value: Any) -> str | None:
     normalized = normalized.replace("::character varying", "")
     normalized = normalized.replace("::text[]", "")
     normalized = normalized.replace("::text", "")
+    # PostgreSQL reflects a redundant CAST(identifier AS TEXT) as
+    # identifier::text. Only canonicalize casts of a bare identifier so
+    # operators, literals, functions, and boolean structure remain visible.
+    normalized = IDENTIFIER_TEXT_CAST.sub(r"\g<identifier>", normalized)
     normalized = re.sub(r"\(\(([^()]*)\)\)", r"(\1)", normalized)
     normalized = re.sub(r"^\((.*)\)$", r"\1", normalized)
     normalized = re.sub(
