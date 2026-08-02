@@ -201,12 +201,14 @@ def upgrade() -> None:
     op.create_check_constraint(
         NOT_DELETED_CONSTRAINT,
         "archive_submissions",
-        "previous_status IS NULL OR previous_status::text <> 'DELETED'",
+        "previous_status IS NULL OR CAST(previous_status AS TEXT) <> 'DELETED'",
     )
     op.create_check_constraint(
         ACTIVE_NULL_CONSTRAINT,
         "archive_submissions",
-        "deleted_at IS NOT NULL OR status::text = 'DELETED' OR previous_status IS NULL",
+        "deleted_at IS NOT NULL "
+        "OR CAST(status AS TEXT) = 'DELETED' "
+        "OR previous_status IS NULL",
     )
     connection.execute(sa.text(BACKFILL_SQL))
     _validate_postflight(connection)

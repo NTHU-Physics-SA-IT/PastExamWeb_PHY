@@ -395,12 +395,12 @@ class ArchiveSubmission(SQLModel, table=True):
     __tablename__ = "archive_submissions"
     __table_args__ = (
         CheckConstraint(
-            "previous_status IS NULL OR previous_status::text <> 'DELETED'",
+            "previous_status IS NULL OR CAST(previous_status AS TEXT) <> 'DELETED'",
             name="ck_archive_submissions_previous_status_not_deleted",
         ),
         CheckConstraint(
             "deleted_at IS NOT NULL "
-            "OR status::text = 'DELETED' "
+            "OR CAST(status AS TEXT) = 'DELETED' "
             "OR previous_status IS NULL",
             name="ck_archive_submissions_active_previous_status_null",
         ),
