@@ -56,6 +56,20 @@ Notify the submitter when a submission is:
 Do not notify submitters merely because a Course or Archive is moved to trash
 or restored.
 
+Review side effects are gated by the expected-state check and transition
+policy:
+
+- a true transition calls the existing notification owner inside the caller's
+  database transaction;
+- a same-target no-op does not enqueue a notification or any other event;
+- a stale expected-state mismatch does not enqueue a notification or any other
+  event;
+- an illegal transition does not enqueue a notification or any other event.
+
+The current policy slice defines these classifications without changing route
+behavior. Route enforcement and early side-effect short-circuiting belong to
+the next integration slice.
+
 ### Current implementation and gap
 
 Status helpers create the four notification types. Rejection copy still uses
@@ -220,7 +234,7 @@ integration.
 | Operation | Current boundary | Risk/status |
 | --- | --- | --- |
 | Archive upload | MinIO put, then database work; admin/course/archive paths may commit in stages | Partial object/DB or partial DB state is possible |
-| Submission approve | May create/reuse course/archive with more than one commit before final submission/notification commit | Transaction owner is fragmented |
+| Submission approve | Category/Course/Archive work, submission review metadata, and notification enqueue share the approve caller's commit | PostgreSQL operation is caller-owned and protected by focused rollback tests |
 | Report create/review | Report mutation and durable personal notification share a commit; archive report takedown is included | Comparatively complete and protected by focused tests |
 | Republish | Transition and notification share the caller transaction | Comparatively complete |
 | Permanent delete | MinIO call and DB delete cannot be atomic; helper may downgrade storage failure to warning | Retry and truthful result gap |
@@ -239,6 +253,11 @@ Current tests directly cover report atomicity/deduplication, discussion durable
 notifications, personal-notification ownership, archive storage upload
 failures, and bulk dispatch. They do not yet cover rollback/compensation across
 PostgreSQL and MinIO or all repeated submission transition cycles.
+
+The pure review-policy matrix and expected-state classifier have exhaustive
+unit coverage. They do not prove route enforcement, PostgreSQL row-lock
+ordering, or concurrent first-writer-wins behavior; those require the next
+review-integration and concurrency slices.
 
 ## Required follow-up
 

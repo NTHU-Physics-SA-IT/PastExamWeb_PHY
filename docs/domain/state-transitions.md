@@ -16,22 +16,28 @@ Related documents:
 
 ### Intended invariant
 
-| From | Allowed target/action |
-| --- | --- |
-| `pending` | `approved`, `rejected`, `takedown` |
-| `approved` | `rejected`, `takedown` |
-| `rejected` | `approved` |
-| `takedown` | `approved` through republish |
-| `deleted` | Trash restore lifecycle only |
+The review policy is exhaustive across every review status and direct review
+action:
 
-Requesting the current target state is a successful, idempotent retry:
+| Current status | `approve` | `reject` | `takedown` | `republish` |
+| --- | --- | --- | --- | --- |
+| `pending` | transition → `approved` | transition → `rejected` | transition → `takedown` | illegal |
+| `approved` | no-op → `approved` | transition → `rejected` | transition → `takedown` | no-op → `approved` |
+| `rejected` | transition → `approved` | no-op → `rejected` | illegal | illegal |
+| `takedown` | illegal | illegal | no-op → `takedown` | transition → `approved` |
+| `deleted` | illegal | illegal | illegal | illegal |
+
+The matrix contains seven transitions, four no-ops, and nine illegal actions.
+Deleted submissions can leave `deleted` only through the Trash restore
+lifecycle.
+
+A deliberate request based on the current state whose target is already
+established is a successful no-op:
 
 - the result is a no-op that the caller can distinguish from a new transition;
 - it creates no new data, notification, statistical event, or audit event;
 - it does not overwrite the actor or time of the transition that established
-  the current state;
-- the response must expose the distinction, but this contract does not yet
-  prescribe a JSON field name.
+  the current state.
 
 A request for a different target not listed in the matrix is invalid and
 returns `409 Conflict`. This includes `rejected` to `takedown`.
@@ -42,6 +48,38 @@ than a retry.
 
 `pending` to `takedown` lets an administrator stop processing a pending
 duplicate or otherwise ineligible file after comparing its detail.
+
+### Review precondition
+
+Direct review requests carry the status observed by the caller as
+`expected_status`. The final route contract requires this field. A missing or
+explicitly null precondition returns `428 Precondition Required`; an unknown
+status value fails request validation with `422 Unprocessable Entity`.
+
+After authorization and row locking, the application handles the request in
+this order:
+
+1. establish that the submission exists;
+2. reject a missing `expected_status`;
+3. compare `expected_status` with the actual status;
+4. classify a mismatch as stale and return `409 Conflict`;
+5. only for a match, apply the review matrix above.
+
+The expected-state comparison takes precedence over no-op or transition
+classification. For example, a client that observed `pending` cannot submit
+`reject` after another request has changed the row to `approved` and thereby
+create a second `approved` to `rejected` transition. It receives a stale
+conflict instead.
+
+A transport retry retains its original expected status. If the first request
+committed but its response was lost, retrying `approve(expected=pending)` after
+the row became `approved` is stale, not a same-target no-op. The caller reloads
+the resource; bounded Stage 5A does not add an idempotency-result ledger.
+
+The precondition is intentionally status-only. It prevents competing direct
+review requests based on one observed status, but it does not detect an ABA
+cycle such as `approved → rejected → approved`. Stage 5A does not add a
+version/revision column, ETag framework, or migration for generation tracking.
 
 | Value | Canonical Chinese label |
 | --- | --- |
@@ -55,16 +93,22 @@ duplicate or otherwise ineligible file after comparing its detail.
 
 `backend/app/services/archive_submission_status.py` implements takedown and
 republish helpers. Review endpoints in `archives.py` implement approve/reject.
-Republish requires `takedown`, but approve/reject mutability checks and the
-takedown helper currently permit some same-state or disallowed transitions
-without the complete no-op response and side-effect guarantees above.
+The status service also owns a synchronous, immutable, side-effect-free policy
+result for the complete matrix and a separate expected-state classifier.
+`SubmissionDecision.expected_status` is currently parser-optional so this
+policy-only slice does not break existing callers. The routes do not yet read
+or enforce that field, acquire the planned row lock, or return the final
+precondition/no-op responses; those changes belong to the next integration
+slice. Existing takedown and republish mutators retain their runtime behavior
+until that integration.
 
 ### Implementation gaps
 
-- `rejected` can currently be taken down.
-- Repeated approve/reject paths can be accepted, but do not yet provide a
-  confirmed distinguishable no-op contract or complete audit/side-effect
-  protection.
+- Routes do not yet enforce mandatory `expected_status`, stale `409`, or
+  missing-precondition `428`.
+- Route mutators do not yet uniformly use the pure matrix or short-circuit all
+  same-target actions before side effects.
+- The final response does not yet distinguish a transition from a no-op.
 - Backend rejection notification copy and `frontend/src/views/Admin.vue` still
   use `已退回` in places.
 
@@ -285,7 +329,8 @@ tests before centralization.
 
 | Condition | Intended semantic result | Current status |
 | --- | --- | --- |
-| Same-target retry | Successful distinguishable no-op without writes, notification, statistics, or audit changes | Partially implemented; response schema and full side-effect protection require follow-up |
+| Same-target action with a matching precondition | Successful distinguishable no-op without writes, notification, statistics, or audit changes | Pure policy implemented; route enforcement and response require follow-up |
+| Stale direct review request | `409 Conflict` without writes or notification | Pure expected-state classification implemented; route enforcement requires follow-up |
 | Different invalid transition | `409 Conflict` without writes or notification | Partially implemented |
 | Permission denied | Deny without revealing protected resource details | Backend enforcement exists; consistency requires review |
 | Missing entity | Not found/unavailable without side effects | Generally implemented |
@@ -294,8 +339,8 @@ tests before centralization.
 | Storage deletion failure | Do not report the single item as fully deleted; preserve retry evidence | Implementation gap; current cleanup may emit only a warning |
 
 This contract does not standardize the precise `401`/`403` authentication
-status or prescribe the same-target no-op response field name. Future
-conformance work must coordinate API responses, frontend handling, and tests.
+status. Future conformance work must coordinate the no-op response,
+frontend handling, and tests.
 
 ## Required follow-up
 

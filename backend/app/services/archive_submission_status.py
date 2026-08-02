@@ -1,4 +1,6 @@
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 
 from fastapi import HTTPException, status
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -10,6 +12,212 @@ from app.models.models import (
 )
 from app.services.personal_notifications import enqueue_personal_notification
 from app.utils.course_text import format_course_display_name
+
+
+class ArchiveSubmissionReviewAction(str, Enum):
+    APPROVE = "approve"
+    REJECT = "reject"
+    TAKEDOWN = "takedown"
+    REPUBLISH = "republish"
+
+
+class ArchiveSubmissionTransitionClassification(str, Enum):
+    TRANSITION = "transition"
+    NO_OP = "no_op"
+    ILLEGAL = "illegal"
+
+
+class ArchiveSubmissionExpectedStateClassification(str, Enum):
+    MISSING = "missing"
+    MATCH = "match"
+    STALE = "stale"
+
+
+@dataclass(frozen=True)
+class ArchiveSubmissionTransitionResult:
+    action: ArchiveSubmissionReviewAction
+    source_status: SubmissionStatus
+    target_status: SubmissionStatus
+    classification: ArchiveSubmissionTransitionClassification
+    resulting_status: SubmissionStatus
+
+
+_ACTION_TARGET_STATUS = {
+    ArchiveSubmissionReviewAction.APPROVE: SubmissionStatus.APPROVED,
+    ArchiveSubmissionReviewAction.REJECT: SubmissionStatus.REJECTED,
+    ArchiveSubmissionReviewAction.TAKEDOWN: SubmissionStatus.TAKEDOWN,
+    ArchiveSubmissionReviewAction.REPUBLISH: SubmissionStatus.APPROVED,
+}
+
+_REVIEW_TRANSITION_POLICY = {
+    (
+        SubmissionStatus.PENDING,
+        ArchiveSubmissionReviewAction.APPROVE,
+    ): (
+        ArchiveSubmissionTransitionClassification.TRANSITION,
+        SubmissionStatus.APPROVED,
+    ),
+    (
+        SubmissionStatus.PENDING,
+        ArchiveSubmissionReviewAction.REJECT,
+    ): (
+        ArchiveSubmissionTransitionClassification.TRANSITION,
+        SubmissionStatus.REJECTED,
+    ),
+    (
+        SubmissionStatus.PENDING,
+        ArchiveSubmissionReviewAction.TAKEDOWN,
+    ): (
+        ArchiveSubmissionTransitionClassification.TRANSITION,
+        SubmissionStatus.TAKEDOWN,
+    ),
+    (
+        SubmissionStatus.PENDING,
+        ArchiveSubmissionReviewAction.REPUBLISH,
+    ): (
+        ArchiveSubmissionTransitionClassification.ILLEGAL,
+        SubmissionStatus.PENDING,
+    ),
+    (
+        SubmissionStatus.APPROVED,
+        ArchiveSubmissionReviewAction.APPROVE,
+    ): (
+        ArchiveSubmissionTransitionClassification.NO_OP,
+        SubmissionStatus.APPROVED,
+    ),
+    (
+        SubmissionStatus.APPROVED,
+        ArchiveSubmissionReviewAction.REJECT,
+    ): (
+        ArchiveSubmissionTransitionClassification.TRANSITION,
+        SubmissionStatus.REJECTED,
+    ),
+    (
+        SubmissionStatus.APPROVED,
+        ArchiveSubmissionReviewAction.TAKEDOWN,
+    ): (
+        ArchiveSubmissionTransitionClassification.TRANSITION,
+        SubmissionStatus.TAKEDOWN,
+    ),
+    (
+        SubmissionStatus.APPROVED,
+        ArchiveSubmissionReviewAction.REPUBLISH,
+    ): (
+        ArchiveSubmissionTransitionClassification.NO_OP,
+        SubmissionStatus.APPROVED,
+    ),
+    (
+        SubmissionStatus.REJECTED,
+        ArchiveSubmissionReviewAction.APPROVE,
+    ): (
+        ArchiveSubmissionTransitionClassification.TRANSITION,
+        SubmissionStatus.APPROVED,
+    ),
+    (
+        SubmissionStatus.REJECTED,
+        ArchiveSubmissionReviewAction.REJECT,
+    ): (
+        ArchiveSubmissionTransitionClassification.NO_OP,
+        SubmissionStatus.REJECTED,
+    ),
+    (
+        SubmissionStatus.REJECTED,
+        ArchiveSubmissionReviewAction.TAKEDOWN,
+    ): (
+        ArchiveSubmissionTransitionClassification.ILLEGAL,
+        SubmissionStatus.REJECTED,
+    ),
+    (
+        SubmissionStatus.REJECTED,
+        ArchiveSubmissionReviewAction.REPUBLISH,
+    ): (
+        ArchiveSubmissionTransitionClassification.ILLEGAL,
+        SubmissionStatus.REJECTED,
+    ),
+    (
+        SubmissionStatus.TAKEDOWN,
+        ArchiveSubmissionReviewAction.APPROVE,
+    ): (
+        ArchiveSubmissionTransitionClassification.ILLEGAL,
+        SubmissionStatus.TAKEDOWN,
+    ),
+    (
+        SubmissionStatus.TAKEDOWN,
+        ArchiveSubmissionReviewAction.REJECT,
+    ): (
+        ArchiveSubmissionTransitionClassification.ILLEGAL,
+        SubmissionStatus.TAKEDOWN,
+    ),
+    (
+        SubmissionStatus.TAKEDOWN,
+        ArchiveSubmissionReviewAction.TAKEDOWN,
+    ): (
+        ArchiveSubmissionTransitionClassification.NO_OP,
+        SubmissionStatus.TAKEDOWN,
+    ),
+    (
+        SubmissionStatus.TAKEDOWN,
+        ArchiveSubmissionReviewAction.REPUBLISH,
+    ): (
+        ArchiveSubmissionTransitionClassification.TRANSITION,
+        SubmissionStatus.APPROVED,
+    ),
+    (
+        SubmissionStatus.DELETED,
+        ArchiveSubmissionReviewAction.APPROVE,
+    ): (
+        ArchiveSubmissionTransitionClassification.ILLEGAL,
+        SubmissionStatus.DELETED,
+    ),
+    (
+        SubmissionStatus.DELETED,
+        ArchiveSubmissionReviewAction.REJECT,
+    ): (
+        ArchiveSubmissionTransitionClassification.ILLEGAL,
+        SubmissionStatus.DELETED,
+    ),
+    (
+        SubmissionStatus.DELETED,
+        ArchiveSubmissionReviewAction.TAKEDOWN,
+    ): (
+        ArchiveSubmissionTransitionClassification.ILLEGAL,
+        SubmissionStatus.DELETED,
+    ),
+    (
+        SubmissionStatus.DELETED,
+        ArchiveSubmissionReviewAction.REPUBLISH,
+    ): (
+        ArchiveSubmissionTransitionClassification.ILLEGAL,
+        SubmissionStatus.DELETED,
+    ),
+}
+
+
+def classify_archive_submission_review_transition(
+    source_status: SubmissionStatus,
+    action: ArchiveSubmissionReviewAction,
+) -> ArchiveSubmissionTransitionResult:
+    classification, resulting_status = _REVIEW_TRANSITION_POLICY[
+        (source_status, action)
+    ]
+    return ArchiveSubmissionTransitionResult(
+        action=action,
+        source_status=source_status,
+        target_status=_ACTION_TARGET_STATUS[action],
+        classification=classification,
+        resulting_status=resulting_status,
+    )
+
+
+def classify_archive_submission_expected_state(
+    expected_status: SubmissionStatus | None,
+    actual_status: SubmissionStatus,
+) -> ArchiveSubmissionExpectedStateClassification:
+    if expected_status is None:
+        return ArchiveSubmissionExpectedStateClassification.MISSING
+    if expected_status == actual_status:
+        return ArchiveSubmissionExpectedStateClassification.MATCH
+    return ArchiveSubmissionExpectedStateClassification.STALE
 
 
 _SUBMISSION_NOTIFICATION_COPY = {

@@ -1540,6 +1540,7 @@ class CourseCategoryRead(BaseModel):
 
 class SubmissionDecision(BaseModel):
     note: Optional[str] = None
+    expected_status: Optional[SubmissionStatus] = None
 
 
 class CourseSubmissionRead(BaseModel):
