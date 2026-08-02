@@ -139,6 +139,10 @@ const notificationRemoveMock = vi.hoisted(() => vi.fn())
 const listAdminSubmissionsMock = vi.hoisted(() => vi.fn())
 const getSubmissionStatisticsMock = vi.hoisted(() => vi.fn())
 const listSubmissionComparisonsMock = vi.hoisted(() => vi.fn())
+const approveSubmissionMock = vi.hoisted(() => vi.fn())
+const rejectSubmissionMock = vi.hoisted(() => vi.fn())
+const takedownSubmissionMock = vi.hoisted(() => vi.fn())
+const republishSubmissionMock = vi.hoisted(() => vi.fn())
 
 const trackEventMock = vi.hoisted(() => vi.fn())
 const isUnauthorizedErrorMock = vi.hoisted(() => vi.fn(() => false))
@@ -208,6 +212,10 @@ vi.mock('@/api', () => ({
     listAdminSubmissions: listAdminSubmissionsMock,
     getSubmissionStatistics: getSubmissionStatisticsMock,
     listSubmissionComparisons: listSubmissionComparisonsMock,
+    approveSubmission: approveSubmissionMock,
+    rejectSubmission: rejectSubmissionMock,
+    takedownSubmission: takedownSubmissionMock,
+    republishSubmission: republishSubmissionMock,
   },
 }))
 
@@ -246,6 +254,14 @@ describe('AdminView', () => {
     notificationRemoveMock.mockResolvedValue()
     listAdminSubmissionsMock.mockResolvedValue({ data: [] })
     listSubmissionComparisonsMock.mockResolvedValue({ data: [] })
+    approveSubmissionMock.mockReset()
+    rejectSubmissionMock.mockReset()
+    takedownSubmissionMock.mockReset()
+    republishSubmissionMock.mockReset()
+    approveSubmissionMock.mockResolvedValue({ data: {} })
+    rejectSubmissionMock.mockResolvedValue({ data: {} })
+    takedownSubmissionMock.mockResolvedValue({ data: {} })
+    republishSubmissionMock.mockResolvedValue({ data: {} })
     getSubmissionStatisticsMock.mockImplementation((range) =>
       Promise.resolve({ data: makeSubmissionStatistics(range, { 0: 2, 1: 1 }) })
     )
@@ -398,6 +414,33 @@ describe('AdminView', () => {
     expect(listSubmissionComparisonsMock).toHaveBeenCalledWith(currentSubmissionId)
     expect(wrapper.vm.comparisonArchives.map(({ id }) => id)).toEqual(candidateIds)
     expect(wrapper.vm.comparisonArchives).toEqual(comparisons)
+  })
+
+  it('uses each review row status as the direct review precondition', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    await wrapper.vm.reviewArchiveSubmission({ id: 7101, status: 'pending' }, 'approve')
+    await wrapper.vm.reviewArchiveSubmission({ id: 7102, status: 'approved' }, 'reject')
+    await wrapper.vm.reviewArchiveSubmission({ id: 7103, status: 'pending' }, 'takedown')
+    await wrapper.vm.reviewArchiveSubmission({ id: 7104, status: 'takedown' }, 'republish')
+
+    expect(approveSubmissionMock).toHaveBeenCalledWith(7101, 'pending')
+    expect(rejectSubmissionMock).toHaveBeenCalledWith(7102, 'approved')
+    expect(takedownSubmissionMock).toHaveBeenCalledWith(7103, 'pending')
+    expect(republishSubmissionMock).toHaveBeenCalledWith(7104, 'takedown')
+  })
+
+  it('uses comparison candidate status and fails closed when row status is missing', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    await wrapper.vm.takedownComparisonItem({ id: 7201, status: 'approved' })
+    await wrapper.vm.reviewArchiveSubmission({ id: 7202 }, 'approve')
+
+    expect(takedownSubmissionMock).toHaveBeenCalledTimes(1)
+    expect(takedownSubmissionMock).toHaveBeenCalledWith(7201, 'approved')
+    expect(approveSubmissionMock).not.toHaveBeenCalled()
   })
 
   it('keeps desktop actor-time columns while restoring compact mobile metadata', async () => {

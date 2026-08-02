@@ -66,9 +66,12 @@ policy:
   event;
 - an illegal transition does not enqueue a notification or any other event.
 
-The current policy slice defines these classifications without changing route
-behavior. Route enforcement and early side-effect short-circuiting belong to
-the next integration slice.
+The four direct review routes enforce these classifications after
+administrator authorization and a submission row lock. Missing, stale,
+illegal, and same-target requests release the transaction without mutation;
+only a true transition reaches the existing notification owner. The
+archive-report uphold flow remains an internal, report-owned takedown operation
+and does not require a client expected-state field.
 
 ### Current implementation and gap
 
@@ -255,9 +258,10 @@ failures, and bulk dispatch. They do not yet cover rollback/compensation across
 PostgreSQL and MinIO or all repeated submission transition cycles.
 
 The pure review-policy matrix and expected-state classifier have exhaustive
-unit coverage. They do not prove route enforcement, PostgreSQL row-lock
-ordering, or concurrent first-writer-wins behavior; those require the next
-review-integration and concurrency slices.
+unit coverage. Focused PostgreSQL API tests protect direct-route precondition,
+error, no-op snapshot, transition, rollback, and notification behavior.
+Deterministic independent-session race tests remain necessary to prove
+first-writer-wins under controlled concurrency.
 
 ## Required follow-up
 

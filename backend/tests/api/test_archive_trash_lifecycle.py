@@ -62,7 +62,10 @@ async def _create_approved_pair(
 
     response = await client.post(
         f"/archives/admin/submissions/{submission.id}/approve",
-        json={"note": f"approve pair {label}"},
+        json={
+            "note": f"approve pair {label}",
+            "expected_status": "pending",
+        },
     )
     assert response.status_code == 200
     assert response.json()["status"] == SubmissionStatus.APPROVED.value

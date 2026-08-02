@@ -95,20 +95,31 @@ version/revision column, ETag framework, or migration for generation tracking.
 republish helpers. Review endpoints in `archives.py` implement approve/reject.
 The status service also owns a synchronous, immutable, side-effect-free policy
 result for the complete matrix and a separate expected-state classifier.
-`SubmissionDecision.expected_status` is currently parser-optional so this
-policy-only slice does not break existing callers. The routes do not yet read
-or enforce that field, acquire the planned row lock, or return the final
-precondition/no-op responses; those changes belong to the next integration
-slice. Existing takedown and republish mutators retain their runtime behavior
-until that integration.
+`SubmissionDecision.expected_status` remains parser-optional so the routes can
+map a missing or null field to `428` instead of Pydantic mapping it to `422`.
+The runtime contract is nevertheless mandatory: all four direct review routes
+authorize the administrator, load the submission once with `FOR UPDATE`,
+enforce the expected-state classifier before the transition policy, and
+short-circuit missing, stale, illegal, and same-target requests before review
+mutation or notification. Repository frontend callers send the status carried
+by the row or comparison candidate being acted on.
+
+The direct routes return stable error-detail codes:
+
+- missing/null: `428 archive_submission_precondition_required`;
+- expected-state mismatch: `409 archive_submission_stale_state`; and
+- a matching-state illegal edge: `409 archive_submission_illegal_transition`.
+
+Same-target no-ops return the existing flat `ArchiveSubmissionRead` shape with
+no writes. The separate archive-report uphold flow retains its report-owned
+transaction and internal submission takedown; it does not use the direct-client
+precondition contract.
 
 ### Implementation gaps
 
-- Routes do not yet enforce mandatory `expected_status`, stale `409`, or
-  missing-precondition `428`.
-- Route mutators do not yet uniformly use the pure matrix or short-circuit all
-  same-target actions before side effects.
 - The final response does not yet distinguish a transition from a no-op.
+- Backend capability projection and deterministic concurrent-session evidence
+  remain follow-up work.
 - Backend rejection notification copy and `frontend/src/views/Admin.vue` still
   use `已退回` in places.
 
@@ -329,9 +340,9 @@ tests before centralization.
 
 | Condition | Intended semantic result | Current status |
 | --- | --- | --- |
-| Same-target action with a matching precondition | Successful distinguishable no-op without writes, notification, statistics, or audit changes | Pure policy implemented; route enforcement and response require follow-up |
-| Stale direct review request | `409 Conflict` without writes or notification | Pure expected-state classification implemented; route enforcement requires follow-up |
-| Different invalid transition | `409 Conflict` without writes or notification | Partially implemented |
+| Same-target action with a matching precondition | Successful no-op without writes, notification, statistics, or audit changes | Direct routes enforce no-op gating; distinguishable response metadata remains follow-up |
+| Stale direct review request | `409 Conflict` without writes or notification | Implemented with stable `archive_submission_stale_state` detail |
+| Different invalid transition | `409 Conflict` without writes or notification | Implemented for direct review routes with stable `archive_submission_illegal_transition` detail |
 | Permission denied | Deny without revealing protected resource details | Backend enforcement exists; consistency requires review |
 | Missing entity | Not found/unavailable without side effects | Generally implemented |
 | Active uniqueness conflict | Explicit conflict and no duplicate row | Implemented for several report paths; soft-delete predicate has a gap |

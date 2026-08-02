@@ -132,7 +132,7 @@ async def test_approved_submission_can_be_rejected_or_taken_down(
     try:
         approved_response = await client.post(
             f"/archives/admin/submissions/{submission.id}/approve",
-            json={"note": "initial approval"},
+            json={"note": "initial approval", "expected_status": "pending"},
         )
         assert approved_response.status_code == 200
         assert approved_response.json()["status"] == SubmissionStatus.APPROVED.value
@@ -157,7 +157,10 @@ async def test_approved_submission_can_be_rejected_or_taken_down(
 
         response = await client.post(
             f"/archives/admin/submissions/{submission.id}/{action}",
-            json={"note": f"move to {target_status.value}"},
+            json={
+                "note": f"move to {target_status.value}",
+                "expected_status": "approved",
+            },
         )
         assert response.status_code == 200
         assert response.json()["status"] == target_status.value
@@ -234,7 +237,7 @@ async def test_rejected_submission_can_be_approved(
     try:
         rejected_response = await client.post(
             f"/archives/admin/submissions/{submission.id}/reject",
-            json={"note": "initial rejection"},
+            json={"note": "initial rejection", "expected_status": "pending"},
         )
         assert rejected_response.status_code == 200
         assert rejected_response.json()["status"] == SubmissionStatus.REJECTED.value
@@ -256,7 +259,10 @@ async def test_rejected_submission_can_be_approved(
 
         response = await client.post(
             f"/archives/admin/submissions/{submission.id}/approve",
-            json={"note": "approved after rejection"},
+            json={
+                "note": "approved after rejection",
+                "expected_status": "rejected",
+            },
         )
         assert response.status_code == 200
         assert response.json()["status"] == SubmissionStatus.APPROVED.value
@@ -362,9 +368,18 @@ async def test_archive_review_statuses_create_deduplicated_notifications(
     app.dependency_overrides[get_current_user] = _override_admin(admin.id)
     try:
         responses = [
-            await client.post(f"/archives/admin/submissions/{submissions[0].id}/approve"),
-            await client.post(f"/archives/admin/submissions/{submissions[1].id}/reject"),
-            await client.post(f"/archives/admin/submissions/{submissions[2].id}/takedown"),
+            await client.post(
+                f"/archives/admin/submissions/{submissions[0].id}/approve",
+                json={"expected_status": "pending"},
+            ),
+            await client.post(
+                f"/archives/admin/submissions/{submissions[1].id}/reject",
+                json={"expected_status": "pending"},
+            ),
+            await client.post(
+                f"/archives/admin/submissions/{submissions[2].id}/takedown",
+                json={"expected_status": "pending"},
+            ),
         ]
         assert [response.status_code for response in responses] == [200, 200, 200]
 

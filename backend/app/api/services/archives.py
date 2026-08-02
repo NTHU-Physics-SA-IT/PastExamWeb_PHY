@@ -56,6 +56,11 @@ from app.api.services.submission_statistics import (
     record_submission_event,
 )
 from app.services.archive_submission_status import (
+    ArchiveSubmissionExpectedStateClassification,
+    ArchiveSubmissionReviewAction,
+    ArchiveSubmissionTransitionClassification,
+    classify_archive_submission_expected_state,
+    classify_archive_submission_review_transition,
     enqueue_submission_status_notification,
     normalize_submission_status,
     republish_archive_submission,
@@ -117,6 +122,98 @@ def _ensure_review_submission_mutable(submission: ArchiveSubmission) -> None:
             status_code=status.HTTP_409_CONFLICT,
             detail="此投稿已下架或已刪除，僅能查看，不能再編輯或變更審核狀態。",
         )
+
+
+async def _lock_archive_submission_for_direct_review(
+    db: AsyncSession,
+    submission_id: int,
+) -> ArchiveSubmission | None:
+    return (
+        await db.execute(
+            select(ArchiveSubmission)
+            .where(ArchiveSubmission.id == submission_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+
+
+async def _prepare_direct_archive_submission_review(
+    db: AsyncSession,
+    *,
+    submission_id: int,
+    decision: SubmissionDecision | None,
+    action: ArchiveSubmissionReviewAction,
+) -> tuple[ArchiveSubmission, ArchiveSubmissionRead | None]:
+    submission = await _lock_archive_submission_for_direct_review(db, submission_id)
+    if submission is None:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Submission not found",
+        )
+
+    actual_status = (
+        SubmissionStatus.DELETED
+        if submission.deleted_at is not None
+        else _normalize_submission_status(submission.status)
+    )
+    if actual_status is None:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "archive_submission_illegal_transition",
+                "message": "此投稿目前不能執行該審核操作。",
+                "actual_status": str(submission.status),
+                "reload_required": False,
+            },
+        )
+
+    expected_status = decision.expected_status if decision else None
+    expected_state = classify_archive_submission_expected_state(
+        expected_status,
+        actual_status,
+    )
+    if expected_state == ArchiveSubmissionExpectedStateClassification.MISSING:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail={
+                "code": "archive_submission_precondition_required",
+                "message": "請重新載入投稿狀態後再執行操作。",
+                "reload_required": True,
+            },
+        )
+    if expected_state == ArchiveSubmissionExpectedStateClassification.STALE:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "archive_submission_stale_state",
+                "message": "投稿狀態已變更，請重新載入後再操作。",
+                "actual_status": actual_status.value,
+                "reload_required": True,
+            },
+        )
+
+    policy = classify_archive_submission_review_transition(actual_status, action)
+    if policy.classification == ArchiveSubmissionTransitionClassification.ILLEGAL:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "archive_submission_illegal_transition",
+                "message": "此投稿目前不能執行該審核操作。",
+                "actual_status": actual_status.value,
+                "reload_required": False,
+            },
+        )
+    if policy.classification == ArchiveSubmissionTransitionClassification.NO_OP:
+        response = ArchiveSubmissionRead.model_validate(submission)
+        await db.rollback()
+        return submission, response
+
+    return submission, None
 
 
 async def _get_deleted_course_id_for_submission(
@@ -988,12 +1085,14 @@ async def approve_archive_submission(
         )
 
     try:
-        submission = await db.get(ArchiveSubmission, submission_id)
-        if not submission:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
-            )
-        _ensure_review_submission_mutable(submission)
+        submission, no_op_response = await _prepare_direct_archive_submission_review(
+            db,
+            submission_id=submission_id,
+            decision=decision,
+            action=ArchiveSubmissionReviewAction.APPROVE,
+        )
+        if no_op_response is not None:
+            return no_op_response
 
         formatted_course_name = format_course_display_name(
             submission.requested_course_name or submission.subject
@@ -1120,19 +1219,31 @@ async def reject_archive_submission(
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
-    submission = await db.get(ArchiveSubmission, submission_id)
-    if not submission:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
-    _ensure_review_submission_mutable(submission)
+    try:
+        submission, no_op_response = await _prepare_direct_archive_submission_review(
+            db,
+            submission_id=submission_id,
+            decision=decision,
+            action=ArchiveSubmissionReviewAction.REJECT,
+        )
+        if no_op_response is not None:
+            return no_op_response
 
-    submission.status = SubmissionStatus.REJECTED
-    submission.reviewer_id = current_user.user_id
-    submission.review_note = decision.note if decision else None
-    submission.reviewed_at = datetime.now(timezone.utc)
-    await enqueue_submission_status_notification(db, submission, SubmissionStatus.REJECTED)
-    await db.commit()
-    await db.refresh(submission)
-    return submission
+        submission.status = SubmissionStatus.REJECTED
+        submission.reviewer_id = current_user.user_id
+        submission.review_note = decision.note if decision else None
+        submission.reviewed_at = datetime.now(timezone.utc)
+        await enqueue_submission_status_notification(
+            db,
+            submission,
+            SubmissionStatus.REJECTED,
+        )
+        await db.commit()
+        await db.refresh(submission)
+        return submission
+    except Exception:
+        await db.rollback()
+        raise
 
 
 @router.post("/admin/submissions/{submission_id}/takedown", response_model=ArchiveSubmissionRead)
@@ -1145,20 +1256,28 @@ async def takedown_archive_submission(
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
-    submission = await db.get(ArchiveSubmission, submission_id)
-    if not submission:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
-    _ensure_review_submission_mutable(submission)
+    try:
+        submission, no_op_response = await _prepare_direct_archive_submission_review(
+            db,
+            submission_id=submission_id,
+            decision=decision,
+            action=ArchiveSubmissionReviewAction.TAKEDOWN,
+        )
+        if no_op_response is not None:
+            return no_op_response
 
-    await take_down_archive_submission(
-        db,
-        submission,
-        reviewer_id=current_user.user_id,
-        note=decision.note if decision else None,
-    )
-    await db.commit()
-    await db.refresh(submission)
-    return submission
+        await take_down_archive_submission(
+            db,
+            submission,
+            reviewer_id=current_user.user_id,
+            note=decision.note if decision else None,
+        )
+        await db.commit()
+        await db.refresh(submission)
+        return submission
+    except Exception:
+        await db.rollback()
+        raise
 
 
 @router.post("/admin/submissions/{submission_id}/republish", response_model=ArchiveSubmissionRead)
@@ -1171,83 +1290,75 @@ async def republish_archive_submission_endpoint(
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
-    submission = (
-        await db.execute(
-            select(ArchiveSubmission)
-            .where(ArchiveSubmission.id == submission_id)
-            .with_for_update()
+    try:
+        submission, no_op_response = await _prepare_direct_archive_submission_review(
+            db,
+            submission_id=submission_id,
+            decision=decision,
+            action=ArchiveSubmissionReviewAction.REPUBLISH,
         )
-    ).scalar_one_or_none()
-    if not submission:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
-    normalized_status = _normalize_submission_status(submission.status)
-    if submission.deleted_at is not None or normalized_status == SubmissionStatus.DELETED:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="此投稿已刪除，無法重新上架。",
-        )
-    if normalized_status != SubmissionStatus.TAKEDOWN:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only taken down submissions can be republished",
-        )
+        if no_op_response is not None:
+            return no_op_response
 
-    if submission.created_archive_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="無法重新上架：找不到對應考古題。",
-        )
+        if submission.created_archive_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="無法重新上架：找不到對應考古題。",
+            )
 
-    archive = await db.get(Archive, submission.created_archive_id)
-    if not archive:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="無法重新上架：關聯考古題不存在",
-        )
-    if archive.deleted_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="無法重新上架：關聯考古題已下架，請先復原考古題。",
-        )
+        archive = await db.get(Archive, submission.created_archive_id)
+        if not archive:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="無法重新上架：關聯考古題不存在",
+            )
+        if archive.deleted_at is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="無法重新上架：關聯考古題已下架，請先復原考古題。",
+            )
 
-    course = await db.get(Course, archive.course_id)
-    if not course:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="無法重新上架：關聯課程不存在",
-        )
-    if course.deleted_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="無法重新上架：關聯課程已在垃圾桶，請先復原原課程。",
-        )
+        course = await db.get(Course, archive.course_id)
+        if not course:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="無法重新上架：關聯課程不存在",
+            )
+        if course.deleted_at is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="無法重新上架：關聯課程已在垃圾桶，請先復原原課程。",
+            )
 
-    if submission.lifecycle_reason == LIFECYCLE_LINKED_ARCHIVE_PERMANENTLY_DELETED:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="無法復原：關聯考古題已永久刪除",
-        )
-    if submission.lifecycle_reason == LIFECYCLE_ARCHIVE_TRASHED:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="無法重新上架：此投稿先前因關聯考古題刪除而下架",
-        )
+        if submission.lifecycle_reason == LIFECYCLE_LINKED_ARCHIVE_PERMANENTLY_DELETED:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="無法復原：關聯考古題已永久刪除",
+            )
+        if submission.lifecycle_reason == LIFECYCLE_ARCHIVE_TRASHED:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="無法重新上架：此投稿先前因關聯考古題刪除而下架",
+            )
 
-    if is_course_trash_lifecycle_reason(submission.lifecycle_reason):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="無法重新上架：此投稿先前因關聯課程刪除而下架",
-        )
+        if is_course_trash_lifecycle_reason(submission.lifecycle_reason):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="無法重新上架：此投稿先前因關聯課程刪除而下架",
+            )
 
-    await republish_archive_submission(
-        db,
-        submission,
-        reviewer_id=current_user.user_id,
-        note=decision.note if decision else None,
-    )
-    await db.commit()
-    await db.refresh(submission)
-    return submission
+        await republish_archive_submission(
+            db,
+            submission,
+            reviewer_id=current_user.user_id,
+            note=decision.note if decision else None,
+        )
+        await db.commit()
+        await db.refresh(submission)
+        return submission
+    except Exception:
+        await db.rollback()
+        raise
 
 
 @router.delete("/admin/submissions/{submission_id}")

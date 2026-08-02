@@ -1,5 +1,26 @@
 import { api } from './client'
 
+const archiveSubmissionStatuses = new Set([
+  'pending',
+  'approved',
+  'rejected',
+  'takedown',
+  'deleted',
+])
+
+const buildReviewDecision = (expectedStatus, note) => {
+  const normalizedStatus = String(expectedStatus || '')
+    .trim()
+    .toLowerCase()
+  if (!archiveSubmissionStatuses.has(normalizedStatus)) {
+    throw new TypeError('Archive submission status is required')
+  }
+  return {
+    note,
+    expected_status: normalizedStatus,
+  }
+}
+
 export const archiveService = {
   uploadArchive(formData) {
     return api.post('/archives/upload', formData, {
@@ -74,20 +95,32 @@ export const archiveService = {
     return api.delete(`/archives/submissions/${submissionId}`)
   },
 
-  approveSubmission(submissionId, note = '') {
-    return api.post(`/archives/admin/submissions/${submissionId}/approve`, { note })
+  approveSubmission(submissionId, expectedStatus, note = '') {
+    return api.post(
+      `/archives/admin/submissions/${submissionId}/approve`,
+      buildReviewDecision(expectedStatus, note)
+    )
   },
 
-  rejectSubmission(submissionId, note = '') {
-    return api.post(`/archives/admin/submissions/${submissionId}/reject`, { note })
+  rejectSubmission(submissionId, expectedStatus, note = '') {
+    return api.post(
+      `/archives/admin/submissions/${submissionId}/reject`,
+      buildReviewDecision(expectedStatus, note)
+    )
   },
 
-  takedownSubmission(submissionId, note = '') {
-    return api.post(`/archives/admin/submissions/${submissionId}/takedown`, { note })
+  takedownSubmission(submissionId, expectedStatus, note = '') {
+    return api.post(
+      `/archives/admin/submissions/${submissionId}/takedown`,
+      buildReviewDecision(expectedStatus, note)
+    )
   },
 
-  republishSubmission(submissionId, note = '') {
-    return api.post(`/archives/admin/submissions/${submissionId}/republish`, { note })
+  republishSubmission(submissionId, expectedStatus, note = '') {
+    return api.post(
+      `/archives/admin/submissions/${submissionId}/republish`,
+      buildReviewDecision(expectedStatus, note)
+    )
   },
 
   updateSubmission(submissionId, submissionData) {

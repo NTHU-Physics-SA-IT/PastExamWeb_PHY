@@ -179,7 +179,10 @@ async def test_approve_rolls_back_new_category_course_archive_on_notification_fa
         with pytest.raises(RuntimeError, match="approval notification failed"):
             await client.post(
                 f"/archives/admin/submissions/{submission_id}/approve",
-                json={"note": "must roll back"},
+                json={
+                    "note": "must roll back",
+                    "expected_status": "pending",
+                },
             )
 
         async with session_maker() as session:
@@ -307,7 +310,10 @@ async def test_rejected_reapproval_rolls_back_on_notification_failure(
         with pytest.raises(RuntimeError, match="approval notification failed"):
             await client.post(
                 f"/archives/admin/submissions/{submission_id}/approve",
-                json={"note": "replacement approval"},
+                json={
+                    "note": "replacement approval",
+                    "expected_status": "rejected",
+                },
             )
 
         async with session_maker() as session:
@@ -447,7 +453,10 @@ async def test_approve_rolls_back_existing_archive_update_on_notification_failur
         with pytest.raises(RuntimeError, match="approval notification failed"):
             await client.post(
                 f"/archives/admin/submissions/{submission_id}/approve",
-                json={"note": "must not replace review"},
+                json={
+                    "note": "must not replace review",
+                    "expected_status": "rejected",
+                },
             )
 
         async with session_maker() as session:
@@ -517,7 +526,10 @@ async def test_approve_commits_complete_result_visible_to_new_session(
     try:
         response = await client.post(
             f"/archives/admin/submissions/{submission_id}/approve",
-            json={"note": "complete approval"},
+            json={
+                "note": "complete approval",
+                "expected_status": "pending",
+            },
         )
         assert response.status_code == 200
         assert response.json()["status"] == SubmissionStatus.APPROVED.value
@@ -590,12 +602,18 @@ async def test_approve_preserves_authorization_and_not_found_errors(
 
     try:
         app.dependency_overrides[get_current_user] = _get_non_admin
-        forbidden = await client.post("/archives/admin/submissions/999999999/approve")
+        forbidden = await client.post(
+            "/archives/admin/submissions/999999999/approve",
+            json={"expected_status": "pending"},
+        )
         assert forbidden.status_code == 403
         assert forbidden.json()["detail"] == "Admin access required"
 
         app.dependency_overrides[get_current_user] = _override_admin(admin.id)
-        missing = await client.post("/archives/admin/submissions/999999999/approve")
+        missing = await client.post(
+            "/archives/admin/submissions/999999999/approve",
+            json={"expected_status": "pending"},
+        )
         assert missing.status_code == 404
         assert missing.json()["detail"] == "Submission not found"
     finally:
@@ -635,7 +653,8 @@ async def test_approve_invalid_course_rolls_back_without_mutation(
     app.dependency_overrides[get_current_user] = _override_admin(admin.id)
     try:
         response = await client.post(
-            f"/archives/admin/submissions/{submission_id}/approve"
+            f"/archives/admin/submissions/{submission_id}/approve",
+            json={"expected_status": "pending"},
         )
         assert response.status_code == 400
         assert response.json()["detail"] == "Invalid course name"

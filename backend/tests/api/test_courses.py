@@ -177,7 +177,10 @@ async def _review_course_lifecycle_context(
 ):
     approved_response = await client.post(
         f"/archives/admin/submissions/{submission_id}/approve",
-        json={"note": "course lifecycle approval"},
+        json={
+            "note": "course lifecycle approval",
+            "expected_status": "pending",
+        },
     )
     assert approved_response.status_code == 200
     assert approved_response.json()["status"] == SubmissionStatus.APPROVED.value
@@ -185,7 +188,10 @@ async def _review_course_lifecycle_context(
     if final_status == SubmissionStatus.REJECTED:
         rejected_response = await client.post(
             f"/archives/admin/submissions/{submission_id}/reject",
-            json={"note": "course lifecycle rejection"},
+            json={
+                "note": "course lifecycle rejection",
+                "expected_status": "approved",
+            },
         )
         assert rejected_response.status_code == 200
         assert rejected_response.json()["status"] == SubmissionStatus.REJECTED.value

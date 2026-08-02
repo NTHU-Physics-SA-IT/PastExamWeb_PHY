@@ -4545,6 +4545,20 @@ const getReviewItemStatus = (item) => {
   if (item?.deletedAt || item?.deleted_at) return 'deleted'
   return normalizeSubmissionStatus(item?.status)
 }
+const directReviewExpectedStatuses = new Set([
+  'pending',
+  'approved',
+  'rejected',
+  'takedown',
+  'deleted',
+])
+const getDirectReviewExpectedStatus = (item) => {
+  const status = getReviewItemStatus(item)
+  if (!directReviewExpectedStatuses.has(status)) {
+    throw new TypeError('Archive submission status is required')
+  }
+  return status
+}
 const getReviewStatusFilterValue = (status) => {
   const raw = String(status || '').trim()
   if (!raw) return ''
@@ -7269,7 +7283,7 @@ const confirmTakedownComparisonItem = (item) => {
 const takedownComparisonItem = async (item) => {
   if (!item?.id) return
   try {
-    await archiveService.takedownSubmission(item.id)
+    await archiveService.takedownSubmission(item.id, getDirectReviewExpectedStatus(item))
     toast.add({ severity: 'success', summary: '完成', detail: '已下架', life: 3000 })
     await loadReviewItems()
     await loadArchiveComparison(selectedArchiveRequest.value)
@@ -7302,14 +7316,15 @@ const reviewArchiveSubmission = async (submission, action) => {
     return
   }
   try {
+    const expectedStatus = getDirectReviewExpectedStatus(submission)
     if (action === 'approve') {
-      await archiveService.approveSubmission(submission.id)
+      await archiveService.approveSubmission(submission.id, expectedStatus)
     } else if (action === 'takedown') {
-      await archiveService.takedownSubmission(submission.id)
+      await archiveService.takedownSubmission(submission.id, expectedStatus)
     } else if (action === 'republish') {
-      await archiveService.republishSubmission(submission.id)
+      await archiveService.republishSubmission(submission.id, expectedStatus)
     } else {
-      await archiveService.rejectSubmission(submission.id)
+      await archiveService.rejectSubmission(submission.id, expectedStatus)
     }
     const actionMessages = {
       approve: '考古題投稿已通過',

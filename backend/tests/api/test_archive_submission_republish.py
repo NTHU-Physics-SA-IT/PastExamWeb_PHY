@@ -97,17 +97,30 @@ async def test_republish_restores_approved_and_notifies_requester_once(
     try:
         app.dependency_overrides[get_current_user] = _override_admin(admin.id)
         responses = await asyncio.gather(
-            client.post(path, json={"note": "重新公開"}),
-            client.post(path, json={"note": "重複請求"}),
+            client.post(
+                path,
+                json={"note": "重新公開", "expected_status": "takedown"},
+            ),
+            client.post(
+                path,
+                json={"note": "重複請求", "expected_status": "takedown"},
+            ),
         )
-        assert sorted(response.status_code for response in responses) == [200, 400]
+        assert sorted(response.status_code for response in responses) == [200, 409]
         successful = next(
             response for response in responses if response.status_code == 200
         )
         assert successful.json()["status"] == SubmissionStatus.APPROVED.value
 
-        repeated = await client.post(path, json={"note": "再次重試"})
-        assert repeated.status_code == 400
+        repeated = await client.post(
+            path,
+            json={"note": "再次重試", "expected_status": "takedown"},
+        )
+        assert repeated.status_code == 409
+        assert (
+            repeated.json()["detail"]["code"]
+            == "archive_submission_stale_state"
+        )
 
         async with session_maker() as session:
             stored = await session.get(ArchiveSubmission, submission.id)
@@ -147,7 +160,7 @@ async def test_republish_restores_approved_and_notifies_requester_once(
 
 
 @pytest.mark.asyncio
-async def test_republish_rejects_other_status_and_rolls_back_notification_failure(
+async def test_republish_no_op_and_rolls_back_notification_failure(
     client, session_maker, make_user, monkeypatch
 ):
     requester = await make_user(name="republish-rollback-requester")
@@ -168,10 +181,12 @@ async def test_republish_rejects_other_status_and_rolls_back_notification_failur
     )
     try:
         app.dependency_overrides[get_current_user] = _override_admin(admin.id)
-        not_takedown = await client.post(
-            f"/archives/admin/submissions/{approved_submission.id}/republish"
+        already_approved = await client.post(
+            f"/archives/admin/submissions/{approved_submission.id}/republish",
+            json={"expected_status": "approved"},
         )
-        assert not_takedown.status_code == 400
+        assert already_approved.status_code == 200
+        assert already_approved.json()["status"] == SubmissionStatus.APPROVED.value
 
         from app.services import archive_submission_status as status_service
 
@@ -184,7 +199,10 @@ async def test_republish_rejects_other_status_and_rolls_back_notification_failur
             fail_notification,
         )
         with pytest.raises(RuntimeError, match="republish notification failed"):
-            await client.post(f"/archives/admin/submissions/{submission.id}/republish")
+            await client.post(
+                f"/archives/admin/submissions/{submission.id}/republish",
+                json={"expected_status": "takedown"},
+            )
 
         async with session_maker() as session:
             unchanged = await session.get(ArchiveSubmission, submission.id)

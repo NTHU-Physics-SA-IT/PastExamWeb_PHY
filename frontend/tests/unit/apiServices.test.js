@@ -104,6 +104,48 @@ describe('API service wrappers', () => {
     })
   })
 
+  it('archive review requests include the current submission status', () => {
+    archiveService.approveSubmission(101, 'pending', 'approve note')
+    expect(postMock).toHaveBeenLastCalledWith('/archives/admin/submissions/101/approve', {
+      note: 'approve note',
+      expected_status: 'pending',
+    })
+
+    archiveService.rejectSubmission(102, 'approved', 'reject note')
+    expect(postMock).toHaveBeenLastCalledWith('/archives/admin/submissions/102/reject', {
+      note: 'reject note',
+      expected_status: 'approved',
+    })
+
+    archiveService.takedownSubmission(103, 'pending', 'takedown note')
+    expect(postMock).toHaveBeenLastCalledWith('/archives/admin/submissions/103/takedown', {
+      note: 'takedown note',
+      expected_status: 'pending',
+    })
+
+    archiveService.republishSubmission(104, 'takedown', 'republish note')
+    expect(postMock).toHaveBeenLastCalledWith('/archives/admin/submissions/104/republish', {
+      note: 'republish note',
+      expected_status: 'takedown',
+    })
+  })
+
+  it('archive review requests fail closed before transport when status is missing', () => {
+    expect(() => archiveService.approveSubmission(101, null)).toThrow(
+      'Archive submission status is required'
+    )
+    expect(() => archiveService.rejectSubmission(102, '')).toThrow(
+      'Archive submission status is required'
+    )
+    expect(() => archiveService.takedownSubmission(103, 'unknown')).toThrow(
+      'Archive submission status is required'
+    )
+    expect(() => archiveService.republishSubmission(104)).toThrow(
+      'Archive submission status is required'
+    )
+    expect(postMock).not.toHaveBeenCalled()
+  })
+
   it('notification service proxies', () => {
     notificationService.getActive()
     expect(getMock).toHaveBeenCalledWith('/notifications/active')
