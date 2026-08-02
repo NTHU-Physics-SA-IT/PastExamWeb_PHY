@@ -51,7 +51,9 @@ Reviewed manifests currently cover:
 - `e3b7c1d9f5a2`: the reviewed schema before the archive-report workflow;
 - `a7c3e9f1b5d2`: the reviewed schema before persisted ArchiveSubmission
   owner-self-delete eligibility;
-- `f5e1d8c3a7b2`: the current repository head and SQLModel metadata contract.
+- `f5e1d8c3a7b2`: the reviewed schema before typed ArchiveSubmission previous
+  status; and
+- `d8f2a6c1b4e7`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,

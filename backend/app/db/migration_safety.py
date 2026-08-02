@@ -38,6 +38,14 @@ MIGRATION_LOCK_CLASS_ID = 1_438_970_421
 CANONICAL_CATEGORY_NAME_INDEX = "uq_course_category_configs_normalized_name"
 CANONICAL_CATEGORY_KEY_INDEX = "uq_course_category_configs_normalized_key"
 CANONICAL_CATEGORY_LEGACY_CHECK = "ck_course_category_configs_no_legacy_key"
+ARCHIVE_SUBMISSION_PREVIOUS_STATUS_CHECKS = {
+    "ck_archive_submissions_previous_status_not_deleted",
+    "ck_archive_submissions_active_previous_status_null",
+}
+IDENTIFIER_TEXT_CAST = re.compile(
+    r"\bcast\(\s*(?P<identifier>[a-z_]\w*(?:\.[a-z_]\w*)?)"
+    r"\s+as\s+text\s*\)"
+)
 
 
 @dataclass
@@ -199,8 +207,7 @@ def is_revision_ancestor(
     head: str,
 ) -> bool:
     return revision in {
-        item.revision
-        for item in script.walk_revisions(base="base", head=head)
+        item.revision for item in script.walk_revisions(base="base", head=head)
     }
 
 
@@ -217,6 +224,7 @@ def _metadata_for_variant(variant: str) -> MetaData:
     if variant == "head":
         return metadata
     if variant not in {
+        "pre_archive_submission_previous_status",
         "pre_owner_self_delete_eligibility",
         "pre_archive_reports",
         "pre_metadata_alignment",
@@ -225,6 +233,16 @@ def _metadata_for_variant(variant: str) -> MetaData:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
 
     archive_submissions = metadata.tables["archive_submissions"]
+    for constraint in list(archive_submissions.constraints):
+        if (
+            isinstance(constraint, CheckConstraint)
+            and constraint.name in ARCHIVE_SUBMISSION_PREVIOUS_STATUS_CHECKS
+        ):
+            archive_submissions.constraints.remove(constraint)
+    archive_submissions._columns.remove(archive_submissions.c.previous_status)
+    if variant == "pre_archive_submission_previous_status":
+        return metadata
+
     archive_submissions._columns.remove(
         archive_submissions.c.owner_self_delete_consumed
     )
@@ -263,10 +281,7 @@ def _metadata_for_variant(variant: str) -> MetaData:
 
 
 def _retained_enums(spec: ManifestSpec) -> dict[str, set[str]]:
-    return {
-        enum_name: set(values)
-        for enum_name, values in spec.retained_enums
-    }
+    return {enum_name: set(values) for enum_name, values in spec.retained_enums}
 
 
 def metadata_for_revision(revision: str) -> MetaData | None:
@@ -310,6 +325,10 @@ def _normalize_predicate(value: Any) -> str | None:
     normalized = normalized.replace("::character varying", "")
     normalized = normalized.replace("::text[]", "")
     normalized = normalized.replace("::text", "")
+    # PostgreSQL reflects a redundant CAST(identifier AS TEXT) as
+    # identifier::text. Only canonicalize casts of a bare identifier so
+    # operators, literals, functions, and boolean structure remain visible.
+    normalized = IDENTIFIER_TEXT_CAST.sub(r"\g<identifier>", normalized)
     normalized = re.sub(r"\(\(([^()]*)\)\)", r"(\1)", normalized)
     normalized = re.sub(r"^\((.*)\)$", r"\1", normalized)
     normalized = re.sub(
@@ -325,19 +344,13 @@ def _normalize_predicate(value: Any) -> str | None:
         normalized,
     )
     if any_match:
-        normalized = (
-            f"{any_match.group('column')} in "
-            f"({any_match.group('values')})"
-        )
+        normalized = f"{any_match.group('column')} in ({any_match.group('values')})"
     all_match = re.fullmatch(
         r"(?P<column>[\w().]+) <> all \(array\[(?P<values>.*)\]\)",
         normalized,
     )
     if all_match:
-        normalized = (
-            f"{all_match.group('column')} not in "
-            f"({all_match.group('values')})"
-        )
+        normalized = f"{all_match.group('column')} not in ({all_match.group('values')})"
     return normalized
 
 
@@ -678,9 +691,7 @@ def compare_head_schema(
         }
         actual_checks = {
             _normalize_predicate(item.get("sqltext"))
-            for item in inspector.get_check_constraints(
-                table_name, schema="public"
-            )
+            for item in inspector.get_check_constraints(table_name, schema="public")
         }
         checks.append(
             _set_check(
@@ -688,9 +699,7 @@ def compare_head_schema(
             )
         )
 
-        expected_indexes = {
-            _expected_index_signature(index) for index in table.indexes
-        }
+        expected_indexes = {_expected_index_signature(index) for index in table.indexes}
         actual_indexes = {
             _actual_index_signature(index)
             for index in inspector.get_indexes(table_name, schema="public")
@@ -737,8 +746,7 @@ def inspect_database(
         )
     elif heads[0] != HEAD_SCHEMA_REVISION or get_manifest_spec(heads[0]) is None:
         report.errors.append(
-            "Repository head has no reviewed schema manifest: "
-            f"{heads[0]}"
+            f"Repository head has no reviewed schema manifest: {heads[0]}"
         )
 
     owned_engine = engine is None
@@ -767,19 +775,13 @@ def inspect_database(
                     script.get_revision(report.current_revision) is not None
                 )
             elif len(report.alembic_versions) > 1:
-                report.errors.append(
-                    "Alembic ledger must contain exactly one revision"
-                )
+                report.errors.append("Alembic ledger must contain exactly one revision")
 
             ledger_missing = (
                 not report.alembic_version_exists or not report.alembic_versions
             )
             manifest_spec: ManifestSpec | None = None
-            if (
-                report.database_empty
-                and ledger_missing
-                and not report.errors
-            ):
+            if report.database_empty and ledger_missing and not report.errors:
                 report.upgrade_allowed = True
                 return report
 
@@ -798,13 +800,10 @@ def inspect_database(
                         "Known revision has no reviewed schema manifest: "
                         f"{report.current_revision}"
                     )
-                elif (
-                    report.current_revision != heads[0]
-                    and not is_revision_ancestor(
-                        script,
-                        revision=report.current_revision,
-                        head=heads[0],
-                    )
+                elif report.current_revision != heads[0] and not is_revision_ancestor(
+                    script,
+                    revision=report.current_revision,
+                    head=heads[0],
                 ):
                     report.errors.append(
                         "Database revision is not an ancestor of repository head"
@@ -816,10 +815,7 @@ def inspect_database(
                 and len(heads) == 1
                 and (
                     ledger_missing
-                    or (
-                        len(report.alembic_versions) == 1
-                        and manifest_spec is not None
-                    )
+                    or (len(report.alembic_versions) == 1 and manifest_spec is not None)
                 )
             )
             if should_compare:
@@ -851,10 +847,7 @@ def inspect_database(
                 and len(report.alembic_versions) == 1
                 and report.current_revision_known
                 and (
-                    (
-                        report.current_revision == heads[0]
-                        and report.schema_matches_head
-                    )
+                    (report.current_revision == heads[0] and report.schema_matches_head)
                     or (
                         report.current_revision != heads[0]
                         and manifest_spec is not None
@@ -862,10 +855,7 @@ def inspect_database(
                     )
                 )
             )
-            if (
-                report.upgrade_allowed
-                and report.current_revision != heads[0]
-            ):
+            if report.upgrade_allowed and report.current_revision != heads[0]:
                 report.warnings.append(
                     "Database has a validated forward migration path to head"
                 )

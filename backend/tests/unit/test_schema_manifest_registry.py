@@ -11,7 +11,7 @@ from app.db.migration_safety import metadata_for_revision
 
 
 def test_reviewed_manifest_registry_has_required_revisions() -> None:
-    assert HEAD_SCHEMA_REVISION == "f5e1d8c3a7b2"
+    assert HEAD_SCHEMA_REVISION == "d8f2a6c1b4e7"
     assert reviewed_manifest_revisions() == (
         "c4d8e2f1a6b9",
         "a4c7e9d2f6b1",
@@ -19,6 +19,7 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
         "e3b7c1d9f5a2",
         "a7c3e9f1b5d2",
         "f5e1d8c3a7b2",
+        "d8f2a6c1b4e7",
     )
 
 
@@ -35,20 +36,28 @@ def test_recovery_manifest_is_versioned_and_revision_bound() -> None:
 
 def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     column_name = "owner_self_delete_consumed"
-    head = metadata_for_revision("f5e1d8c3a7b2")
+    previous_status_column = "previous_status"
+    head = metadata_for_revision("d8f2a6c1b4e7")
+    f5 = metadata_for_revision("f5e1d8c3a7b2")
     a7 = metadata_for_revision("a7c3e9f1b5d2")
     e3 = metadata_for_revision("e3b7c1d9f5a2")
     c9 = metadata_for_revision("c9e4f1a7b2d6")
     a4 = metadata_for_revision("a4c7e9d2f6b1")
 
     assert head is not None
+    assert f5 is not None
     assert a7 is not None
     assert e3 is not None
     assert c9 is not None
     assert a4 is not None
 
     assert column_name in head.tables["archive_submissions"].c
+    assert previous_status_column in head.tables["archive_submissions"].c
     assert "archive_reports" in head.tables
+
+    assert column_name in f5.tables["archive_submissions"].c
+    assert previous_status_column not in f5.tables["archive_submissions"].c
+    assert "archive_reports" in f5.tables
 
     assert column_name not in a7.tables["archive_submissions"].c
     assert "archive_reports" in a7.tables
@@ -89,7 +98,8 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     )
 
     # Building older variants must never mutate current SQLModel metadata.
-    rebuilt_head = metadata_for_revision("f5e1d8c3a7b2")
+    rebuilt_head = metadata_for_revision("d8f2a6c1b4e7")
     assert rebuilt_head is not None
     assert column_name in rebuilt_head.tables["archive_submissions"].c
+    assert previous_status_column in rebuilt_head.tables["archive_submissions"].c
     assert "archive_reports" in rebuilt_head.tables

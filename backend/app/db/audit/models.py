@@ -75,6 +75,43 @@ class AggregateCounts(BaseModel):
     difference: int
 
 
+class PreviousStatusAggregateCounts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    total: int = Field(ge=0)
+    active: int = Field(ge=0)
+    deleted: int = Field(ge=0)
+    previous_status_pending: int = Field(ge=0)
+    previous_status_approved: int = Field(ge=0)
+    previous_status_rejected: int = Field(ge=0)
+    previous_status_takedown: int = Field(ge=0)
+    previous_status_null: int = Field(ge=0)
+    previous_status_deleted: int = Field(ge=0)
+    invalid_previous_status: int = Field(ge=0)
+    active_with_previous_status: int = Field(ge=0)
+    deleted_with_exact_previous_status: int = Field(ge=0)
+    deleted_with_null_previous_status: int = Field(ge=0)
+    valid_course_marker: int = Field(ge=0)
+    valid_course_marker_with_previous_status: int = Field(ge=0)
+    invalid_course_marker: int = Field(ge=0)
+    deterministic_owner_delete_candidate: int = Field(ge=0)
+    deterministic_backfilled: int = Field(ge=0)
+    ambiguous_admin_archive_group: int = Field(ge=0)
+    permanent: int = Field(ge=0)
+    unknown_deleted_provenance: int = Field(ge=0)
+    owner_self_delete_consumed_true: int = Field(ge=0)
+    owner_self_delete_consumed_false: int = Field(ge=0)
+    shared_created_archive_groups: int = Field(ge=0)
+    shared_created_archive_submissions: int = Field(ge=0)
+    automatic_true: int = Field(ge=0)
+    automatic_false: int = Field(ge=0)
+    unsupported: int = Field(ge=0)
+    unclassified: int = Field(ge=0)
+    overlap: int = Field(ge=0)
+    bucket_sum: int = Field(ge=0)
+    difference: int
+
+
 class FlagCombination(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -93,7 +130,7 @@ class AuditResult(BaseModel):
     status: AuditStatus
     error_code: str | None
     continuity: ContinuityResult | None
-    aggregates: AggregateCounts | None
+    aggregates: AggregateCounts | PreviousStatusAggregateCounts | None
     combinations: list[FlagCombination] = Field(default_factory=list, max_length=20)
     mutual_exclusivity: bool | None
     conservation: bool | None

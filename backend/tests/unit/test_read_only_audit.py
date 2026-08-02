@@ -115,6 +115,25 @@ def test_registry_is_sealed_and_versioned() -> None:
         get_audit_adapter("unknown-audit", 1)
 
 
+def test_previous_status_audit_is_revision_bounded_and_course_marker_read_only() -> (
+    None
+):
+    adapter = get_audit_adapter(ELIGIBILITY_AUDIT_ID, 2)
+
+    assert adapter.accepted_source_revisions == frozenset(
+        {
+            "f5e1d8c3a7b2",
+            "d8f2a6c1b4e7",
+        }
+    )
+    assert "valid_course_marker" in adapter.approved_aggregate_labels
+    assert (
+        "valid_course_marker_with_previous_status" in adapter.approved_aggregate_labels
+    )
+    assert "to_jsonb(submission)->>'previous_status'" in adapter.summary_sql
+    assert "UPDATE ARCHIVE_SUBMISSIONS" not in adapter.summary_sql.upper()
+
+
 def test_transaction_is_noninteractive_read_only_and_explicitly_rolled_back() -> None:
     sql = build_transaction_sql(request(), get_audit_adapter(ELIGIBILITY_AUDIT_ID, 1))
 

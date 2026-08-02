@@ -145,16 +145,53 @@ def test_head_database_preflight_is_read_only(clean_public_schema: Engine) -> No
 
     assert before == after
     with clean_public_schema.connect() as connection:
-        assert connection.scalar(
-            text("SELECT count(*) FROM courses WHERE id = :course_id"),
-            {"course_id": course_id},
-        ) == 1
+        assert (
+            connection.scalar(
+                text("SELECT count(*) FROM courses WHERE id = :course_id"),
+                {"course_id": course_id},
+            )
+            == 1
+        )
 
 
 def test_head_schema_matches_sqlmodel_autogenerate_contract() -> None:
     upgrade()
 
     command.check(alembic_config())
+
+
+def test_head_schema_accepts_equivalent_postgresql_check_reflection(
+    clean_public_schema: Engine,
+) -> None:
+    upgrade()
+
+    with clean_public_schema.connect() as connection:
+        reflected = {
+            item["name"]: item["sqltext"]
+            for item in sa_inspect(connection).get_check_constraints(
+                "archive_submissions",
+                schema="public",
+            )
+        }
+
+    previous_status_check = reflected[
+        "ck_archive_submissions_previous_status_not_deleted"
+    ]
+    active_status_check = reflected[
+        "ck_archive_submissions_active_previous_status_null"
+    ]
+    assert "previous_status::text" in previous_status_check
+    assert "status::text" in active_status_check
+    assert "cast(" not in previous_status_check.lower()
+    assert "cast(" not in active_status_check.lower()
+
+    report = inspect_database()
+    check = next(
+        item
+        for item in report.schema_checks
+        if item.name == "archive_submissions.check_constraints"
+    )
+    assert check.passed is True
 
 
 def test_missing_ledger_reports_candidate_but_never_stamps(
@@ -173,10 +210,13 @@ def test_missing_ledger_reports_candidate_but_never_stamps(
     assert report.upgrade_allowed is False
     with clean_public_schema.connect() as connection:
         assert "alembic_version" not in sa_inspect(connection).get_table_names()
-        assert connection.scalar(
-            text("SELECT count(*) FROM courses WHERE id = :course_id"),
-            {"course_id": course_id},
-        ) == 1
+        assert (
+            connection.scalar(
+                text("SELECT count(*) FROM courses WHERE id = :course_id"),
+                {"course_id": course_id},
+            )
+            == 1
+        )
 
 
 def test_missing_ledger_with_drift_fails_without_mutation(
@@ -286,9 +326,7 @@ def test_archive_report_revision_is_additive_and_reversible(
             return {
                 table_name: tuple(
                     column["name"]
-                    for column in inspector.get_columns(
-                        table_name, schema="public"
-                    )
+                    for column in inspector.get_columns(table_name, schema="public")
                 )
                 for table_name in inspector.get_table_names(schema="public")
                 if table_name != "alembic_version"
@@ -319,9 +357,10 @@ def test_archive_report_revision_is_additive_and_reversible(
     _, heads = revision_graph(config)
     assert heads == [head_revision()]
     with clean_public_schema.connect() as connection:
-        assert connection.scalar(
-            text("SELECT version_num FROM alembic_version")
-        ) == new_revision
+        assert (
+            connection.scalar(text("SELECT version_num FROM alembic_version"))
+            == new_revision
+        )
 
 
 def test_known_revision_without_manifest_is_blocked() -> None:
@@ -332,8 +371,7 @@ def test_known_revision_without_manifest_is_blocked() -> None:
     assert report.current_revision == "d1e6c8a4f2b9"
     assert report.upgrade_allowed is False
     assert any(
-        "no reviewed schema manifest" in error
-        and "d1e6c8a4f2b9" in error
+        "no reviewed schema manifest" in error and "d1e6c8a4f2b9" in error
         for error in report.errors
     )
     assert migrate.main(["upgrade", "--json"]) == 2
@@ -368,9 +406,7 @@ def test_head_schema_drift_is_blocked(clean_public_schema: Engine) -> None:
 def test_concurrent_migration_advisory_lock_fails_closed(
     clean_public_schema: Engine,
 ) -> None:
-    second_engine = create_engine(
-        alembic_config().get_main_option("sqlalchemy.url")
-    )
+    second_engine = create_engine(alembic_config().get_main_option("sqlalchemy.url"))
     try:
         with migration_advisory_lock(clean_public_schema):
             with pytest.raises(RuntimeError, match="advisory lock"):
@@ -424,8 +460,7 @@ def test_multiple_repository_heads_fail_closed(
             "announcement_read_receipts.unique_constraints",
         ),
         (
-            "ALTER TABLE comment_reports "
-            "DROP CONSTRAINT ck_comment_reports_status",
+            "ALTER TABLE comment_reports DROP CONSTRAINT ck_comment_reports_status",
             "comment_reports.check_constraints",
         ),
         ("DROP INDEX ix_users_deleted_by_id", "users.indexes"),
@@ -464,8 +499,7 @@ def test_credentials_are_redacted_from_errors_and_json(
     raw_url = database_url().render_as_string(hide_password=False)
     error = safe_error(
         RuntimeError(
-            f"{password} {quote(password, safe='')} "
-            f"{quote_plus(password)} {raw_url}"
+            f"{password} {quote(password, safe='')} {quote_plus(password)} {raw_url}"
         )
     )
     assert report.database_connected is False
