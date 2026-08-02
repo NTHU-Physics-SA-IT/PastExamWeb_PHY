@@ -102,6 +102,14 @@ class SubmissionStatus(str, PyEnum):
     TAKEDOWN = "takedown"
 
 
+class ArchiveSubmissionAdminAction(str, PyEnum):
+    APPROVE = "approve"
+    REJECT = "reject"
+    TAKEDOWN = "takedown"
+    REPUBLISH = "republish"
+    DELETE = "delete"
+
+
 class User(SQLModel, table=True):
     __tablename__ = "users"
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -1591,6 +1599,14 @@ class ArchiveSubmissionRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ArchiveSubmissionAdminRead(ArchiveSubmissionRead):
+    available_actions: List[ArchiveSubmissionAdminAction]
+
+
+class ArchiveSubmissionActionRead(ArchiveSubmissionAdminRead):
+    changed: bool
 
 
 class ArchiveSubmissionComparisonRead(ArchiveSubmissionRead):

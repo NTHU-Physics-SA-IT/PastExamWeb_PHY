@@ -989,6 +989,13 @@ async def test_admin_edit_persists_requested_category_caller_transaction(
             },
         )
         assert response.status_code == 200
+        assert response.json()["available_actions"] == [
+            "approve",
+            "reject",
+            "takedown",
+            "delete",
+        ]
+        assert "changed" not in response.json()
 
         async with session_maker() as session:
             category = (

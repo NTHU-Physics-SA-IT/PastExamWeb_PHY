@@ -69,9 +69,19 @@ policy:
 The four direct review routes enforce these classifications after
 administrator authorization and a submission row lock. Missing, stale,
 illegal, and same-target requests release the transaction without mutation;
-only a true transition reaches the existing notification owner. The
-archive-report uphold flow remains an internal, report-owned takedown operation
-and does not require a client expected-state field.
+only a true transition reaches the existing notification owner. A successful
+true transition returns `changed=true`; a same-target no-op returns
+`changed=false`. The archive-report uphold flow remains an internal,
+report-owned takedown operation and does not require a client expected-state
+field.
+
+Deterministic PostgreSQL race coverage pauses the first direct review request
+after the real notification owner has enqueued and flushed its row but before
+the caller commit. A second independent request has already attempted the same
+submission row lock. Releasing the winner proves that the loser reads the
+committed status and exits stale with no notification, metadata, Archive,
+Category, Course, or event side effect. The winning transition owns exactly
+one effective notification and one transaction outcome.
 
 ### Current implementation and gap
 
@@ -104,8 +114,8 @@ test evidence.
   sends nothing.
 - A same-target retry creates no other data, statistical event, or audit event
   and does not overwrite the original transition actor or time.
-- The caller can distinguish the no-op from a new transition, without this
-  stage prescribing the response field name.
+- The caller distinguishes a no-op (`changed=false`) from a new transition
+  (`changed=true`).
 - A dedupe key distinguishes a retry of one event from a later real cycle.
 
 ### Implementation gap
@@ -260,8 +270,10 @@ PostgreSQL and MinIO or all repeated submission transition cycles.
 The pure review-policy matrix and expected-state classifier have exhaustive
 unit coverage. Focused PostgreSQL API tests protect direct-route precondition,
 error, no-op snapshot, transition, rollback, and notification behavior.
-Deterministic independent-session race tests remain necessary to prove
-first-writer-wins under controlled concurrency.
+Deterministic independent-session PostgreSQL race tests protect
+first-writer-wins for double approval and both winner orders for every pair
+among approve, reject, and takedown from `pending`. Later-cycle notification
+identity and dedupe remain Stage 5C work.
 
 ## Required follow-up
 

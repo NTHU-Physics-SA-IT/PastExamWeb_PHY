@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy import delete, func
 from sqlmodel import select
 
+from app.api.services import archives as archives_service
 from app.main import app
 from app.models.models import (
     Archive,
@@ -13,10 +14,12 @@ from app.models.models import (
     ArchiveType,
     Course,
     CourseCategory,
+    CourseCategoryConfig,
     PersonalNotification,
     SubmissionStatus,
     UserRoles,
 )
+from app.services import archive_submission_status as status_service
 from app.utils.auth import get_current_user
 
 
@@ -25,6 +28,17 @@ def _override_admin(user_id: int):
         return UserRoles(user_id=user_id, is_admin=True)
 
     return _get_current_user
+
+
+def _override_user(user_id: int):
+    async def _get_current_user():
+        return UserRoles(user_id=user_id, is_admin=False)
+
+    return _get_current_user
+
+
+async def _fail_if_notification_called(*_args, **_kwargs):
+    raise AssertionError("non-transition must not call notification owner")
 
 
 async def _create_review_context(
@@ -114,6 +128,11 @@ async def _review_snapshot(session_maker, submission_id: int):
             )
             or 0
         )
+        course = (
+            await session.execute(
+                select(Course).where(Course.name == submission.subject)
+            )
+        ).scalar_one()
         return {
             "submission": (
                 submission.status,
@@ -122,6 +141,8 @@ async def _review_snapshot(session_maker, submission_id: int):
                 submission.review_note,
                 submission.lifecycle_reason,
                 submission.created_archive_id,
+                submission.deleted_at,
+                submission.restored_at,
             ),
             "archive": (
                 None
@@ -139,6 +160,20 @@ async def _review_snapshot(session_maker, submission_id: int):
                     archive.deleted_at,
                     archive.updated_at,
                 )
+            ),
+            "course": (
+                course.id,
+                course.name,
+                course.category,
+                course.deleted_at,
+            ),
+            "category_count": int(
+                await session.scalar(
+                    select(func.count(CourseCategoryConfig.id)).where(
+                        CourseCategoryConfig.key == submission.category
+                    )
+                )
+                or 0
             ),
             "notifications": notifications,
             "events": events,
@@ -326,6 +361,7 @@ async def test_direct_review_routes_classify_expected_state_mismatch_as_stale(
     client,
     session_maker,
     make_user,
+    monkeypatch,
     action,
 ):
     requester = await make_user()
@@ -337,6 +373,11 @@ async def test_direct_review_routes_classify_expected_state_mismatch_as_stale(
         submission_status=SubmissionStatus.APPROVED,
     )
     before = await _review_snapshot(session_maker, submission.id)
+    monkeypatch.setattr(
+        archives_service,
+        "enqueue_submission_status_notification",
+        _fail_if_notification_called,
+    )
     app.dependency_overrides[get_current_user] = _override_admin(admin.id)
     try:
         response = await client.post(
@@ -351,6 +392,7 @@ async def test_direct_review_routes_classify_expected_state_mismatch_as_stale(
             "actual_status": "approved",
             "reload_required": True,
         }
+        assert "changed" not in response.json()
         assert await _review_snapshot(session_maker, submission.id) == before
     finally:
         app.dependency_overrides.pop(get_current_user, None)
@@ -366,6 +408,7 @@ async def test_direct_review_route_rejects_illegal_transition_without_side_effec
     client,
     session_maker,
     make_user,
+    monkeypatch,
 ):
     requester = await make_user()
     admin = await make_user(is_admin=True)
@@ -376,6 +419,11 @@ async def test_direct_review_route_rejects_illegal_transition_without_side_effec
         submission_status=SubmissionStatus.REJECTED,
     )
     before = await _review_snapshot(session_maker, submission.id)
+    monkeypatch.setattr(
+        status_service,
+        "enqueue_submission_status_notification",
+        _fail_if_notification_called,
+    )
     app.dependency_overrides[get_current_user] = _override_admin(admin.id)
     try:
         response = await client.post(
@@ -390,6 +438,7 @@ async def test_direct_review_route_rejects_illegal_transition_without_side_effec
             "actual_status": "rejected",
             "reload_required": False,
         }
+        assert "changed" not in response.json()
         assert await _review_snapshot(session_maker, submission.id) == before
     finally:
         app.dependency_overrides.pop(get_current_user, None)
@@ -455,8 +504,102 @@ async def test_direct_review_same_target_actions_are_flat_response_no_ops(
     client,
     session_maker,
     make_user,
+    monkeypatch,
     action,
     current_status,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    course, _, submission = await _create_review_context(
+        session_maker,
+        requester_id=requester.id,
+        reviewer_id=admin.id,
+        submission_status=current_status,
+    )
+    before = await _review_snapshot(session_maker, submission.id)
+    monkeypatch.setattr(
+        archives_service,
+        "enqueue_submission_status_notification",
+        _fail_if_notification_called,
+    )
+    monkeypatch.setattr(
+        status_service,
+        "enqueue_submission_status_notification",
+        _fail_if_notification_called,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        response = await client.post(
+            f"/archives/admin/submissions/{submission.id}/{action}",
+            json={
+                "note": "must not replace original review",
+                "expected_status": current_status.value,
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.json()["id"] == submission.id
+        assert response.json()["status"] == current_status.value
+        assert response.json()["changed"] is False
+        assert response.json()["available_actions"] == {
+            SubmissionStatus.APPROVED: ["reject", "takedown", "delete"],
+            SubmissionStatus.REJECTED: ["approve", "delete"],
+            SubmissionStatus.TAKEDOWN: ["republish", "delete"],
+        }[current_status]
+        assert "submission" not in response.json()
+        assert await _review_snapshot(session_maker, submission.id) == before
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_review_context(
+            session_maker,
+            course_id=course.id,
+            submission_id=submission.id,
+        )
+
+@pytest.mark.parametrize(
+    ("action", "current_status", "resulting_status", "available_actions"),
+    [
+        (
+            "approve",
+            SubmissionStatus.PENDING,
+            SubmissionStatus.APPROVED,
+            ["reject", "takedown", "delete"],
+        ),
+        (
+            "reject",
+            SubmissionStatus.PENDING,
+            SubmissionStatus.REJECTED,
+            ["approve", "delete"],
+        ),
+        (
+            "takedown",
+            SubmissionStatus.PENDING,
+            SubmissionStatus.TAKEDOWN,
+            ["republish", "delete"],
+        ),
+        (
+            "approve",
+            SubmissionStatus.REJECTED,
+            SubmissionStatus.APPROVED,
+            ["reject", "takedown", "delete"],
+        ),
+        (
+            "republish",
+            SubmissionStatus.TAKEDOWN,
+            SubmissionStatus.APPROVED,
+            ["reject", "takedown", "delete"],
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_direct_review_true_transitions_return_flat_changed_response(
+    client,
+    session_maker,
+    make_user,
+    action,
+    current_status,
+    resulting_status,
+    available_actions,
 ):
     requester = await make_user()
     admin = await make_user(is_admin=True)
@@ -472,16 +615,129 @@ async def test_direct_review_same_target_actions_are_flat_response_no_ops(
         response = await client.post(
             f"/archives/admin/submissions/{submission.id}/{action}",
             json={
-                "note": "must not replace original review",
+                "note": f"true {action}",
                 "expected_status": current_status.value,
             },
         )
 
         assert response.status_code == 200
         assert response.json()["id"] == submission.id
-        assert response.json()["status"] == current_status.value
-        assert "changed" not in response.json()
-        assert await _review_snapshot(session_maker, submission.id) == before
+        assert response.json()["status"] == resulting_status.value
+        assert response.json()["changed"] is True
+        assert response.json()["available_actions"] == available_actions
+        assert "submission" not in response.json()
+
+        after = await _review_snapshot(session_maker, submission.id)
+        assert after["submission"][0] == resulting_status
+        assert after["submission"][1] == admin.id
+        assert after["submission"][2] is not None
+        assert after["submission"][3] == f"true {action}"
+        assert after["notifications"] == before["notifications"] + 1
+        assert after["events"] == before["events"]
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_review_context(
+            session_maker,
+            course_id=course.id,
+            submission_id=submission.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_admin_submission_list_projects_stable_available_actions(
+    client,
+    session_maker,
+    make_user,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    contexts = []
+    expected_by_id = {}
+    try:
+        for submission_status, actions in [
+            (
+                SubmissionStatus.PENDING,
+                ["approve", "reject", "takedown", "delete"],
+            ),
+            (
+                SubmissionStatus.APPROVED,
+                ["reject", "takedown", "delete"],
+            ),
+            (SubmissionStatus.REJECTED, ["approve", "delete"]),
+            (SubmissionStatus.TAKEDOWN, ["republish", "delete"]),
+            (SubmissionStatus.DELETED, []),
+        ]:
+            course, _, submission = await _create_review_context(
+                session_maker,
+                requester_id=requester.id,
+                reviewer_id=admin.id,
+                submission_status=submission_status,
+            )
+            contexts.append((course.id, submission.id))
+            expected_by_id[submission.id] = (
+                submission_status.value,
+                actions,
+            )
+
+        deleted_course, _, deleted_submission = await _create_review_context(
+            session_maker,
+            requester_id=requester.id,
+            reviewer_id=admin.id,
+            submission_status=SubmissionStatus.PENDING,
+        )
+        contexts.append((deleted_course.id, deleted_submission.id))
+        async with session_maker() as session:
+            row = await session.get(ArchiveSubmission, deleted_submission.id)
+            row.deleted_at = datetime.now(timezone.utc)
+            await session.commit()
+        expected_by_id[deleted_submission.id] = ("deleted", [])
+
+        app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+        response = await client.get("/archives/admin/submissions")
+
+        assert response.status_code == 200
+        rows_by_id = {
+            row["id"]: row for row in response.json() if row["id"] in expected_by_id
+        }
+        assert set(rows_by_id) == set(expected_by_id)
+        for submission_id, (expected_status, actions) in expected_by_id.items():
+            row = rows_by_id[submission_id]
+            assert row["status"] == expected_status
+            assert row["available_actions"] == actions
+            assert len(row["available_actions"]) == len(set(row["available_actions"]))
+            assert "changed" not in row
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        for course_id, submission_id in contexts:
+            await _cleanup_review_context(
+                session_maker,
+                course_id=course_id,
+                submission_id=submission_id,
+            )
+
+
+@pytest.mark.asyncio
+async def test_owner_submission_response_does_not_expose_admin_capabilities(
+    client,
+    session_maker,
+    make_user,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    course, _, submission = await _create_review_context(
+        session_maker,
+        requester_id=requester.id,
+        reviewer_id=admin.id,
+        submission_status=SubmissionStatus.PENDING,
+    )
+    app.dependency_overrides[get_current_user] = _override_user(requester.id)
+    try:
+        response = await client.get("/archives/submissions/me")
+
+        assert response.status_code == 200
+        row = next(item for item in response.json() if item["id"] == submission.id)
+        assert "available_actions" not in row
+        assert "changed" not in row
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         await _cleanup_review_context(

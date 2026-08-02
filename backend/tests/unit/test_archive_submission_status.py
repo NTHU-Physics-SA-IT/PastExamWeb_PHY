@@ -5,13 +5,15 @@ from itertools import product
 
 import pytest
 
-from app.models.models import SubmissionStatus
+from app.models.models import ArchiveSubmissionAdminAction, SubmissionStatus
 from app.services.archive_submission_status import (
     ArchiveSubmissionExpectedStateClassification,
     ArchiveSubmissionReviewAction,
     ArchiveSubmissionTransitionClassification,
+    available_archive_submission_admin_actions,
     classify_archive_submission_expected_state,
     classify_archive_submission_review_transition,
+    resolve_archive_submission_actual_status,
 )
 
 
@@ -139,6 +141,42 @@ POLICY_MATRIX = [
 ]
 
 
+ADMIN_ACTION_MATRIX = [
+    (
+        SubmissionStatus.PENDING,
+        (
+            ArchiveSubmissionAdminAction.APPROVE,
+            ArchiveSubmissionAdminAction.REJECT,
+            ArchiveSubmissionAdminAction.TAKEDOWN,
+            ArchiveSubmissionAdminAction.DELETE,
+        ),
+    ),
+    (
+        SubmissionStatus.APPROVED,
+        (
+            ArchiveSubmissionAdminAction.REJECT,
+            ArchiveSubmissionAdminAction.TAKEDOWN,
+            ArchiveSubmissionAdminAction.DELETE,
+        ),
+    ),
+    (
+        SubmissionStatus.REJECTED,
+        (
+            ArchiveSubmissionAdminAction.APPROVE,
+            ArchiveSubmissionAdminAction.DELETE,
+        ),
+    ),
+    (
+        SubmissionStatus.TAKEDOWN,
+        (
+            ArchiveSubmissionAdminAction.REPUBLISH,
+            ArchiveSubmissionAdminAction.DELETE,
+        ),
+    ),
+    (SubmissionStatus.DELETED, ()),
+]
+
+
 @pytest.mark.parametrize(
     ("source_status", "action", "classification", "resulting_status"),
     POLICY_MATRIX,
@@ -205,6 +243,61 @@ def test_archive_submission_review_policy_result_is_immutable_and_synchronous():
     )
     with pytest.raises(FrozenInstanceError):
         result.resulting_status = SubmissionStatus.REJECTED
+
+
+@pytest.mark.parametrize(("status", "expected_actions"), ADMIN_ACTION_MATRIX)
+def test_archive_submission_admin_actions_follow_canonical_projection(
+    status,
+    expected_actions,
+):
+    actions = available_archive_submission_admin_actions(status)
+
+    assert actions == expected_actions
+    assert len(actions) == len(set(actions))
+
+
+def test_archive_submission_admin_actions_are_pure_and_keep_delete_outside_review_matrix():
+    assert not iscoroutinefunction(available_archive_submission_admin_actions)
+    assert tuple(
+        signature(available_archive_submission_admin_actions).parameters
+    ) == ("status",)
+    assert ArchiveSubmissionAdminAction.DELETE.value not in {
+        action.value for action in ArchiveSubmissionReviewAction
+    }
+
+
+@pytest.mark.parametrize("status", list(SubmissionStatus))
+def test_archive_submission_actual_status_normalization_preserves_active_status(status):
+    assert (
+        resolve_archive_submission_actual_status(status, deleted_at=None) == status
+    )
+
+
+@pytest.mark.parametrize(
+    "raw_status",
+    [
+        SubmissionStatus.PENDING,
+        SubmissionStatus.APPROVED,
+        "rejected",
+        " takedown ",
+    ],
+)
+def test_archive_submission_actual_status_normalization_prioritizes_deleted_at(
+    raw_status,
+):
+    assert (
+        resolve_archive_submission_actual_status(
+            raw_status,
+            deleted_at=object(),
+        )
+        == SubmissionStatus.DELETED
+    )
+
+
+def test_archive_submission_actual_status_normalization_rejects_unknown_status():
+    assert (
+        resolve_archive_submission_actual_status("unknown", deleted_at=None) is None
+    )
 
 
 @pytest.mark.parametrize("status", list(SubmissionStatus))

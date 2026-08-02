@@ -81,6 +81,27 @@ review requests based on one observed status, but it does not detect an ABA
 cycle such as `approved → rejected → approved`. Stage 5A does not add a
 version/revision column, ETag framework, or migration for generation tracking.
 
+### Admin review capabilities
+
+Administrator-facing submission responses project the basic actions available
+from the current normalized submission status. The projection order is stable:
+`approve`, `reject`, `takedown`, `republish`, then `delete`.
+
+| Status | Advertised actions |
+| --- | --- |
+| `pending` | `approve`, `reject`, `takedown`, `delete` |
+| `approved` | `reject`, `takedown`, `delete` |
+| `rejected` | `approve`, `delete` |
+| `takedown` | `republish`, `delete` |
+| `deleted` | none |
+
+The projection is a pure backend policy. `delete` is a trash-lifecycle action,
+not an entry in the review-transition matrix. Same-target no-op actions are
+accepted by the direct API contract but are not advertised. In particular,
+`takedown` exposes both `republish` and `delete`. A non-null `deleted_at`
+normalizes the row to `deleted` for both route enforcement and capability
+projection.
+
 | Value | Canonical Chinese label |
 | --- | --- |
 | `pending` | 待審核 |
@@ -110,16 +131,32 @@ The direct routes return stable error-detail codes:
 - expected-state mismatch: `409 archive_submission_stale_state`; and
 - a matching-state illegal edge: `409 archive_submission_illegal_transition`.
 
-Same-target no-ops return the existing flat `ArchiveSubmissionRead` shape with
-no writes. The separate archive-report uphold flow retains its report-owned
-transaction and internal submission takedown; it does not use the direct-client
-precondition contract.
+Successful direct actions retain the existing flat submission fields. They add
+admin-only `available_actions` and a required `changed` boolean: a true
+transition returns `changed=true`, while a same-target no-op returns
+`changed=false` with its original metadata and no writes. Admin list/update
+responses add only `available_actions`; owner and public projections do not
+expose administrator capabilities. The comparison response keeps its
+compatibility `can_takedown` field, deriving it from the same backend capability
+policy instead of a separate status mapping.
+
+Deterministic PostgreSQL tests use independent request sessions and an event
+barrier while the first request holds the submission row lock through its
+commit boundary. Double-approve and every pair among approve, reject, and
+takedown from `pending` establish first-writer-wins: the winner returns
+`changed=true`, the loser observes the committed state and returns stale
+`409`, and only the winner produces transition metadata, Archive work, or a
+notification. A deliberate same-target request with a matching expected state
+remains the distinct `changed=false` control.
+
+The separate archive-report uphold flow retains its report-owned transaction
+and internal submission takedown; it does not use the direct-client
+precondition or direct-action response contract.
 
 ### Implementation gaps
 
-- The final response does not yet distinguish a transition from a no-op.
-- Backend capability projection and deterministic concurrent-session evidence
-  remain follow-up work.
+- The frontend does not yet consume `available_actions` or `changed`; visible
+  action projection and no-op/stale feedback remain later Stage 5A work.
 - Backend rejection notification copy and `frontend/src/views/Admin.vue` still
   use `已退回` in places.
 
@@ -340,7 +377,7 @@ tests before centralization.
 
 | Condition | Intended semantic result | Current status |
 | --- | --- | --- |
-| Same-target action with a matching precondition | Successful no-op without writes, notification, statistics, or audit changes | Direct routes enforce no-op gating; distinguishable response metadata remains follow-up |
+| Same-target action with a matching precondition | Successful no-op without writes, notification, statistics, or audit changes | Implemented as flat `200` action response with `changed=false` |
 | Stale direct review request | `409 Conflict` without writes or notification | Implemented with stable `archive_submission_stale_state` detail |
 | Different invalid transition | `409 Conflict` without writes or notification | Implemented for direct review routes with stable `archive_submission_illegal_transition` detail |
 | Permission denied | Deny without revealing protected resource details | Backend enforcement exists; consistency requires review |

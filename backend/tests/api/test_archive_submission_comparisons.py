@@ -215,6 +215,7 @@ async def test_pending_submission_includes_approved_candidate_from_same_requeste
 
     assert [row["id"] for row in rows] == [candidate.id]
     assert rows[0]["status"] == SubmissionStatus.APPROVED.value
+    assert rows[0]["can_takedown"] is True
     assert current.id not in {row["id"] for row in rows}
 
 
@@ -273,6 +274,7 @@ async def test_approved_submission_includes_pending_candidate_from_same_requeste
 
     assert [row["id"] for row in rows] == [candidate.id]
     assert rows[0]["status"] == SubmissionStatus.PENDING.value
+    assert rows[0]["can_takedown"] is True
     assert current.id not in {row["id"] for row in rows}
 
 
@@ -596,6 +598,7 @@ async def test_comparisons_include_takedown_and_exclude_rejected_and_deleted(
     )
 
     assert [row["id"] for row in rows] == [takedown.id]
+    assert rows[0]["can_takedown"] is False
     assert rejected.id not in {row["id"] for row in rows}
     assert deleted.id not in {row["id"] for row in rows}
 

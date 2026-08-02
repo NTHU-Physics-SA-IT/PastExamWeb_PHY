@@ -23,6 +23,9 @@ from app.db.course_categories import (
 )
 from app.models.models import (
     Archive,
+    ArchiveSubmissionActionRead,
+    ArchiveSubmissionAdminAction,
+    ArchiveSubmissionAdminRead,
     ArchiveSubmissionComparisonRead,
     ArchiveSubmission,
     ArchiveSubmissionEvent,
@@ -59,11 +62,13 @@ from app.services.archive_submission_status import (
     ArchiveSubmissionExpectedStateClassification,
     ArchiveSubmissionReviewAction,
     ArchiveSubmissionTransitionClassification,
+    available_archive_submission_admin_actions,
     classify_archive_submission_expected_state,
     classify_archive_submission_review_transition,
     enqueue_submission_status_notification,
     normalize_submission_status,
     republish_archive_submission,
+    resolve_archive_submission_actual_status,
     take_down_archive_submission,
 )
 
@@ -108,6 +113,50 @@ def _normalize_submission_status(raw_status):
     return normalized_status
 
 
+def _resolve_submission_actual_status(raw_status, *, deleted_at):
+    normalized_status = resolve_archive_submission_actual_status(
+        raw_status,
+        deleted_at=deleted_at,
+    )
+    if normalized_status is None:
+        logger.warning("Unsupported submission status encountered: %s", raw_status)
+    return normalized_status
+
+
+def _serialize_archive_submission_admin(
+    submission,
+) -> ArchiveSubmissionAdminRead:
+    base = ArchiveSubmissionRead.model_validate(submission)
+    deleted_at = (
+        submission.get("deleted_at")
+        if isinstance(submission, dict)
+        else getattr(submission, "deleted_at", None)
+    )
+    actual_status = _resolve_submission_actual_status(
+        base.status,
+        deleted_at=deleted_at,
+    )
+    if actual_status is None:
+        raise ValueError(f"Unsupported submission status: {base.status}")
+
+    payload = base.model_dump()
+    payload["status"] = actual_status
+    payload["available_actions"] = available_archive_submission_admin_actions(
+        actual_status
+    )
+    return ArchiveSubmissionAdminRead.model_validate(payload)
+
+
+def _serialize_archive_submission_action(
+    submission,
+    *,
+    changed: bool,
+) -> ArchiveSubmissionActionRead:
+    payload = _serialize_archive_submission_admin(submission).model_dump()
+    payload["changed"] = changed
+    return ArchiveSubmissionActionRead.model_validate(payload)
+
+
 def _is_locked_review_submission(submission: ArchiveSubmission) -> bool:
     normalized_status = _normalize_submission_status(submission.status)
     return (
@@ -143,7 +192,7 @@ async def _prepare_direct_archive_submission_review(
     submission_id: int,
     decision: SubmissionDecision | None,
     action: ArchiveSubmissionReviewAction,
-) -> tuple[ArchiveSubmission, ArchiveSubmissionRead | None]:
+) -> tuple[ArchiveSubmission, ArchiveSubmissionActionRead | None]:
     submission = await _lock_archive_submission_for_direct_review(db, submission_id)
     if submission is None:
         await db.rollback()
@@ -152,10 +201,9 @@ async def _prepare_direct_archive_submission_review(
             detail="Submission not found",
         )
 
-    actual_status = (
-        SubmissionStatus.DELETED
-        if submission.deleted_at is not None
-        else _normalize_submission_status(submission.status)
+    actual_status = _resolve_submission_actual_status(
+        submission.status,
+        deleted_at=submission.deleted_at,
     )
     if actual_status is None:
         await db.rollback()
@@ -209,7 +257,10 @@ async def _prepare_direct_archive_submission_review(
             },
         )
     if policy.classification == ArchiveSubmissionTransitionClassification.NO_OP:
-        response = ArchiveSubmissionRead.model_validate(submission)
+        response = _serialize_archive_submission_action(
+            submission,
+            changed=False,
+        )
         await db.rollback()
         return submission, response
 
@@ -679,7 +730,7 @@ async def delete_my_archive_submission(
     }
 
 
-@router.get("/admin/submissions", response_model=list[ArchiveSubmissionRead])
+@router.get("/admin/submissions", response_model=list[ArchiveSubmissionAdminRead])
 async def list_archive_submissions_for_admin(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
@@ -715,6 +766,7 @@ async def list_archive_submissions_for_admin(
                 ) AS is_admin_upload,
                 archive_submissions.created_archive_id,
                 archive_submissions.lifecycle_reason,
+                archive_submissions.deleted_at,
                 (archives.deleted_at IS NOT NULL) AS linked_archive_deleted,
                 (courses.deleted_at IS NOT NULL) AS linked_course_deleted,
                 archive_submissions.created_at,
@@ -746,7 +798,10 @@ async def list_archive_submissions_for_admin(
     skipped_submission_count = 0
     for row in result.all():
         row_dict = dict(row._mapping)
-        normalized_status = _normalize_submission_status(row_dict.get("status"))
+        normalized_status = _resolve_submission_actual_status(
+            row_dict.get("status"),
+            deleted_at=row_dict.get("deleted_at"),
+        )
         if normalized_status is None:
             skipped_submission_count += 1
             continue
@@ -764,7 +819,9 @@ async def list_archive_submissions_for_admin(
             )
         try:
             row_dict["is_admin_upload"] = bool(row_dict.get("is_admin_upload"))
-            archive_submissions.append(ArchiveSubmissionRead.model_validate(row_dict))
+            archive_submissions.append(
+                _serialize_archive_submission_admin(row_dict)
+            )
         except Exception as exc:
             skipped_submission_count += 1
             logger.warning(
@@ -899,7 +956,10 @@ async def list_archive_submission_comparisons(
     }
     rows = []
     for comparison, requester_name, requester_email in result.all():
-        normalized_status = _normalize_submission_status(comparison.status)
+        normalized_status = _resolve_submission_actual_status(
+            comparison.status,
+            deleted_at=comparison.deleted_at,
+        )
         if normalized_status not in comparable_statuses:
             continue
 
@@ -907,10 +967,10 @@ async def list_archive_submission_comparisons(
         payload["requester_name"] = requester_name
         payload["requester_email"] = requester_email
         payload["status"] = normalized_status
-        payload["can_takedown"] = normalized_status in {
-            SubmissionStatus.PENDING,
-            SubmissionStatus.APPROVED,
-        }
+        payload["can_takedown"] = (
+            ArchiveSubmissionAdminAction.TAKEDOWN
+            in available_archive_submission_admin_actions(normalized_status)
+        )
         rows.append(payload)
 
     rows.sort(
@@ -972,7 +1032,10 @@ async def get_archive_submission_preview_file(
     )
 
 
-@router.put("/admin/submissions/{submission_id}", response_model=ArchiveSubmissionRead)
+@router.put(
+    "/admin/submissions/{submission_id}",
+    response_model=ArchiveSubmissionAdminRead,
+)
 async def update_archive_submission_for_admin(
     submission_id: int,
     submission_data: ArchiveSubmissionUpdate,
@@ -1069,10 +1132,13 @@ async def update_archive_submission_for_admin(
             db.add(archive)
             await db.commit()
 
-    return submission
+    return _serialize_archive_submission_admin(submission)
 
 
-@router.post("/admin/submissions/{submission_id}/approve", response_model=ArchiveSubmissionRead)
+@router.post(
+    "/admin/submissions/{submission_id}/approve",
+    response_model=ArchiveSubmissionActionRead,
+)
 async def approve_archive_submission(
     submission_id: int,
     decision: SubmissionDecision | None = None,
@@ -1203,13 +1269,17 @@ async def approve_archive_submission(
         await db.flush()
         await db.refresh(submission)
         await db.commit()
-        return submission
+        await db.refresh(submission)
+        return _serialize_archive_submission_action(submission, changed=True)
     except Exception:
         await db.rollback()
         raise
 
 
-@router.post("/admin/submissions/{submission_id}/reject", response_model=ArchiveSubmissionRead)
+@router.post(
+    "/admin/submissions/{submission_id}/reject",
+    response_model=ArchiveSubmissionActionRead,
+)
 async def reject_archive_submission(
     submission_id: int,
     decision: SubmissionDecision | None = None,
@@ -1240,13 +1310,16 @@ async def reject_archive_submission(
         )
         await db.commit()
         await db.refresh(submission)
-        return submission
+        return _serialize_archive_submission_action(submission, changed=True)
     except Exception:
         await db.rollback()
         raise
 
 
-@router.post("/admin/submissions/{submission_id}/takedown", response_model=ArchiveSubmissionRead)
+@router.post(
+    "/admin/submissions/{submission_id}/takedown",
+    response_model=ArchiveSubmissionActionRead,
+)
 async def takedown_archive_submission(
     submission_id: int,
     decision: SubmissionDecision | None = None,
@@ -1274,13 +1347,16 @@ async def takedown_archive_submission(
         )
         await db.commit()
         await db.refresh(submission)
-        return submission
+        return _serialize_archive_submission_action(submission, changed=True)
     except Exception:
         await db.rollback()
         raise
 
 
-@router.post("/admin/submissions/{submission_id}/republish", response_model=ArchiveSubmissionRead)
+@router.post(
+    "/admin/submissions/{submission_id}/republish",
+    response_model=ArchiveSubmissionActionRead,
+)
 async def republish_archive_submission_endpoint(
     submission_id: int,
     decision: SubmissionDecision | None = None,
@@ -1355,7 +1431,7 @@ async def republish_archive_submission_endpoint(
         )
         await db.commit()
         await db.refresh(submission)
-        return submission
+        return _serialize_archive_submission_action(submission, changed=True)
     except Exception:
         await db.rollback()
         raise

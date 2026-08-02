@@ -7,6 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.models import (
     ArchiveSubmission,
+    ArchiveSubmissionAdminAction,
     PersonalNotificationType,
     SubmissionStatus,
 )
@@ -47,6 +48,29 @@ _ACTION_TARGET_STATUS = {
     ArchiveSubmissionReviewAction.REJECT: SubmissionStatus.REJECTED,
     ArchiveSubmissionReviewAction.TAKEDOWN: SubmissionStatus.TAKEDOWN,
     ArchiveSubmissionReviewAction.REPUBLISH: SubmissionStatus.APPROVED,
+}
+
+_ADMIN_ACTION_POLICY = {
+    SubmissionStatus.PENDING: (
+        ArchiveSubmissionAdminAction.APPROVE,
+        ArchiveSubmissionAdminAction.REJECT,
+        ArchiveSubmissionAdminAction.TAKEDOWN,
+        ArchiveSubmissionAdminAction.DELETE,
+    ),
+    SubmissionStatus.APPROVED: (
+        ArchiveSubmissionAdminAction.REJECT,
+        ArchiveSubmissionAdminAction.TAKEDOWN,
+        ArchiveSubmissionAdminAction.DELETE,
+    ),
+    SubmissionStatus.REJECTED: (
+        ArchiveSubmissionAdminAction.APPROVE,
+        ArchiveSubmissionAdminAction.DELETE,
+    ),
+    SubmissionStatus.TAKEDOWN: (
+        ArchiveSubmissionAdminAction.REPUBLISH,
+        ArchiveSubmissionAdminAction.DELETE,
+    ),
+    SubmissionStatus.DELETED: (),
 }
 
 _REVIEW_TRANSITION_POLICY = {
@@ -220,6 +244,12 @@ def classify_archive_submission_expected_state(
     return ArchiveSubmissionExpectedStateClassification.STALE
 
 
+def available_archive_submission_admin_actions(
+    status: SubmissionStatus,
+) -> tuple[ArchiveSubmissionAdminAction, ...]:
+    return _ADMIN_ACTION_POLICY[status]
+
+
 _SUBMISSION_NOTIFICATION_COPY = {
     SubmissionStatus.APPROVED: ("考古題審核通過", "已通過審核"),
     SubmissionStatus.REJECTED: ("考古題投稿已退回", "已退回"),
@@ -234,6 +264,16 @@ def normalize_submission_status(value) -> SubmissionStatus | None:
         return SubmissionStatus(str(value).strip().lower())
     except ValueError:
         return None
+
+
+def resolve_archive_submission_actual_status(
+    value,
+    *,
+    deleted_at,
+) -> SubmissionStatus | None:
+    if deleted_at is not None:
+        return SubmissionStatus.DELETED
+    return normalize_submission_status(value)
 
 
 async def enqueue_submission_status_notification(
