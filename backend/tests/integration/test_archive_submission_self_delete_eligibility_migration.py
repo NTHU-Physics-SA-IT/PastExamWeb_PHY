@@ -111,7 +111,7 @@ def migration_engine(monkeypatch: pytest.MonkeyPatch) -> Engine:
 
 def test_model_and_manifest_define_the_new_head_contract() -> None:
     assert COLUMN_NAME in ArchiveSubmission.__table__.c
-    assert HEAD_SCHEMA_REVISION == NEW_REVISION
+    assert HEAD_SCHEMA_REVISION == "d8f2a6c1b4e7"
 
     source_metadata = metadata_for_revision(PREVIOUS_REVISION)
     head_metadata = metadata_for_revision(NEW_REVISION)
@@ -140,7 +140,7 @@ def test_model_instance_default_is_false() -> None:
 def test_new_revision_is_the_single_child_of_a7() -> None:
     script, heads = revision_graph()
 
-    assert heads == [NEW_REVISION]
+    assert heads == ["d8f2a6c1b4e7"]
     assert script.get_revision(NEW_REVISION).down_revision == PREVIOUS_REVISION
 
 

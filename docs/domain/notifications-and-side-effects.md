@@ -56,6 +56,13 @@ Notify the submitter when a submission is:
 Do not notify submitters merely because a Course or Archive is moved to trash
 or restored.
 
+The ArchiveSubmission previous-status schema prerequisite does not change
+runtime notification behavior. Owner, administrator, and system deletion
+remain silent; restore remains silent; and Course trash/restore retains its
+existing notification semantics. The P0 migration and sealed audit classify
+prior-state provenance without enqueueing notifications or modifying
+notification deduplication.
+
 Review side effects are gated by the expected-state check and transition
 policy:
 

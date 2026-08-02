@@ -233,6 +233,24 @@ takedown are separate concepts.
   approval action.
 - `deleted` leaves review transitions and is handled only by trash lifecycle.
 
+`ArchiveSubmission.previous_status` is a nullable, typed schema prerequisite
+for reversible submission soft delete. It may preserve only `pending`,
+`approved`, `rejected`, or `takedown`, and only after a submission truly enters
+the `deleted` lifecycle. Every active row (`deleted_at IS NULL` and normalized
+status other than `deleted`) keeps this column null. Historical deleted rows
+whose prior state cannot be proven also keep it null; a future restore must
+fail closed for those rows rather than infer from `created_archive_id`, a
+linked Archive, or review metadata. Permanent or otherwise unrestorable rows
+have no restorable prior state.
+
+Course trash is a separate active lifecycle. Its affected submissions remain
+`takedown` with `deleted_at=NULL` and continue to store the exact prior state
+in the existing versioned `course_trashed|previous_status=...` lifecycle
+marker. The schema prerequisite migration validates and counts those markers
+but does not copy them into `ArchiveSubmission.previous_status`, change their
+status, or rewrite their lifecycle reason. A later successful exact restore
+may clear the typed prior state only after it has consumed that state.
+
 ### Current implementation
 
 Lifecycle reasons such as archive/course trash are stored on
@@ -247,6 +265,13 @@ uses the legal `pending` to `approved` to `rejected` review flow before Course
 trash, and directly protects restoration to rejected. Both tests verify the
 persisted Course lifecycle reason and previous-status marker; they do not
 cover pending, administrator-takedown, or sibling-group cases.
+
+The current P0 milestone adds only the typed nullable column, its database
+guards, deterministic historical owner-delete backfill, schema manifest, and
+sealed read-only audit. Owner/admin delete routes do not yet write the column,
+restore does not yet consume it, and Course trash/restore continues using its
+versioned marker. S3A and S3B remain required before the new field governs
+runtime deletion or restoration.
 
 ### Known gap
 

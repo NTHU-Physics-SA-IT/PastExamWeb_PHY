@@ -15,7 +15,6 @@ from pydantic import ValidationError
 
 from app.core.config import SQLALCHEMY_DATABASE_URL
 from app.db.audit.models import (
-    AggregateCounts,
     AuditMode,
     AuditRequest,
     AuditResult,
@@ -110,8 +109,11 @@ def _identity_expression(request: AuditRequest) -> str:
 
 def _continuity_cte(request: AuditRequest) -> str:
     expected = _sql_literal(request.expected_ledger)
-    expects_column = request.expected_ledger == "f5e1d8c3a7b2"
-    column_condition = (
+    expects_owner_delete_column = request.expected_ledger in {
+        "f5e1d8c3a7b2",
+        "d8f2a6c1b4e7",
+    }
+    owner_delete_column_condition = (
         """
         EXISTS (
             SELECT 1
@@ -125,7 +127,7 @@ def _continuity_cte(request: AuditRequest) -> str:
                   IN ('false', 'false::boolean')
         )
         """
-        if expects_column
+        if expects_owner_delete_column
         else """
         NOT EXISTS (
             SELECT 1
@@ -133,6 +135,30 @@ def _continuity_cte(request: AuditRequest) -> str:
             WHERE table_schema = 'public'
               AND table_name = 'archive_submissions'
               AND column_name = 'owner_self_delete_consumed'
+        )
+        """
+    )
+    expects_previous_status_column = request.expected_ledger == "d8f2a6c1b4e7"
+    previous_status_column_condition = (
+        """
+        EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'archive_submissions'
+              AND column_name = 'previous_status'
+              AND udt_name = 'submissionstatus'
+              AND is_nullable = 'YES'
+        )
+        """
+        if expects_previous_status_column
+        else """
+        NOT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'archive_submissions'
+              AND column_name = 'previous_status'
         )
         """
     )
@@ -174,7 +200,8 @@ schema_state AS (
         AND to_regclass('public.users') IS NOT NULL
         AND to_regclass('public.alembic_version') IS NOT NULL
         AND required_columns.required_columns_ok
-        AND ({column_condition}) AS schema_ok
+        AND ({owner_delete_column_condition})
+        AND ({previous_status_column_condition}) AS schema_ok
     FROM required_columns
 ),
 enum_state AS (
@@ -267,7 +294,9 @@ result AS (
             THEN 'complete'
             ELSE 'data_blocked'
         END AS status,
-        summary.*,
+        to_jsonb(summary) AS aggregates,
+        summary.overlap = 0 AS mutual_exclusivity,
+        summary.difference = 0 AS conservation,
         COALESCE(
             (
                 SELECT json_agg(
@@ -284,19 +313,10 @@ SELECT
     '{RESULT_MARKER}' || json_build_object(
         'status', status,
         'error_code', NULL,
-        'aggregates', json_build_object(
-            'total', total,
-            'automatic_true', automatic_true,
-            'automatic_false', automatic_false,
-            'unsupported', unsupported,
-            'unclassified', unclassified,
-            'overlap', overlap,
-            'bucket_sum', bucket_sum,
-            'difference', difference
-        ),
+        'aggregates', aggregates,
         'combinations', combinations,
-        'mutual_exclusivity', overlap = 0,
-        'conservation', difference = 0
+        'mutual_exclusivity', mutual_exclusivity,
+        'conservation', conservation
     )::text
 FROM result
 """
@@ -404,6 +424,7 @@ def parse_process_output(
         continuity = ContinuityResult.model_validate(meta)
         aggregates_payload = payload.pop("aggregates", None)
         combinations_payload = payload.pop("combinations", [])
+        adapter = get_audit_adapter(request.audit_id, request.audit_version)
         result = AuditResult(
             audit_id=request.audit_id,
             audit_version=request.audit_version,
@@ -412,7 +433,7 @@ def parse_process_output(
             repository_revision=request.repository_revision,
             continuity=continuity,
             aggregates=(
-                AggregateCounts.model_validate(aggregates_payload)
+                adapter.aggregate_model.model_validate(aggregates_payload)
                 if aggregates_payload is not None
                 else None
             ),
@@ -458,7 +479,6 @@ def parse_process_output(
         re.fullmatch(r"[a-z][a-z0-9_]{0,63}", flag) for flag in approved_flags
     ):
         raise AuditExecutionError("result_schema_invalid: unsafe combination label")
-    adapter = get_audit_adapter(request.audit_id, request.audit_version)
     if not approved_flags.issubset(adapter.approved_combination_flags):
         raise AuditExecutionError("result_schema_invalid: unknown combination label")
     return result
