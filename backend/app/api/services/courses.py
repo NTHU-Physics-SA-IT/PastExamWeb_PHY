@@ -32,6 +32,7 @@ from app.db.course_categories import (
 )
 from app.api.services.archive_submission_lifecycle import (
     archive_lifecycle_conflict_error,
+    course_lifecycle_conflict_error,
     make_course_trash_lifecycle_reason,
     is_course_trash_lifecycle_reason,
     soft_delete_archive_with_submission_takedown,
@@ -81,11 +82,13 @@ from app.services.archive_submission_links import (
     validate_archive_source_submission_rows,
 )
 from app.services import archive_lifecycle_locks
+from app.services import course_lifecycle_locks
 from app.services.archive_lifecycle_locks import (
     LifecyclePlanRetryExhausted,
     LockedLifecycleRows,
     PlanRebuildBudget,
 )
+from app.services.course_lifecycle_locks import CourseLifecycleOperation
 
 router = APIRouter()
 
@@ -180,69 +183,6 @@ def _normalize_category_badge_color(color: str | None) -> str:
             detail="Invalid category badge color",
         )
     return normalized
-
-
-def _build_course_submission_match_conditions(
-    course_name: str,
-    course_category: str,
-) -> list:
-    conditions = []
-    normalized_course_name = normalize_course_search_text(course_name)
-    if normalized_course_name:
-        requested_name_match = normalized_course_text_expr(ArchiveSubmission.requested_course_name) == normalized_course_name
-        subject_match = normalized_course_text_expr(ArchiveSubmission.subject) == normalized_course_name
-        name_match = or_(requested_name_match, subject_match)
-        normalized_category = (course_category or "").strip().lower()
-        if normalized_category:
-            category_match = or_(
-                func.lower(func.trim(ArchiveSubmission.requested_category_key)) == normalized_category,
-                func.lower(func.trim(ArchiveSubmission.category)) == normalized_category,
-            )
-            conditions.append(and_(name_match, category_match))
-        else:
-            conditions.append(name_match)
-    return conditions
-
-
-async def _find_submissions_related_to_course(
-    db: AsyncSession,
-    *,
-    course_name: str,
-    course_category: str,
-    archive_ids: list[int],
-) -> list[ArchiveSubmission]:
-    archive_id_set = set(archive_ids)
-    conditions = []
-
-    if archive_id_set:
-        conditions.append(ArchiveSubmission.created_archive_id.in_(archive_id_set))
-
-    conditions.extend(_build_course_submission_match_conditions(course_name, course_category))
-
-    if not conditions:
-        return []
-
-    linked_submissions = (
-        await db.execute(
-            select(ArchiveSubmission).where(
-                or_(*conditions),
-                ArchiveSubmission.deleted_at.is_(None),
-                ArchiveSubmission.status != SubmissionStatus.DELETED,
-            )
-        )
-    ).scalars().all()
-
-    result = []
-    seen_ids: set[int] = set()
-    for submission in linked_submissions:
-        if submission.id is None:
-            continue
-        if submission.id in seen_ids:
-            continue
-        seen_ids.add(submission.id)
-        result.append(submission)
-
-    return result
 
 
 def _public_archive_conditions(course_id: int | None = None, archive_id: int | None = None) -> list:
@@ -1996,19 +1936,47 @@ async def delete_course(
             detail="Only admins can delete courses",
         )
 
-    query = select(Course).where(Course.id == course_id, Course.deleted_at.is_(None))
-    result = await db.execute(query)
-    course = result.scalar_one_or_none()
+    budget = PlanRebuildBudget()
+    locked_course_plan = None
+    while True:
+        locked_course_plan, revalidation = (
+            await course_lifecycle_locks.acquire_course_lifecycle_plan_once(
+                db,
+                course_id=course_id,
+                operation=CourseLifecycleOperation.TRASH,
+            )
+        )
+        if locked_course_plan is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Course not found"
+            )
+        if revalidation is not None and revalidation.valid:
+            break
 
-    if not course:
+        await db.rollback()
+        try:
+            budget = budget.consume()
+        except LifecyclePlanRetryExhausted:
+            raise course_lifecycle_conflict_error()
+
+    course = locked_course_plan.rows.course(course_id)
+    if course is None or course.deleted_at is not None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Course not found"
         )
 
-    archives_query = select(Archive).where(Archive.course_id == course_id)
-    archives_result = await db.execute(archives_query)
-    all_course_archives = archives_result.scalars().all()
-    active_archives = [archive for archive in all_course_archives if archive.deleted_at is None]
+    mutable_archive_ids = set(locked_course_plan.plan.mutable_archive_ids)
+    active_archives = [
+        archive
+        for archive in locked_course_plan.rows.archives
+        if archive.id in mutable_archive_ids
+    ]
+    mutable_submission_ids = set(locked_course_plan.plan.mutable_submission_ids)
+    linked_submissions = [
+        submission
+        for submission in locked_course_plan.rows.submissions
+        if submission.id in mutable_submission_ids
+    ]
 
     # Soft delete all associated archives and the course
     current_time = datetime.now(timezone.utc)
@@ -2016,35 +1984,6 @@ async def delete_course(
         archive.deleted_at = current_time
         archive.deleted_by_id = current_user.user_id
         archive.deleted_reason = "course deleted"
-
-    archive_ids = [archive.id for archive in all_course_archives if archive.id is not None]
-    linked_submissions = await _find_submissions_related_to_course(
-        db,
-        course_name=course.name,
-        course_category=course.category,
-        archive_ids=archive_ids,
-    )
-    active_archive_ids = {archive.id for archive in active_archives if archive.id is not None}
-    linked_archive_ids = {
-        submission.created_archive_id
-        for submission in linked_submissions
-        if submission.created_archive_id is not None
-    }
-    missing_linked_archive_ids = linked_archive_ids - active_archive_ids
-    if missing_linked_archive_ids:
-        linked_archives = (
-            await db.execute(
-                select(Archive).where(
-                    Archive.id.in_(missing_linked_archive_ids),
-                    Archive.deleted_at.is_(None),
-                )
-            )
-        ).scalars().all()
-        for archive in linked_archives:
-            archive.deleted_at = current_time
-            archive.deleted_by_id = current_user.user_id
-            archive.deleted_reason = "course deleted"
-            active_archives.append(archive)
 
     for submission in linked_submissions:
         if is_course_trash_lifecycle_reason(submission.lifecycle_reason):
