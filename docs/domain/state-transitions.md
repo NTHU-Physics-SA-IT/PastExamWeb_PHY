@@ -284,6 +284,20 @@ domains.
 `test_comment_report_admin_review_is_authorized_atomic_and_idempotent` and
 `test_archive_report_review_optional_takedown_is_atomic_and_non_destructive`.
 
+ArchiveReport review, soft trash, and soft restore discover their exact
+references before the first row lock and then use the canonical lifecycle
+order: Course, Archive, optional exact ArchiveSubmission, and ArchiveReport.
+Legacy Archives omit the absent Submission without fabricating one. After the
+locks are held, the operation revalidates the Report state and exact FK
+membership before applying the existing transition. One changed discovery may
+roll back and rebuild once; an unstable or static integrity anomaly fails
+closed through the generic internal-error boundary and does not borrow the
+Archive or Course lifecycle conflict contracts.
+
+This lock adoption does not change the pending-to-final matrix, finalized
+conflict, invalid action combination, legacy Archive takedown gap, result
+notification, soft-delete metadata, or pending-report restore uniqueness gap.
+
 ## Public visibility
 
 ### Intended invariant

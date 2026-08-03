@@ -14,6 +14,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.models import (
     Archive,
+    ArchiveReport,
     ArchiveSubmission,
     Course,
     CourseCategoryConfig,
@@ -31,6 +32,7 @@ class LifecycleResourceClass(IntEnum):
     COURSE = 20
     ARCHIVE = 30
     ARCHIVE_SUBMISSION = 40
+    ARCHIVE_REPORT = 50
 
 
 class LifecycleLockSetExpansionError(RuntimeError):
@@ -149,6 +151,7 @@ class ArchiveLifecycleLockPlan:
         course_ids: Iterable[int | None] = (),
         archive_ids: Iterable[int | None] = (),
         submission_ids: Iterable[int | None] = (),
+        report_ids: Iterable[int | None] = (),
         fingerprint: LifecycleMembershipFingerprint | None = None,
         approval_namespace_scope: str | None = None,
     ) -> ArchiveLifecycleLockPlan:
@@ -162,6 +165,7 @@ class ArchiveLifecycleLockPlan:
                     LifecycleResourceClass.ARCHIVE_SUBMISSION,
                     submission_ids,
                 ),
+                (LifecycleResourceClass.ARCHIVE_REPORT, report_ids),
             )
             for row_id in _stable_ids(values)
         )
@@ -208,15 +212,23 @@ class LockedLifecycleRows:
     courses: tuple[Course, ...] = ()
     archives: tuple[Archive, ...] = ()
     submissions: tuple[ArchiveSubmission, ...] = ()
+    reports: tuple[ArchiveReport, ...] = ()
 
     def __post_init__(self) -> None:
-        for attribute in ("categories", "courses", "archives", "submissions"):
+        for attribute in (
+            "categories",
+            "courses",
+            "archives",
+            "submissions",
+            "reports",
+        ):
             object.__setattr__(self, attribute, tuple(getattr(self, attribute)))
         for resource_class, rows in (
             (LifecycleResourceClass.COURSE_CATEGORY, self.categories),
             (LifecycleResourceClass.COURSE, self.courses),
             (LifecycleResourceClass.ARCHIVE, self.archives),
             (LifecycleResourceClass.ARCHIVE_SUBMISSION, self.submissions),
+            (LifecycleResourceClass.ARCHIVE_REPORT, self.reports),
         ):
             allowed = set(self.plan.ids_for(resource_class))
             actual = {row.id for row in rows}
@@ -236,6 +248,9 @@ class LockedLifecycleRows:
 
     def submission(self, row_id: int) -> ArchiveSubmission | None:
         return next((row for row in self.submissions if row.id == row_id), None)
+
+    def report(self, row_id: int) -> ArchiveReport | None:
+        return next((row for row in self.reports if row.id == row_id), None)
 
 
 @dataclass(frozen=True)
@@ -424,12 +439,18 @@ async def acquire_lifecycle_locks(
         ArchiveSubmission,
         plan.ids_for(LifecycleResourceClass.ARCHIVE_SUBMISSION),
     )
+    reports = await _lock_rows(
+        db,
+        ArchiveReport,
+        plan.ids_for(LifecycleResourceClass.ARCHIVE_REPORT),
+    )
     return LockedLifecycleRows(
         plan=plan,
         categories=categories,
         courses=courses,
         archives=archives,
         submissions=submissions,
+        reports=reports,
     )
 
 
@@ -487,6 +508,7 @@ async def revalidate_lifecycle_membership(
         (LifecycleResourceClass.COURSE, locked.courses),
         (LifecycleResourceClass.ARCHIVE, locked.archives),
         (LifecycleResourceClass.ARCHIVE_SUBMISSION, locked.submissions),
+        (LifecycleResourceClass.ARCHIVE_REPORT, locked.reports),
     ):
         if {row.id for row in rows} != set(locked.plan.ids_for(resource_class)):
             reasons.append(f"missing:{resource_class.name.lower()}")

@@ -42,6 +42,9 @@ from app.services.archive_submission_status import (
     normalize_submission_status,
     take_down_archive_submission,
 )
+from app.services.archive_report_lifecycle_locks import (
+    acquire_stable_archive_report_locks,
+)
 from app.services.discussions import soft_delete_discussion_message
 from app.services.personal_notifications import enqueue_personal_notification
 from app.utils.auth import get_current_user
@@ -1133,21 +1136,17 @@ async def delete_archive_report(
     db: AsyncSession = Depends(get_session),
 ):
     _require_admin(current_user)
-    report = (
-        await db.execute(
-            select(ArchiveReport)
-            .where(
-                ArchiveReport.id == report_id,
-                ArchiveReport.deleted_at.is_(None),
-            )
-            .with_for_update()
-        )
-    ).scalar_one_or_none()
-    if report is None:
+    locked = await acquire_stable_archive_report_locks(
+        db,
+        report_id=report_id,
+        operation="archive_report_trash",
+    )
+    if locked is None or locked.report.deleted_at is not None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Archive report not found",
         )
+    report = locked.report
     report.deleted_at = datetime.now(timezone.utc)
     report.deleted_by_id = current_user.user_id
     db.add(report)
@@ -1163,21 +1162,17 @@ async def review_archive_report(
     db: AsyncSession = Depends(get_session),
 ):
     _require_admin(current_user)
-    report = (
-        await db.execute(
-            select(ArchiveReport)
-            .where(
-                ArchiveReport.id == report_id,
-                ArchiveReport.deleted_at.is_(None),
-            )
-            .with_for_update()
-        )
-    ).scalar_one_or_none()
-    if report is None:
+    locked = await acquire_stable_archive_report_locks(
+        db,
+        report_id=report_id,
+        operation="archive_report_review",
+    )
+    if locked is None or locked.report.deleted_at is not None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Archive report not found",
         )
+    report = locked.report
     if report.status in FINAL_REPORT_STATUSES:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -1205,17 +1200,12 @@ async def review_archive_report(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="This archive is not managed by an active submission",
             )
-        submission = (
-            await db.execute(
-                select(ArchiveSubmission)
-                .where(
-                    ArchiveSubmission.id == report.archive_submission_id,
-                    ArchiveSubmission.created_archive_id == report.archive_id,
-                )
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
-        if submission is None:
+        submission = locked.submission
+        if (
+            submission is None
+            or submission.id != report.archive_submission_id
+            or submission.created_archive_id != report.archive_id
+        ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="The source archive submission no longer exists",

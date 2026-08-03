@@ -49,6 +49,9 @@ from app.utils.storage import get_minio_client
 from app.services.archive_submission_links import (
     ensure_archive_submission_link_available,
 )
+from app.services.archive_report_lifecycle_locks import (
+    acquire_stable_archive_report_locks,
+)
 from app.services import archive_lifecycle_locks
 from app.services import course_lifecycle_locks
 from app.services.archive_lifecycle_locks import (
@@ -1607,12 +1610,17 @@ async def restore_trash_item(
         return {"message": "留言回報已還原"}
 
     if payload.item_type == TrashEntityType.ARCHIVE_REPORT:
-        report = await db.get(ArchiveReport, payload.item_id)
-        if not report or report.deleted_at is None:
+        locked = await acquire_stable_archive_report_locks(
+            db,
+            report_id=payload.item_id,
+            operation="archive_report_restore",
+        )
+        if locked is None or locked.report.deleted_at is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Archive report not found",
             )
+        report = locked.report
         report.deleted_at = None
         report.deleted_by_id = None
         await db.commit()

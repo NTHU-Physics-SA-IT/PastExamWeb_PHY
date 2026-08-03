@@ -2,7 +2,7 @@ import asyncio
 import uuid
 
 import pytest
-from sqlalchemy import delete, func
+from sqlalchemy import delete, func, text
 from sqlmodel import select
 
 from app.main import app
@@ -18,6 +18,8 @@ from app.models.models import (
     UserRoles,
 )
 from app.utils.auth import get_current_user
+from app.services import archive_lifecycle_locks
+from app.services.archive_lifecycle_locks import LifecycleResourceClass
 
 
 def _override_user(user_id: int, *, is_admin: bool = False):
@@ -113,6 +115,54 @@ async def _cleanup_context(session_maker, *, course_id: int, archive_id: int):
         await session.execute(delete(Archive).where(Archive.id == archive_id))
         await session.execute(delete(Course).where(Course.id == course_id))
         await session.commit()
+
+
+async def _run_two_request_lock_race(
+    *,
+    monkeypatch,
+    first_request,
+    second_request,
+):
+    first_locked = asyncio.Event()
+    release_first = asyncio.Event()
+    second_attempted = asyncio.Event()
+    call_count = 0
+    traces = []
+    original_acquire = archive_lifecycle_locks.acquire_lifecycle_locks
+
+    async def observed_acquire(db, plan):
+        nonlocal call_count
+        call_count += 1
+        call_number = call_count
+        traces.append(
+            [(resource.resource_class, resource.row_id) for resource in plan.resources]
+        )
+        if call_number == 1:
+            locked = await original_acquire(db, plan)
+            first_locked.set()
+            await asyncio.wait_for(release_first.wait(), timeout=5)
+            return locked
+        if call_number == 2:
+            second_attempted.set()
+        return await original_acquire(db, plan)
+
+    monkeypatch.setattr(
+        archive_lifecycle_locks,
+        "acquire_lifecycle_locks",
+        observed_acquire,
+    )
+    first_task = asyncio.create_task(first_request())
+    await asyncio.wait_for(first_locked.wait(), timeout=5)
+    second_task = asyncio.create_task(second_request())
+    await asyncio.wait_for(second_attempted.wait(), timeout=5)
+    release_first.set()
+    return (
+        await asyncio.wait_for(
+            asyncio.gather(first_task, second_task),
+            timeout=10,
+        ),
+        traces,
+    )
 
 
 @pytest.mark.asyncio
@@ -563,4 +613,736 @@ async def test_archive_report_review_accepts_missing_or_blank_admin_response(
         app.dependency_overrides.pop(get_current_user, None)
         await _cleanup_context(
             session_maker, course_id=course.id, archive_id=archive.id
+        )
+
+
+@pytest.mark.asyncio
+async def test_archive_report_review_locks_exact_parents_before_report(
+    client, session_maker, make_user, monkeypatch
+):
+    reporter = await make_user(name=f"report-lock-reporter-{uuid.uuid4().hex[:8]}")
+    requester = await make_user(name=f"report-lock-requester-{uuid.uuid4().hex[:8]}")
+    admin = await make_user(
+        name=f"report-lock-admin-{uuid.uuid4().hex[:8]}",
+        is_admin=True,
+    )
+    course, archive, submission = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    path = f"/reports/courses/{course.id}/archives/{archive.id}"
+    traces: list[list[tuple[LifecycleResourceClass, int]]] = []
+    original_acquire = archive_lifecycle_locks.acquire_lifecycle_locks
+
+    async def observed_acquire(db, plan):
+        traces.append(
+            [(resource.resource_class, resource.row_id) for resource in plan.resources]
+        )
+        return await original_acquire(db, plan)
+
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(reporter.id)
+        report = (
+            await client.post(path, json={"report_reason": "metadata_mismatch"})
+        ).json()
+        monkeypatch.setattr(
+            archive_lifecycle_locks,
+            "acquire_lifecycle_locks",
+            observed_acquire,
+        )
+        app.dependency_overrides[get_current_user] = _override_user(
+            admin.id,
+            is_admin=True,
+        )
+
+        response = await client.patch(
+            f"/reports/admin/archives/{report['id']}",
+            json={"status": "dismissed"},
+        )
+
+        assert response.status_code == 200
+        assert traces, "ArchiveReport review did not execute the canonical planner"
+        assert traces == [
+            [
+                (LifecycleResourceClass.COURSE, course.id),
+                (LifecycleResourceClass.ARCHIVE, archive.id),
+                (LifecycleResourceClass.ARCHIVE_SUBMISSION, submission.id),
+                (LifecycleResourceClass.ARCHIVE_REPORT, report["id"]),
+            ]
+        ]
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_context(
+            session_maker,
+            course_id=course.id,
+            archive_id=archive.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_legacy_archive_report_plan_omits_submission_without_fabrication(
+    client, session_maker, make_user, monkeypatch
+):
+    reporter = await make_user(name=f"legacy-lock-reporter-{uuid.uuid4().hex[:8]}")
+    uploader = await make_user(name=f"legacy-lock-uploader-{uuid.uuid4().hex[:8]}")
+    admin = await make_user(
+        name=f"legacy-lock-admin-{uuid.uuid4().hex[:8]}",
+        is_admin=True,
+    )
+    course, archive, submission = await _create_archive_context(
+        session_maker,
+        requester_id=uploader.id,
+        with_submission=False,
+    )
+    assert submission is None
+    path = f"/reports/courses/{course.id}/archives/{archive.id}"
+    traces: list[list[tuple[LifecycleResourceClass, int]]] = []
+    original_acquire = archive_lifecycle_locks.acquire_lifecycle_locks
+
+    async def observed_acquire(db, plan):
+        traces.append(
+            [(resource.resource_class, resource.row_id) for resource in plan.resources]
+        )
+        return await original_acquire(db, plan)
+
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(reporter.id)
+        report = (
+            await client.post(path, json={"report_reason": "duplicate_archive"})
+        ).json()
+        monkeypatch.setattr(
+            archive_lifecycle_locks,
+            "acquire_lifecycle_locks",
+            observed_acquire,
+        )
+        app.dependency_overrides[get_current_user] = _override_user(
+            admin.id,
+            is_admin=True,
+        )
+
+        legacy_takedown = await client.patch(
+            f"/reports/admin/archives/{report['id']}",
+            json={"status": "upheld", "take_down_archive": True},
+        )
+        response = await client.patch(
+            f"/reports/admin/archives/{report['id']}",
+            json={"status": "dismissed"},
+        )
+
+        assert legacy_takedown.status_code == 409
+        assert (
+            legacy_takedown.json()["detail"]
+            == "This archive is not managed by an active submission"
+        )
+        assert response.status_code == 200
+        assert traces, "Legacy ArchiveReport review did not execute the planner"
+        expected = [
+            (LifecycleResourceClass.COURSE, course.id),
+            (LifecycleResourceClass.ARCHIVE, archive.id),
+            (LifecycleResourceClass.ARCHIVE_REPORT, report["id"]),
+        ]
+        assert traces == [
+            expected,
+            expected,
+        ]
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_context(
+            session_maker,
+            course_id=course.id,
+            archive_id=archive.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_archive_report_soft_trash_and_restore_share_parent_first_plan(
+    client, session_maker, make_user, monkeypatch
+):
+    reporter = await make_user(name=f"trash-lock-reporter-{uuid.uuid4().hex[:8]}")
+    requester = await make_user(name=f"trash-lock-requester-{uuid.uuid4().hex[:8]}")
+    admin = await make_user(
+        name=f"trash-lock-admin-{uuid.uuid4().hex[:8]}",
+        is_admin=True,
+    )
+    course, archive, submission = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    path = f"/reports/courses/{course.id}/archives/{archive.id}"
+    traces: list[list[tuple[LifecycleResourceClass, int]]] = []
+    original_acquire = archive_lifecycle_locks.acquire_lifecycle_locks
+
+    async def observed_acquire(db, plan):
+        traces.append(
+            [(resource.resource_class, resource.row_id) for resource in plan.resources]
+        )
+        return await original_acquire(db, plan)
+
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(reporter.id)
+        report = (
+            await client.post(path, json={"report_reason": "metadata_mismatch"})
+        ).json()
+        monkeypatch.setattr(
+            archive_lifecycle_locks,
+            "acquire_lifecycle_locks",
+            observed_acquire,
+        )
+        app.dependency_overrides[get_current_user] = _override_user(
+            admin.id,
+            is_admin=True,
+        )
+
+        deleted = await client.delete(f"/reports/admin/archives/{report['id']}")
+        repeated_delete = await client.delete(f"/reports/admin/archives/{report['id']}")
+        restored = await client.post(
+            "/trash/restore",
+            json={"item_type": "archive_report", "item_id": report["id"]},
+        )
+        repeated_restore = await client.post(
+            "/trash/restore",
+            json={"item_type": "archive_report", "item_id": report["id"]},
+        )
+
+        assert deleted.status_code == 200
+        assert repeated_delete.status_code == 404
+        assert restored.status_code == 200
+        assert repeated_restore.status_code == 404
+        assert traces, "ArchiveReport trash/restore did not execute the planner"
+        expected = [
+            (LifecycleResourceClass.COURSE, course.id),
+            (LifecycleResourceClass.ARCHIVE, archive.id),
+            (LifecycleResourceClass.ARCHIVE_SUBMISSION, submission.id),
+            (LifecycleResourceClass.ARCHIVE_REPORT, report["id"]),
+        ]
+        assert traces == [expected, expected, expected, expected]
+        async with session_maker() as session:
+            assert (
+                await session.scalar(
+                    select(func.count(PersonalNotification.id)).where(
+                        PersonalNotification.source_type == "archive_report",
+                        PersonalNotification.source_id == report["id"],
+                    )
+                )
+                or 0
+            ) == 1
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_context(
+            session_maker,
+            course_id=course.id,
+            archive_id=archive.id,
+        )
+
+
+@pytest.mark.parametrize("review_first", [True, False])
+@pytest.mark.asyncio
+async def test_archive_report_review_and_archive_trash_serialize_parent_first(
+    client, session_maker, make_user, monkeypatch, review_first
+):
+    reporter = await make_user(name=f"archive-race-reporter-{uuid.uuid4().hex[:8]}")
+    requester = await make_user(name=f"archive-race-requester-{uuid.uuid4().hex[:8]}")
+    admin = await make_user(
+        name=f"archive-race-admin-{uuid.uuid4().hex[:8]}",
+        is_admin=True,
+    )
+    course, archive, submission = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(reporter.id)
+        report = (
+            await client.post(
+                f"/reports/courses/{course.id}/archives/{archive.id}",
+                json={"report_reason": "metadata_mismatch"},
+            )
+        ).json()
+        app.dependency_overrides[get_current_user] = _override_user(
+            admin.id,
+            is_admin=True,
+        )
+
+        async def review():
+            return await client.patch(
+                f"/reports/admin/archives/{report['id']}",
+                json={"status": "upheld", "take_down_archive": False},
+            )
+
+        async def trash_archive():
+            return await client.delete(f"/courses/{course.id}/archives/{archive.id}")
+
+        requests = (review, trash_archive) if review_first else (trash_archive, review)
+        responses, traces = await _run_two_request_lock_race(
+            monkeypatch=monkeypatch,
+            first_request=requests[0],
+            second_request=requests[1],
+        )
+
+        assert [response.status_code for response in responses] == [200, 200]
+        assert all(
+            trace[:3]
+            == [
+                (LifecycleResourceClass.COURSE, course.id),
+                (LifecycleResourceClass.ARCHIVE, archive.id),
+                (LifecycleResourceClass.ARCHIVE_SUBMISSION, submission.id),
+            ]
+            for trace in traces
+        )
+        async with session_maker() as session:
+            stored_report = await session.get(ArchiveReport, report["id"])
+            stored_archive = await session.get(Archive, archive.id)
+            stored_submission = await session.get(
+                ArchiveSubmission,
+                submission.id,
+            )
+            assert stored_report.status == "upheld"
+            assert stored_archive.deleted_at is not None
+            assert stored_submission.status == SubmissionStatus.TAKEDOWN
+            assert (
+                await session.scalar(
+                    select(func.count(PersonalNotification.id)).where(
+                        PersonalNotification.notification_type
+                        == "archive_report_result",
+                        PersonalNotification.source_id == report["id"],
+                    )
+                )
+                or 0
+            ) == 1
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_context(
+            session_maker,
+            course_id=course.id,
+            archive_id=archive.id,
+        )
+
+
+@pytest.mark.parametrize("restore_first", [True, False])
+@pytest.mark.asyncio
+async def test_archive_report_takedown_and_archive_restore_serialize(
+    client, session_maker, make_user, monkeypatch, restore_first
+):
+    reporter = await make_user(name=f"restore-race-reporter-{uuid.uuid4().hex[:8]}")
+    requester = await make_user(name=f"restore-race-requester-{uuid.uuid4().hex[:8]}")
+    admin = await make_user(
+        name=f"restore-race-admin-{uuid.uuid4().hex[:8]}",
+        is_admin=True,
+    )
+    course, archive, submission = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(reporter.id)
+        report = (
+            await client.post(
+                f"/reports/courses/{course.id}/archives/{archive.id}",
+                json={"report_reason": "metadata_mismatch"},
+            )
+        ).json()
+        app.dependency_overrides[get_current_user] = _override_user(
+            admin.id,
+            is_admin=True,
+        )
+        assert (
+            await client.delete(f"/courses/{course.id}/archives/{archive.id}")
+        ).status_code == 200
+
+        async def review_with_takedown():
+            return await client.patch(
+                f"/reports/admin/archives/{report['id']}",
+                json={"status": "upheld", "take_down_archive": True},
+            )
+
+        async def restore_archive():
+            return await client.post(
+                "/trash/restore",
+                json={"item_type": "archive", "item_id": archive.id},
+            )
+
+        requests = (
+            (restore_archive, review_with_takedown)
+            if restore_first
+            else (review_with_takedown, restore_archive)
+        )
+        responses, _ = await _run_two_request_lock_race(
+            monkeypatch=monkeypatch,
+            first_request=requests[0],
+            second_request=requests[1],
+        )
+
+        if restore_first:
+            assert [response.status_code for response in responses] == [200, 200]
+        else:
+            assert [response.status_code for response in responses] == [409, 200]
+        async with session_maker() as session:
+            stored_report = await session.get(ArchiveReport, report["id"])
+            stored_archive = await session.get(Archive, archive.id)
+            stored_submission = await session.get(
+                ArchiveSubmission,
+                submission.id,
+            )
+            assert stored_archive.deleted_at is None
+            if restore_first:
+                assert stored_report.status == "upheld"
+                assert stored_submission.status == SubmissionStatus.TAKEDOWN
+            else:
+                assert stored_report.status == "pending"
+                assert stored_submission.status == SubmissionStatus.APPROVED
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_context(
+            session_maker,
+            course_id=course.id,
+            archive_id=archive.id,
+        )
+
+
+@pytest.mark.parametrize("course_first", [True, False])
+@pytest.mark.asyncio
+async def test_archive_report_review_and_course_trash_serialize(
+    client, session_maker, make_user, monkeypatch, course_first
+):
+    reporter = await make_user(name=f"course-race-reporter-{uuid.uuid4().hex[:8]}")
+    requester = await make_user(name=f"course-race-requester-{uuid.uuid4().hex[:8]}")
+    admin = await make_user(
+        name=f"course-race-admin-{uuid.uuid4().hex[:8]}",
+        is_admin=True,
+    )
+    course, archive, submission = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(reporter.id)
+        report = (
+            await client.post(
+                f"/reports/courses/{course.id}/archives/{archive.id}",
+                json={"report_reason": "metadata_mismatch"},
+            )
+        ).json()
+        app.dependency_overrides[get_current_user] = _override_user(
+            admin.id,
+            is_admin=True,
+        )
+
+        async def review():
+            return await client.patch(
+                f"/reports/admin/archives/{report['id']}",
+                json={"status": "dismissed"},
+            )
+
+        async def trash_course():
+            return await client.delete(f"/courses/admin/courses/{course.id}")
+
+        requests = (trash_course, review) if course_first else (review, trash_course)
+        responses, _ = await _run_two_request_lock_race(
+            monkeypatch=monkeypatch,
+            first_request=requests[0],
+            second_request=requests[1],
+        )
+
+        assert [response.status_code for response in responses] == [200, 200]
+        async with session_maker() as session:
+            stored_report = await session.get(ArchiveReport, report["id"])
+            stored_course = await session.get(Course, course.id)
+            stored_submission = await session.get(
+                ArchiveSubmission,
+                submission.id,
+            )
+            assert stored_report.status == "dismissed"
+            assert stored_course.deleted_at is not None
+            assert stored_submission.status == SubmissionStatus.TAKEDOWN
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_context(
+            session_maker,
+            course_id=course.id,
+            archive_id=archive.id,
+        )
+
+
+@pytest.mark.parametrize("restore_first", [True, False])
+@pytest.mark.asyncio
+async def test_archive_report_review_and_course_restore_serialize(
+    client, session_maker, make_user, monkeypatch, restore_first
+):
+    reporter = await make_user(name=f"course-restore-reporter-{uuid.uuid4().hex[:8]}")
+    requester = await make_user(name=f"course-restore-requester-{uuid.uuid4().hex[:8]}")
+    admin = await make_user(
+        name=f"course-restore-admin-{uuid.uuid4().hex[:8]}",
+        is_admin=True,
+    )
+    course, archive, submission = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(reporter.id)
+        report = (
+            await client.post(
+                f"/reports/courses/{course.id}/archives/{archive.id}",
+                json={"report_reason": "metadata_mismatch"},
+            )
+        ).json()
+        app.dependency_overrides[get_current_user] = _override_user(
+            admin.id,
+            is_admin=True,
+        )
+        assert (
+            await client.delete(f"/courses/admin/courses/{course.id}")
+        ).status_code == 200
+
+        async def review():
+            return await client.patch(
+                f"/reports/admin/archives/{report['id']}",
+                json={"status": "dismissed"},
+            )
+
+        async def restore_course():
+            return await client.post(
+                "/trash/restore",
+                json={"item_type": "course", "item_id": course.id},
+            )
+
+        requests = (
+            (restore_course, review) if restore_first else (review, restore_course)
+        )
+        responses, _ = await _run_two_request_lock_race(
+            monkeypatch=monkeypatch,
+            first_request=requests[0],
+            second_request=requests[1],
+        )
+
+        assert [response.status_code for response in responses] == [200, 200]
+        async with session_maker() as session:
+            stored_report = await session.get(ArchiveReport, report["id"])
+            stored_course = await session.get(Course, course.id)
+            stored_submission = await session.get(
+                ArchiveSubmission,
+                submission.id,
+            )
+            assert stored_report.status == "dismissed"
+            assert stored_course.deleted_at is None
+            assert stored_submission.status == SubmissionStatus.APPROVED
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_context(
+            session_maker,
+            course_id=course.id,
+            archive_id=archive.id,
+        )
+
+
+@pytest.mark.parametrize(
+    ("first_status", "second_status"),
+    [("upheld", "dismissed"), ("dismissed", "upheld")],
+)
+@pytest.mark.asyncio
+async def test_archive_report_concurrent_finalization_has_one_winner(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+    first_status,
+    second_status,
+):
+    reporter = await make_user(name=f"decision-race-reporter-{uuid.uuid4().hex[:8]}")
+    requester = await make_user(name=f"decision-race-requester-{uuid.uuid4().hex[:8]}")
+    admin = await make_user(
+        name=f"decision-race-admin-{uuid.uuid4().hex[:8]}",
+        is_admin=True,
+    )
+    course, archive, _ = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(reporter.id)
+        report = (
+            await client.post(
+                f"/reports/courses/{course.id}/archives/{archive.id}",
+                json={"report_reason": "metadata_mismatch"},
+            )
+        ).json()
+        app.dependency_overrides[get_current_user] = _override_user(
+            admin.id,
+            is_admin=True,
+        )
+
+        async def first_review():
+            return await client.patch(
+                f"/reports/admin/archives/{report['id']}",
+                json={"status": first_status},
+            )
+
+        async def second_review():
+            return await client.patch(
+                f"/reports/admin/archives/{report['id']}",
+                json={"status": second_status},
+            )
+
+        responses, _ = await _run_two_request_lock_race(
+            monkeypatch=monkeypatch,
+            first_request=first_review,
+            second_request=second_review,
+        )
+
+        assert [response.status_code for response in responses] == [200, 409]
+        async with session_maker() as session:
+            stored_report = await session.get(ArchiveReport, report["id"])
+            assert stored_report.status == first_status
+            assert (
+                await session.scalar(
+                    select(func.count(PersonalNotification.id)).where(
+                        PersonalNotification.notification_type
+                        == "archive_report_result",
+                        PersonalNotification.source_id == report["id"],
+                    )
+                )
+                or 0
+            ) == 1
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_context(
+            session_maker,
+            course_id=course.id,
+            archive_id=archive.id,
+        )
+
+
+@pytest.mark.parametrize("trash_first", [True, False])
+@pytest.mark.asyncio
+async def test_archive_report_review_and_soft_trash_serialize_same_row(
+    client, session_maker, make_user, monkeypatch, trash_first
+):
+    reporter = await make_user(name=f"report-trash-reporter-{uuid.uuid4().hex[:8]}")
+    requester = await make_user(name=f"report-trash-requester-{uuid.uuid4().hex[:8]}")
+    admin = await make_user(
+        name=f"report-trash-admin-{uuid.uuid4().hex[:8]}",
+        is_admin=True,
+    )
+    course, archive, _ = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(reporter.id)
+        report = (
+            await client.post(
+                f"/reports/courses/{course.id}/archives/{archive.id}",
+                json={"report_reason": "metadata_mismatch"},
+            )
+        ).json()
+        app.dependency_overrides[get_current_user] = _override_user(
+            admin.id,
+            is_admin=True,
+        )
+
+        async def review():
+            return await client.patch(
+                f"/reports/admin/archives/{report['id']}",
+                json={"status": "upheld"},
+            )
+
+        async def trash_report():
+            return await client.delete(f"/reports/admin/archives/{report['id']}")
+
+        requests = (trash_report, review) if trash_first else (review, trash_report)
+        responses, _ = await _run_two_request_lock_race(
+            monkeypatch=monkeypatch,
+            first_request=requests[0],
+            second_request=requests[1],
+        )
+
+        assert [response.status_code for response in responses] == (
+            [200, 404] if trash_first else [200, 200]
+        )
+        async with session_maker() as session:
+            stored_report = await session.get(ArchiveReport, report["id"])
+            assert stored_report.deleted_at is not None
+            assert stored_report.status == ("pending" if trash_first else "upheld")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_context(
+            session_maker,
+            course_id=course.id,
+            archive_id=archive.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_two_archive_reports_reverse_input_lock_in_numeric_order(
+    client, session_maker, make_user
+):
+    first_reporter = await make_user(name=f"reverse-report-a-{uuid.uuid4().hex[:8]}")
+    second_reporter = await make_user(name=f"reverse-report-b-{uuid.uuid4().hex[:8]}")
+    requester = await make_user(name=f"reverse-requester-{uuid.uuid4().hex[:8]}")
+    course, archive, _ = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    path = f"/reports/courses/{course.id}/archives/{archive.id}"
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(first_reporter.id)
+        first_report = (
+            await client.post(path, json={"report_reason": "metadata_mismatch"})
+        ).json()
+        app.dependency_overrides[get_current_user] = _override_user(second_reporter.id)
+        second_report = (
+            await client.post(path, json={"report_reason": "duplicate_archive"})
+        ).json()
+
+        reverse = archive_lifecycle_locks.ArchiveLifecycleLockPlan.build(
+            report_ids=[second_report["id"], first_report["id"]]
+        )
+        forward = archive_lifecycle_locks.ArchiveLifecycleLockPlan.build(
+            report_ids=[first_report["id"], second_report["id"]]
+        )
+        assert reverse == forward
+        assert reverse.ids_for(LifecycleResourceClass.ARCHIVE_REPORT) == tuple(
+            sorted([first_report["id"], second_report["id"]])
+        )
+
+        first_locked = asyncio.Event()
+        release_first = asyncio.Event()
+        second_attempted = asyncio.Event()
+
+        async def lock_first():
+            async with session_maker() as session:
+                await session.execute(text("SET LOCAL lock_timeout = '3s'"))
+                await archive_lifecycle_locks.acquire_lifecycle_locks(
+                    session,
+                    reverse,
+                )
+                first_locked.set()
+                await asyncio.wait_for(release_first.wait(), timeout=5)
+                await session.commit()
+
+        async def lock_second():
+            async with session_maker() as session:
+                await session.execute(text("SET LOCAL lock_timeout = '3s'"))
+                second_attempted.set()
+                await archive_lifecycle_locks.acquire_lifecycle_locks(
+                    session,
+                    forward,
+                )
+                await session.commit()
+
+        first_task = asyncio.create_task(lock_first())
+        await asyncio.wait_for(first_locked.wait(), timeout=5)
+        second_task = asyncio.create_task(lock_second())
+        await asyncio.wait_for(second_attempted.wait(), timeout=5)
+        release_first.set()
+        await asyncio.wait_for(
+            asyncio.gather(first_task, second_task),
+            timeout=10,
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_context(
+            session_maker,
+            course_id=course.id,
+            archive_id=archive.id,
         )
