@@ -19,6 +19,7 @@ from app.models.models import (
     SubmissionStatus,
     UserRoles,
 )
+from app.services import archive_lifecycle_locks
 from app.services import archive_submission_status as status_service
 from app.utils.auth import get_current_user
 
@@ -217,21 +218,36 @@ async def _run_deterministic_review_race(
     notification_calls = 0
     lock_calls = 0
     request_session_ids: set[int] = set()
+    attempted_session_ids: set[int] = set()
 
-    original_lock = archives_service._lock_archive_submission_for_direct_review
+    original_lock = archive_lifecycle_locks.acquire_lifecycle_locks
+    original_mutex = archive_lifecycle_locks.acquire_approval_namespace_mutex
 
-    async def observed_lock(db, locked_submission_id):
+    def observe_attempt(db) -> None:
+        attempted_session_ids.add(id(db))
+        if len(attempted_session_ids) == 2:
+            loser_lock_attempted.set()
+
+    async def observed_lock(db, plan):
         nonlocal lock_calls
         lock_calls += 1
         request_session_ids.add(id(db))
-        if lock_calls == 2:
-            loser_lock_attempted.set()
-        return await original_lock(db, locked_submission_id)
+        observe_attempt(db)
+        return await original_lock(db, plan)
+
+    async def observed_mutex(db, **kwargs):
+        observe_attempt(db)
+        return await original_mutex(db, **kwargs)
 
     monkeypatch.setattr(
-        archives_service,
-        "_lock_archive_submission_for_direct_review",
+        archive_lifecycle_locks,
+        "acquire_lifecycle_locks",
         observed_lock,
+    )
+    monkeypatch.setattr(
+        archive_lifecycle_locks,
+        "acquire_approval_namespace_mutex",
+        observed_mutex,
     )
 
     notification_owner = (
@@ -347,7 +363,7 @@ async def test_direct_review_races_are_deterministic_first_writer_wins(
         }
         assert "changed" not in loser_response.json()
         assert result["notification_calls"] == 1
-        assert result["lock_calls"] == 2
+        assert result["lock_calls"] == (3 if winner_action == "approve" else 2)
         assert len(result["request_session_ids"]) == 2
 
         after = await _race_snapshot(session_maker, context)

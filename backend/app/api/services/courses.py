@@ -31,6 +31,7 @@ from app.db.course_categories import (
     normalize_course_category_name,
 )
 from app.api.services.archive_submission_lifecycle import (
+    archive_lifecycle_conflict_error,
     make_course_trash_lifecycle_reason,
     is_course_trash_lifecycle_reason,
     soft_delete_archive_with_submission_takedown,
@@ -76,6 +77,15 @@ from app.utils.course_text import (
 from app.core.config import settings
 from app.services.personal_notifications import enqueue_personal_notification
 from app.services.discussions import soft_delete_discussion_message
+from app.services.archive_submission_links import (
+    validate_archive_source_submission_rows,
+)
+from app.services import archive_lifecycle_locks
+from app.services.archive_lifecycle_locks import (
+    LifecyclePlanRetryExhausted,
+    LockedLifecycleRows,
+    PlanRebuildBudget,
+)
 
 router = APIRouter()
 
@@ -90,7 +100,9 @@ DEFAULT_CATEGORIES = [
     (category.key, category.name, category.label, category.icon)
     for category in DEFAULT_COURSE_CATEGORY_DEFINITIONS
 ]
-DEFAULT_CATEGORY_ORDER = {item[0]: index for index, item in enumerate(DEFAULT_CATEGORIES)}
+DEFAULT_CATEGORY_ORDER = {
+    item[0]: index for index, item in enumerate(DEFAULT_CATEGORIES)
+}
 DEFAULT_CATEGORY_BADGE_COLOR = "slate"
 CATEGORY_BADGE_COLOR_TOKENS = {
     "navy",
@@ -664,20 +676,35 @@ async def get_course_archives(
             ArchiveSubmission.deleted_at.is_(None),
             ArchiveSubmission.status != SubmissionStatus.DELETED,
         ]
-        if not current_user.is_admin:
-            submission_visibility_conditions.append(
-                ArchiveSubmission.requester_id == current_user.user_id
-            )
         linked_submissions = (
             await db.execute(
-                select(ArchiveSubmission.id, ArchiveSubmission.created_archive_id).where(
+                select(
+                    ArchiveSubmission.id,
+                    ArchiveSubmission.created_archive_id,
+                    ArchiveSubmission.requester_id,
+                ).where(
                     *submission_visibility_conditions
                 )
             )
         ).all()
-        for submission_id, created_archive_id in linked_submissions:
-            if submission_id is not None and created_archive_id is not None:
-                source_submission_ids_by_archive.setdefault(created_archive_id, []).append(submission_id)
+        validated_sources = validate_archive_source_submission_rows(
+            [
+                (created_archive_id, submission_id)
+                for submission_id, created_archive_id, _requester_id in linked_submissions
+            ],
+            operation="source_lookup",
+        )
+        for submission_id, created_archive_id, requester_id in linked_submissions:
+            if (
+                created_archive_id in validated_sources
+                and (
+                    current_user.is_admin
+                    or requester_id == current_user.user_id
+                )
+            ):
+                source_submission_ids_by_archive[created_archive_id] = (
+                    validated_sources[created_archive_id]
+                )
 
     return [
         ArchiveRead.model_validate(archive).model_copy(
@@ -1707,20 +1734,58 @@ async def delete_archive(
     Soft delete an archive. Users can only delete their own uploads.
     Admins can delete any archive.
     """
-    query = select(Archive).where(
-        Archive.course_id == course_id,
-        Archive.id == archive_id,
-        Archive.deleted_at.is_(None),
-    )
-    result = await db.execute(query)
-    archive = result.scalar_one_or_none()
+    budget = PlanRebuildBudget()
+    locked: LockedLifecycleRows | None = None
+    while True:
+        (
+            locked,
+            revalidation,
+        ) = await archive_lifecycle_locks.acquire_exact_archive_lifecycle_locks(
+            db,
+            archive_id=archive_id,
+            operation="archive_trash",
+        )
+        if locked is None:
+            break
+        if revalidation is not None and revalidation.valid:
+            break
+        conflict_archive = locked.archive(archive_id)
+        terminal_error = None
+        if (
+            conflict_archive is None
+            or conflict_archive.course_id != course_id
+            or conflict_archive.deleted_at is not None
+        ):
+            terminal_error = HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Archive not found",
+            )
+        elif (
+            not current_user.is_admin
+            and conflict_archive.uploader_id != current_user.user_id
+        ):
+            terminal_error = HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to delete this archive",
+            )
+        await db.rollback()
+        try:
+            budget = budget.consume()
+        except LifecyclePlanRetryExhausted:
+            if terminal_error is not None:
+                raise terminal_error
+            raise archive_lifecycle_conflict_error()
 
-    if not archive:
+    archive = locked.archive(archive_id) if locked is not None else None
+
+    if not archive or archive.course_id != course_id or archive.deleted_at is not None:
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Archive not found"
         )
 
     if not current_user.is_admin and archive.uploader_id != current_user.user_id:
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have permission to delete this archive",
@@ -1729,6 +1794,7 @@ async def delete_archive(
     result = await soft_delete_archive_with_submission_takedown(
         db,
         archive=archive,
+        submissions=locked.submissions,
         user_id=current_user.user_id,
         reason="archive deleted",
     )

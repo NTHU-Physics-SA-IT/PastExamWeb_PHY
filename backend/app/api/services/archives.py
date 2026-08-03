@@ -3,6 +3,7 @@ import os
 import re
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 
@@ -10,6 +11,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, 
 from fastapi.responses import StreamingResponse
 from minio.error import S3Error
 from sqlalchemy import BigInteger, and_, cast, func, or_, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -70,6 +72,19 @@ from app.services.archive_submission_status import (
     republish_archive_submission,
     resolve_archive_submission_actual_status,
     take_down_archive_submission,
+)
+from app.services.archive_submission_links import (
+    archive_submission_link_conflict,
+    ensure_archive_submission_link_available,
+    is_archive_submission_link_unique_violation,
+    validate_archive_source_membership,
+)
+from app.services import archive_lifecycle_locks
+from app.services.archive_lifecycle_locks import (
+    ArchiveLifecycleLockPlan,
+    LifecycleMembershipFingerprint,
+    LifecyclePlanRetryExhausted,
+    PlanRebuildBudget,
 )
 
 router = APIRouter()
@@ -173,34 +188,18 @@ def _ensure_review_submission_mutable(submission: ArchiveSubmission) -> None:
         )
 
 
-async def _lock_archive_submission_for_direct_review(
-    db: AsyncSession,
-    submission_id: int,
-) -> ArchiveSubmission | None:
-    return (
-        await db.execute(
-            select(ArchiveSubmission)
-            .where(ArchiveSubmission.id == submission_id)
-            .with_for_update()
-        )
-    ).scalar_one_or_none()
+@dataclass(frozen=True)
+class _DirectReviewLockContext:
+    submission: ArchiveSubmission
 
 
 async def _prepare_direct_archive_submission_review(
     db: AsyncSession,
     *,
-    submission_id: int,
+    submission: ArchiveSubmission,
     decision: SubmissionDecision | None,
     action: ArchiveSubmissionReviewAction,
 ) -> tuple[ArchiveSubmission, ArchiveSubmissionActionRead | None]:
-    submission = await _lock_archive_submission_for_direct_review(db, submission_id)
-    if submission is None:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Submission not found",
-        )
-
     actual_status = _resolve_submission_actual_status(
         submission.status,
         deleted_at=submission.deleted_at,
@@ -265,6 +264,222 @@ async def _prepare_direct_archive_submission_review(
         return submission, response
 
     return submission, None
+
+
+def _raise_direct_review_membership_conflict(
+    submission: ArchiveSubmission | None,
+) -> None:
+    actual_status = (
+        _resolve_submission_actual_status(
+            submission.status,
+            deleted_at=submission.deleted_at,
+        )
+        if submission is not None
+        else None
+    )
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "archive_submission_stale_state",
+            "message": "投稿狀態已變更，請重新載入後再操作。",
+            "actual_status": (
+                actual_status.value if actual_status is not None else "deleted"
+            ),
+            "reload_required": True,
+        },
+    )
+
+
+async def _discover_direct_review_lock_context(
+    db: AsyncSession,
+    *,
+    submission_id: int,
+    action: ArchiveSubmissionReviewAction,
+) -> tuple[ArchiveLifecycleLockPlan, dict[str, int | str | None]] | None:
+    submission = (
+        await db.execute(
+            select(ArchiveSubmission)
+            .where(ArchiveSubmission.id == submission_id)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if submission is None:
+        return None
+
+    course_name = _normalize_course_name(
+        format_course_display_name(
+            submission.requested_course_name or submission.subject
+        )
+    )
+    category_key = submission.requested_category_key or submission.category
+    approval_scope: str | None = None
+    if action == ArchiveSubmissionReviewAction.APPROVE:
+        approval_scope = (
+            await archive_lifecycle_locks.acquire_approval_namespace_mutex(
+                db,
+                category_key=category_key,
+                course_name=course_name,
+            )
+        )
+
+    archive = (
+        (
+            await db.execute(
+                select(Archive)
+                .where(Archive.id == submission.created_archive_id)
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if submission.created_archive_id is not None
+        else None
+    )
+    sibling_ids: tuple[int, ...] | None = None
+    submission_ids = (submission.id,)
+    if archive is not None:
+        sibling_ids = validate_archive_source_membership(
+            (
+                (
+                    await db.execute(
+                        select(ArchiveSubmission.id)
+                        .where(ArchiveSubmission.created_archive_id == archive.id)
+                        .order_by(ArchiveSubmission.id.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            ),
+            operation=(
+                "approval"
+                if action == ArchiveSubmissionReviewAction.APPROVE
+                else "review"
+            ),
+        )
+        if action == ArchiveSubmissionReviewAction.APPROVE:
+            submission_ids = sibling_ids
+
+    category = None
+    active_course = None
+    deleted_course = None
+    if action == ArchiveSubmissionReviewAction.APPROVE:
+        category_lookup_key = canonicalize_course_category_key(
+            (category_key or "").strip().lower()
+        )
+        category = (
+            await db.execute(
+                select(CourseCategoryConfig).where(
+                    CourseCategoryConfig.key == category_lookup_key
+                )
+            )
+        ).scalar_one_or_none()
+        active_course = (
+            await db.execute(
+                select(Course).where(
+                    normalized_course_text_expr(Course.name) == course_name,
+                    Course.category == category_key,
+                    Course.deleted_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if active_course is None:
+            deleted_course = (
+                await db.execute(
+                    select(Course).where(
+                        normalized_course_text_expr(Course.name) == course_name,
+                        Course.category == category_key,
+                        Course.deleted_at.is_not(None),
+                    )
+                )
+            ).scalar_one_or_none()
+
+    archive_course_pairs = (
+        ((archive.id, archive.course_id),) if archive is not None else ()
+    )
+    plan = ArchiveLifecycleLockPlan.build(
+        category_ids=(category.id if category is not None else None,),
+        course_ids=(
+            active_course.id if active_course is not None else None,
+            deleted_course.id if deleted_course is not None else None,
+            archive.course_id if archive is not None else None,
+        ),
+        archive_ids=(archive.id if archive is not None else None,),
+        submission_ids=submission_ids,
+        fingerprint=LifecycleMembershipFingerprint(
+            target_submission_id=submission.id,
+            target_created_archive_id=submission.created_archive_id,
+            target_requester_id=submission.requester_id,
+            target_owner_id=submission.owner_id,
+            archive_course_pairs=archive_course_pairs,
+            sibling_submission_ids=sibling_ids,
+        ),
+        approval_namespace_scope=approval_scope,
+    )
+    return plan, {
+        "course_name": course_name,
+        "category_key": category_key,
+    }
+
+
+async def _lock_direct_review_context(
+    db: AsyncSession,
+    *,
+    submission_id: int,
+    action: ArchiveSubmissionReviewAction,
+) -> _DirectReviewLockContext:
+    budget = PlanRebuildBudget()
+    while True:
+        discovered = await _discover_direct_review_lock_context(
+            db,
+            submission_id=submission_id,
+            action=action,
+        )
+        if discovered is None:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Submission not found",
+            )
+        plan, metadata = discovered
+        locked = await archive_lifecycle_locks.acquire_lifecycle_locks(db, plan)
+        revalidation = (
+            await archive_lifecycle_locks.revalidate_lifecycle_membership(
+                db,
+                locked,
+            )
+        )
+        submission = locked.submission(submission_id)
+        approval_identity_changed = False
+        if (
+            action == ArchiveSubmissionReviewAction.APPROVE
+            and submission is not None
+        ):
+            locked_course_name = _normalize_course_name(
+                format_course_display_name(
+                    submission.requested_course_name or submission.subject
+                )
+            )
+            locked_category_key = (
+                submission.requested_category_key or submission.category
+            )
+            approval_identity_changed = (
+                locked_course_name != metadata["course_name"]
+                or locked_category_key != metadata["category_key"]
+            )
+        if revalidation.valid and not approval_identity_changed:
+            if submission is None:
+                await db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Submission not found",
+                )
+            return _DirectReviewLockContext(submission=submission)
+
+        await db.rollback()
+        try:
+            budget = budget.consume()
+        except LifecyclePlanRetryExhausted:
+            current = await db.get(ArchiveSubmission, submission_id)
+            await db.rollback()
+            _raise_direct_review_membership_conflict(current)
 
 
 async def _get_deleted_course_id_for_submission(
@@ -391,14 +606,6 @@ async def _next_course_order_index(db: AsyncSession, category: str) -> int:
         )
     ).scalar_one_or_none()
     return 0 if max_order is None else int(max_order) + 1
-
-
-async def _acquire_course_approval_lock(db: AsyncSession, *, category_key: str, course_name: str) -> None:
-    scope_key = f"archive_approval:{category_key}:{course_name.lower().strip()}"
-    await db.execute(
-        text("SELECT pg_advisory_xact_lock(hashtext(:scope_key))"),
-        {"scope_key": scope_key},
-    )
 
 
 @router.post("/upload")
@@ -1151,9 +1358,14 @@ async def approve_archive_submission(
         )
 
     try:
-        submission, no_op_response = await _prepare_direct_archive_submission_review(
+        lock_context = await _lock_direct_review_context(
             db,
             submission_id=submission_id,
+            action=ArchiveSubmissionReviewAction.APPROVE,
+        )
+        submission, no_op_response = await _prepare_direct_archive_submission_review(
+            db,
+            submission=lock_context.submission,
             decision=decision,
             action=ArchiveSubmissionReviewAction.APPROVE,
         )
@@ -1171,12 +1383,6 @@ async def approve_archive_submission(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid course name",
             )
-
-        await _acquire_course_approval_lock(
-            db,
-            category_key=category_key,
-            course_name=course_name,
-        )
 
         if submission.requested_category_key:
             await _ensure_or_create_requested_category_for_approval(
@@ -1256,6 +1462,14 @@ async def approve_archive_submission(
         await db.flush()
         await db.refresh(archive)
 
+        await ensure_archive_submission_link_available(
+            db,
+            submission_id=submission.id,
+            current_archive_id=submission.created_archive_id,
+            target_archive_id=archive.id,
+            operation="approval",
+        )
+
         submission.status = SubmissionStatus.APPROVED
         submission.reviewer_id = current_user.user_id
         submission.review_note = decision.note if decision else None
@@ -1271,6 +1485,11 @@ async def approve_archive_submission(
         await db.commit()
         await db.refresh(submission)
         return _serialize_archive_submission_action(submission, changed=True)
+    except IntegrityError as error:
+        await db.rollback()
+        if is_archive_submission_link_unique_violation(error):
+            raise archive_submission_link_conflict() from error
+        raise
     except Exception:
         await db.rollback()
         raise
@@ -1290,9 +1509,14 @@ async def reject_archive_submission(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
     try:
-        submission, no_op_response = await _prepare_direct_archive_submission_review(
+        lock_context = await _lock_direct_review_context(
             db,
             submission_id=submission_id,
+            action=ArchiveSubmissionReviewAction.REJECT,
+        )
+        submission, no_op_response = await _prepare_direct_archive_submission_review(
+            db,
+            submission=lock_context.submission,
             decision=decision,
             action=ArchiveSubmissionReviewAction.REJECT,
         )
@@ -1330,9 +1554,14 @@ async def takedown_archive_submission(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
     try:
-        submission, no_op_response = await _prepare_direct_archive_submission_review(
+        lock_context = await _lock_direct_review_context(
             db,
             submission_id=submission_id,
+            action=ArchiveSubmissionReviewAction.TAKEDOWN,
+        )
+        submission, no_op_response = await _prepare_direct_archive_submission_review(
+            db,
+            submission=lock_context.submission,
             decision=decision,
             action=ArchiveSubmissionReviewAction.TAKEDOWN,
         )
@@ -1367,9 +1596,14 @@ async def republish_archive_submission_endpoint(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
     try:
-        submission, no_op_response = await _prepare_direct_archive_submission_review(
+        lock_context = await _lock_direct_review_context(
             db,
             submission_id=submission_id,
+            action=ArchiveSubmissionReviewAction.REPUBLISH,
+        )
+        submission, no_op_response = await _prepare_direct_archive_submission_review(
+            db,
+            submission=lock_context.submission,
             decision=decision,
             action=ArchiveSubmissionReviewAction.REPUBLISH,
         )

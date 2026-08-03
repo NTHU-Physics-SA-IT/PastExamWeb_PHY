@@ -72,23 +72,28 @@ policy:
 - a stale expected-state mismatch does not enqueue a notification or any other
   event;
 - an illegal transition does not enqueue a notification or any other event.
+- an Archive-link occupancy conflict, forbidden relink, or cardinality anomaly
+  rolls back the approval transaction and does not retain Category, Course,
+  Archive, status, link, notification, or event work.
 
 The four direct review routes enforce these classifications after
-administrator authorization and a submission row lock. Missing, stale,
-illegal, and same-target requests release the transaction without mutation;
-only a true transition reaches the existing notification owner. A successful
-true transition returns `changed=true`; a same-target no-op returns
-`changed=false`. The archive-report uphold flow remains an internal,
-report-owned takedown operation and does not require a client expected-state
-field.
+administrator authorization and their canonical parent-first lifecycle locks.
+The route/session remains the transaction owner; the shared planner neither
+commits nor writes transition or notification state. Missing, stale, illegal,
+and same-target requests release the transaction without mutation; only a true
+transition reaches the existing notification owner after the locked canonical
+re-read. A successful true transition returns `changed=true`; a same-target
+no-op returns `changed=false`. The archive-report uphold flow remains an
+internal, report-owned takedown operation and does not require a client
+expected-state field.
 
 Deterministic PostgreSQL race coverage pauses the first direct review request
 after the real notification owner has enqueued and flushed its row but before
 the caller commit. A second independent request has already attempted the same
-submission row lock. Releasing the winner proves that the loser reads the
-committed status and exits stale with no notification, metadata, Archive,
-Category, Course, or event side effect. The winning transition owns exactly
-one effective notification and one transaction outcome.
+canonical parent-first lock plan. Releasing the winner proves that the loser
+reads the committed status and exits stale with no notification, metadata,
+Archive, Category, Course, or event side effect. The winning transition owns
+exactly one effective notification and one transaction outcome.
 
 ### Current implementation and gap
 
@@ -99,8 +104,20 @@ review notifications.
 and `test_submission_trash_moves_only_its_paired_archive_to_trash` protect the
 focused approved, independent-pair paths with notification counts recorded
 after approval setup: Archive trash/restore and Submission trash add no
-personal notification. Shared-Archive sibling behavior remains outside this
-evidence.
+personal notification. Parent-first PostgreSQL coverage additionally protects
+one-to-one Archive trash/restore and approve-versus-trash serialization:
+lifecycle trash/restore remains silent, and only a successful direct review
+transition can enqueue its existing single notification. A static
+multi-source Archive relation fails closed through the generic internal-error
+boundary and structured integrity log before lifecycle mutation; it does not
+enter the retryable lifecycle-conflict path and produces no notification or
+event.
+If Archive trash or restore observes one locked membership mismatch, the route
+rolls back before its one permitted plan rebuild. A second mismatch rolls back
+before returning `409 archive_lifecycle_conflict`; neither attempt retains a
+notification, event, lifecycle mutation, dirty ORM state, or transaction lock.
+Planner invariant failures and database deadlock or timeout errors are not
+translated into this public conflict contract.
 `test_course_trash_restore_preserves_approved_submission_without_notification`
 and `test_course_trash_restore_preserves_rejected_submission_without_notification`
 record their notification baselines after the legal review setup and protect
@@ -255,6 +272,7 @@ integration.
 | --- | --- | --- |
 | Archive upload | MinIO put, then database work; admin/course/archive paths may commit in stages | Partial object/DB or partial DB state is possible |
 | Submission approve | Category/Course/Archive work, submission review metadata, and notification enqueue share the approve caller's commit | PostgreSQL operation is caller-owned and protected by focused rollback tests |
+| Submission exact restore | The route owns occupancy validation, lifecycle mutation, and commit; conflict or integrity failure rolls back before returning | Restore remains silent and never infers an Archive from metadata when the retained exact link is null |
 | Report create/review | Report mutation and durable personal notification share a commit; archive report takedown is included | Comparatively complete and protected by focused tests |
 | Republish | Transition and notification share the caller transaction | Comparatively complete |
 | Permanent delete | MinIO call and DB delete cannot be atomic; helper may downgrade storage failure to warning | Retry and truthful result gap |

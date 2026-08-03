@@ -119,11 +119,20 @@ result for the complete matrix and a separate expected-state classifier.
 `SubmissionDecision.expected_status` remains parser-optional so the routes can
 map a missing or null field to `428` instead of Pydantic mapping it to `422`.
 The runtime contract is nevertheless mandatory: all four direct review routes
-authorize the administrator, load the submission once with `FOR UPDATE`,
-enforce the expected-state classifier before the transition policy, and
-short-circuit missing, stale, illegal, and same-target requests before review
-mutation or notification. Repository frontend callers send the status carried
-by the row or comparison candidate being acted on.
+authorize the administrator, discover the exact parent relationship without
+locking, then acquire the canonical lifecycle plan before enforcing the
+expected-state classifier and transition policy. Existing exact parents lock
+Course, Archive, then ArchiveSubmission rows by ascending numeric primary key;
+approve also takes its established normalized approval-namespace advisory
+mutex before any row lock and locks every exact-linked sibling when it may
+update Archive metadata. The one-to-one guard requires that exact source set
+to contain at most the target submission; multiple exact sources are a static
+integrity anomaly and fail closed before a lock plan is accepted. Reject,
+takedown, and republish lock only the target submission after its exact
+ancestors. Missing, stale, illegal, and same-target requests short-circuit
+before review mutation or notification.
+Repository frontend callers send the status carried by the row or comparison
+candidate being acted on.
 
 The direct routes return stable error-detail codes:
 
@@ -140,18 +149,68 @@ expose administrator capabilities. The comparison response keeps its
 compatibility `can_takedown` field, deriving it from the same backend capability
 policy instead of a separate status mapping.
 
-Deterministic PostgreSQL tests use independent request sessions and an event
-barrier while the first request holds the submission row lock through its
-commit boundary. Double-approve and every pair among approve, reject, and
-takedown from `pending` establish first-writer-wins: the winner returns
-`changed=true`, the loser observes the committed state and returns stale
-`409`, and only the winner produces transition metadata, Archive work, or a
-notification. A deliberate same-target request with a matching expected state
-remains the distinct `changed=false` control.
+The exact Course/Archive/Submission membership fingerprint is re-read after
+all locks. A mismatch rolls back that attempt and permits one bounded plan
+rebuild; lock sets never expand after acquisition begins.
+`created_archive_id = NULL` remains no exact Archive relationship and is never
+replaced by a metadata guess.
+
+Archive soft trash and restore use the same Course, Archive, exact-linked
+ArchiveSubmission ordering. They discover the optional exact source before
+their first row lock, reject more than one source as a static one-to-one
+integrity anomaly, revalidate the legal zero-or-one membership afterward, and
+then apply the existing transition to the locked row. This slice does not
+change submission delete/restore, Course lifecycle, report lifecycle, or
+permanent-delete lock ordering.
+
+If Archive trash or restore finds that a legal parent or zero-or-one exact
+source membership changed between discovery and locked revalidation, it rolls
+back and rebuilds the complete plan once. A stable second attempt proceeds
+normally. If the second locked revalidation also differs, the second
+transaction rolls back and returns
+`409 archive_lifecycle_conflict` with the canonical message
+`Archive lifecycle changed during this request. Please retry.` No lifecycle
+write is committed. A static multi-source relation never enters this retry
+path: it uses the existing generic internal-error response plus the structured
+one-to-one integrity log. This contract does not replace not-found or
+authorization handling, direct-review stale or illegal-transition errors,
+same-target review no-ops, planner invariant failures, PostgreSQL deadlocks, or
+lock timeouts.
+
+Deterministic PostgreSQL tests use independent request sessions and event
+barriers while the first request holds its canonical plan through the commit
+boundary. Double-approve and every pair among approve, reject, and takedown
+from `pending` establish first-writer-wins: the winner returns `changed=true`,
+the loser observes the committed state and returns stale `409`, and only the
+winner produces transition metadata, Archive work, or a notification.
+Approve-existing versus Archive trash, Archive trash versus restore, and
+reverse-input plans over two independent one-to-one Archive/Submission pairs
+also establish serial outcomes without a deadlock. A deliberate same-target
+request with a matching expected state remains the distinct `changed=false`
+control.
 
 The separate archive-report uphold flow retains its report-owned transaction
 and internal submission takedown; it does not use the direct-client
 precondition or direct-action response contract.
+
+### Archive link conflicts
+
+Approval preserves an existing exact `created_archive_id` or establishes a
+previously null link; normal application review and restore flows never relink
+a non-null submission to a different Archive. Before link mutation, the
+application verifies that the intended Archive has no other source submission.
+The named nullable unique constraint remains the final arbiter when concurrent
+transactions both pass that precheck.
+
+An Archive already occupied by another submission, including an exact
+`23505` violation of
+`uq_archive_submissions_created_archive_id`, returns
+`409 archive_submission_link_conflict` with no occupant identity. A non-null
+relink attempt or static multi-occupant result is an internal integrity
+anomaly: the operation stops, uses the repository's generic internal-server
+response, and does not select, truncate, or repair a relationship. Submission
+restore follows only its retained exact link; a null link remains null and does
+not search for an Archive by metadata.
 
 ### Implementation gaps
 
@@ -212,12 +271,13 @@ domains.
 - An item may be hidden when that public item, its Course, or a required parent
   is explicitly trashed or blocked.
 
-### Observed likely bug
+### One-to-one corruption boundary
 
-Some current queries evaluate all submissions linked to one `Archive`; a
-non-approved linked submission can make the shared archive unavailable. This
-conflicts with the independent-file contract and requires characterization
-tests before conformance changes.
+The schema and application contract permit at most one source submission for
+an `Archive`. Any historical result containing multiple exact sources is an
+integrity anomaly, not a visibility group: mutation fails closed through the
+generic internal-error boundary and no source is selected as a winner. Public
+visibility correction remains outside this lifecycle-lock slice.
 
 ## Trash and restore
 
