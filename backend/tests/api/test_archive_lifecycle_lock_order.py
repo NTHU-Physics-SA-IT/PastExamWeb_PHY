@@ -388,6 +388,397 @@ async def test_archive_trash_and_restore_share_parent_first_one_to_one_plan(
         )
 
 
+@pytest.mark.parametrize("delete_actor", ["owner", "admin"])
+@pytest.mark.asyncio
+async def test_submission_delete_acquires_parent_first_one_to_one_plan(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+    delete_actor,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    async with session_maker() as session:
+        stored = await session.get(ArchiveSubmission, target.id)
+        stored.status = SubmissionStatus.APPROVED
+        await session.commit()
+
+    traces = []
+    original_acquire = archive_lifecycle_locks.acquire_lifecycle_locks
+
+    async def observed_acquire(db, plan):
+        traces.append(_resource_trace(plan))
+        return await original_acquire(db, plan)
+
+    monkeypatch.setattr(
+        archive_lifecycle_locks,
+        "acquire_lifecycle_locks",
+        observed_acquire,
+    )
+    actor = requester if delete_actor == "owner" else admin
+    path = (
+        f"/archives/submissions/{target.id}"
+        if delete_actor == "owner"
+        else f"/archives/admin/submissions/{target.id}"
+    )
+    app.dependency_overrides[get_current_user] = _override_user(
+        actor.id,
+        is_admin=delete_actor == "admin",
+    )
+    try:
+        response = await client.delete(path)
+        assert response.status_code == 200
+        assert traces == [
+            [
+                (LifecycleResourceClass.COURSE, course.id),
+                (LifecycleResourceClass.ARCHIVE, archive.id),
+                (LifecycleResourceClass.ARCHIVE_SUBMISSION, target.id),
+            ]
+        ]
+        async with session_maker() as session:
+            stored_archive = await session.get(Archive, archive.id)
+            stored_submission = await session.get(ArchiveSubmission, target.id)
+            assert stored_archive.deleted_at is not None
+            assert stored_submission.status == SubmissionStatus.DELETED
+            assert stored_submission.deleted_at is not None
+            assert stored_submission.previous_status is None
+            assert stored_submission.owner_self_delete_consumed is False
+            assert (
+                int(
+                    await session.scalar(
+                        select(func.count(PersonalNotification.id)).where(
+                            PersonalNotification.source_type == "archive_submission",
+                            PersonalNotification.source_id == target.id,
+                        )
+                    )
+                    or 0
+                )
+                == 0
+            )
+            assert (
+                int(
+                    await session.scalar(
+                        select(func.count(ArchiveSubmissionEvent.id)).where(
+                            ArchiveSubmissionEvent.submission_id == target.id
+                        )
+                    )
+                    or 0
+                )
+                == 0
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_submission_restore_acquires_parent_first_one_to_one_plan(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    async with session_maker() as session:
+        stored_archive = await session.get(Archive, archive.id)
+        stored_submission = await session.get(ArchiveSubmission, target.id)
+        stored_archive.deleted_at = stored_submission.deleted_at = (
+            stored_submission.reviewed_at
+        )
+        stored_submission.status = SubmissionStatus.DELETED
+        stored_submission.delete_reason = "admin deleted"
+        await session.commit()
+
+    traces = []
+    original_acquire = archive_lifecycle_locks.acquire_lifecycle_locks
+
+    async def observed_acquire(db, plan):
+        traces.append(_resource_trace(plan))
+        return await original_acquire(db, plan)
+
+    monkeypatch.setattr(
+        archive_lifecycle_locks,
+        "acquire_lifecycle_locks",
+        observed_acquire,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        response = await client.post(
+            "/trash/restore",
+            json={"item_type": "archive_submission", "item_id": target.id},
+        )
+        assert response.status_code == 200
+        assert traces == [
+            [
+                (LifecycleResourceClass.COURSE, course.id),
+                (LifecycleResourceClass.ARCHIVE, archive.id),
+                (LifecycleResourceClass.ARCHIVE_SUBMISSION, target.id),
+            ]
+        ]
+        async with session_maker() as session:
+            stored_archive = await session.get(Archive, archive.id)
+            stored_submission = await session.get(ArchiveSubmission, target.id)
+            assert stored_archive.deleted_at is None
+            assert stored_submission.status == SubmissionStatus.APPROVED
+            assert stored_submission.deleted_at is None
+            assert stored_submission.previous_status is None
+            assert stored_submission.owner_self_delete_consumed is False
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.parametrize("first_operation", ["owner", "admin"])
+@pytest.mark.asyncio
+async def test_owner_and_admin_submission_delete_serialize_without_deadlock(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+    first_operation,
+):
+    actor = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=actor.id,
+    )
+    async with session_maker() as session:
+        stored = await session.get(ArchiveSubmission, target.id)
+        stored.status = SubmissionStatus.APPROVED
+        await session.commit()
+
+    app.dependency_overrides[get_current_user] = _override_admin(actor.id)
+
+    async def owner_delete():
+        return await client.delete(f"/archives/submissions/{target.id}")
+
+    async def admin_delete():
+        return await client.delete(f"/archives/admin/submissions/{target.id}")
+
+    try:
+        first, second, traces, sqlstates = await _run_two_request_lock_race(
+            monkeypatch=monkeypatch,
+            first_request=(
+                owner_delete if first_operation == "owner" else admin_delete
+            ),
+            second_request=(
+                admin_delete if first_operation == "owner" else owner_delete
+            ),
+        )
+        assert first.status_code == 200
+        assert second.status_code == (409 if first_operation == "owner" else 200)
+        assert "40P01" not in sqlstates
+        assert traces[0] == traces[1]
+        assert traces[0] == [
+            (LifecycleResourceClass.COURSE, course.id),
+            (LifecycleResourceClass.ARCHIVE, archive.id),
+            (LifecycleResourceClass.ARCHIVE_SUBMISSION, target.id),
+        ]
+
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, target.id)
+            assert stored.status == SubmissionStatus.DELETED
+            assert stored.deleted_at is not None
+            assert stored.previous_status is None
+            assert stored.owner_self_delete_consumed is False
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.parametrize("first_operation", ["delete", "restore"])
+@pytest.mark.asyncio
+async def test_submission_delete_and_restore_serialize_without_deadlock(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+    first_operation,
+):
+    actor = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=actor.id,
+    )
+    async with session_maker() as session:
+        stored = await session.get(ArchiveSubmission, target.id)
+        stored.status = SubmissionStatus.APPROVED
+        await session.commit()
+
+    app.dependency_overrides[get_current_user] = _override_admin(actor.id)
+
+    async def delete_submission():
+        return await client.delete(f"/archives/submissions/{target.id}")
+
+    async def restore_submission():
+        return await client.post(
+            "/trash/restore",
+            json={"item_type": "archive_submission", "item_id": target.id},
+        )
+
+    try:
+        first, second, traces, sqlstates = await _run_two_request_lock_race(
+            monkeypatch=monkeypatch,
+            first_request=(
+                delete_submission if first_operation == "delete" else restore_submission
+            ),
+            second_request=(
+                restore_submission if first_operation == "delete" else delete_submission
+            ),
+        )
+        assert first.status_code == (200 if first_operation == "delete" else 404)
+        assert second.status_code == 200
+        assert "40P01" not in sqlstates
+        assert traces[0] == traces[1]
+        assert traces[0] == [
+            (LifecycleResourceClass.COURSE, course.id),
+            (LifecycleResourceClass.ARCHIVE, archive.id),
+            (LifecycleResourceClass.ARCHIVE_SUBMISSION, target.id),
+        ]
+
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, target.id)
+            if first_operation == "delete":
+                assert stored.status == SubmissionStatus.APPROVED
+                assert stored.deleted_at is None
+            else:
+                assert stored.status == SubmissionStatus.DELETED
+                assert stored.deleted_at is not None
+            assert stored.previous_status is None
+            assert stored.owner_self_delete_consumed is False
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_reverse_input_submission_plans_lock_same_rows_in_same_order(
+    session_maker,
+    make_user,
+):
+    requester = await make_user()
+    category, course, first_archive, first_submission = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    second_archive, second_submission = await _create_second_pair(
+        session_maker,
+        course=course,
+        requester_id=requester.id,
+    )
+    first_locked = asyncio.Event()
+    release_first = asyncio.Event()
+    second_attempted = asyncio.Event()
+    traces = []
+    sqlstates: list[str] = []
+
+    async def acquire(input_order, *, hold, attempted):
+        plan = archive_lifecycle_locks.ArchiveLifecycleLockPlan.build(
+            course_ids=[course.id, course.id],
+            archive_ids=input_order["archives"],
+            submission_ids=input_order["submissions"],
+        )
+        traces.append(_resource_trace(plan))
+        async with session_maker() as session:
+            if attempted:
+                second_attempted.set()
+            try:
+                await archive_lifecycle_locks.acquire_lifecycle_locks(session, plan)
+            except Exception as exc:
+                sqlstate = getattr(exc, "sqlstate", None) or getattr(
+                    getattr(exc, "orig", None),
+                    "sqlstate",
+                    None,
+                )
+                if sqlstate:
+                    sqlstates.append(str(sqlstate))
+                raise
+            if hold:
+                first_locked.set()
+                await asyncio.wait_for(release_first.wait(), timeout=10)
+            await session.rollback()
+
+    first_task = asyncio.create_task(
+        acquire(
+            {
+                "archives": [second_archive.id, first_archive.id],
+                "submissions": [second_submission.id, first_submission.id],
+            },
+            hold=True,
+            attempted=False,
+        )
+    )
+    await asyncio.wait_for(first_locked.wait(), timeout=10)
+    second_task = asyncio.create_task(
+        acquire(
+            {
+                "archives": [first_archive.id, second_archive.id],
+                "submissions": [first_submission.id, second_submission.id],
+            },
+            hold=False,
+            attempted=True,
+        )
+    )
+    await asyncio.wait_for(second_attempted.wait(), timeout=10)
+    assert not second_task.done()
+    release_first.set()
+    try:
+        await asyncio.wait_for(first_task, timeout=10)
+        await asyncio.wait_for(second_task, timeout=10)
+        assert traces[0] == traces[1]
+        assert traces[0] == [
+            (LifecycleResourceClass.COURSE, course.id),
+            (LifecycleResourceClass.ARCHIVE, first_archive.id),
+            (LifecycleResourceClass.ARCHIVE, second_archive.id),
+            (LifecycleResourceClass.ARCHIVE_SUBMISSION, first_submission.id),
+            (LifecycleResourceClass.ARCHIVE_SUBMISSION, second_submission.id),
+        ]
+        assert "40P01" not in sqlstates
+    finally:
+        release_first.set()
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[first_archive.id, second_archive.id],
+            submission_ids=[first_submission.id, second_submission.id],
+        )
+
+
 @pytest.mark.parametrize("first_operation", ["approve", "trash"])
 @pytest.mark.asyncio
 async def test_approve_existing_and_archive_trash_serialize_without_deadlock(

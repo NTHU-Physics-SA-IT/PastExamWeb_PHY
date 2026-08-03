@@ -289,6 +289,70 @@ async def discover_exact_archive_lifecycle_plan(
     )
 
 
+async def discover_exact_submission_lifecycle_plan(
+    db: AsyncSession,
+    *,
+    submission_id: int,
+    operation: ArchiveSubmissionLinkOperation,
+) -> ArchiveLifecycleLockPlan | None:
+    """Discover one Submission and only its retained exact Archive parent."""
+
+    submission = (
+        await db.execute(
+            select(ArchiveSubmission)
+            .where(ArchiveSubmission.id == submission_id)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if submission is None or submission.id is None:
+        return None
+
+    archive: Archive | None = None
+    sibling_ids: tuple[int, ...] | None = None
+    if submission.created_archive_id is not None:
+        archive = (
+            await db.execute(
+                select(Archive)
+                .where(Archive.id == submission.created_archive_id)
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if archive is not None:
+            sibling_ids = validate_archive_source_membership(
+                (
+                    (
+                        await db.execute(
+                            select(ArchiveSubmission.id)
+                            .where(ArchiveSubmission.created_archive_id == archive.id)
+                            .order_by(ArchiveSubmission.id.asc())
+                        )
+                    )
+                    .scalars()
+                    .all()
+                ),
+                operation=operation,
+            )
+
+    fingerprint = LifecycleMembershipFingerprint(
+        target_submission_id=submission.id,
+        target_created_archive_id=submission.created_archive_id,
+        target_requester_id=submission.requester_id,
+        target_owner_id=submission.owner_id,
+        archive_course_pairs=(
+            ((archive.id, archive.course_id),)
+            if archive is not None and archive.id is not None
+            else ()
+        ),
+        sibling_submission_ids=sibling_ids,
+    )
+    return ArchiveLifecycleLockPlan.build(
+        course_ids=(archive.course_id,) if archive is not None else (),
+        archive_ids=(archive.id,) if archive is not None else (),
+        submission_ids=(submission.id,),
+        fingerprint=fingerprint,
+    )
+
+
 def approval_namespace_scope(*, category_key: str, course_name: str) -> str:
     return f"archive_approval:{category_key}:{course_name.lower().strip()}"
 
@@ -380,6 +444,26 @@ async def acquire_exact_archive_lifecycle_locks(
     plan = await discover_exact_archive_lifecycle_plan(
         db,
         archive_id=archive_id,
+        operation=operation,
+    )
+    if plan is None:
+        return None, None
+    locked = await acquire_lifecycle_locks(db, plan)
+    revalidation = await revalidate_lifecycle_membership(db, locked)
+    return locked, revalidation
+
+
+async def acquire_exact_submission_lifecycle_locks(
+    db: AsyncSession,
+    *,
+    submission_id: int,
+    operation: ArchiveSubmissionLinkOperation,
+) -> tuple[LockedLifecycleRows | None, LifecycleRevalidationResult | None]:
+    """Discover, lock, and revalidate one exact Submission group once."""
+
+    plan = await discover_exact_submission_lifecycle_plan(
+        db,
+        submission_id=submission_id,
         operation=operation,
     )
     if plan is None:

@@ -43,6 +43,7 @@ from app.models.models import (
 from app.api.services.archive_submission_lifecycle import (
     LIFECYCLE_ARCHIVE_TRASHED,
     LIFECYCLE_LINKED_ARCHIVE_PERMANENTLY_DELETED,
+    acquire_stable_submission_lifecycle_locks,
     is_course_trash_lifecycle_reason,
     soft_delete_submission_with_linked_archive,
 )
@@ -900,9 +901,16 @@ async def delete_my_archive_submission(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
-    submission = await db.get(ArchiveSubmission, submission_id)
+    locked = await acquire_stable_submission_lifecycle_locks(
+        db,
+        submission_id=submission_id,
+        operation="submission_delete",
+    )
+    submission = locked.submission(submission_id) if locked is not None else None
     if not submission:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
+        )
 
     if submission.deleted_at is not None or submission.status == SubmissionStatus.DELETED:
         return {"success": True, "id": submission.id}
@@ -924,6 +932,12 @@ async def delete_my_archive_submission(
         submission=submission,
         user_id=current_user.user_id,
         reason="user deleted",
+        linked_archive=(
+            locked.archive(submission.created_archive_id)
+            if submission.created_archive_id is not None
+            else None
+        ),
+        exact_link_only=True,
     )
 
     await db.commit()
@@ -1680,9 +1694,16 @@ async def delete_archive_submission_for_admin(
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
-    submission = await db.get(ArchiveSubmission, submission_id)
+    locked = await acquire_stable_submission_lifecycle_locks(
+        db,
+        submission_id=submission_id,
+        operation="submission_delete",
+    )
+    submission = locked.submission(submission_id) if locked is not None else None
     if not submission:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
+        )
     _ensure_review_submission_mutable(submission)
 
     if submission.status == SubmissionStatus.DELETED:
@@ -1700,6 +1721,12 @@ async def delete_archive_submission_for_admin(
         submission=submission,
         user_id=current_user.user_id,
         reason="admin deleted",
+        linked_archive=(
+            locked.archive(submission.created_archive_id)
+            if submission.created_archive_id is not None
+            else None
+        ),
+        exact_link_only=True,
     )
     submission.reviewer_id = current_user.user_id
     submission.reviewed_at = datetime.now(timezone.utc)

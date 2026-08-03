@@ -24,6 +24,8 @@ ArchiveSubmissionLinkOperation = Literal[
     "approval",
     "review",
     "restore",
+    "submission_delete",
+    "submission_restore",
     "archive_trash",
     "archive_restore",
     "source_lookup",

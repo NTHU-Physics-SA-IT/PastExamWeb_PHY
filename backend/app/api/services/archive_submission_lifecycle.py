@@ -15,6 +15,12 @@ from app.models.models import (
     ArchiveSubmissionEvent,
     SubmissionStatus,
 )
+from app.services import archive_lifecycle_locks
+from app.services.archive_lifecycle_locks import (
+    LockedLifecycleRows,
+    PlanRebuildBudget,
+)
+from app.services.archive_submission_links import ArchiveSubmissionLinkOperation
 from app.utils.storage import get_minio_client
 
 LIFECYCLE_ARCHIVE_TRASHED = "archive_trashed"
@@ -107,6 +113,33 @@ class ArchiveSubmissionGroup:
 
 def is_archive_submission_trashed(submission: ArchiveSubmission) -> bool:
     return submission.deleted_at is not None or submission.status == SubmissionStatus.DELETED
+
+
+async def acquire_stable_submission_lifecycle_locks(
+    db: SQLModelAsyncSession,
+    *,
+    submission_id: int,
+    operation: ArchiveSubmissionLinkOperation,
+) -> LockedLifecycleRows | None:
+    """Acquire one stable exact Submission plan with one transparent rebuild."""
+
+    budget = PlanRebuildBudget()
+    while True:
+        (
+            locked,
+            revalidation,
+        ) = await archive_lifecycle_locks.acquire_exact_submission_lifecycle_locks(
+            db,
+            submission_id=submission_id,
+            operation=operation,
+        )
+        if locked is None:
+            return None
+        if revalidation is not None and revalidation.valid:
+            return locked
+
+        await db.rollback()
+        budget = budget.consume()
 
 
 async def delete_archive_submission_events(
@@ -293,34 +326,25 @@ async def soft_delete_submission_with_linked_archive(
     user_id: Optional[int],
     reason: str,
     now: Optional[datetime] = None,
+    linked_archive: Optional[Archive] = None,
+    exact_link_only: bool = False,
 ) -> dict:
+    warnings: list[str] = []
+    if exact_link_only:
+        if submission.created_archive_id is not None and linked_archive is None:
+            warnings.append(f"關聯考古題 #{submission.created_archive_id} 已不存在")
+    else:
+        linked_archive, link_warnings = await _resolve_linked_archive(
+            db,
+            submission=submission,
+        )
+        warnings.extend(link_warnings)
+
     timestamp = now or datetime.now(timezone.utc)
     submission_count = 1 if _soft_delete_submission(submission, now=timestamp, user_id=user_id, reason=reason) else 0
     archive_count = 0
-    warnings: list[str] = []
-    linked_archive, link_warnings = await _resolve_linked_archive(db, submission=submission)
-    warnings.extend(link_warnings)
     if linked_archive:
         archive_count = 1 if _soft_delete_archive(linked_archive, now=timestamp, user_id=user_id, reason=reason) else 0
-        linked_submissions = (
-            await db.execute(
-                select(ArchiveSubmission).where(
-                    ArchiveSubmission.created_archive_id == linked_archive.id,
-                    ArchiveSubmission.id != submission.id,
-                    ArchiveSubmission.deleted_at.is_(None),
-                    ArchiveSubmission.status != SubmissionStatus.DELETED,
-                )
-            )
-        ).scalars().all()
-        for linked in linked_submissions:
-            if linked.status in {SubmissionStatus.REJECTED, SubmissionStatus.TAKEDOWN}:
-                continue
-            _temporarily_takedown_submission(
-                linked,
-                reason=LIFECYCLE_ARCHIVE_TRASHED,
-                reviewer_id=user_id,
-                now=timestamp,
-            )
     return {"archives": archive_count, "submissions": submission_count, "warnings": warnings}
 
 
