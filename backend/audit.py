@@ -25,7 +25,7 @@ def parser() -> argparse.ArgumentParser:
     commands = root.add_subparsers(dest="command", required=True)
     run = commands.add_parser("run")
     run.add_argument("--audit", required=True, choices=[ELIGIBILITY_AUDIT_ID])
-    run.add_argument("--version", type=int, default=2, choices=[1, 2])
+    run.add_argument("--version", type=int, default=3, choices=[1, 2, 3])
     run.add_argument(
         "--mode",
         required=True,

@@ -6,11 +6,16 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
-from app.db.audit.models import AggregateCounts, PreviousStatusAggregateCounts
+from app.db.audit.models import (
+    AggregateCounts,
+    OneToOneAggregateCounts,
+    PreviousStatusAggregateCounts,
+)
 
 
 ELIGIBILITY_AUDIT_ID = "archive-submission-self-delete-eligibility"
 PREVIOUS_STATUS_REVISION = "d8f2a6c1b4e7"
+ONE_TO_ONE_REVISION = "6f3a9c2d8e41"
 
 
 _CLASSIFICATION_CTE = r"""
@@ -672,10 +677,121 @@ _ELIGIBILITY_V2 = AuditAdapter(
     aggregate_model=PreviousStatusAggregateCounts,
 )
 
+_ONE_TO_ONE_SUMMARY_SQL = (
+    r"""
+WITH previous_status_summary AS (
+"""
+    + _PREVIOUS_STATUS_SUMMARY_SQL
+    + r"""
+),
+link_cardinalities AS (
+    SELECT
+        created_archive_id,
+        count(*)::bigint AS cardinality
+    FROM archive_submissions
+    WHERE created_archive_id IS NOT NULL
+    GROUP BY created_archive_id
+),
+relationship_summary AS (
+    SELECT
+        count(*) FILTER (
+            WHERE submission.created_archive_id IS NULL
+        )::bigint AS created_archive_id_null,
+        count(*) FILTER (
+            WHERE submission.created_archive_id IS NOT NULL
+        )::bigint AS created_archive_id_non_null,
+        count(DISTINCT submission.created_archive_id)::bigint
+            AS distinct_created_archive_ids,
+        COALESCE((
+            SELECT max(cardinality)
+            FROM link_cardinalities
+        ), 0)::bigint AS max_created_archive_cardinality,
+        count(*) FILTER (
+            WHERE submission.created_archive_id IS NOT NULL
+              AND archive.id IS NULL
+        )::bigint AS dangling_created_archive_links
+    FROM archive_submissions AS submission
+    LEFT JOIN archives AS archive
+      ON archive.id = submission.created_archive_id
+),
+resource_counts AS (
+    SELECT
+        (SELECT count(*) FROM course_category_configs)::bigint
+            AS course_category_configs_total,
+        (SELECT count(*) FROM users)::bigint AS users_total,
+        (SELECT count(*) FROM courses)::bigint AS courses_total,
+        (SELECT count(*) FROM archives)::bigint AS archives_total
+),
+fingerprints AS (
+    SELECT
+        md5(COALESCE(string_agg(
+            concat_ws(
+                ':',
+                submission.id::text,
+                COALESCE(submission.created_archive_id::text, 'NULL')
+            ),
+            '|' ORDER BY submission.id
+        ), '')) AS created_archive_link_checksum,
+        md5(COALESCE(string_agg(
+            concat_ws(
+                ':',
+                submission.id::text,
+                submission.status::text,
+                COALESCE(submission.previous_status::text, 'NULL'),
+                submission.owner_self_delete_consumed::text,
+                COALESCE(submission.deleted_at::text, 'NULL'),
+                COALESCE(submission.deleted_by_id::text, 'NULL'),
+                COALESCE(submission.delete_reason, 'NULL'),
+                COALESCE(submission.lifecycle_reason, 'NULL'),
+                COALESCE(submission.restored_at::text, 'NULL'),
+                COALESCE(submission.restored_by_id::text, 'NULL')
+            ),
+            '|' ORDER BY submission.id
+        ), '')) AS submission_state_checksum
+    FROM archive_submissions AS submission
+)
+SELECT
+    previous_status_summary.*,
+    relationship_summary.created_archive_id_null,
+    relationship_summary.created_archive_id_non_null,
+    relationship_summary.distinct_created_archive_ids,
+    relationship_summary.max_created_archive_cardinality,
+    relationship_summary.dangling_created_archive_links,
+    resource_counts.course_category_configs_total,
+    resource_counts.users_total,
+    resource_counts.courses_total,
+    resource_counts.archives_total,
+    fingerprints.created_archive_link_checksum,
+    fingerprints.submission_state_checksum
+FROM
+    previous_status_summary,
+    relationship_summary,
+    resource_counts,
+    fingerprints
+"""
+)
+
+_ELIGIBILITY_V3 = AuditAdapter(
+    audit_id=ELIGIBILITY_AUDIT_ID,
+    version=3,
+    accepted_source_revisions=frozenset(
+        {
+            PREVIOUS_STATUS_REVISION,
+            ONE_TO_ONE_REVISION,
+        }
+    ),
+    approved_aggregate_labels=tuple(OneToOneAggregateCounts.model_fields),
+    approved_combination_flags=_ELIGIBILITY_V2.approved_combination_flags,
+    summary_sql=_ONE_TO_ONE_SUMMARY_SQL,
+    combinations_sql=_PREVIOUS_STATUS_COMBINATIONS_SQL,
+    aggregate_model=OneToOneAggregateCounts,
+)
+
 
 _REGISTRY = {
     (_ELIGIBILITY_V1.audit_id, _ELIGIBILITY_V1.version): _ELIGIBILITY_V1,
     (_ELIGIBILITY_V2.audit_id, _ELIGIBILITY_V2.version): _ELIGIBILITY_V2,
+    (_ELIGIBILITY_V3.audit_id, _ELIGIBILITY_V3.version): _ELIGIBILITY_V3,
 }
 
 

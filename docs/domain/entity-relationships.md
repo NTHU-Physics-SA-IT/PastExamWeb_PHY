@@ -24,8 +24,8 @@ current implementation separately from the intended product relation.
 | `CourseCategoryConfig` | `Course.category` stores its key as a string rather than an FK; submissions also retain category snapshots | Category controls discovery and creation choices, but its soft-delete lifecycle is independent from historical submissions | Confirmed by code; no DB FK means application checks carry integrity |
 | `Course` | Required parent of `Archive`; category is a string key; has soft-delete metadata | Groups archives for navigation; course trash may hide/deactivate children but must not rewrite independent submission review results | Confirmed by code in `courses.py` and `trash.py` |
 | `CourseSubmission` | Requester/reviewer and optional `created_course_id`; no soft-delete metadata in the current model | A course/category request attached to an archive-submission flow; created category/course becomes independent after approval | Implementation gap: current model is a separate review record and has no defined trash lifecycle |
-| `Archive` | Required `course_id`, optional uploader, one `object_name`, optional soft-delete metadata; submissions point to it with `created_archive_id` | One independently accessible approved public file for authenticated system users, within a logical exam group | Current naming can be mistaken for the whole logical group |
-| `ArchiveSubmission` | Required requester and object name; optional reviewer, legacy owner, and `created_archive_id`; review/trash fields and monotonic owner-self-delete eligibility coexist | One independent submission and PDF. Ownership survives eligibility consumption, and its review/lifecycle must not alter siblings | Eligibility persistence is implemented as a schema prerequisite; application enforcement and group-lifecycle gaps remain |
+| `Archive` | Required `course_id`, optional uploader, one `object_name`, optional soft-delete metadata; at most one submission points to it through the named nullable unique `created_archive_id` constraint | One independently accessible approved public file for authenticated system users, optionally created by exactly one submission | Administrator-created Archives may have no source submission; application guards remain a later milestone |
+| `ArchiveSubmission` | Required requester and object name; optional reviewer, legacy owner, and nullable unique `created_archive_id`; review/trash fields and monotonic owner-self-delete eligibility coexist | One independent submission and PDF, optionally paired with exactly one Archive. Ownership survives eligibility consumption | Database uniqueness is enforced; application fail-fast guards and group-lifecycle corrections remain later milestones |
 | `ArchiveSubmissionEvent` | Unique `submission_id` integer and timestamp, without a declared FK | Immutable statistical event retained after submission deletion, with active link/PII detached as needed | Implementation gap: permanent-delete helper currently deletes events |
 | `ArchiveDiscussionMessage` / `ArchiveDiscussionLike` | Message requires archive and user IDs; parent/reply references form a thread; likes cascade with message/user deletion | Discussion belongs to the referenced public item; soft-deleted messages should not remain an active source | Confirmed by code and `test_archive_discussion.py` |
 | `CommentReport` | Reporter FK cascades; target and actor/resource FKs mostly `SET NULL`; snapshots preserve context; independent soft delete | Report history survives source changes while active uniqueness and source availability remain explicit | Partially implemented |
@@ -52,16 +52,17 @@ current implementation separately from the intended product relation.
 ### Current implementation
 
 `backend/app/api/services/courses.py` derives public archive data and source
-submission IDs. `archive_submission_lifecycle.py` groups submissions around
-`created_archive_id` during delete/restore. Report-source resolution in
-`reports.py` also considers all linked submissions.
+submission IDs. `archive_submission_lifecycle.py` resolves exact
+`created_archive_id` links during delete/restore. Report-source resolution in
+`reports.py` also considers the linked submission.
 
 ### Known gap
 
-Some visibility and lifecycle paths treat sibling state as a property of the
-shared `Archive`, so a non-approved sibling can hide an approved file or a
-delete/restore operation can change multiple submissions. This is an
-implementation gap, not intended grouping behavior.
+Historical data with multiple submissions pointing to one Archive is an
+invalid relationship, not a supported logical group. The database constraint
+prevents new duplicate non-null links, while later application work must fail
+closed when resolving legacy/corrupt cardinality and must not use metadata to
+guess a replacement Archive.
 
 ### Frontend rendering evidence
 
@@ -122,7 +123,8 @@ takedown, and Archive restore returns it to approved.
 `test_submission_trash_moves_only_its_paired_archive_to_trash` directly
 protects two independent pairs: trashing Submission A trashes Archive A while
 Submission B, Archive B, and B's object identity remain unchanged. These tests
-do not cover sibling submissions that share one Archive.
+cover the supported independent one-to-one pairs. Multiple submissions sharing
+one Archive are an invariant violation, not an additional lifecycle case.
 
 ### Known gap
 
@@ -137,7 +139,7 @@ when requester identity is genuinely absent; two conflicting identities do not
 create two owners. Administrator authorization is independent.
 
 Owner self-delete eligibility belongs to one `ArchiveSubmission`, not to its
-paired Archive, a shared `created_archive_id` group, or sibling submissions.
+paired Archive or any metadata-similar submission.
 Consequently:
 
 - each submission stores and backfills
@@ -150,8 +152,8 @@ Consequently:
   submission's existing value;
 - conflicting requester and legacy owner identities remain invalid and fail
   closed during migration;
-- sharing one Archive does not merge sibling eligibility or make that
-  relationship a migration blocker;
+- an Archive cannot be linked to a second submission; duplicate historical
+  links block the one-to-one schema migration without choosing a winner;
 - the eligibility migration does not update Archive rows.
 
 This schema establishes durable state and historical backfill only. The later

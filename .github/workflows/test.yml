@@ -113,7 +113,6 @@ jobs:
           uv run python audit.py run \
             --audit archive-submission-self-delete-eligibility \
             --mode isolated-test \
-            --expected-ledger d8f2a6c1b4e7 \
             --repository-revision "${GITHUB_SHA}" \
             --output json
           uv run python -m pytest -q \

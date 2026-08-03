@@ -2,16 +2,21 @@ from __future__ import annotations
 
 import json
 
+from sqlalchemy import UniqueConstraint
+from sqlalchemy.dialects.sqlite import dialect as sqlite_dialect
+from sqlalchemy.schema import CreateTable
+
 from app.db.schema_manifests import (
     HEAD_SCHEMA_REVISION,
     get_manifest_spec,
     reviewed_manifest_revisions,
 )
 from app.db.migration_safety import metadata_for_revision
+from app.models.models import ArchiveSubmission
 
 
 def test_reviewed_manifest_registry_has_required_revisions() -> None:
-    assert HEAD_SCHEMA_REVISION == "d8f2a6c1b4e7"
+    assert HEAD_SCHEMA_REVISION == "6f3a9c2d8e41"
     assert reviewed_manifest_revisions() == (
         "c4d8e2f1a6b9",
         "a4c7e9d2f6b1",
@@ -20,6 +25,7 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
         "a7c3e9f1b5d2",
         "f5e1d8c3a7b2",
         "d8f2a6c1b4e7",
+        "6f3a9c2d8e41",
     )
 
 
@@ -37,7 +43,9 @@ def test_recovery_manifest_is_versioned_and_revision_bound() -> None:
 def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     column_name = "owner_self_delete_consumed"
     previous_status_column = "previous_status"
-    head = metadata_for_revision("d8f2a6c1b4e7")
+    constraint_name = "uq_archive_submissions_created_archive_id"
+    head = metadata_for_revision("6f3a9c2d8e41")
+    d8 = metadata_for_revision("d8f2a6c1b4e7")
     f5 = metadata_for_revision("f5e1d8c3a7b2")
     a7 = metadata_for_revision("a7c3e9f1b5d2")
     e3 = metadata_for_revision("e3b7c1d9f5a2")
@@ -45,6 +53,7 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     a4 = metadata_for_revision("a4c7e9d2f6b1")
 
     assert head is not None
+    assert d8 is not None
     assert f5 is not None
     assert a7 is not None
     assert e3 is not None
@@ -54,6 +63,20 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     assert column_name in head.tables["archive_submissions"].c
     assert previous_status_column in head.tables["archive_submissions"].c
     assert "archive_reports" in head.tables
+    assert any(
+        isinstance(constraint, UniqueConstraint)
+        and constraint.name == constraint_name
+        and tuple(constraint.columns.keys()) == ("created_archive_id",)
+        for constraint in head.tables["archive_submissions"].constraints
+    )
+
+    assert column_name in d8.tables["archive_submissions"].c
+    assert previous_status_column in d8.tables["archive_submissions"].c
+    assert "archive_reports" in d8.tables
+    assert all(
+        constraint.name != constraint_name
+        for constraint in d8.tables["archive_submissions"].constraints
+    )
 
     assert column_name in f5.tables["archive_submissions"].c
     assert previous_status_column not in f5.tables["archive_submissions"].c
@@ -98,8 +121,23 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     )
 
     # Building older variants must never mutate current SQLModel metadata.
-    rebuilt_head = metadata_for_revision("d8f2a6c1b4e7")
+    rebuilt_head = metadata_for_revision("6f3a9c2d8e41")
     assert rebuilt_head is not None
     assert column_name in rebuilt_head.tables["archive_submissions"].c
     assert previous_status_column in rebuilt_head.tables["archive_submissions"].c
     assert "archive_reports" in rebuilt_head.tables
+    assert any(
+        constraint.name == constraint_name
+        for constraint in rebuilt_head.tables["archive_submissions"].constraints
+    )
+
+
+def test_one_to_one_constraint_compiles_for_sqlite_metadata_neighbors() -> None:
+    statement = str(
+        CreateTable(ArchiveSubmission.__table__).compile(
+            dialect=sqlite_dialect(),
+        )
+    )
+
+    assert "CONSTRAINT uq_archive_submissions_created_archive_id" in statement
+    assert "UNIQUE (created_archive_id)" in statement

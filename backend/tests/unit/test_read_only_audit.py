@@ -134,6 +134,30 @@ def test_previous_status_audit_is_revision_bounded_and_course_marker_read_only()
     assert "UPDATE ARCHIVE_SUBMISSIONS" not in adapter.summary_sql.upper()
 
 
+def test_one_to_one_audit_is_revision_bounded_and_aggregate_only() -> None:
+    adapter = get_audit_adapter(ELIGIBILITY_AUDIT_ID, 3)
+
+    assert adapter.accepted_source_revisions == frozenset(
+        {
+            "d8f2a6c1b4e7",
+            "6f3a9c2d8e41",
+        }
+    )
+    for label in (
+        "created_archive_id_null",
+        "created_archive_id_non_null",
+        "distinct_created_archive_ids",
+        "max_created_archive_cardinality",
+        "dangling_created_archive_links",
+        "created_archive_link_checksum",
+        "submission_state_checksum",
+    ):
+        assert label in adapter.approved_aggregate_labels
+    assert "GROUP BY created_archive_id" in adapter.summary_sql
+    assert "LEFT JOIN archives" in adapter.summary_sql
+    assert "UPDATE ARCHIVE_SUBMISSIONS" not in adapter.summary_sql.upper()
+
+
 def test_transaction_is_noninteractive_read_only_and_explicitly_rolled_back() -> None:
     sql = build_transaction_sql(request(), get_audit_adapter(ELIGIBILITY_AUDIT_ID, 1))
 

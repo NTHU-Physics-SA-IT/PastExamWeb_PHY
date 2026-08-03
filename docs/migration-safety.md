@@ -52,8 +52,10 @@ Reviewed manifests currently cover:
 - `a7c3e9f1b5d2`: the reviewed schema before persisted ArchiveSubmission
   owner-self-delete eligibility;
 - `f5e1d8c3a7b2`: the reviewed schema before typed ArchiveSubmission previous
-  status; and
-- `d8f2a6c1b4e7`: the current repository head and SQLModel metadata contract.
+  status;
+- `d8f2a6c1b4e7`: the reviewed schema before the ArchiveSubmission/Archive
+  one-to-one constraint; and
+- `6f3a9c2d8e41`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,
@@ -133,6 +135,17 @@ metadata, ownership or lifecycle contradictions, overlapping buckets,
 unclassified rows, and conservation failures abort the PostgreSQL transaction.
 The migration does not infer one submission's value from a shared Archive and
 does not modify Archive, ownership, review, delete, or restore metadata.
+
+The ArchiveSubmission/Archive one-to-one migration adds the named standard
+nullable unique constraint
+`uq_archive_submissions_created_archive_id`. Before DDL it locks the source
+table and performs bounded aggregate checks for duplicate non-null links and
+dangling Archive references. Any anomaly aborts the transaction with counts
+only; the migration never exposes relationship IDs, chooses a canonical
+submission, clears or reassigns a link, duplicates an Archive, or rewrites
+application rows. Multiple null links remain valid. Downgrade removes only
+the named unique constraint and preserves the existing foreign key, rows,
+links, primary keys, and sequences.
 
 On the first bootstrap, one missing canonical key or any extra custom category
 is evidence that the database is not the expected clean initialized target,

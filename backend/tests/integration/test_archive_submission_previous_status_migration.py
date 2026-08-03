@@ -278,7 +278,7 @@ def test_model_manifest_and_response_boundary_define_previous_status() -> None:
         "DELETED",
         "TAKEDOWN",
     }
-    assert HEAD_SCHEMA_REVISION == NEW_REVISION
+    assert HEAD_SCHEMA_REVISION == "6f3a9c2d8e41"
 
     source_metadata = metadata_for_revision(PREVIOUS_REVISION)
     head_metadata = metadata_for_revision(NEW_REVISION)
@@ -298,8 +298,9 @@ def test_model_manifest_and_response_boundary_define_previous_status() -> None:
 def test_new_revision_is_the_single_child_of_f5() -> None:
     script, heads = revision_graph()
 
-    assert heads == [NEW_REVISION]
+    assert heads == [HEAD_SCHEMA_REVISION]
     assert script.get_revision(NEW_REVISION).down_revision == PREVIOUS_REVISION
+    assert script.get_revision(HEAD_SCHEMA_REVISION).down_revision == NEW_REVISION
 
 
 def test_fresh_upgrade_adds_nullable_typed_column_without_index(

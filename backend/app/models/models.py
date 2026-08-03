@@ -394,6 +394,10 @@ class CourseSubmission(SQLModel, table=True):
 class ArchiveSubmission(SQLModel, table=True):
     __tablename__ = "archive_submissions"
     __table_args__ = (
+        UniqueConstraint(
+            "created_archive_id",
+            name="uq_archive_submissions_created_archive_id",
+        ),
         CheckConstraint(
             "previous_status IS NULL OR CAST(previous_status AS TEXT) <> 'DELETED'",
             name="ck_archive_submissions_previous_status_not_deleted",

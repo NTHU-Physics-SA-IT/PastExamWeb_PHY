@@ -42,6 +42,7 @@ ARCHIVE_SUBMISSION_PREVIOUS_STATUS_CHECKS = {
     "ck_archive_submissions_previous_status_not_deleted",
     "ck_archive_submissions_active_previous_status_null",
 }
+ARCHIVE_SUBMISSION_CREATED_ARCHIVE_UNIQUE = "uq_archive_submissions_created_archive_id"
 IDENTIFIER_TEXT_CAST = re.compile(
     r"\bcast\(\s*(?P<identifier>[a-z_]\w*(?:\.[a-z_]\w*)?)"
     r"\s+as\s+text\s*\)"
@@ -224,6 +225,7 @@ def _metadata_for_variant(variant: str) -> MetaData:
     if variant == "head":
         return metadata
     if variant not in {
+        "pre_archive_submission_one_to_one",
         "pre_archive_submission_previous_status",
         "pre_owner_self_delete_eligibility",
         "pre_archive_reports",
@@ -233,6 +235,15 @@ def _metadata_for_variant(variant: str) -> MetaData:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
 
     archive_submissions = metadata.tables["archive_submissions"]
+    for constraint in list(archive_submissions.constraints):
+        if (
+            isinstance(constraint, UniqueConstraint)
+            and constraint.name == ARCHIVE_SUBMISSION_CREATED_ARCHIVE_UNIQUE
+        ):
+            archive_submissions.constraints.remove(constraint)
+    if variant == "pre_archive_submission_one_to_one":
+        return metadata
+
     for constraint in list(archive_submissions.constraints):
         if (
             isinstance(constraint, CheckConstraint)
@@ -683,6 +694,34 @@ def compare_head_schema(
                 f"{table_name}.unique_constraints", expected_unique, actual_unique
             )
         )
+        expected_named_one_to_one = {
+            (
+                constraint.name,
+                tuple(constraint.columns.keys()),
+            )
+            for constraint in table.constraints
+            if isinstance(constraint, UniqueConstraint)
+            and constraint.name == ARCHIVE_SUBMISSION_CREATED_ARCHIVE_UNIQUE
+        }
+        if expected_named_one_to_one:
+            actual_named_one_to_one = {
+                (
+                    item.get("name"),
+                    tuple(item.get("column_names") or []),
+                )
+                for item in inspector.get_unique_constraints(
+                    table_name,
+                    schema="public",
+                )
+                if item.get("name") == ARCHIVE_SUBMISSION_CREATED_ARCHIVE_UNIQUE
+            }
+            checks.append(
+                _set_check(
+                    f"{table_name}.named_one_to_one_constraint",
+                    expected_named_one_to_one,
+                    actual_named_one_to_one,
+                )
+            )
 
         expected_checks = {
             _normalize_predicate(constraint.sqltext)
