@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Sequence
 
+from fastapi import HTTPException, status
 from minio.error import S3Error
 from sqlalchemy import and_, delete, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
@@ -23,6 +24,22 @@ COURSE_TRASH_LIFECYCLE_PREFIX = f"{LIFECYCLE_COURSE_TRASHED}|"
 COURSE_TRASH_PREVIOUS_STATUS_KEY = "previous_status"
 COURSE_TRASH_COURSE_ID_KEY = "course_id"
 COURSE_TRASH_ARCHIVE_ID_KEY = "archive_id"
+ARCHIVE_LIFECYCLE_CONFLICT_CODE = "archive_lifecycle_conflict"
+ARCHIVE_LIFECYCLE_CONFLICT_MESSAGE = (
+    "Archive lifecycle changed during this request. Please retry."
+)
+
+
+def archive_lifecycle_conflict_error() -> HTTPException:
+    """Return the shared public contract for an exhausted Archive plan rebuild."""
+
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": ARCHIVE_LIFECYCLE_CONFLICT_CODE,
+            "message": ARCHIVE_LIFECYCLE_CONFLICT_MESSAGE,
+        },
+    )
 
 
 def make_course_trash_lifecycle_reason(
@@ -31,9 +48,7 @@ def make_course_trash_lifecycle_reason(
     course_id: Optional[int],
     archive_id: Optional[int],
 ) -> str:
-    fields: list[str] = [
-        f"{COURSE_TRASH_PREVIOUS_STATUS_KEY}={previous_status.value}"
-    ]
+    fields: list[str] = [f"{COURSE_TRASH_PREVIOUS_STATUS_KEY}={previous_status.value}"]
     if course_id is not None:
         fields.append(f"{COURSE_TRASH_COURSE_ID_KEY}={course_id}")
     if archive_id is not None:
@@ -249,25 +264,19 @@ async def soft_delete_archive_with_submission_takedown(
     db: SQLModelAsyncSession,
     *,
     archive: Archive,
+    submissions: Sequence[ArchiveSubmission],
     user_id: Optional[int],
     reason: str,
     now: Optional[datetime] = None,
 ) -> dict:
     timestamp = now or datetime.now(timezone.utc)
     archive_count = 1 if _soft_delete_archive(archive, now=timestamp, user_id=user_id, reason=reason) else 0
-    submissions = (
-        await db.execute(
-            select(ArchiveSubmission).where(
-                ArchiveSubmission.created_archive_id == archive.id,
-                ArchiveSubmission.deleted_at.is_(None),
-                ArchiveSubmission.status != SubmissionStatus.DELETED,
-            )
-        )
-    ).scalars().all()
     submission_count = sum(
         1
         for item in submissions
-        if _temporarily_takedown_submission(
+        if item.deleted_at is None
+        and item.status != SubmissionStatus.DELETED
+        and _temporarily_takedown_submission(
             item,
             reason=LIFECYCLE_ARCHIVE_TRASHED,
             reviewer_id=user_id,
@@ -319,6 +328,7 @@ async def restore_archive_with_temporary_submissions(
     db: SQLModelAsyncSession,
     *,
     archive: Archive,
+    submissions: Sequence[ArchiveSubmission],
     user_id: Optional[int],
     now: Optional[datetime] = None,
 ) -> dict:
@@ -332,22 +342,23 @@ async def restore_archive_with_temporary_submissions(
         archive.restored_by_id = user_id
         restored_archives = 1
 
-    submissions = (
-        await db.execute(
-            select(ArchiveSubmission).where(
-                ArchiveSubmission.created_archive_id == archive.id,
-                ArchiveSubmission.status == SubmissionStatus.TAKEDOWN,
-                ArchiveSubmission.lifecycle_reason == LIFECYCLE_ARCHIVE_TRASHED,
-            )
-        )
-    ).scalars().all()
-    for item in submissions:
+    restored_submissions = [
+        item
+        for item in submissions
+        if item.status == SubmissionStatus.TAKEDOWN
+        and item.lifecycle_reason == LIFECYCLE_ARCHIVE_TRASHED
+    ]
+    for item in restored_submissions:
         item.status = SubmissionStatus.APPROVED
         item.lifecycle_reason = None
         item.reviewer_id = user_id
         item.reviewed_at = timestamp
 
-    return {"archives": restored_archives, "submissions_restored": len(submissions), "warnings": []}
+    return {
+        "archives": restored_archives,
+        "submissions_restored": len(restored_submissions),
+        "warnings": [],
+    }
 
 
 async def mark_linked_submissions_archive_permanently_deleted(

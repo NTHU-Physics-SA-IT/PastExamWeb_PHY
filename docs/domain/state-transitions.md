@@ -119,11 +119,17 @@ result for the complete matrix and a separate expected-state classifier.
 `SubmissionDecision.expected_status` remains parser-optional so the routes can
 map a missing or null field to `428` instead of Pydantic mapping it to `422`.
 The runtime contract is nevertheless mandatory: all four direct review routes
-authorize the administrator, load the submission once with `FOR UPDATE`,
-enforce the expected-state classifier before the transition policy, and
-short-circuit missing, stale, illegal, and same-target requests before review
-mutation or notification. Repository frontend callers send the status carried
-by the row or comparison candidate being acted on.
+authorize the administrator, discover the exact parent relationship without
+locking, then acquire the canonical lifecycle plan before enforcing the
+expected-state classifier and transition policy. Existing exact parents lock
+Course, Archive, then ArchiveSubmission rows by ascending numeric primary key;
+approve also takes its established normalized approval-namespace advisory
+mutex before any row lock and locks every exact-linked sibling when it may
+update shared Archive metadata. Reject, takedown, and republish lock only the
+target submission after its exact ancestors. Missing, stale, illegal, and
+same-target requests short-circuit before review mutation or notification.
+Repository frontend callers send the status carried by the row or comparison
+candidate being acted on.
 
 The direct routes return stable error-detail codes:
 
@@ -140,13 +146,38 @@ expose administrator capabilities. The comparison response keeps its
 compatibility `can_takedown` field, deriving it from the same backend capability
 policy instead of a separate status mapping.
 
-Deterministic PostgreSQL tests use independent request sessions and an event
-barrier while the first request holds the submission row lock through its
-commit boundary. Double-approve and every pair among approve, reject, and
-takedown from `pending` establish first-writer-wins: the winner returns
-`changed=true`, the loser observes the committed state and returns stale
-`409`, and only the winner produces transition metadata, Archive work, or a
-notification. A deliberate same-target request with a matching expected state
+The exact Course/Archive/Submission membership fingerprint is re-read after
+all locks. A mismatch rolls back that attempt and permits one bounded plan
+rebuild; lock sets never expand after acquisition begins.
+`created_archive_id = NULL` remains no exact Archive relationship and is never
+replaced by a metadata guess.
+
+Archive soft trash and restore use the same Course, Archive, exact-linked
+ArchiveSubmission ordering. They discover the complete sibling set before
+their first row lock, revalidate it afterward, and then apply the existing
+group transition to the locked rows. This slice does not change submission
+delete/restore, Course lifecycle, report lifecycle, or permanent-delete lock
+ordering.
+
+If Archive trash or restore finds a changed parent or exact-linked sibling
+membership, it rolls back and rebuilds the complete plan once. A stable second
+attempt proceeds normally. If the second locked revalidation also differs, the
+second transaction rolls back and returns
+`409 archive_lifecycle_conflict` with the canonical message
+`Archive lifecycle changed during this request. Please retry.` No lifecycle
+write is committed. This contract does not replace not-found or authorization
+handling, direct-review stale or illegal-transition errors, same-target review
+no-ops, planner invariant failures, PostgreSQL deadlocks, or lock timeouts.
+
+Deterministic PostgreSQL tests use independent request sessions and event
+barriers while the first request holds its canonical plan through the commit
+boundary. Double-approve and every pair among approve, reject, and takedown
+from `pending` establish first-writer-wins: the winner returns `changed=true`,
+the loser observes the committed state and returns stale `409`, and only the
+winner produces transition metadata, Archive work, or a notification.
+Approve-existing versus Archive trash, Archive trash versus restore, and
+reverse-input shared-Archive plans also establish serial outcomes without a
+deadlock. A deliberate same-target request with a matching expected state
 remains the distinct `changed=false` control.
 
 The separate archive-report uphold flow retains its report-owned transaction
