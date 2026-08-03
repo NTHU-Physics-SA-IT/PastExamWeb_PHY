@@ -1,4 +1,5 @@
 from dataclasses import FrozenInstanceError
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -12,6 +13,7 @@ from app.services.archive_lifecycle_locks import (
     LifecycleResourceRef,
     LockedLifecycleRows,
     PlanRebuildBudget,
+    revalidate_lifecycle_membership,
 )
 
 
@@ -182,3 +184,146 @@ def test_locked_result_rejects_rows_outside_plan() -> None:
                 ),
             ),
         )
+
+
+@pytest.mark.asyncio
+async def test_revalidation_rejects_disappeared_target() -> None:
+    plan = ArchiveLifecycleLockPlan.build(
+        submission_ids=[4],
+        fingerprint=LifecycleMembershipFingerprint(
+            target_submission_id=4,
+            target_requester_id=9,
+        ),
+    )
+
+    result = await revalidate_lifecycle_membership(
+        AsyncMock(),
+        LockedLifecycleRows(plan=plan),
+    )
+
+    assert result.valid is False
+    assert "target_submission_missing" in result.reasons
+
+
+@pytest.mark.parametrize(
+    ("created_archive_id", "requester_id"),
+    [(5, 9), (3, 10)],
+)
+@pytest.mark.asyncio
+async def test_revalidation_rejects_parent_or_authorization_identity_change(
+    created_archive_id,
+    requester_id,
+) -> None:
+    plan = ArchiveLifecycleLockPlan.build(
+        submission_ids=[4],
+        fingerprint=LifecycleMembershipFingerprint(
+            target_submission_id=4,
+            target_created_archive_id=3,
+            target_requester_id=9,
+        ),
+    )
+    changed = ArchiveSubmission(
+        id=4,
+        subject="x",
+        category="x",
+        name="x",
+        academic_year=2026,
+        archive_type="final",
+        professor="x",
+        object_name="x.pdf",
+        requester_id=requester_id,
+        created_archive_id=created_archive_id,
+    )
+
+    result = await revalidate_lifecycle_membership(
+        AsyncMock(),
+        LockedLifecycleRows(plan=plan, submissions=(changed,)),
+    )
+
+    assert result.valid is False
+    assert "membership_fingerprint_changed" in result.reasons
+
+
+@pytest.mark.asyncio
+async def test_revalidation_rejects_wrong_course_parent() -> None:
+    plan = ArchiveLifecycleLockPlan.build(
+        course_ids=[2],
+        archive_ids=[3],
+        fingerprint=LifecycleMembershipFingerprint(
+            archive_course_pairs=((3, 2),),
+        ),
+    )
+    changed_archive = Archive(
+        id=3,
+        name="x",
+        academic_year=2026,
+        archive_type="final",
+        professor="x",
+        object_name="x.pdf",
+        course_id=8,
+    )
+
+    result = await revalidate_lifecycle_membership(
+        AsyncMock(),
+        LockedLifecycleRows(
+            plan=plan,
+            courses=(Course(id=2, name="x", category="x"),),
+            archives=(changed_archive,),
+        ),
+    )
+
+    assert result.valid is False
+    assert "membership_fingerprint_changed" in result.reasons
+
+
+@pytest.mark.asyncio
+async def test_revalidation_rejects_sibling_membership_change() -> None:
+    plan = ArchiveLifecycleLockPlan.build(
+        course_ids=[2],
+        archive_ids=[3],
+        submission_ids=[4],
+        fingerprint=LifecycleMembershipFingerprint(
+            archive_course_pairs=((3, 2),),
+            sibling_submission_ids=(4,),
+        ),
+    )
+    db = AsyncMock()
+    query_result = MagicMock()
+    query_result.scalars.return_value.all.return_value = [4, 5]
+    db.execute.return_value = query_result
+
+    result = await revalidate_lifecycle_membership(
+        db,
+        LockedLifecycleRows(
+            plan=plan,
+            courses=(Course(id=2, name="x", category="x"),),
+            archives=(
+                Archive(
+                    id=3,
+                    name="x",
+                    academic_year=2026,
+                    archive_type="final",
+                    professor="x",
+                    object_name="x.pdf",
+                    course_id=2,
+                ),
+            ),
+            submissions=(
+                ArchiveSubmission(
+                    id=4,
+                    subject="x",
+                    category="x",
+                    name="x",
+                    academic_year=2026,
+                    archive_type="final",
+                    professor="x",
+                    object_name="x.pdf",
+                    requester_id=9,
+                    created_archive_id=3,
+                ),
+            ),
+        ),
+    )
+
+    assert result.valid is False
+    assert "membership_fingerprint_changed" in result.reasons

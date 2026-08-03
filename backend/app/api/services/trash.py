@@ -27,6 +27,7 @@ from app.models.models import (
     User,
 )
 from app.api.services.archive_submission_lifecycle import (
+    archive_lifecycle_conflict_error,
     LIFECYCLE_ARCHIVE_TRASHED,
     LIFECYCLE_COURSE_TRASHED,
     LIFECYCLE_LINKED_ARCHIVE_PERMANENTLY_DELETED,
@@ -42,8 +43,16 @@ from app.api.services.archive_submission_lifecycle import (
     restore_archive_submission_group,
 )
 from app.utils.auth import get_current_user
-from app.utils.course_text import normalized_course_text_expr, normalize_course_search_text
+from app.utils.course_text import (
+    normalized_course_text_expr,
+    normalize_course_search_text,
+)
 from app.utils.storage import get_minio_client
+from app.services import archive_lifecycle_locks
+from app.services.archive_lifecycle_locks import (
+    LifecyclePlanRetryExhausted,
+    PlanRebuildBudget,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -1785,7 +1794,9 @@ async def restore_trash_item(
     if payload.item_type == TrashEntityType.NOTIFICATION:
         notification = await db.get(Notification, payload.item_id)
         if not notification or notification.deleted_at is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found"
+            )
 
         notification.deleted_at = None
         notification.deleted_by_id = None
@@ -1793,29 +1804,71 @@ async def restore_trash_item(
         return {"message": "Notification restored"}
 
     if payload.item_type == TrashEntityType.ARCHIVE:
-        archive = await db.get(Archive, payload.item_id)
-        if not archive or archive.deleted_at is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Archive not found")
+        budget = PlanRebuildBudget()
+        locked = None
+        while True:
+            (
+                locked,
+                revalidation,
+            ) = await archive_lifecycle_locks.acquire_exact_archive_lifecycle_locks(
+                db,
+                archive_id=payload.item_id,
+            )
+            if locked is None:
+                break
+            if revalidation is not None and revalidation.valid:
+                break
+            conflict_archive = locked.archive(payload.item_id)
+            terminal_error = (
+                HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Archive not found",
+                )
+                if conflict_archive is None or conflict_archive.deleted_at is None
+                else None
+            )
+            await db.rollback()
+            try:
+                budget = budget.consume()
+            except LifecyclePlanRetryExhausted:
+                if terminal_error is not None:
+                    raise terminal_error
+                raise archive_lifecycle_conflict_error()
 
-        parent_submission = await _get_deleted_submission_parent_for_archive(db, archive.id)
+        archive = locked.archive(payload.item_id) if locked is not None else None
+        if not archive or archive.deleted_at is None:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Archive not found"
+            )
+
+        parent_submission = next(
+            (
+                submission
+                for submission in locked.submissions
+                if is_archive_submission_trashed(submission)
+            ),
+            None,
+        )
         if parent_submission:
+            await db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="此考古題需隨上層投稿一起還原，請先還原投稿。",
             )
 
-        group = await collect_archive_submission_group(db, archive=archive)
-        for linked_archive in group.archives:
-            course = await db.get(Course, linked_archive.course_id)
-            if not course or course.deleted_at is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Course is deleted; restore course before restoring this archive.",
-                )
+        course = locked.course(archive.course_id)
+        if not course or course.deleted_at is not None:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Course is deleted; restore course before restoring this archive.",
+            )
 
         result = await restore_archive_with_temporary_submissions(
             db,
             archive=archive,
+            submissions=locked.submissions,
             user_id=current_user.user_id,
             now=now,
         )

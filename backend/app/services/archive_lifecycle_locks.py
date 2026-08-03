@@ -241,6 +241,46 @@ class LifecycleRevalidationResult:
     reasons: tuple[str, ...] = ()
 
 
+async def discover_exact_archive_lifecycle_plan(
+    db: AsyncSession,
+    *,
+    archive_id: int,
+) -> ArchiveLifecycleLockPlan | None:
+    """Discover one Archive's exact Course and Submission membership."""
+
+    archive = (
+        await db.execute(
+            select(Archive)
+            .where(Archive.id == archive_id)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one_or_none()
+    if archive is None or archive.id is None:
+        return None
+
+    sibling_ids = tuple(
+        (
+            await db.execute(
+                select(ArchiveSubmission.id)
+                .where(ArchiveSubmission.created_archive_id == archive.id)
+                .order_by(ArchiveSubmission.id.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    fingerprint = LifecycleMembershipFingerprint(
+        archive_course_pairs=((archive.id, archive.course_id),),
+        sibling_submission_ids=sibling_ids,
+    )
+    return ArchiveLifecycleLockPlan.build(
+        course_ids=(archive.course_id,),
+        archive_ids=(archive.id,),
+        submission_ids=sibling_ids,
+        fingerprint=fingerprint,
+    )
+
+
 def approval_namespace_scope(*, category_key: str, course_name: str) -> str:
     return f"archive_approval:{category_key}:{course_name.lower().strip()}"
 
@@ -319,6 +359,24 @@ async def acquire_lifecycle_locks(
         archives=archives,
         submissions=submissions,
     )
+
+
+async def acquire_exact_archive_lifecycle_locks(
+    db: AsyncSession,
+    *,
+    archive_id: int,
+) -> tuple[LockedLifecycleRows | None, LifecycleRevalidationResult | None]:
+    """Discover, lock, and revalidate one exact Archive group once."""
+
+    plan = await discover_exact_archive_lifecycle_plan(
+        db,
+        archive_id=archive_id,
+    )
+    if plan is None:
+        return None, None
+    locked = await acquire_lifecycle_locks(db, plan)
+    revalidation = await revalidate_lifecycle_membership(db, locked)
+    return locked, revalidation
 
 
 async def revalidate_lifecycle_membership(

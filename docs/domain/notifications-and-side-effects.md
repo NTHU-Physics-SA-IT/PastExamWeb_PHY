@@ -74,21 +74,23 @@ policy:
 - an illegal transition does not enqueue a notification or any other event.
 
 The four direct review routes enforce these classifications after
-administrator authorization and a submission row lock. Missing, stale,
-illegal, and same-target requests release the transaction without mutation;
-only a true transition reaches the existing notification owner. A successful
-true transition returns `changed=true`; a same-target no-op returns
-`changed=false`. The archive-report uphold flow remains an internal,
-report-owned takedown operation and does not require a client expected-state
-field.
+administrator authorization and their canonical parent-first lifecycle locks.
+The route/session remains the transaction owner; the shared planner neither
+commits nor writes transition or notification state. Missing, stale, illegal,
+and same-target requests release the transaction without mutation; only a true
+transition reaches the existing notification owner after the locked canonical
+re-read. A successful true transition returns `changed=true`; a same-target
+no-op returns `changed=false`. The archive-report uphold flow remains an
+internal, report-owned takedown operation and does not require a client
+expected-state field.
 
 Deterministic PostgreSQL race coverage pauses the first direct review request
 after the real notification owner has enqueued and flushed its row but before
 the caller commit. A second independent request has already attempted the same
-submission row lock. Releasing the winner proves that the loser reads the
-committed status and exits stale with no notification, metadata, Archive,
-Category, Course, or event side effect. The winning transition owns exactly
-one effective notification and one transaction outcome.
+canonical parent-first lock plan. Releasing the winner proves that the loser
+reads the committed status and exits stale with no notification, metadata,
+Archive, Category, Course, or event side effect. The winning transition owns
+exactly one effective notification and one transaction outcome.
 
 ### Current implementation and gap
 
@@ -99,8 +101,16 @@ review notifications.
 and `test_submission_trash_moves_only_its_paired_archive_to_trash` protect the
 focused approved, independent-pair paths with notification counts recorded
 after approval setup: Archive trash/restore and Submission trash add no
-personal notification. Shared-Archive sibling behavior remains outside this
-evidence.
+personal notification. Parent-first PostgreSQL coverage additionally protects
+shared-Archive trash/restore and approve-versus-trash serialization: lifecycle
+trash/restore remains silent, and only a successful direct review transition
+can enqueue its existing single notification.
+If Archive trash or restore observes one locked membership mismatch, the route
+rolls back before its one permitted plan rebuild. A second mismatch rolls back
+before returning `409 archive_lifecycle_conflict`; neither attempt retains a
+notification, event, lifecycle mutation, dirty ORM state, or transaction lock.
+Planner invariant failures and database deadlock or timeout errors are not
+translated into this public conflict contract.
 `test_course_trash_restore_preserves_approved_submission_without_notification`
 and `test_course_trash_restore_preserves_rejected_submission_without_notification`
 record their notification baselines after the legal review setup and protect
