@@ -28,6 +28,8 @@ ArchiveSubmissionLinkOperation = Literal[
     "submission_restore",
     "archive_trash",
     "archive_restore",
+    "course_trash",
+    "course_restore",
     "source_lookup",
 ]
 
@@ -156,7 +158,7 @@ def validate_archive_source_membership(
 def validate_archive_source_submission_rows(
     rows: Iterable[tuple[int | None, int | None]],
     *,
-    operation: Literal["source_lookup"] = "source_lookup",
+    operation: ArchiveSubmissionLinkOperation = "source_lookup",
 ) -> dict[int, list[int]]:
     """Build the compatibility array only after validating one-to-one cardinality."""
     submission_ids_by_archive: dict[int, set[int]] = {}

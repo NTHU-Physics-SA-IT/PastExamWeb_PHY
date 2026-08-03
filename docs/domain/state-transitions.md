@@ -188,6 +188,27 @@ authorization handling, direct-review stale or illegal-transition errors,
 same-target review no-ops, planner invariant failures, PostgreSQL deadlocks, or
 lock timeouts.
 
+Course soft trash and restore preserve their existing metadata candidate
+resolver, lifecycle marker, child eligibility, restore counts, authorization,
+and retry behavior while acquiring the same canonical resource ranks. Course
+trash locks Course, Archive, then ArchiveSubmission rows; Course restore first
+locks the matching CourseCategoryConfig row and then locks Course, Archive,
+and ArchiveSubmission rows. Collections are discovered before the first row
+lock, each resource class is locked by ascending numeric primary key, and the
+locked membership fingerprint includes the Course identity, direct Archive
+membership, exact Archive links, candidate Submission membership, and—during
+restore—the Category identity and lifecycle state.
+
+One changed Course membership rolls back the attempt and permits exactly one
+complete plan rebuild. A stable second attempt applies the existing mutation.
+A second dynamic mismatch rolls back and returns
+`409 course_lifecycle_conflict` with
+`Course lifecycle changed during this request. Please retry.` This contract is
+limited to Course trash/restore collection drift. Static one-to-one anomalies
+remain generic internal errors, and the Course contract does not replace
+Category-deleted, missing/already-active, Archive lifecycle, occupied-link,
+deadlock, timeout, serialization, or integrity-error behavior.
+
 Deterministic PostgreSQL tests use independent request sessions and event
 barriers while the first request holds its canonical plan through the commit
 boundary. Double-approve and every pair among approve, reject, and takedown

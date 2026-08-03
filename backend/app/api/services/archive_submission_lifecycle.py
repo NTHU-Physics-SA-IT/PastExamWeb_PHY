@@ -34,6 +34,10 @@ ARCHIVE_LIFECYCLE_CONFLICT_CODE = "archive_lifecycle_conflict"
 ARCHIVE_LIFECYCLE_CONFLICT_MESSAGE = (
     "Archive lifecycle changed during this request. Please retry."
 )
+COURSE_LIFECYCLE_CONFLICT_CODE = "course_lifecycle_conflict"
+COURSE_LIFECYCLE_CONFLICT_MESSAGE = (
+    "Course lifecycle changed during this request. Please retry."
+)
 
 
 def archive_lifecycle_conflict_error() -> HTTPException:
@@ -44,6 +48,18 @@ def archive_lifecycle_conflict_error() -> HTTPException:
         detail={
             "code": ARCHIVE_LIFECYCLE_CONFLICT_CODE,
             "message": ARCHIVE_LIFECYCLE_CONFLICT_MESSAGE,
+        },
+    )
+
+
+def course_lifecycle_conflict_error() -> HTTPException:
+    """Return the public contract for an exhausted Course plan rebuild."""
+
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": COURSE_LIFECYCLE_CONFLICT_CODE,
+            "message": COURSE_LIFECYCLE_CONFLICT_MESSAGE,
         },
     )
 

@@ -123,6 +123,13 @@ and `test_course_trash_restore_preserves_rejected_submission_without_notificatio
 record their notification baselines after the legal review setup and protect
 that Course trash/restore adds no personal notification for either prior
 state.
+Course trash/restore now acquires its complete immutable parent-first plan
+before mutation and revalidates the locked collection. The first dynamic
+membership mismatch rolls back before one bounded rebuild; a second mismatch
+rolls back before returning `409 course_lifecycle_conflict`. Neither attempt
+retains Course, Archive, Submission, notification, or event work. Static
+integrity anomalies and database deadlock/timeout errors do not enter this
+public conflict boundary.
 
 `test_archive_review_statuses_create_deduplicated_notifications` and
 `test_republish_restores_approved_and_notifies_requester_once` provide partial
@@ -274,6 +281,7 @@ integration.
 | Submission approve | Category/Course/Archive work, submission review metadata, and notification enqueue share the approve caller's commit | PostgreSQL operation is caller-owned and protected by focused rollback tests |
 | Submission owner/admin delete | The route owns authorization, canonical parent-first locks, lifecycle mutation, and commit | Existing delete behavior remains silent; lock/revalidation failure commits no quota, status, Archive, notification, or event change |
 | Submission exact restore | The route owns canonical parent-first locks, occupancy validation, lifecycle mutation, and commit; conflict or integrity failure rolls back before returning | Restore remains silent and never infers an Archive from metadata when the retained exact link is null |
+| Course soft trash/restore | The route owns discovery, canonical Category/Course/Archive/Submission locks, one bounded membership rebuild, lifecycle mutation, and commit | Existing Course results and counts remain unchanged; both operations remain silent |
 | Report create/review | Report mutation and durable personal notification share a commit; archive report takedown is included | Comparatively complete and protected by focused tests |
 | Republish | Transition and notification share the caller transaction | Comparatively complete |
 | Permanent delete | MinIO call and DB delete cannot be atomic; helper may downgrade storage failure to warning | Retry and truthful result gap |

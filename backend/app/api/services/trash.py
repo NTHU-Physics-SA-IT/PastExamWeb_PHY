@@ -28,6 +28,7 @@ from app.models.models import (
 )
 from app.api.services.archive_submission_lifecycle import (
     archive_lifecycle_conflict_error,
+    course_lifecycle_conflict_error,
     acquire_stable_submission_lifecycle_locks,
     LIFECYCLE_ARCHIVE_TRASHED,
     LIFECYCLE_COURSE_TRASHED,
@@ -44,19 +45,17 @@ from app.api.services.archive_submission_lifecycle import (
     restore_archive_submission_group,
 )
 from app.utils.auth import get_current_user
-from app.utils.course_text import (
-    normalized_course_text_expr,
-    normalize_course_search_text,
-)
 from app.utils.storage import get_minio_client
 from app.services.archive_submission_links import (
     ensure_archive_submission_link_available,
 )
 from app.services import archive_lifecycle_locks
+from app.services import course_lifecycle_locks
 from app.services.archive_lifecycle_locks import (
     LifecyclePlanRetryExhausted,
     PlanRebuildBudget,
 )
+from app.services.course_lifecycle_locks import CourseLifecycleOperation
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -194,33 +193,6 @@ def _format_deleted_by(users_by_id: dict[int, User], user_id: Optional[int]) -> 
     if not user:
         return f"已刪除使用者 #{user_id}"
     return user.nickname or user.name or user.email or f"使用者 #{user_id}"
-
-
-def _normalize_course_lookup_value(value: str | None) -> str:
-    return normalize_course_search_text(value)
-
-
-def _build_course_trash_submission_match_conditions(
-    course_name: str,
-    course_category: str,
-) -> list:
-    normalized_course_name = _normalize_course_lookup_value(course_name)
-    if not normalized_course_name:
-        return []
-
-    requested_name_match = normalized_course_text_expr(ArchiveSubmission.requested_course_name) == normalized_course_name
-    subject_match = normalized_course_text_expr(ArchiveSubmission.subject) == normalized_course_name
-    name_match = or_(requested_name_match, subject_match)
-
-    normalized_category = _normalize_course_lookup_value(course_category)
-    if normalized_category:
-        category_match = or_(
-            func.lower(func.trim(ArchiveSubmission.requested_category_key)) == normalized_category,
-            func.lower(func.trim(ArchiveSubmission.category)) == normalized_category,
-        )
-        return [and_(name_match, category_match)]
-
-    return [name_match]
 
 
 def _dependency_count(count: int, unit: str, singular_unit: Optional[str] = None) -> str:
@@ -1663,15 +1635,42 @@ async def restore_trash_item(
         }
 
     if payload.item_type == TrashEntityType.COURSE:
-        course = await db.get(Course, payload.item_id)
-        if not course or course.deleted_at is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
-
-        category = (
-            await db.execute(
-                select(CourseCategoryConfig).where(CourseCategoryConfig.key == course.category)
+        budget = PlanRebuildBudget()
+        locked_course_plan = None
+        while True:
+            locked_course_plan, revalidation = (
+                await course_lifecycle_locks.acquire_course_lifecycle_plan_once(
+                    db,
+                    course_id=payload.item_id,
+                    operation=CourseLifecycleOperation.RESTORE,
+                )
             )
-        ).scalar_one_or_none()
+            if locked_course_plan is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Course not found",
+                )
+            if revalidation is not None and revalidation.valid:
+                break
+
+            await db.rollback()
+            try:
+                budget = budget.consume()
+            except LifecyclePlanRetryExhausted:
+                raise course_lifecycle_conflict_error()
+
+        course = locked_course_plan.rows.course(payload.item_id)
+        if course is None or course.deleted_at is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Course not found",
+            )
+        category_ids = locked_course_plan.plan.lock_plan.ids_for(
+            archive_lifecycle_locks.LifecycleResourceClass.COURSE_CATEGORY
+        )
+        category = (
+            locked_course_plan.rows.category(category_ids[0]) if category_ids else None
+        )
         if not category or category.deleted_at is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -1683,96 +1682,50 @@ async def restore_trash_item(
         course.restored_at = now
         course.restored_by_id = current_user.user_id
 
-        course_id_pattern = f"course_id={course.id}"
-        course_trashed_submission_archive_ids = {
-            archive_id
-            for archive_id in (
-                await db.execute(
-                    select(ArchiveSubmission.created_archive_id).where(
-                        ArchiveSubmission.deleted_at.is_(None),
-                        ArchiveSubmission.status != SubmissionStatus.DELETED,
-                        ArchiveSubmission.created_archive_id.is_not(None),
-                        or_(
-                            ArchiveSubmission.lifecycle_reason.like(f"%|{course_id_pattern}|%"),
-                            ArchiveSubmission.lifecycle_reason.like(f"%|{course_id_pattern}"),
-                        ),
-                    )
-                )
-            ).scalars()
-            if archive_id is not None
-        }
-        archive_restore_conditions = [Archive.course_id == course.id]
-        if course_trashed_submission_archive_ids:
-            archive_restore_conditions.append(Archive.id.in_(course_trashed_submission_archive_ids))
-
-        archives = (
-            await db.execute(
-                select(Archive).where(
-                    or_(*archive_restore_conditions),
-                    Archive.deleted_at.is_not(None),
-                )
-            )
-        ).scalars().all()
+        mutable_archive_ids = set(locked_course_plan.plan.mutable_archive_ids)
+        archives = [
+            archive
+            for archive in locked_course_plan.rows.archives
+            if archive.id in mutable_archive_ids
+        ]
         restored_archives_count = 0
-        skipped_submission_archive_count = 0
-        restored_archive_ids = []
+        skipped_submission_archive_count = len(
+            locked_course_plan.plan.blocked_archive_ids
+        )
         for archive in archives:
-            parent_submission = await _get_deleted_submission_parent_for_archive(db, archive.id)
-            if parent_submission:
-                skipped_submission_archive_count += 1
-                continue
-
             archive.deleted_at = None
             archive.deleted_by_id = None
             archive.deleted_reason = None
             archive.restored_at = now
             archive.restored_by_id = current_user.user_id
             restored_archives_count += 1
-            if archive.id is not None:
-                restored_archive_ids.append(archive.id)
 
         restored_submission_count = 0
         skipped_submission_count = 0
-        course_submission_match_conditions = _build_course_trash_submission_match_conditions(
-            course.name, course.category
-        )
-        all_submission_match_conditions = []
-        if restored_archive_ids:
-            all_submission_match_conditions.append(ArchiveSubmission.created_archive_id.in_(restored_archive_ids))
-        all_submission_match_conditions.extend(course_submission_match_conditions)
+        mutable_submission_ids = set(locked_course_plan.plan.mutable_submission_ids)
+        submissions = [
+            submission
+            for submission in locked_course_plan.rows.submissions
+            if submission.id in mutable_submission_ids
+        ]
+        for submission in submissions:
+            previous_status = get_course_trash_previous_status(
+                submission.lifecycle_reason
+            )
+            if previous_status in {
+                SubmissionStatus.APPROVED,
+                SubmissionStatus.PENDING,
+                SubmissionStatus.REJECTED,
+                SubmissionStatus.TAKEDOWN,
+            }:
+                submission.status = previous_status
+                restored_submission_count += 1
+            else:
+                skipped_submission_count += 1
 
-        if all_submission_match_conditions:
-            submissions = (
-                await db.execute(
-                    select(ArchiveSubmission).where(
-                        ArchiveSubmission.deleted_at.is_(None),
-                        ArchiveSubmission.status != SubmissionStatus.DELETED,
-                        or_(*all_submission_match_conditions),
-                        or_(
-                            ArchiveSubmission.lifecycle_reason == LIFECYCLE_COURSE_TRASHED,
-                            ArchiveSubmission.lifecycle_reason.like(f"{LIFECYCLE_COURSE_TRASHED}|%"),
-                            ArchiveSubmission.lifecycle_reason.like(f"%|{course_id_pattern}|%"),
-                            ArchiveSubmission.lifecycle_reason.like(f"%|{course_id_pattern}"),
-                        ),
-                    )
-                )
-            ).scalars().all()
-            for submission in submissions:
-                previous_status = get_course_trash_previous_status(submission.lifecycle_reason)
-                if previous_status in {
-                    SubmissionStatus.APPROVED,
-                    SubmissionStatus.PENDING,
-                    SubmissionStatus.REJECTED,
-                    SubmissionStatus.TAKEDOWN,
-                }:
-                    submission.status = previous_status
-                    restored_submission_count += 1
-                else:
-                    skipped_submission_count += 1
-
-                submission.lifecycle_reason = None
-                submission.reviewer_id = current_user.user_id
-                submission.reviewed_at = now
+            submission.lifecycle_reason = None
+            submission.reviewer_id = current_user.user_id
+            submission.reviewed_at = now
 
         await db.commit()
         message = (

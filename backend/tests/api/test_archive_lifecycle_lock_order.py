@@ -10,6 +10,8 @@ from app.api.services import archives as archives_service
 from app.api.services.archive_submission_lifecycle import (
     ARCHIVE_LIFECYCLE_CONFLICT_CODE,
     ARCHIVE_LIFECYCLE_CONFLICT_MESSAGE,
+    COURSE_LIFECYCLE_CONFLICT_CODE,
+    COURSE_LIFECYCLE_CONFLICT_MESSAGE,
     LIFECYCLE_ARCHIVE_TRASHED,
 )
 from app.main import app
@@ -25,7 +27,12 @@ from app.models.models import (
     UserRoles,
 )
 from app.services import archive_lifecycle_locks
+from app.services import course_lifecycle_locks
 from app.services.archive_lifecycle_locks import LifecycleResourceClass
+from app.services.course_lifecycle_locks import (
+    CourseLifecycleOperation,
+    CourseLifecycleRevalidationResult,
+)
 from app.services.archive_submission_links import (
     validate_archive_source_membership,
 )
@@ -263,6 +270,747 @@ async def _run_two_request_lock_race(
     first_result = await asyncio.wait_for(first_task, timeout=10)
     second_result = await asyncio.wait_for(second_task, timeout=10)
     return first_result, second_result, traces, sqlstates
+
+
+@pytest.mark.asyncio
+async def test_course_trash_and_restore_use_canonical_parent_first_plans(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    traces = []
+    original_acquire = archive_lifecycle_locks.acquire_lifecycle_locks
+
+    async def observed_acquire(db, plan):
+        traces.append(_resource_trace(plan))
+        return await original_acquire(db, plan)
+
+    monkeypatch.setattr(
+        archive_lifecycle_locks,
+        "acquire_lifecycle_locks",
+        observed_acquire,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        trash_response = await client.delete(f"/courses/admin/courses/{course.id}")
+        assert trash_response.status_code == 200
+        restore_response = await client.post(
+            "/trash/restore",
+            json={"item_type": "course", "item_id": course.id},
+        )
+        assert restore_response.status_code == 200
+
+        assert traces == [
+            [
+                (LifecycleResourceClass.COURSE, course.id),
+                (LifecycleResourceClass.ARCHIVE, archive.id),
+                (LifecycleResourceClass.ARCHIVE_SUBMISSION, target.id),
+            ],
+            [
+                (LifecycleResourceClass.COURSE_CATEGORY, category.id),
+                (LifecycleResourceClass.COURSE, course.id),
+                (LifecycleResourceClass.ARCHIVE, archive.id),
+                (LifecycleResourceClass.ARCHIVE_SUBMISSION, target.id),
+            ],
+        ]
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [CourseLifecycleOperation.TRASH, CourseLifecycleOperation.RESTORE],
+)
+@pytest.mark.asyncio
+async def test_course_lifecycle_rebuild_exhaustion_returns_narrow_contract(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+    operation,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    calls = 0
+    try:
+        if operation is CourseLifecycleOperation.RESTORE:
+            trash_response = await client.delete(f"/courses/admin/courses/{course.id}")
+            assert trash_response.status_code == 200
+
+        async def always_changed(db, locked):
+            nonlocal calls
+            calls += 1
+            return CourseLifecycleRevalidationResult(
+                valid=False,
+                fingerprint=locked.plan.fingerprint,
+                reasons=("synthetic_membership_change",),
+            )
+
+        monkeypatch.setattr(
+            course_lifecycle_locks,
+            "revalidate_course_lifecycle_plan",
+            always_changed,
+        )
+        response = (
+            await client.delete(f"/courses/admin/courses/{course.id}")
+            if operation is CourseLifecycleOperation.TRASH
+            else await client.post(
+                "/trash/restore",
+                json={"item_type": "course", "item_id": course.id},
+            )
+        )
+        assert response.status_code == 409
+        assert response.json()["detail"] == {
+            "code": COURSE_LIFECYCLE_CONFLICT_CODE,
+            "message": COURSE_LIFECYCLE_CONFLICT_MESSAGE,
+        }
+        assert calls == 2
+
+        async with session_maker() as session:
+            stored_course = await session.get(Course, course.id)
+            stored_archive = await session.get(Archive, archive.id)
+            stored_submission = await session.get(
+                ArchiveSubmission,
+                target.id,
+            )
+            expected_deleted = operation is CourseLifecycleOperation.RESTORE
+            assert (stored_course.deleted_at is not None) is expected_deleted
+            assert (stored_archive.deleted_at is not None) is expected_deleted
+            assert stored_submission.status == (
+                SubmissionStatus.TAKEDOWN
+                if expected_deleted
+                else SubmissionStatus.PENDING
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_course_lifecycle_first_membership_change_rebuilds_once(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    calls = 0
+    original_revalidate = course_lifecycle_locks.revalidate_course_lifecycle_plan
+
+    async def changed_once(db, locked):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return CourseLifecycleRevalidationResult(
+                valid=False,
+                fingerprint=locked.plan.fingerprint,
+                reasons=("synthetic_membership_change",),
+            )
+        return await original_revalidate(db, locked)
+
+    monkeypatch.setattr(
+        course_lifecycle_locks,
+        "revalidate_course_lifecycle_plan",
+        changed_once,
+    )
+    try:
+        response = await client.delete(f"/courses/admin/courses/{course.id}")
+        assert response.status_code == 200
+        assert calls == 2
+        async with session_maker() as session:
+            assert (await session.get(Course, course.id)).deleted_at is not None
+            assert (await session.get(Archive, archive.id)).deleted_at is not None
+            assert (
+                await session.get(ArchiveSubmission, target.id)
+            ).status == SubmissionStatus.TAKEDOWN
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.parametrize("first_operation", ["course", "archive"])
+@pytest.mark.asyncio
+async def test_course_trash_and_archive_trash_serialize_without_deadlock(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+    first_operation,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+
+    async def trash_course():
+        return await client.delete(f"/courses/admin/courses/{course.id}")
+
+    async def trash_archive():
+        return await client.delete(f"/courses/{course.id}/archives/{archive.id}")
+
+    try:
+        first, second, traces, sqlstates = await _run_two_request_lock_race(
+            monkeypatch=monkeypatch,
+            first_request=(
+                trash_course if first_operation == "course" else trash_archive
+            ),
+            second_request=(
+                trash_archive if first_operation == "course" else trash_course
+            ),
+        )
+        assert first.status_code == 200
+        assert second.status_code == (404 if first_operation == "course" else 200)
+        assert "40P01" not in sqlstates
+        for trace in traces:
+            assert trace == sorted(trace)
+            assert trace.index(
+                (LifecycleResourceClass.COURSE, course.id)
+            ) < trace.index((LifecycleResourceClass.ARCHIVE, archive.id))
+            assert trace.index(
+                (LifecycleResourceClass.ARCHIVE, archive.id)
+            ) < trace.index((LifecycleResourceClass.ARCHIVE_SUBMISSION, target.id))
+        async with session_maker() as session:
+            assert (await session.get(Course, course.id)).deleted_at is not None
+            assert (await session.get(Archive, archive.id)).deleted_at is not None
+            assert (
+                await session.get(ArchiveSubmission, target.id)
+            ).status == SubmissionStatus.TAKEDOWN
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.parametrize("first_operation", ["course", "review"])
+@pytest.mark.asyncio
+async def test_course_trash_and_submission_review_serialize_without_deadlock(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+    first_operation,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+
+    async def trash_course():
+        return await client.delete(f"/courses/admin/courses/{course.id}")
+
+    async def approve():
+        return await client.post(
+            f"/archives/admin/submissions/{target.id}/approve",
+            json={"expected_status": "pending", "note": "course race"},
+        )
+
+    try:
+        first, second, traces, sqlstates = await _run_two_request_lock_race(
+            monkeypatch=monkeypatch,
+            first_request=trash_course if first_operation == "course" else approve,
+            second_request=approve if first_operation == "course" else trash_course,
+        )
+        assert first.status_code == 200
+        assert second.status_code == (409 if first_operation == "course" else 200)
+        if first_operation == "course":
+            assert second.json()["detail"]["code"] == ("archive_submission_stale_state")
+        assert "40P01" not in sqlstates
+        for trace in traces:
+            assert trace == sorted(trace)
+            assert (LifecycleResourceClass.COURSE, course.id) in trace
+            assert (LifecycleResourceClass.ARCHIVE, archive.id) in trace
+            assert (
+                LifecycleResourceClass.ARCHIVE_SUBMISSION,
+                target.id,
+            ) in trace
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, target.id)
+            assert stored.status == SubmissionStatus.TAKEDOWN
+            notification_count = int(
+                await session.scalar(
+                    select(func.count(PersonalNotification.id)).where(
+                        PersonalNotification.source_type == "archive_submission",
+                        PersonalNotification.source_id == target.id,
+                    )
+                )
+                or 0
+            )
+            assert notification_count == (0 if first_operation == "course" else 1)
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.parametrize("first_operation", ["course", "submission"])
+@pytest.mark.asyncio
+async def test_course_restore_and_submission_restore_serialize_without_deadlock(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+    first_operation,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    async with session_maker() as session:
+        stored = await session.get(ArchiveSubmission, target.id)
+        stored.status = SubmissionStatus.APPROVED
+        await session.commit()
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        delete_submission = await client.delete(
+            f"/archives/admin/submissions/{target.id}"
+        )
+        assert delete_submission.status_code == 200
+        delete_course = await client.delete(f"/courses/admin/courses/{course.id}")
+        assert delete_course.status_code == 200
+
+        async def restore_course():
+            return await client.post(
+                "/trash/restore",
+                json={"item_type": "course", "item_id": course.id},
+            )
+
+        async def restore_submission():
+            return await client.post(
+                "/trash/restore",
+                json={
+                    "item_type": "archive_submission",
+                    "item_id": target.id,
+                },
+            )
+
+        first, second, traces, sqlstates = await _run_two_request_lock_race(
+            monkeypatch=monkeypatch,
+            first_request=(
+                restore_course if first_operation == "course" else restore_submission
+            ),
+            second_request=(
+                restore_submission if first_operation == "course" else restore_course
+            ),
+        )
+        assert first.status_code == (200 if first_operation == "course" else 409)
+        assert second.status_code == 200
+        assert "40P01" not in sqlstates
+        for trace in traces:
+            assert trace == sorted(trace)
+
+        async with session_maker() as session:
+            stored_course = await session.get(Course, course.id)
+            stored_submission = await session.get(
+                ArchiveSubmission,
+                target.id,
+            )
+            assert stored_course.deleted_at is None
+            if first_operation == "course":
+                assert stored_submission.deleted_at is None
+                assert stored_submission.status == SubmissionStatus.APPROVED
+            else:
+                assert stored_submission.deleted_at is not None
+                assert stored_submission.status == SubmissionStatus.DELETED
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.parametrize("first_operation", ["trash", "restore"])
+@pytest.mark.asyncio
+async def test_course_trash_and_restore_have_legal_concurrent_winner_orders(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+    first_operation,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    first_locked = asyncio.Event()
+    release_first = asyncio.Event()
+    original_acquire = archive_lifecycle_locks.acquire_lifecycle_locks
+    sqlstates: list[str] = []
+    call_count = 0
+
+    async def observed_acquire(db, plan):
+        nonlocal call_count
+        call_count += 1
+        try:
+            locked = await original_acquire(db, plan)
+        except Exception as exc:
+            sqlstate = getattr(exc, "sqlstate", None) or getattr(
+                getattr(exc, "orig", None),
+                "sqlstate",
+                None,
+            )
+            if sqlstate:
+                sqlstates.append(str(sqlstate))
+            raise
+        if call_count == 1:
+            first_locked.set()
+            await asyncio.wait_for(release_first.wait(), timeout=10)
+        return locked
+
+    try:
+        if first_operation == "restore":
+            initial_trash = await client.delete(f"/courses/admin/courses/{course.id}")
+            assert initial_trash.status_code == 200
+            call_count = 0
+        monkeypatch.setattr(
+            archive_lifecycle_locks,
+            "acquire_lifecycle_locks",
+            observed_acquire,
+        )
+
+        async def trash_course():
+            return await client.delete(f"/courses/admin/courses/{course.id}")
+
+        async def restore_course():
+            return await client.post(
+                "/trash/restore",
+                json={"item_type": "course", "item_id": course.id},
+            )
+
+        winner_task = asyncio.create_task(
+            trash_course() if first_operation == "trash" else restore_course()
+        )
+        await asyncio.wait_for(first_locked.wait(), timeout=10)
+        loser = await asyncio.wait_for(
+            restore_course() if first_operation == "trash" else trash_course(),
+            timeout=10,
+        )
+        assert loser.status_code == 404
+        release_first.set()
+        winner = await asyncio.wait_for(winner_task, timeout=10)
+        assert winner.status_code == 200
+        assert "40P01" not in sqlstates
+
+        async with session_maker() as session:
+            stored_course = await session.get(Course, course.id)
+            assert (stored_course.deleted_at is not None) is (
+                first_operation == "trash"
+            )
+    finally:
+        release_first.set()
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_course_trash_rebuilds_after_real_membership_change(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    original_acquire = archive_lifecycle_locks.acquire_lifecycle_locks
+    inserted_submission_ids: list[int] = []
+    calls = 0
+
+    async def insert_matching_submission() -> None:
+        marker = uuid.uuid4().hex
+        async with session_maker() as session:
+            submission = ArchiveSubmission(
+                subject=course.name,
+                category=course.category,
+                name=f"Membership {marker}",
+                academic_year=2026,
+                archive_type=ArchiveType.FINAL,
+                professor="Membership Professor",
+                object_name=f"submissions/membership-{marker}.pdf",
+                requester_id=requester.id,
+                status=SubmissionStatus.PENDING,
+            )
+            session.add(submission)
+            await session.commit()
+            await session.refresh(submission)
+            inserted_submission_ids.append(submission.id)
+
+    async def change_before_first_lock(db, plan):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await insert_matching_submission()
+        return await original_acquire(db, plan)
+
+    monkeypatch.setattr(
+        archive_lifecycle_locks,
+        "acquire_lifecycle_locks",
+        change_before_first_lock,
+    )
+    try:
+        response = await client.delete(f"/courses/admin/courses/{course.id}")
+        assert response.status_code == 200
+        assert calls == 2
+        assert len(inserted_submission_ids) == 1
+        async with session_maker() as session:
+            inserted = await session.get(
+                ArchiveSubmission,
+                inserted_submission_ids[0],
+            )
+            assert inserted.status == SubmissionStatus.TAKEDOWN
+            assert inserted.lifecycle_reason.startswith("course_trashed|")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        if inserted_submission_ids:
+            async with session_maker() as session:
+                await session.execute(
+                    delete(ArchiveSubmission).where(
+                        ArchiveSubmission.id.in_(inserted_submission_ids)
+                    )
+                )
+                await session.commit()
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_course_trash_second_real_membership_change_returns_conflict(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    original_acquire = archive_lifecycle_locks.acquire_lifecycle_locks
+    inserted_submission_ids: list[int] = []
+
+    async def change_membership_before_lock(db, plan):
+        marker = uuid.uuid4().hex
+        async with session_maker() as session:
+            submission = ArchiveSubmission(
+                subject=course.name,
+                category=course.category,
+                name=f"Membership conflict {marker}",
+                academic_year=2026,
+                archive_type=ArchiveType.FINAL,
+                professor="Membership Conflict Professor",
+                object_name=f"submissions/membership-conflict-{marker}.pdf",
+                requester_id=requester.id,
+                status=SubmissionStatus.PENDING,
+            )
+            session.add(submission)
+            await session.commit()
+            await session.refresh(submission)
+            inserted_submission_ids.append(submission.id)
+        return await original_acquire(db, plan)
+
+    monkeypatch.setattr(
+        archive_lifecycle_locks,
+        "acquire_lifecycle_locks",
+        change_membership_before_lock,
+    )
+    try:
+        response = await client.delete(f"/courses/admin/courses/{course.id}")
+        assert response.status_code == 409
+        assert response.json()["detail"] == {
+            "code": COURSE_LIFECYCLE_CONFLICT_CODE,
+            "message": COURSE_LIFECYCLE_CONFLICT_MESSAGE,
+        }
+        assert len(inserted_submission_ids) == 2
+        async with session_maker() as session:
+            assert (await session.get(Course, course.id)).deleted_at is None
+            assert (await session.get(Archive, archive.id)).deleted_at is None
+            for submission_id in [target.id, *inserted_submission_ids]:
+                stored = await session.get(ArchiveSubmission, submission_id)
+                assert stored.status == SubmissionStatus.PENDING
+                assert stored.lifecycle_reason is None
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        if inserted_submission_ids:
+            async with session_maker() as session:
+                await session.execute(
+                    delete(ArchiveSubmission).where(
+                        ArchiveSubmission.id.in_(inserted_submission_ids)
+                    )
+                )
+                await session.commit()
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_two_course_reverse_input_plans_lock_identically(
+    session_maker,
+    make_user,
+):
+    requester = await make_user()
+    first = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    second = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    first_category, first_course, first_archive, first_submission = first
+    second_category, second_course, second_archive, second_submission = second
+    first_locked = asyncio.Event()
+    release_first = asyncio.Event()
+    second_attempted = asyncio.Event()
+    traces = []
+    sqlstates: list[str] = []
+
+    async def acquire(*, reverse: bool, hold: bool) -> None:
+        courses = [first_course.id, second_course.id]
+        archives = [first_archive.id, second_archive.id]
+        submissions = [first_submission.id, second_submission.id]
+        if reverse:
+            courses.reverse()
+            archives.reverse()
+            submissions.reverse()
+        plan = archive_lifecycle_locks.ArchiveLifecycleLockPlan.build(
+            course_ids=courses,
+            archive_ids=archives,
+            submission_ids=submissions,
+        )
+        traces.append(_resource_trace(plan))
+        async with session_maker() as session:
+            if not hold:
+                second_attempted.set()
+            try:
+                await archive_lifecycle_locks.acquire_lifecycle_locks(
+                    session,
+                    plan,
+                )
+            except Exception as exc:
+                sqlstate = getattr(exc, "sqlstate", None) or getattr(
+                    getattr(exc, "orig", None),
+                    "sqlstate",
+                    None,
+                )
+                if sqlstate:
+                    sqlstates.append(str(sqlstate))
+                raise
+            if hold:
+                first_locked.set()
+                await asyncio.wait_for(release_first.wait(), timeout=10)
+            await session.rollback()
+
+    first_task = asyncio.create_task(acquire(reverse=True, hold=True))
+    await asyncio.wait_for(first_locked.wait(), timeout=10)
+    second_task = asyncio.create_task(acquire(reverse=False, hold=False))
+    await asyncio.wait_for(second_attempted.wait(), timeout=10)
+    assert not second_task.done()
+    release_first.set()
+    try:
+        await asyncio.wait_for(first_task, timeout=10)
+        await asyncio.wait_for(second_task, timeout=10)
+        assert traces[0] == traces[1]
+        assert traces[0] == sorted(traces[0])
+        assert "40P01" not in sqlstates
+    finally:
+        release_first.set()
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=first_category.id,
+            course_id=first_course.id,
+            archive_ids=[first_archive.id],
+            submission_ids=[first_submission.id],
+        )
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=second_category.id,
+            course_id=second_course.id,
+            archive_ids=[second_archive.id],
+            submission_ids=[second_submission.id],
+        )
 
 
 @pytest.mark.asyncio
