@@ -272,7 +272,8 @@ integration.
 | --- | --- | --- |
 | Archive upload | MinIO put, then database work; admin/course/archive paths may commit in stages | Partial object/DB or partial DB state is possible |
 | Submission approve | Category/Course/Archive work, submission review metadata, and notification enqueue share the approve caller's commit | PostgreSQL operation is caller-owned and protected by focused rollback tests |
-| Submission exact restore | The route owns occupancy validation, lifecycle mutation, and commit; conflict or integrity failure rolls back before returning | Restore remains silent and never infers an Archive from metadata when the retained exact link is null |
+| Submission owner/admin delete | The route owns authorization, canonical parent-first locks, lifecycle mutation, and commit | Existing delete behavior remains silent; lock/revalidation failure commits no quota, status, Archive, notification, or event change |
+| Submission exact restore | The route owns canonical parent-first locks, occupancy validation, lifecycle mutation, and commit; conflict or integrity failure rolls back before returning | Restore remains silent and never infers an Archive from metadata when the retained exact link is null |
 | Report create/review | Report mutation and durable personal notification share a commit; archive report takedown is included | Comparatively complete and protected by focused tests |
 | Republish | Transition and notification share the caller transaction | Comparatively complete |
 | Permanent delete | MinIO call and DB delete cannot be atomic; helper may downgrade storage failure to warning | Retry and truthful result gap |

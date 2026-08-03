@@ -159,9 +159,20 @@ Archive soft trash and restore use the same Course, Archive, exact-linked
 ArchiveSubmission ordering. They discover the optional exact source before
 their first row lock, reject more than one source as a static one-to-one
 integrity anomaly, revalidate the legal zero-or-one membership afterward, and
-then apply the existing transition to the locked row. This slice does not
-change submission delete/restore, Course lifecycle, report lifecycle, or
-permanent-delete lock ordering.
+then apply the existing transition to the locked row.
+
+Existing owner delete, administrator delete, and exact Submission restore now
+use the same planner without changing their authorization, status, quota,
+previous-status, retry, or response contracts. An unlinked Submission locks
+only its own row. A legally linked Submission discovers its retained exact
+parent before the first row lock, then locks Course, Archive, and
+ArchiveSubmission in canonical rank and ascending-primary-key order. Locked
+membership and requester/owner identity are revalidated before mutation. One
+changed discovery may roll back and rebuild internally; a second mismatch
+fails through the existing generic internal-error boundary and never borrows
+the Archive-only `archive_lifecycle_conflict` contract. Course lifecycle,
+report lifecycle, and permanent-delete lock ordering remain outside this
+slice.
 
 If Archive trash or restore finds that a legal parent or zero-or-one exact
 source membership changed between discovery and locked revalidation, it rolls

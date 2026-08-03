@@ -28,6 +28,7 @@ from app.models.models import (
 )
 from app.api.services.archive_submission_lifecycle import (
     archive_lifecycle_conflict_error,
+    acquire_stable_submission_lifecycle_locks,
     LIFECYCLE_ARCHIVE_TRASHED,
     LIFECYCLE_COURSE_TRASHED,
     LIFECYCLE_LINKED_ARCHIVE_PERMANENTLY_DELETED,
@@ -1903,9 +1904,19 @@ async def restore_trash_item(
         return {"message": "User restored"}
 
     if payload.item_type == TrashEntityType.ARCHIVE_SUBMISSION:
-        submission = await db.get(ArchiveSubmission, payload.item_id)
-        if not submission or (submission.deleted_at is None and submission.status != SubmissionStatus.DELETED):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+        locked = await acquire_stable_submission_lifecycle_locks(
+            db,
+            submission_id=payload.item_id,
+            operation="submission_restore",
+        )
+        submission = locked.submission(payload.item_id) if locked is not None else None
+        if not submission or (
+            submission.deleted_at is None
+            and submission.status != SubmissionStatus.DELETED
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
+            )
         if submission.lifecycle_reason == LIFECYCLE_LINKED_ARCHIVE_PERMANENTLY_DELETED:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -1926,11 +1937,16 @@ async def restore_trash_item(
 
         group = await collect_archive_submission_group(
             db,
+            archive=(
+                locked.archive(submission.created_archive_id)
+                if submission.created_archive_id is not None
+                else None
+            ),
             submission=submission,
             exact_link_only=True,
         )
         for linked_archive in group.archives:
-            course = await db.get(Course, linked_archive.course_id)
+            course = locked.course(linked_archive.course_id)
             if not course or course.deleted_at is not None:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
@@ -1939,6 +1955,11 @@ async def restore_trash_item(
 
         result = await restore_archive_submission_group(
             db,
+            archive=(
+                locked.archive(submission.created_archive_id)
+                if submission.created_archive_id is not None
+                else None
+            ),
             submission=submission,
             user_id=current_user.user_id,
             now=now,

@@ -2,6 +2,7 @@ import io
 import uuid
 
 import pytest
+import pytest_asyncio
 from fastapi import HTTPException
 from httpx import AsyncClient
 from sqlalchemy import delete, select, func
@@ -12,6 +13,7 @@ from app.main import app
 from app.models.models import (
     Archive,
     ArchiveSubmission,
+    ArchiveSubmissionEvent,
     ArchiveType,
     Course,
     CourseCategory,
@@ -22,6 +24,26 @@ from app.models.models import (
     UserRoles,
 )
 from app.utils.auth import get_current_user
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def cleanup_test_created_submission_events(session_maker):
+    """Keep upload/review event rows owned by each test out of the shared baseline."""
+
+    async with session_maker() as session:
+        baseline_ids = set(
+            (await session.execute(select(ArchiveSubmissionEvent.id))).scalars()
+        )
+
+    yield
+
+    async with session_maker() as session:
+        await session.execute(
+            delete(ArchiveSubmissionEvent).where(
+                ArchiveSubmissionEvent.id.not_in(baseline_ids)
+            )
+        )
+        await session.commit()
 
 
 def _override_admin(user_id: int):

@@ -3,12 +3,17 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from app.api.services.archive_submission_lifecycle import (
+    acquire_stable_submission_lifecycle_locks,
+)
 from app.models.models import Archive, ArchiveSubmission, Course, CourseCategoryConfig
+from app.services import archive_lifecycle_locks
 from app.services.archive_lifecycle_locks import (
     ArchiveLifecycleLockPlan,
     LifecycleLockSetExpansionError,
     LifecycleMembershipFingerprint,
     LifecyclePlanRetryExhausted,
+    LifecycleRevalidationResult,
     LifecycleResourceClass,
     LifecycleResourceRef,
     LockedLifecycleRows,
@@ -214,6 +219,223 @@ async def test_archive_discovery_rejects_static_multi_source_membership() -> Non
             archive_id=archive.id,
             operation="archive_trash",
         )
+
+
+@pytest.mark.asyncio
+async def test_unlinked_submission_discovery_plans_only_the_submission() -> None:
+    submission = ArchiveSubmission(
+        id=7,
+        subject="x",
+        category="x",
+        name="x",
+        academic_year=2026,
+        archive_type="final",
+        professor="x",
+        object_name="x.pdf",
+        requester_id=9,
+        owner_id=11,
+        created_archive_id=None,
+    )
+    submission_result = MagicMock()
+    submission_result.scalar_one_or_none.return_value = submission
+    db = AsyncMock()
+    db.execute.return_value = submission_result
+
+    plan = await archive_lifecycle_locks.discover_exact_submission_lifecycle_plan(
+        db,
+        submission_id=submission.id,
+        operation="submission_delete",
+    )
+
+    assert plan.resources == (
+        LifecycleResourceRef(LifecycleResourceClass.ARCHIVE_SUBMISSION, 7),
+    )
+    assert plan.fingerprint == LifecycleMembershipFingerprint(
+        target_submission_id=7,
+        target_created_archive_id=None,
+        target_requester_id=9,
+        target_owner_id=11,
+    )
+
+
+@pytest.mark.asyncio
+async def test_linked_submission_discovery_plans_parent_first() -> None:
+    submission = ArchiveSubmission(
+        id=7,
+        subject="x",
+        category="x",
+        name="x",
+        academic_year=2026,
+        archive_type="final",
+        professor="x",
+        object_name="x.pdf",
+        requester_id=9,
+        created_archive_id=5,
+    )
+    archive = Archive(
+        id=5,
+        name="x",
+        academic_year=2026,
+        archive_type="final",
+        professor="x",
+        object_name="x.pdf",
+        course_id=3,
+    )
+    submission_result = MagicMock()
+    submission_result.scalar_one_or_none.return_value = submission
+    archive_result = MagicMock()
+    archive_result.scalar_one_or_none.return_value = archive
+    sibling_result = MagicMock()
+    sibling_result.scalars.return_value.all.return_value = [7]
+    db = AsyncMock()
+    db.execute.side_effect = [
+        submission_result,
+        archive_result,
+        sibling_result,
+    ]
+
+    plan = await archive_lifecycle_locks.discover_exact_submission_lifecycle_plan(
+        db,
+        submission_id=submission.id,
+        operation="submission_restore",
+    )
+
+    assert plan.resources == (
+        LifecycleResourceRef(LifecycleResourceClass.COURSE, 3),
+        LifecycleResourceRef(LifecycleResourceClass.ARCHIVE, 5),
+        LifecycleResourceRef(LifecycleResourceClass.ARCHIVE_SUBMISSION, 7),
+    )
+    assert plan.fingerprint == LifecycleMembershipFingerprint(
+        target_submission_id=7,
+        target_created_archive_id=5,
+        target_requester_id=9,
+        target_owner_id=None,
+        archive_course_pairs=((5, 3),),
+        sibling_submission_ids=(7,),
+    )
+
+
+@pytest.mark.asyncio
+async def test_submission_discovery_rejects_static_multi_source_membership() -> None:
+    submission = ArchiveSubmission(
+        id=7,
+        subject="x",
+        category="x",
+        name="x",
+        academic_year=2026,
+        archive_type="final",
+        professor="x",
+        object_name="x.pdf",
+        requester_id=9,
+        created_archive_id=5,
+    )
+    archive = Archive(
+        id=5,
+        name="x",
+        academic_year=2026,
+        archive_type="final",
+        professor="x",
+        object_name="x.pdf",
+        course_id=3,
+    )
+    submission_result = MagicMock()
+    submission_result.scalar_one_or_none.return_value = submission
+    archive_result = MagicMock()
+    archive_result.scalar_one_or_none.return_value = archive
+    sibling_result = MagicMock()
+    sibling_result.scalars.return_value.all.return_value = [7, 8]
+    db = AsyncMock()
+    db.execute.side_effect = [
+        submission_result,
+        archive_result,
+        sibling_result,
+    ]
+
+    with pytest.raises(ArchiveSubmissionOneToOneInvariantError):
+        await archive_lifecycle_locks.discover_exact_submission_lifecycle_plan(
+            db,
+            submission_id=submission.id,
+            operation="submission_delete",
+        )
+
+
+@pytest.mark.asyncio
+async def test_submission_lifecycle_rebuilds_once_after_membership_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = ArchiveLifecycleLockPlan.build(submission_ids=[7])
+    locked = LockedLifecycleRows(
+        plan=plan,
+        submissions=(
+            ArchiveSubmission(
+                id=7,
+                subject="x",
+                category="x",
+                name="x",
+                academic_year=2026,
+                archive_type="final",
+                professor="x",
+                object_name="x.pdf",
+                requester_id=9,
+            ),
+        ),
+    )
+    invalid = LifecycleRevalidationResult(
+        valid=False,
+        fingerprint=LifecycleMembershipFingerprint(),
+        reasons=("membership_fingerprint_changed",),
+    )
+    valid = LifecycleRevalidationResult(
+        valid=True,
+        fingerprint=LifecycleMembershipFingerprint(),
+    )
+    acquire = AsyncMock(side_effect=[(locked, invalid), (locked, valid)])
+    monkeypatch.setattr(
+        archive_lifecycle_locks,
+        "acquire_exact_submission_lifecycle_locks",
+        acquire,
+    )
+    db = AsyncMock()
+
+    result = await acquire_stable_submission_lifecycle_locks(
+        db,
+        submission_id=7,
+        operation="submission_restore",
+    )
+
+    assert result is locked
+    assert acquire.await_count == 2
+    db.rollback.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_submission_lifecycle_second_membership_change_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = ArchiveLifecycleLockPlan.build(submission_ids=[7])
+    locked = LockedLifecycleRows(plan=plan)
+    invalid = LifecycleRevalidationResult(
+        valid=False,
+        fingerprint=LifecycleMembershipFingerprint(),
+        reasons=("membership_fingerprint_changed",),
+    )
+    acquire = AsyncMock(return_value=(locked, invalid))
+    monkeypatch.setattr(
+        archive_lifecycle_locks,
+        "acquire_exact_submission_lifecycle_locks",
+        acquire,
+    )
+    db = AsyncMock()
+
+    with pytest.raises(LifecyclePlanRetryExhausted):
+        await acquire_stable_submission_lifecycle_locks(
+            db,
+            submission_id=7,
+            operation="submission_delete",
+        )
+
+    assert acquire.await_count == 2
+    assert db.rollback.await_count == 2
 
 
 @pytest.mark.asyncio
