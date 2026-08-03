@@ -125,9 +125,12 @@ expected-state classifier and transition policy. Existing exact parents lock
 Course, Archive, then ArchiveSubmission rows by ascending numeric primary key;
 approve also takes its established normalized approval-namespace advisory
 mutex before any row lock and locks every exact-linked sibling when it may
-update shared Archive metadata. Reject, takedown, and republish lock only the
-target submission after its exact ancestors. Missing, stale, illegal, and
-same-target requests short-circuit before review mutation or notification.
+update Archive metadata. The one-to-one guard requires that exact source set
+to contain at most the target submission; multiple exact sources are a static
+integrity anomaly and fail closed before a lock plan is accepted. Reject,
+takedown, and republish lock only the target submission after its exact
+ancestors. Missing, stale, illegal, and same-target requests short-circuit
+before review mutation or notification.
 Repository frontend callers send the status carried by the row or comparison
 candidate being acted on.
 
@@ -153,21 +156,26 @@ rebuild; lock sets never expand after acquisition begins.
 replaced by a metadata guess.
 
 Archive soft trash and restore use the same Course, Archive, exact-linked
-ArchiveSubmission ordering. They discover the complete sibling set before
-their first row lock, revalidate it afterward, and then apply the existing
-group transition to the locked rows. This slice does not change submission
-delete/restore, Course lifecycle, report lifecycle, or permanent-delete lock
-ordering.
+ArchiveSubmission ordering. They discover the optional exact source before
+their first row lock, reject more than one source as a static one-to-one
+integrity anomaly, revalidate the legal zero-or-one membership afterward, and
+then apply the existing transition to the locked row. This slice does not
+change submission delete/restore, Course lifecycle, report lifecycle, or
+permanent-delete lock ordering.
 
-If Archive trash or restore finds a changed parent or exact-linked sibling
-membership, it rolls back and rebuilds the complete plan once. A stable second
-attempt proceeds normally. If the second locked revalidation also differs, the
-second transaction rolls back and returns
+If Archive trash or restore finds that a legal parent or zero-or-one exact
+source membership changed between discovery and locked revalidation, it rolls
+back and rebuilds the complete plan once. A stable second attempt proceeds
+normally. If the second locked revalidation also differs, the second
+transaction rolls back and returns
 `409 archive_lifecycle_conflict` with the canonical message
 `Archive lifecycle changed during this request. Please retry.` No lifecycle
-write is committed. This contract does not replace not-found or authorization
-handling, direct-review stale or illegal-transition errors, same-target review
-no-ops, planner invariant failures, PostgreSQL deadlocks, or lock timeouts.
+write is committed. A static multi-source relation never enters this retry
+path: it uses the existing generic internal-error response plus the structured
+one-to-one integrity log. This contract does not replace not-found or
+authorization handling, direct-review stale or illegal-transition errors,
+same-target review no-ops, planner invariant failures, PostgreSQL deadlocks, or
+lock timeouts.
 
 Deterministic PostgreSQL tests use independent request sessions and event
 barriers while the first request holds its canonical plan through the commit
@@ -176,9 +184,10 @@ from `pending` establish first-writer-wins: the winner returns `changed=true`,
 the loser observes the committed state and returns stale `409`, and only the
 winner produces transition metadata, Archive work, or a notification.
 Approve-existing versus Archive trash, Archive trash versus restore, and
-reverse-input shared-Archive plans also establish serial outcomes without a
-deadlock. A deliberate same-target request with a matching expected state
-remains the distinct `changed=false` control.
+reverse-input plans over two independent one-to-one Archive/Submission pairs
+also establish serial outcomes without a deadlock. A deliberate same-target
+request with a matching expected state remains the distinct `changed=false`
+control.
 
 The separate archive-report uphold flow retains its report-owned transaction
 and internal submission takedown; it does not use the direct-client
@@ -262,12 +271,13 @@ domains.
 - An item may be hidden when that public item, its Course, or a required parent
   is explicitly trashed or blocked.
 
-### Observed likely bug
+### One-to-one corruption boundary
 
-Some current queries evaluate all submissions linked to one `Archive`; a
-non-approved linked submission can make the shared archive unavailable. This
-conflicts with the independent-file contract and requires characterization
-tests before conformance changes.
+The schema and application contract permit at most one source submission for
+an `Archive`. Any historical result containing multiple exact sources is an
+integrity anomaly, not a visibility group: mutation fails closed through the
+generic internal-error boundary and no source is selected as a winner. Public
+visibility correction remains outside this lifecycle-lock slice.
 
 ## Trash and restore
 

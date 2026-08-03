@@ -1743,6 +1743,7 @@ async def delete_archive(
         ) = await archive_lifecycle_locks.acquire_exact_archive_lifecycle_locks(
             db,
             archive_id=archive_id,
+            operation="archive_trash",
         )
         if locked is None:
             break

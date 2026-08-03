@@ -1,16 +1,18 @@
 import asyncio
 import uuid
 
+from httpx import ASGITransport, AsyncClient
 import pytest
 from sqlalchemy import delete, func
 from sqlmodel import select
 
-from app.main import app
+from app.api.services import archives as archives_service
 from app.api.services.archive_submission_lifecycle import (
     ARCHIVE_LIFECYCLE_CONFLICT_CODE,
     ARCHIVE_LIFECYCLE_CONFLICT_MESSAGE,
     LIFECYCLE_ARCHIVE_TRASHED,
 )
+from app.main import app
 from app.models.models import (
     Archive,
     ArchiveSubmission,
@@ -24,6 +26,9 @@ from app.models.models import (
 )
 from app.services import archive_lifecycle_locks
 from app.services.archive_lifecycle_locks import LifecycleResourceClass
+from app.services.archive_submission_links import (
+    validate_archive_source_membership,
+)
 from app.utils.auth import get_current_user
 
 
@@ -38,7 +43,16 @@ def _override_admin(user_id: int):
     return _override_user(user_id, is_admin=True)
 
 
-async def _create_shared_archive_context(session_maker, *, requester_id: int):
+async def _create_archive_context(
+    session_maker,
+    *,
+    requester_id: int,
+) -> tuple[
+    CourseCategoryConfig,
+    Course,
+    Archive,
+    ArchiveSubmission,
+]:
     marker = uuid.uuid4().hex
     category = CourseCategoryConfig(
         key=f"lock-{marker[:12]}",
@@ -78,50 +92,79 @@ async def _create_shared_archive_context(session_maker, *, requester_id: int):
             status=SubmissionStatus.PENDING,
             created_archive_id=archive.id,
         )
-        sibling = ArchiveSubmission(
+        session.add(target)
+        await session.commit()
+        for row in (category, course, archive, target):
+            await session.refresh(row)
+    return category, course, archive, target
+
+
+async def _create_second_pair(
+    session_maker,
+    *,
+    course: Course,
+    requester_id: int,
+) -> tuple[Archive, ArchiveSubmission]:
+    marker = uuid.uuid4().hex
+    async with session_maker() as session:
+        archive = Archive(
+            name=f"Second lock archive {marker}",
+            academic_year=2026,
+            archive_type=ArchiveType.MIDTERM,
+            professor="Second Lock Professor",
+            object_name=f"archive/second-lock-{marker}.pdf",
+            uploader_id=requester_id,
+            course_id=course.id,
+        )
+        session.add(archive)
+        await session.flush()
+        submission = ArchiveSubmission(
             subject=course.name,
-            category=category.key,
-            name=f"Sibling {marker}",
+            category=course.category,
+            name=archive.name,
             academic_year=archive.academic_year,
             archive_type=archive.archive_type,
             professor=archive.professor,
-            object_name=f"archive/sibling-{marker}.pdf",
+            object_name=archive.object_name,
             requester_id=requester_id,
             status=SubmissionStatus.APPROVED,
             created_archive_id=archive.id,
         )
-        session.add(target)
-        session.add(sibling)
+        session.add(submission)
         await session.commit()
-        for row in (category, course, archive, target, sibling):
-            await session.refresh(row)
-    return category, course, archive, target, sibling
+        await session.refresh(archive)
+        await session.refresh(submission)
+    return archive, submission
 
 
-async def _cleanup_shared_archive_context(
+async def _cleanup_archive_context(
     session_maker,
     *,
     category_id: int,
     course_id: int,
-    archive_id: int,
+    archive_ids: list[int],
     submission_ids: list[int],
 ) -> None:
     async with session_maker() as session:
-        await session.execute(
-            delete(PersonalNotification).where(
-                PersonalNotification.source_type == "archive_submission",
-                PersonalNotification.source_id.in_(submission_ids),
+        if submission_ids:
+            await session.execute(
+                delete(PersonalNotification).where(
+                    PersonalNotification.source_type == "archive_submission",
+                    PersonalNotification.source_id.in_(submission_ids),
+                )
             )
-        )
-        await session.execute(
-            delete(ArchiveSubmissionEvent).where(
-                ArchiveSubmissionEvent.submission_id.in_(submission_ids)
+            await session.execute(
+                delete(ArchiveSubmissionEvent).where(
+                    ArchiveSubmissionEvent.submission_id.in_(submission_ids)
+                )
             )
-        )
-        await session.execute(
-            delete(ArchiveSubmission).where(ArchiveSubmission.id.in_(submission_ids))
-        )
-        await session.execute(delete(Archive).where(Archive.id == archive_id))
+            await session.execute(
+                delete(ArchiveSubmission).where(
+                    ArchiveSubmission.id.in_(submission_ids)
+                )
+            )
+        if archive_ids:
+            await session.execute(delete(Archive).where(Archive.id.in_(archive_ids)))
         await session.execute(delete(Course).where(Course.id == course_id))
         await session.execute(
             delete(CourseCategoryConfig).where(CourseCategoryConfig.id == category_id)
@@ -129,110 +172,44 @@ async def _cleanup_shared_archive_context(
         await session.commit()
 
 
-async def _create_racing_sibling(
+async def _replace_archive_source(
     session_maker,
     *,
     archive: Archive,
     course: Course,
     requester_id: int,
+    current_source_id: int,
     status: SubmissionStatus,
     lifecycle_reason: str | None,
 ) -> int:
+    """Change legal membership without ever violating the database constraint."""
     marker = uuid.uuid4().hex
     async with session_maker() as session:
-        sibling = ArchiveSubmission(
+        current = await session.get(ArchiveSubmission, current_source_id)
+        assert current is not None
+        current.created_archive_id = None
+        await session.flush()
+        replacement = ArchiveSubmission(
             subject=course.name,
             category=course.category,
-            name=f"Racing sibling {marker}",
+            name=f"Replacement source {marker}",
             academic_year=archive.academic_year,
             archive_type=archive.archive_type,
             professor=archive.professor,
-            object_name=f"archive/racing-sibling-{marker}.pdf",
+            object_name=f"archive/replacement-source-{marker}.pdf",
             requester_id=requester_id,
             status=status,
             lifecycle_reason=lifecycle_reason,
             created_archive_id=archive.id,
         )
-        session.add(sibling)
+        session.add(replacement)
         await session.commit()
-        await session.refresh(sibling)
-        return sibling.id
+        await session.refresh(replacement)
+        return replacement.id
 
 
 def _resource_trace(plan):
     return [(resource.resource_class, resource.row_id) for resource in plan.resources]
-
-
-@pytest.mark.asyncio
-async def test_approve_existing_acquires_mutex_then_parent_first_shared_plan(
-    client,
-    session_maker,
-    make_user,
-    monkeypatch,
-):
-    requester = await make_user()
-    admin = await make_user(is_admin=True)
-    category, course, archive, target, sibling = await _create_shared_archive_context(
-        session_maker,
-        requester_id=requester.id,
-    )
-    trace: list[tuple[str, object]] = []
-    original_mutex = archive_lifecycle_locks.acquire_approval_namespace_mutex
-    original_acquire = archive_lifecycle_locks.acquire_lifecycle_locks
-
-    async def observed_mutex(db, **kwargs):
-        trace.append(("mutex", None))
-        return await original_mutex(db, **kwargs)
-
-    async def observed_acquire(db, plan):
-        trace.append(("rows", _resource_trace(plan)))
-        return await original_acquire(db, plan)
-
-    monkeypatch.setattr(
-        archive_lifecycle_locks,
-        "acquire_approval_namespace_mutex",
-        observed_mutex,
-    )
-    monkeypatch.setattr(
-        archive_lifecycle_locks,
-        "acquire_lifecycle_locks",
-        observed_acquire,
-    )
-    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
-    try:
-        response = await client.post(
-            f"/archives/admin/submissions/{target.id}/approve",
-            json={"expected_status": "pending", "note": "parent first"},
-        )
-        assert response.status_code == 200
-        assert trace == [
-            ("mutex", None),
-            (
-                "rows",
-                [
-                    (LifecycleResourceClass.COURSE_CATEGORY, category.id),
-                    (LifecycleResourceClass.COURSE, course.id),
-                    (LifecycleResourceClass.ARCHIVE, archive.id),
-                    (
-                        LifecycleResourceClass.ARCHIVE_SUBMISSION,
-                        min(target.id, sibling.id),
-                    ),
-                    (
-                        LifecycleResourceClass.ARCHIVE_SUBMISSION,
-                        max(target.id, sibling.id),
-                    ),
-                ],
-            ),
-        ]
-    finally:
-        app.dependency_overrides.pop(get_current_user, None)
-        await _cleanup_shared_archive_context(
-            session_maker,
-            category_id=category.id,
-            course_id=course.id,
-            archive_id=archive.id,
-            submission_ids=[target.id, sibling.id],
-        )
 
 
 async def _run_two_request_lock_race(
@@ -289,7 +266,7 @@ async def _run_two_request_lock_race(
 
 
 @pytest.mark.asyncio
-async def test_archive_trash_and_restore_share_parent_first_plan(
+async def test_approve_existing_acquires_mutex_then_parent_first_one_to_one_plan(
     client,
     session_maker,
     make_user,
@@ -297,7 +274,72 @@ async def test_archive_trash_and_restore_share_parent_first_plan(
 ):
     requester = await make_user()
     admin = await make_user(is_admin=True)
-    category, course, archive, target, sibling = await _create_shared_archive_context(
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    trace: list[tuple[str, object]] = []
+    original_mutex = archive_lifecycle_locks.acquire_approval_namespace_mutex
+    original_acquire = archive_lifecycle_locks.acquire_lifecycle_locks
+
+    async def observed_mutex(db, **kwargs):
+        trace.append(("mutex", None))
+        return await original_mutex(db, **kwargs)
+
+    async def observed_acquire(db, plan):
+        trace.append(("rows", _resource_trace(plan)))
+        return await original_acquire(db, plan)
+
+    monkeypatch.setattr(
+        archive_lifecycle_locks,
+        "acquire_approval_namespace_mutex",
+        observed_mutex,
+    )
+    monkeypatch.setattr(
+        archive_lifecycle_locks,
+        "acquire_lifecycle_locks",
+        observed_acquire,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        response = await client.post(
+            f"/archives/admin/submissions/{target.id}/approve",
+            json={"expected_status": "pending", "note": "parent first"},
+        )
+        assert response.status_code == 200
+        assert trace == [
+            ("mutex", None),
+            (
+                "rows",
+                [
+                    (LifecycleResourceClass.COURSE_CATEGORY, category.id),
+                    (LifecycleResourceClass.COURSE, course.id),
+                    (LifecycleResourceClass.ARCHIVE, archive.id),
+                    (LifecycleResourceClass.ARCHIVE_SUBMISSION, target.id),
+                ],
+            ),
+        ]
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_archive_trash_and_restore_share_parent_first_one_to_one_plan(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
         session_maker,
         requester_id=requester.id,
     )
@@ -328,41 +370,21 @@ async def test_archive_trash_and_restore_share_parent_first_plan(
         expected = [
             (LifecycleResourceClass.COURSE, course.id),
             (LifecycleResourceClass.ARCHIVE, archive.id),
-            (
-                LifecycleResourceClass.ARCHIVE_SUBMISSION,
-                min(target.id, sibling.id),
-            ),
-            (
-                LifecycleResourceClass.ARCHIVE_SUBMISSION,
-                max(target.id, sibling.id),
-            ),
+            (LifecycleResourceClass.ARCHIVE_SUBMISSION, target.id),
         ]
         assert trace == [expected, expected]
 
         async with session_maker() as session:
-            stored = list(
-                (
-                    await session.execute(
-                        select(ArchiveSubmission)
-                        .where(ArchiveSubmission.id.in_([target.id, sibling.id]))
-                        .order_by(ArchiveSubmission.id.asc())
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            assert [row.status for row in stored] == [
-                SubmissionStatus.APPROVED,
-                SubmissionStatus.APPROVED,
-            ]
+            stored = await session.get(ArchiveSubmission, target.id)
+            assert stored.status == SubmissionStatus.APPROVED
     finally:
         app.dependency_overrides.pop(get_current_user, None)
-        await _cleanup_shared_archive_context(
+        await _cleanup_archive_context(
             session_maker,
             category_id=category.id,
             course_id=course.id,
-            archive_id=archive.id,
-            submission_ids=[target.id, sibling.id],
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
         )
 
 
@@ -377,7 +399,7 @@ async def test_approve_existing_and_archive_trash_serialize_without_deadlock(
 ):
     requester = await make_user()
     admin = await make_user(is_admin=True)
-    category, course, archive, target, sibling = await _create_shared_archive_context(
+    category, course, archive, target = await _create_archive_context(
         session_maker,
         requester_id=requester.id,
     )
@@ -404,7 +426,7 @@ async def test_approve_existing_and_archive_trash_serialize_without_deadlock(
             assert second.status_code == 200
         else:
             assert second.status_code == 409
-            assert second.json()["detail"]["code"] == "archive_submission_stale_state"
+            assert second.json()["detail"]["code"] == ("archive_submission_stale_state")
         assert "40P01" not in sqlstates
 
         for trace in traces:
@@ -419,7 +441,7 @@ async def test_approve_existing_and_archive_trash_serialize_without_deadlock(
                 for resource_class, resource_id in trace
                 if resource_class == LifecycleResourceClass.ARCHIVE_SUBMISSION
             ]
-            assert submission_ids == sorted([target.id, sibling.id])
+            assert submission_ids == [target.id]
 
         async with session_maker() as session:
             stored_archive = await session.get(Archive, archive.id)
@@ -441,25 +463,18 @@ async def test_approve_existing_and_archive_trash_serialize_without_deadlock(
                 )
                 or 0
             )
-            archive_count = int(
-                await session.scalar(
-                    select(func.count(Archive.id)).where(Archive.id == archive.id)
-                )
-                or 0
-            )
         assert stored_archive.deleted_at is not None
         assert stored_target.status == SubmissionStatus.TAKEDOWN
         assert notification_count == (1 if first_operation == "approve" else 0)
         assert event_count == 0
-        assert archive_count == 1
     finally:
         app.dependency_overrides.pop(get_current_user, None)
-        await _cleanup_shared_archive_context(
+        await _cleanup_archive_context(
             session_maker,
             category_id=category.id,
             course_id=course.id,
-            archive_id=archive.id,
-            submission_ids=[target.id, sibling.id],
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
         )
 
 
@@ -474,7 +489,7 @@ async def test_archive_trash_and_restore_serialize_without_deadlock(
 ):
     requester = await make_user()
     admin = await make_user(is_admin=True)
-    category, course, archive, target, sibling = await _create_shared_archive_context(
+    category, course, archive, target = await _create_archive_context(
         session_maker,
         requester_id=requester.id,
     )
@@ -506,70 +521,125 @@ async def test_archive_trash_and_restore_serialize_without_deadlock(
         assert traces[0] == [
             (LifecycleResourceClass.COURSE, course.id),
             (LifecycleResourceClass.ARCHIVE, archive.id),
-            (
-                LifecycleResourceClass.ARCHIVE_SUBMISSION,
-                min(target.id, sibling.id),
-            ),
-            (
-                LifecycleResourceClass.ARCHIVE_SUBMISSION,
-                max(target.id, sibling.id),
-            ),
+            (LifecycleResourceClass.ARCHIVE_SUBMISSION, target.id),
         ]
 
         async with session_maker() as session:
             stored_archive = await session.get(Archive, archive.id)
-            statuses = list(
-                (
-                    await session.execute(
-                        select(ArchiveSubmission.status)
-                        .where(ArchiveSubmission.id.in_([target.id, sibling.id]))
-                        .order_by(ArchiveSubmission.id.asc())
-                    )
-                )
-                .scalars()
-                .all()
-            )
+            stored_target = await session.get(ArchiveSubmission, target.id)
             notification_count = int(
                 await session.scalar(
                     select(func.count(PersonalNotification.id)).where(
                         PersonalNotification.source_type == "archive_submission",
-                        PersonalNotification.source_id.in_([target.id, sibling.id]),
+                        PersonalNotification.source_id == target.id,
                     )
                 )
                 or 0
             )
         if first_operation == "trash":
             assert stored_archive.deleted_at is None
-            assert statuses == [
-                SubmissionStatus.APPROVED,
-                SubmissionStatus.APPROVED,
-            ]
+            assert stored_target.status == SubmissionStatus.APPROVED
         else:
             assert stored_archive.deleted_at is not None
-            assert statuses == [
-                SubmissionStatus.TAKEDOWN,
-                SubmissionStatus.TAKEDOWN,
-            ]
+            assert stored_target.status == SubmissionStatus.TAKEDOWN
         assert notification_count == 0
     finally:
         app.dependency_overrides.pop(get_current_user, None)
-        await _cleanup_shared_archive_context(
+        await _cleanup_archive_context(
             session_maker,
             category_id=category.id,
             course_id=course.id,
-            archive_id=archive.id,
-            submission_ids=[target.id, sibling.id],
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.parametrize("first_operation", ["restore", "republish"])
+@pytest.mark.asyncio
+async def test_republish_and_archive_restore_serialize_without_deadlock(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+    first_operation,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+
+    async def restore():
+        return await client.post(
+            "/trash/restore",
+            json={"item_type": "archive", "item_id": archive.id},
+        )
+
+    async def republish():
+        return await client.post(
+            f"/archives/admin/submissions/{target.id}/republish",
+            json={"expected_status": "takedown", "note": "restore race"},
+        )
+
+    try:
+        setup_response = await client.delete(
+            f"/courses/{course.id}/archives/{archive.id}"
+        )
+        assert setup_response.status_code == 200
+
+        first, second, traces, sqlstates = await _run_two_request_lock_race(
+            monkeypatch=monkeypatch,
+            first_request=restore if first_operation == "restore" else republish,
+            second_request=republish if first_operation == "restore" else restore,
+        )
+        if first_operation == "restore":
+            assert first.status_code == 200
+            assert second.status_code == 409
+            assert second.json()["detail"]["code"] == ("archive_submission_stale_state")
+        else:
+            assert first.status_code == 409
+            assert second.status_code == 200
+        assert "40P01" not in sqlstates
+        for trace in traces:
+            assert trace == sorted(trace)
+            assert (LifecycleResourceClass.COURSE, course.id) in trace
+            assert (LifecycleResourceClass.ARCHIVE, archive.id) in trace
+            assert (
+                LifecycleResourceClass.ARCHIVE_SUBMISSION,
+                target.id,
+            ) in trace
+
+        async with session_maker() as session:
+            stored_archive = await session.get(Archive, archive.id)
+            stored_target = await session.get(ArchiveSubmission, target.id)
+        assert stored_archive.deleted_at is None
+        assert stored_target.status == SubmissionStatus.APPROVED
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
         )
 
 
 @pytest.mark.asyncio
-async def test_shared_archive_reverse_input_locks_same_canonical_order(
+async def test_two_one_to_one_pairs_reverse_input_lock_same_canonical_order(
     session_maker,
     make_user,
 ):
     requester = await make_user()
-    category, course, archive, target, sibling = await _create_shared_archive_context(
+    category, course, archive, target = await _create_archive_context(
         session_maker,
+        requester_id=requester.id,
+    )
+    second_archive, second_submission = await _create_second_pair(
+        session_maker,
+        course=course,
         requester_id=requester.id,
     )
     first_locked = asyncio.Event()
@@ -577,12 +647,14 @@ async def test_shared_archive_reverse_input_locks_same_canonical_order(
     second_attempted = asyncio.Event()
     traces = []
     sqlstates: list[str] = []
+    archive_ids = [archive.id, second_archive.id]
+    submission_ids = [target.id, second_submission.id]
 
-    async def worker(input_ids, *, first):
+    async def worker(input_archive_ids, input_submission_ids, *, first):
         plan = archive_lifecycle_locks.ArchiveLifecycleLockPlan.build(
             course_ids=[course.id],
-            archive_ids=[archive.id],
-            submission_ids=input_ids,
+            archive_ids=input_archive_ids,
+            submission_ids=input_submission_ids,
         )
         traces.append(_resource_trace(plan))
         async with session_maker() as session:
@@ -596,7 +668,8 @@ async def test_shared_archive_reverse_input_locks_same_canonical_order(
                 if first:
                     first_locked.set()
                     await asyncio.wait_for(release_first.wait(), timeout=10)
-                assert [row.id for row in locked.submissions] == sorted(input_ids)
+                assert [row.id for row in locked.archives] == sorted(archive_ids)
+                assert [row.id for row in locked.submissions] == sorted(submission_ids)
                 await session.rollback()
             except Exception as exc:
                 sqlstate = getattr(exc, "sqlstate", None) or getattr(
@@ -609,9 +682,17 @@ async def test_shared_archive_reverse_input_locks_same_canonical_order(
                 raise
 
     try:
-        first_task = asyncio.create_task(worker([sibling.id, target.id], first=True))
+        first_task = asyncio.create_task(
+            worker(
+                list(reversed(archive_ids)),
+                list(reversed(submission_ids)),
+                first=True,
+            )
+        )
         await asyncio.wait_for(first_locked.wait(), timeout=10)
-        second_task = asyncio.create_task(worker([target.id, sibling.id], first=False))
+        second_task = asyncio.create_task(
+            worker(archive_ids, submission_ids, first=False)
+        )
         await asyncio.wait_for(second_attempted.wait(), timeout=10)
         assert not second_task.done()
         release_first.set()
@@ -619,30 +700,13 @@ async def test_shared_archive_reverse_input_locks_same_canonical_order(
         await asyncio.wait_for(second_task, timeout=10)
         assert traces[0] == traces[1]
         assert "40P01" not in sqlstates
-
-        async with session_maker() as session:
-            statuses = list(
-                (
-                    await session.execute(
-                        select(ArchiveSubmission.status)
-                        .where(ArchiveSubmission.id.in_([target.id, sibling.id]))
-                        .order_by(ArchiveSubmission.id.asc())
-                    )
-                )
-                .scalars()
-                .all()
-            )
-        assert statuses == [
-            SubmissionStatus.PENDING,
-            SubmissionStatus.APPROVED,
-        ]
     finally:
-        await _cleanup_shared_archive_context(
+        await _cleanup_archive_context(
             session_maker,
             category_id=category.id,
             course_id=course.id,
-            archive_id=archive.id,
-            submission_ids=[target.id, sibling.id],
+            archive_ids=archive_ids,
+            submission_ids=submission_ids,
         )
 
 
@@ -657,7 +721,7 @@ async def test_archive_lifecycle_rebuilds_once_after_real_membership_change(
 ):
     requester = await make_user()
     admin = await make_user(is_admin=True)
-    category, course, archive, target, sibling = await _create_shared_archive_context(
+    category, course, archive, target = await _create_archive_context(
         session_maker,
         requester_id=requester.id,
     )
@@ -668,9 +732,13 @@ async def test_archive_lifecycle_rebuilds_once_after_real_membership_change(
     discovery_calls = 0
     original_discover = archive_lifecycle_locks.discover_exact_archive_lifecycle_plan
 
-    async def observed_discover(db, *, archive_id):
+    async def observed_discover(db, *, archive_id, operation):
         nonlocal discovery_calls
-        plan = await original_discover(db, archive_id=archive_id)
+        plan = await original_discover(
+            db,
+            archive_id=archive_id,
+            operation=operation,
+        )
         discovery_calls += 1
         if discovery_calls == 1:
             discovery_ready.set()
@@ -680,11 +748,12 @@ async def test_archive_lifecycle_rebuilds_once_after_real_membership_change(
     async def mutate_membership_once():
         await asyncio.wait_for(discovery_ready.wait(), timeout=10)
         created_submission_ids.append(
-            await _create_racing_sibling(
+            await _replace_archive_source(
                 session_maker,
                 archive=archive,
                 course=course,
                 requester_id=requester.id,
+                current_source_id=target.id,
                 status=(
                     SubmissionStatus.APPROVED
                     if operation == "trash"
@@ -723,69 +792,37 @@ async def test_archive_lifecycle_rebuilds_once_after_real_membership_change(
 
         assert response.status_code == 200
         assert discovery_calls == 2
-        assert len(created_submission_ids) == 1
-
-        all_submission_ids = [
-            target.id,
-            sibling.id,
-            *created_submission_ids,
-        ]
+        replacement_id = created_submission_ids[0]
         async with session_maker() as session:
             stored_archive = await session.get(Archive, archive.id)
-            statuses = list(
-                (
-                    await session.execute(
-                        select(ArchiveSubmission.status)
-                        .where(ArchiveSubmission.id.in_(all_submission_ids))
-                        .order_by(ArchiveSubmission.id.asc())
-                    )
-                )
-                .scalars()
-                .all()
+            stored_target = await session.get(ArchiveSubmission, target.id)
+            stored_replacement = await session.get(
+                ArchiveSubmission,
+                replacement_id,
             )
-            notification_count = int(
-                await session.scalar(
-                    select(func.count(PersonalNotification.id)).where(
-                        PersonalNotification.source_type == "archive_submission",
-                        PersonalNotification.source_id.in_(all_submission_ids),
-                    )
-                )
-                or 0
-            )
-            event_count = int(
-                await session.scalar(
-                    select(func.count(ArchiveSubmissionEvent.id)).where(
-                        ArchiveSubmissionEvent.submission_id.in_(all_submission_ids)
-                    )
-                )
-                or 0
-            )
+        assert stored_target.created_archive_id is None
         if operation == "trash":
             assert stored_archive.deleted_at is not None
-            assert statuses == [SubmissionStatus.TAKEDOWN] * 3
+            assert stored_target.status == SubmissionStatus.PENDING
+            assert stored_replacement.status == SubmissionStatus.TAKEDOWN
         else:
             assert stored_archive.deleted_at is None
-            assert statuses == [SubmissionStatus.APPROVED] * 3
-        assert notification_count == 0
-        assert event_count == 0
+            assert stored_target.status == SubmissionStatus.TAKEDOWN
+            assert stored_replacement.status == SubmissionStatus.APPROVED
     finally:
         app.dependency_overrides.pop(get_current_user, None)
-        await _cleanup_shared_archive_context(
+        await _cleanup_archive_context(
             session_maker,
             category_id=category.id,
             course_id=course.id,
-            archive_id=archive.id,
-            submission_ids=[
-                target.id,
-                sibling.id,
-                *created_submission_ids,
-            ],
+            archive_ids=[archive.id],
+            submission_ids=[target.id, *created_submission_ids],
         )
 
 
 @pytest.mark.parametrize("operation", ["trash", "restore"])
 @pytest.mark.asyncio
-async def test_archive_lifecycle_second_real_membership_change_returns_contract(
+async def test_archive_lifecycle_second_membership_change_returns_contract(
     client,
     session_maker,
     make_user,
@@ -794,7 +831,7 @@ async def test_archive_lifecycle_second_real_membership_change_returns_contract(
 ):
     requester = await make_user()
     admin = await make_user(is_admin=True)
-    category, course, archive, target, sibling = await _create_shared_archive_context(
+    category, course, archive, target = await _create_archive_context(
         session_maker,
         requester_id=requester.id,
     )
@@ -803,11 +840,16 @@ async def test_archive_lifecycle_second_real_membership_change_returns_contract(
     discovery_events = [asyncio.Event(), asyncio.Event()]
     membership_events = [asyncio.Event(), asyncio.Event()]
     discovery_calls = 0
+    current_source_id = target.id
     original_discover = archive_lifecycle_locks.discover_exact_archive_lifecycle_plan
 
-    async def observed_discover(db, *, archive_id):
+    async def observed_discover(db, *, archive_id, operation):
         nonlocal discovery_calls
-        plan = await original_discover(db, archive_id=archive_id)
+        plan = await original_discover(
+            db,
+            archive_id=archive_id,
+            operation=operation,
+        )
         call_index = discovery_calls
         discovery_calls += 1
         if call_index < 2:
@@ -819,27 +861,29 @@ async def test_archive_lifecycle_second_real_membership_change_returns_contract(
         return plan
 
     async def mutate_membership_twice():
+        nonlocal current_source_id
         for call_index in range(2):
             await asyncio.wait_for(
                 discovery_events[call_index].wait(),
                 timeout=10,
             )
-            created_submission_ids.append(
-                await _create_racing_sibling(
-                    session_maker,
-                    archive=archive,
-                    course=course,
-                    requester_id=requester.id,
-                    status=(
-                        SubmissionStatus.APPROVED
-                        if operation == "trash"
-                        else SubmissionStatus.TAKEDOWN
-                    ),
-                    lifecycle_reason=(
-                        None if operation == "trash" else LIFECYCLE_ARCHIVE_TRASHED
-                    ),
-                )
+            replacement_id = await _replace_archive_source(
+                session_maker,
+                archive=archive,
+                course=course,
+                requester_id=requester.id,
+                current_source_id=current_source_id,
+                status=(
+                    SubmissionStatus.APPROVED
+                    if operation == "trash"
+                    else SubmissionStatus.TAKEDOWN
+                ),
+                lifecycle_reason=(
+                    None if operation == "trash" else LIFECYCLE_ARCHIVE_TRASHED
+                ),
             )
+            created_submission_ids.append(replacement_id)
+            current_source_id = replacement_id
             membership_events[call_index].set()
 
     async def invoke_operation():
@@ -859,32 +903,17 @@ async def test_archive_lifecycle_second_real_membership_change_returns_contract(
 
         async with session_maker() as session:
             archive_before = await session.get(Archive, archive.id)
-            submissions_before = list(
-                (
-                    await session.execute(
-                        select(ArchiveSubmission)
-                        .where(ArchiveSubmission.id.in_([target.id, sibling.id]))
-                        .order_by(ArchiveSubmission.id.asc())
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            before = (
+            target_before = await session.get(ArchiveSubmission, target.id)
+            lifecycle_before = (
                 archive_before.deleted_at,
                 archive_before.deleted_by_id,
                 archive_before.deleted_reason,
                 archive_before.restored_at,
                 archive_before.restored_by_id,
-                tuple(
-                    (
-                        item.status,
-                        item.lifecycle_reason,
-                        item.reviewed_at,
-                        item.reviewer_id,
-                    )
-                    for item in submissions_before
-                ),
+                target_before.status,
+                target_before.lifecycle_reason,
+                target_before.reviewed_at,
+                target_before.reviewer_id,
             )
 
         monkeypatch.setattr(
@@ -908,72 +937,226 @@ async def test_archive_lifecycle_second_real_membership_change_returns_contract(
         assert "fingerprint" not in response.text
         assert str(archive.id) not in response.text
 
-        all_submission_ids = [
-            target.id,
-            sibling.id,
-            *created_submission_ids,
-        ]
         async with session_maker() as session:
             archive_after = await session.get(Archive, archive.id)
-            submissions_after = list(
-                (
-                    await session.execute(
-                        select(ArchiveSubmission)
-                        .where(ArchiveSubmission.id.in_([target.id, sibling.id]))
-                        .order_by(ArchiveSubmission.id.asc())
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            after = (
+            target_after = await session.get(ArchiveSubmission, target.id)
+            lifecycle_after = (
                 archive_after.deleted_at,
                 archive_after.deleted_by_id,
                 archive_after.deleted_reason,
                 archive_after.restored_at,
                 archive_after.restored_by_id,
-                tuple(
-                    (
-                        item.status,
-                        item.lifecycle_reason,
-                        item.reviewed_at,
-                        item.reviewer_id,
-                    )
-                    for item in submissions_after
-                ),
+                target_after.status,
+                target_after.lifecycle_reason,
+                target_after.reviewed_at,
+                target_after.reviewer_id,
             )
             notification_count = int(
                 await session.scalar(
                     select(func.count(PersonalNotification.id)).where(
                         PersonalNotification.source_type == "archive_submission",
-                        PersonalNotification.source_id.in_(all_submission_ids),
+                        PersonalNotification.source_id.in_(
+                            [target.id, *created_submission_ids]
+                        ),
                     )
                 )
                 or 0
             )
-            event_count = int(
-                await session.scalar(
-                    select(func.count(ArchiveSubmissionEvent.id)).where(
-                        ArchiveSubmissionEvent.submission_id.in_(all_submission_ids)
-                    )
-                )
-                or 0
-            )
-        assert after == before
+        assert lifecycle_after == lifecycle_before
         assert notification_count == 0
-        assert event_count == 0
     finally:
         app.dependency_overrides.pop(get_current_user, None)
-        await _cleanup_shared_archive_context(
+        await _cleanup_archive_context(
             session_maker,
             category_id=category.id,
             course_id=course.id,
-            archive_id=archive.id,
-            submission_ids=[
-                target.id,
-                sibling.id,
-                *created_submission_ids,
-            ],
+            archive_ids=[archive.id],
+            submission_ids=[target.id, *created_submission_ids],
+        )
+
+
+@pytest.mark.parametrize(
+    ("operation", "route_operation"),
+    [("trash", "archive_trash"), ("restore", "archive_restore")],
+)
+@pytest.mark.asyncio
+async def test_static_multi_source_anomaly_is_generic_500_without_rebuild(
+    session_maker,
+    make_user,
+    monkeypatch,
+    caplog,
+    operation,
+    route_operation,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    calls = 0
+    original_validate = validate_archive_source_membership
+
+    def static_anomaly(_submission_ids, *, operation):
+        nonlocal calls
+        calls += 1
+        assert operation == route_operation
+        return original_validate([101, 102], operation=operation)
+
+    try:
+        if operation == "restore":
+            transport = ASGITransport(app=app)
+            async with AsyncClient(
+                transport=transport,
+                base_url="http://testserver",
+            ) as setup_client:
+                setup_response = await setup_client.delete(
+                    f"/courses/{course.id}/archives/{archive.id}"
+                )
+            assert setup_response.status_code == 200
+
+        async with session_maker() as session:
+            archive_before = await session.get(Archive, archive.id)
+            target_before = await session.get(ArchiveSubmission, target.id)
+            before = (
+                archive_before.deleted_at,
+                archive_before.deleted_reason,
+                archive_before.restored_at,
+                target_before.status,
+                target_before.lifecycle_reason,
+            )
+
+        monkeypatch.setattr(
+            archive_lifecycle_locks,
+            "validate_archive_source_membership",
+            static_anomaly,
+        )
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as non_raising_client:
+            if operation == "trash":
+                response = await non_raising_client.delete(
+                    f"/courses/{course.id}/archives/{archive.id}"
+                )
+            else:
+                response = await non_raising_client.post(
+                    "/trash/restore",
+                    json={"item_type": "archive", "item_id": archive.id},
+                )
+
+        assert response.status_code == 500
+        assert response.text == "Internal Server Error"
+        assert ARCHIVE_LIFECYCLE_CONFLICT_CODE not in response.text
+        assert "archive_submission_link_conflict" not in response.text
+        assert str(archive.id) not in response.text
+        assert calls == 1
+        assert any(
+            getattr(record, "event", None)
+            == "archive_submission_one_to_one_invariant_violation"
+            and getattr(record, "operation", None) == route_operation
+            for record in caplog.records
+        )
+
+        async with session_maker() as session:
+            archive_after = await session.get(Archive, archive.id)
+            target_after = await session.get(ArchiveSubmission, target.id)
+            after = (
+                archive_after.deleted_at,
+                archive_after.deleted_reason,
+                archive_after.restored_at,
+                target_after.status,
+                target_after.lifecycle_reason,
+            )
+        assert after == before
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_review_static_multi_source_anomaly_keeps_generic_500_boundary(
+    session_maker,
+    make_user,
+    monkeypatch,
+    caplog,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    original_validate = validate_archive_source_membership
+    calls = 0
+
+    def static_anomaly(_submission_ids, *, operation):
+        nonlocal calls
+        calls += 1
+        assert operation == "approval"
+        return original_validate([201, 202], operation=operation)
+
+    monkeypatch.setattr(
+        archives_service,
+        "validate_archive_source_membership",
+        static_anomaly,
+    )
+    try:
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as non_raising_client:
+            response = await non_raising_client.post(
+                f"/archives/admin/submissions/{target.id}/approve",
+                json={"expected_status": "pending", "note": "static anomaly"},
+            )
+
+        assert response.status_code == 500
+        assert response.text == "Internal Server Error"
+        assert ARCHIVE_LIFECYCLE_CONFLICT_CODE not in response.text
+        assert "archive_submission_link_conflict" not in response.text
+        assert str(archive.id) not in response.text
+        assert calls == 1
+        assert any(
+            getattr(record, "event", None)
+            == "archive_submission_one_to_one_invariant_violation"
+            and getattr(record, "operation", None) == "approval"
+            for record in caplog.records
+        )
+
+        async with session_maker() as session:
+            stored_archive = await session.get(Archive, archive.id)
+            stored_target = await session.get(ArchiveSubmission, target.id)
+            notification_count = int(
+                await session.scalar(
+                    select(func.count(PersonalNotification.id)).where(
+                        PersonalNotification.source_id == target.id
+                    )
+                )
+                or 0
+            )
+        assert stored_archive.deleted_at is None
+        assert stored_target.status == SubmissionStatus.PENDING
+        assert stored_target.created_archive_id == archive.id
+        assert notification_count == 0
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
         )
 
 
@@ -988,7 +1171,7 @@ async def test_archive_lifecycle_contract_is_not_used_for_invariant_failure(
 ):
     requester = await make_user()
     admin = await make_user(is_admin=True)
-    category, course, archive, target, sibling = await _create_shared_archive_context(
+    category, course, archive, target = await _create_archive_context(
         session_maker,
         requester_id=requester.id,
     )
@@ -1024,12 +1207,12 @@ async def test_archive_lifecycle_contract_is_not_used_for_invariant_failure(
                 )
     finally:
         app.dependency_overrides.pop(get_current_user, None)
-        await _cleanup_shared_archive_context(
+        await _cleanup_archive_context(
             session_maker,
             category_id=category.id,
             course_id=course.id,
-            archive_id=archive.id,
-            submission_ids=[target.id, sibling.id],
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
         )
 
 
@@ -1044,7 +1227,7 @@ async def test_archive_lifecycle_contract_does_not_swallow_database_deadlock(
 ):
     requester = await make_user()
     admin = await make_user(is_admin=True)
-    category, course, archive, target, sibling = await _create_shared_archive_context(
+    category, course, archive, target = await _create_archive_context(
         session_maker,
         requester_id=requester.id,
     )
@@ -1081,12 +1264,12 @@ async def test_archive_lifecycle_contract_does_not_swallow_database_deadlock(
                 )
     finally:
         app.dependency_overrides.pop(get_current_user, None)
-        await _cleanup_shared_archive_context(
+        await _cleanup_archive_context(
             session_maker,
             category_id=category.id,
             course_id=course.id,
-            archive_id=archive.id,
-            submission_ids=[target.id, sibling.id],
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
         )
 
 
@@ -1143,7 +1326,7 @@ async def test_archive_trash_unauthorized_stays_forbidden_after_retry(
 ):
     requester = await make_user()
     intruder = await make_user()
-    category, course, archive, target, sibling = await _create_shared_archive_context(
+    category, course, archive, target = await _create_archive_context(
         session_maker,
         requester_id=requester.id,
     )
@@ -1154,12 +1337,13 @@ async def test_archive_trash_unauthorized_stays_forbidden_after_retry(
     original_acquire = archive_lifecycle_locks.acquire_exact_archive_lifecycle_locks
     calls = 0
 
-    async def force_mismatch(db, *, archive_id):
+    async def force_mismatch(db, *, archive_id, operation):
         nonlocal calls
         calls += 1
         locked, revalidation = await original_acquire(
             db,
             archive_id=archive_id,
+            operation=operation,
         )
         assert locked is not None
         assert revalidation is not None
@@ -1186,10 +1370,10 @@ async def test_archive_trash_unauthorized_stays_forbidden_after_retry(
         assert calls == 2
     finally:
         app.dependency_overrides.pop(get_current_user, None)
-        await _cleanup_shared_archive_context(
+        await _cleanup_archive_context(
             session_maker,
             category_id=category.id,
             course_id=course.id,
-            archive_id=archive.id,
-            submission_ids=[target.id, sibling.id],
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
         )

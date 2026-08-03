@@ -20,7 +20,14 @@ ARCHIVE_SUBMISSION_LINK_CONFLICT_DETAIL = {
     "message": "This archive is already linked to another submission.",
 }
 
-ArchiveSubmissionLinkOperation = Literal["approval", "restore", "source_lookup"]
+ArchiveSubmissionLinkOperation = Literal[
+    "approval",
+    "review",
+    "restore",
+    "archive_trash",
+    "archive_restore",
+    "source_lookup",
+]
 
 
 class ArchiveSubmissionOneToOneInvariantError(RuntimeError):
@@ -118,6 +125,32 @@ async def ensure_archive_submission_link_available(
         raise archive_submission_link_conflict()
 
 
+def validate_archive_source_membership(
+    submission_ids: Iterable[int | None],
+    *,
+    operation: ArchiveSubmissionLinkOperation,
+) -> tuple[int, ...]:
+    """Return one exact source at most, or fail closed as an integrity anomaly."""
+    normalized_ids = tuple(
+        sorted(
+            {
+                submission_id
+                for submission_id in submission_ids
+                if submission_id is not None
+            }
+        )
+    )
+    if len(normalized_ids) > 1:
+        _raise_invariant_violation(
+            operation=operation,
+            invariant="multiple_archive_occupants",
+            occupant_count=len(normalized_ids),
+            duplicate_group_count=1,
+            affected_row_count=len(normalized_ids),
+        )
+    return normalized_ids
+
+
 def validate_archive_source_submission_rows(
     rows: Iterable[tuple[int | None, int | None]],
     *,
@@ -145,7 +178,12 @@ def validate_archive_source_submission_rows(
         )
 
     return {
-        archive_id: sorted(submission_ids)
+        archive_id: list(
+            validate_archive_source_membership(
+                submission_ids,
+                operation=operation,
+            )
+        )
         for archive_id, submission_ids in submission_ids_by_archive.items()
     }
 

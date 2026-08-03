@@ -105,9 +105,13 @@ and `test_submission_trash_moves_only_its_paired_archive_to_trash` protect the
 focused approved, independent-pair paths with notification counts recorded
 after approval setup: Archive trash/restore and Submission trash add no
 personal notification. Parent-first PostgreSQL coverage additionally protects
-shared-Archive trash/restore and approve-versus-trash serialization: lifecycle
-trash/restore remains silent, and only a successful direct review transition
-can enqueue its existing single notification.
+one-to-one Archive trash/restore and approve-versus-trash serialization:
+lifecycle trash/restore remains silent, and only a successful direct review
+transition can enqueue its existing single notification. A static
+multi-source Archive relation fails closed through the generic internal-error
+boundary and structured integrity log before lifecycle mutation; it does not
+enter the retryable lifecycle-conflict path and produces no notification or
+event.
 If Archive trash or restore observes one locked membership mismatch, the route
 rolls back before its one permitted plan rebuild. A second mismatch rolls back
 before returning `409 archive_lifecycle_conflict`; neither attempt retains a

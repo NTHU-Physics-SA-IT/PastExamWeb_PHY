@@ -77,6 +77,7 @@ from app.services.archive_submission_links import (
     archive_submission_link_conflict,
     ensure_archive_submission_link_available,
     is_archive_submission_link_unique_violation,
+    validate_archive_source_membership,
 )
 from app.services import archive_lifecycle_locks
 from app.services.archive_lifecycle_locks import (
@@ -334,19 +335,27 @@ async def _discover_direct_review_lock_context(
     )
     sibling_ids: tuple[int, ...] | None = None
     submission_ids = (submission.id,)
-    if action == ArchiveSubmissionReviewAction.APPROVE and archive is not None:
-        sibling_ids = tuple(
+    if archive is not None:
+        sibling_ids = validate_archive_source_membership(
             (
-                await db.execute(
-                    select(ArchiveSubmission.id)
-                    .where(ArchiveSubmission.created_archive_id == archive.id)
-                    .order_by(ArchiveSubmission.id.asc())
+                (
+                    await db.execute(
+                        select(ArchiveSubmission.id)
+                        .where(ArchiveSubmission.created_archive_id == archive.id)
+                        .order_by(ArchiveSubmission.id.asc())
+                    )
                 )
-            )
-            .scalars()
-            .all()
+                .scalars()
+                .all()
+            ),
+            operation=(
+                "approval"
+                if action == ArchiveSubmissionReviewAction.APPROVE
+                else "review"
+            ),
         )
-        submission_ids = sibling_ids
+        if action == ArchiveSubmissionReviewAction.APPROVE:
+            submission_ids = sibling_ids
 
     category = None
     active_course = None

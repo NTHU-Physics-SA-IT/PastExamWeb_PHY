@@ -1816,6 +1816,7 @@ async def restore_trash_item(
             ) = await archive_lifecycle_locks.acquire_exact_archive_lifecycle_locks(
                 db,
                 archive_id=payload.item_id,
+                operation="archive_restore",
             )
             if locked is None:
                 break

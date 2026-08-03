@@ -18,6 +18,10 @@ from app.models.models import (
     Course,
     CourseCategoryConfig,
 )
+from app.services.archive_submission_links import (
+    ArchiveSubmissionLinkOperation,
+    validate_archive_source_membership,
+)
 
 
 class LifecycleResourceClass(IntEnum):
@@ -245,6 +249,7 @@ async def discover_exact_archive_lifecycle_plan(
     db: AsyncSession,
     *,
     archive_id: int,
+    operation: ArchiveSubmissionLinkOperation,
 ) -> ArchiveLifecycleLockPlan | None:
     """Discover one Archive's exact Course and Submission membership."""
 
@@ -258,16 +263,19 @@ async def discover_exact_archive_lifecycle_plan(
     if archive is None or archive.id is None:
         return None
 
-    sibling_ids = tuple(
+    sibling_ids = validate_archive_source_membership(
         (
-            await db.execute(
-                select(ArchiveSubmission.id)
-                .where(ArchiveSubmission.created_archive_id == archive.id)
-                .order_by(ArchiveSubmission.id.asc())
+            (
+                await db.execute(
+                    select(ArchiveSubmission.id)
+                    .where(ArchiveSubmission.created_archive_id == archive.id)
+                    .order_by(ArchiveSubmission.id.asc())
+                )
             )
-        )
-        .scalars()
-        .all()
+            .scalars()
+            .all()
+        ),
+        operation=operation,
     )
     fingerprint = LifecycleMembershipFingerprint(
         archive_course_pairs=((archive.id, archive.course_id),),
@@ -365,12 +373,14 @@ async def acquire_exact_archive_lifecycle_locks(
     db: AsyncSession,
     *,
     archive_id: int,
+    operation: ArchiveSubmissionLinkOperation,
 ) -> tuple[LockedLifecycleRows | None, LifecycleRevalidationResult | None]:
     """Discover, lock, and revalidate one exact Archive group once."""
 
     plan = await discover_exact_archive_lifecycle_plan(
         db,
         archive_id=archive_id,
+        operation=operation,
     )
     if plan is None:
         return None, None

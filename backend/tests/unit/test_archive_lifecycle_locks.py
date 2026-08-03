@@ -13,7 +13,11 @@ from app.services.archive_lifecycle_locks import (
     LifecycleResourceRef,
     LockedLifecycleRows,
     PlanRebuildBudget,
+    discover_exact_archive_lifecycle_plan,
     revalidate_lifecycle_membership,
+)
+from app.services.archive_submission_links import (
+    ArchiveSubmissionOneToOneInvariantError,
 )
 
 
@@ -183,6 +187,32 @@ def test_locked_result_rejects_rows_outside_plan() -> None:
                     requester_id=9,
                 ),
             ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_archive_discovery_rejects_static_multi_source_membership() -> None:
+    archive = Archive(
+        id=3,
+        name="x",
+        academic_year=2026,
+        archive_type="final",
+        professor="x",
+        object_name="x.pdf",
+        course_id=2,
+    )
+    archive_result = MagicMock()
+    archive_result.scalar_one_or_none.return_value = archive
+    sibling_result = MagicMock()
+    sibling_result.scalars.return_value.all.return_value = [4, 5]
+    db = AsyncMock()
+    db.execute.side_effect = [archive_result, sibling_result]
+
+    with pytest.raises(ArchiveSubmissionOneToOneInvariantError):
+        await discover_exact_archive_lifecycle_plan(
+            db,
+            archive_id=archive.id,
+            operation="archive_trash",
         )
 
 
