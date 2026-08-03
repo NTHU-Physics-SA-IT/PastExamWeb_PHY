@@ -112,6 +112,20 @@ class PreviousStatusAggregateCounts(BaseModel):
     difference: int
 
 
+class OneToOneAggregateCounts(PreviousStatusAggregateCounts):
+    created_archive_id_null: int = Field(ge=0)
+    created_archive_id_non_null: int = Field(ge=0)
+    distinct_created_archive_ids: int = Field(ge=0)
+    max_created_archive_cardinality: int = Field(ge=0)
+    dangling_created_archive_links: int = Field(ge=0)
+    course_category_configs_total: int = Field(ge=0)
+    users_total: int = Field(ge=0)
+    courses_total: int = Field(ge=0)
+    archives_total: int = Field(ge=0)
+    created_archive_link_checksum: str = Field(pattern=r"^[0-9a-f]{32}$")
+    submission_state_checksum: str = Field(pattern=r"^[0-9a-f]{32}$")
+
+
 class FlagCombination(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -130,7 +144,9 @@ class AuditResult(BaseModel):
     status: AuditStatus
     error_code: str | None
     continuity: ContinuityResult | None
-    aggregates: AggregateCounts | PreviousStatusAggregateCounts | None
+    aggregates: (
+        AggregateCounts | PreviousStatusAggregateCounts | OneToOneAggregateCounts | None
+    )
     combinations: list[FlagCombination] = Field(default_factory=list, max_length=20)
     mutual_exclusivity: bool | None
     conservation: bool | None
