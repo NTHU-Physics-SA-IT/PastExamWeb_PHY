@@ -44,6 +44,9 @@ from app.api.services.archive_submission_lifecycle import (
 from app.utils.auth import get_current_user
 from app.utils.course_text import normalized_course_text_expr, normalize_course_search_text
 from app.utils.storage import get_minio_client
+from app.services.archive_submission_links import (
+    ensure_archive_submission_link_available,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -1855,7 +1858,23 @@ async def restore_trash_item(
                 detail="無法復原：關聯考古題已永久刪除",
             )
 
-        group = await collect_archive_submission_group(db, submission=submission)
+        try:
+            await ensure_archive_submission_link_available(
+                db,
+                submission_id=submission.id,
+                current_archive_id=submission.created_archive_id,
+                target_archive_id=submission.created_archive_id,
+                operation="restore",
+            )
+        except Exception:
+            await db.rollback()
+            raise
+
+        group = await collect_archive_submission_group(
+            db,
+            submission=submission,
+            exact_link_only=True,
+        )
         for linked_archive in group.archives:
             course = await db.get(Course, linked_archive.course_id)
             if not course or course.deleted_at is not None:
@@ -1869,6 +1888,7 @@ async def restore_trash_item(
             submission=submission,
             user_id=current_user.user_id,
             now=now,
+            exact_link_only=True,
         )
 
         await db.commit()

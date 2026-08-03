@@ -150,6 +150,7 @@ async def collect_archive_submission_group(
     *,
     archive: Optional[Archive] = None,
     submission: Optional[ArchiveSubmission] = None,
+    exact_link_only: bool = False,
 ) -> ArchiveSubmissionGroup:
     group = ArchiveSubmissionGroup()
     archive_ids: set[int] = set()
@@ -170,7 +171,13 @@ async def collect_archive_submission_group(
 
     linked_archive = archive
     if submission:
-        linked_archive, link_warnings = await _resolve_linked_archive(db, submission=submission)
+        if exact_link_only and submission.created_archive_id is None:
+            linked_archive, link_warnings = None, []
+        else:
+            linked_archive, link_warnings = await _resolve_linked_archive(
+                db,
+                submission=submission,
+            )
         group.warnings.extend(link_warnings)
         if linked_archive:
             add_archive(linked_archive)
@@ -403,9 +410,15 @@ async def restore_archive_submission_group(
     submission: Optional[ArchiveSubmission] = None,
     user_id: Optional[int],
     now: Optional[datetime] = None,
+    exact_link_only: bool = False,
 ) -> dict:
     timestamp = now or datetime.now(timezone.utc)
-    group = await collect_archive_submission_group(db, archive=archive, submission=submission)
+    group = await collect_archive_submission_group(
+        db,
+        archive=archive,
+        submission=submission,
+        exact_link_only=exact_link_only,
+    )
     restored_archives = 0
     restored_submissions = 0
 

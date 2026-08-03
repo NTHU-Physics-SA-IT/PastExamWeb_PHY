@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, 
 from fastapi.responses import StreamingResponse
 from minio.error import S3Error
 from sqlalchemy import BigInteger, and_, cast, func, or_, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -70,6 +71,11 @@ from app.services.archive_submission_status import (
     republish_archive_submission,
     resolve_archive_submission_actual_status,
     take_down_archive_submission,
+)
+from app.services.archive_submission_links import (
+    archive_submission_link_conflict,
+    ensure_archive_submission_link_available,
+    is_archive_submission_link_unique_violation,
 )
 
 router = APIRouter()
@@ -1256,6 +1262,14 @@ async def approve_archive_submission(
         await db.flush()
         await db.refresh(archive)
 
+        await ensure_archive_submission_link_available(
+            db,
+            submission_id=submission.id,
+            current_archive_id=submission.created_archive_id,
+            target_archive_id=archive.id,
+            operation="approval",
+        )
+
         submission.status = SubmissionStatus.APPROVED
         submission.reviewer_id = current_user.user_id
         submission.review_note = decision.note if decision else None
@@ -1271,6 +1285,11 @@ async def approve_archive_submission(
         await db.commit()
         await db.refresh(submission)
         return _serialize_archive_submission_action(submission, changed=True)
+    except IntegrityError as error:
+        await db.rollback()
+        if is_archive_submission_link_unique_violation(error):
+            raise archive_submission_link_conflict() from error
+        raise
     except Exception:
         await db.rollback()
         raise

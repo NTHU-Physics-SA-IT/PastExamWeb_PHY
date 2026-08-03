@@ -72,6 +72,9 @@ policy:
 - a stale expected-state mismatch does not enqueue a notification or any other
   event;
 - an illegal transition does not enqueue a notification or any other event.
+- an Archive-link occupancy conflict, forbidden relink, or cardinality anomaly
+  rolls back the approval transaction and does not retain Category, Course,
+  Archive, status, link, notification, or event work.
 
 The four direct review routes enforce these classifications after
 administrator authorization and a submission row lock. Missing, stale,
@@ -255,6 +258,7 @@ integration.
 | --- | --- | --- |
 | Archive upload | MinIO put, then database work; admin/course/archive paths may commit in stages | Partial object/DB or partial DB state is possible |
 | Submission approve | Category/Course/Archive work, submission review metadata, and notification enqueue share the approve caller's commit | PostgreSQL operation is caller-owned and protected by focused rollback tests |
+| Submission exact restore | The route owns occupancy validation, lifecycle mutation, and commit; conflict or integrity failure rolls back before returning | Restore remains silent and never infers an Archive from metadata when the retained exact link is null |
 | Report create/review | Report mutation and durable personal notification share a commit; archive report takedown is included | Comparatively complete and protected by focused tests |
 | Republish | Transition and notification share the caller transaction | Comparatively complete |
 | Permanent delete | MinIO call and DB delete cannot be atomic; helper may downgrade storage failure to warning | Retry and truthful result gap |

@@ -76,6 +76,9 @@ from app.utils.course_text import (
 from app.core.config import settings
 from app.services.personal_notifications import enqueue_personal_notification
 from app.services.discussions import soft_delete_discussion_message
+from app.services.archive_submission_links import (
+    validate_archive_source_submission_rows,
+)
 
 router = APIRouter()
 
@@ -664,20 +667,35 @@ async def get_course_archives(
             ArchiveSubmission.deleted_at.is_(None),
             ArchiveSubmission.status != SubmissionStatus.DELETED,
         ]
-        if not current_user.is_admin:
-            submission_visibility_conditions.append(
-                ArchiveSubmission.requester_id == current_user.user_id
-            )
         linked_submissions = (
             await db.execute(
-                select(ArchiveSubmission.id, ArchiveSubmission.created_archive_id).where(
+                select(
+                    ArchiveSubmission.id,
+                    ArchiveSubmission.created_archive_id,
+                    ArchiveSubmission.requester_id,
+                ).where(
                     *submission_visibility_conditions
                 )
             )
         ).all()
-        for submission_id, created_archive_id in linked_submissions:
-            if submission_id is not None and created_archive_id is not None:
-                source_submission_ids_by_archive.setdefault(created_archive_id, []).append(submission_id)
+        validated_sources = validate_archive_source_submission_rows(
+            [
+                (created_archive_id, submission_id)
+                for submission_id, created_archive_id, _requester_id in linked_submissions
+            ],
+            operation="source_lookup",
+        )
+        for submission_id, created_archive_id, requester_id in linked_submissions:
+            if (
+                created_archive_id in validated_sources
+                and (
+                    current_user.is_admin
+                    or requester_id == current_user.user_id
+                )
+            ):
+                source_submission_ids_by_archive[created_archive_id] = (
+                    validated_sources[created_archive_id]
+                )
 
     return [
         ArchiveRead.model_validate(archive).model_copy(

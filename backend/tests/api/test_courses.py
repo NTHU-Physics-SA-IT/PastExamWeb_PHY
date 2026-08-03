@@ -624,14 +624,17 @@ async def test_get_course_archives_limits_submission_ids_to_owner_or_admin(
         owner_rows = await fetch_as(owner)
         assert owner_rows[owner_archive.id]["source_submission_ids"] == [owner_submission.id]
         assert owner_rows[other_archive.id]["source_submission_ids"] == []
+        assert "source_submission_id" not in owner_rows[owner_archive.id]
 
         other_rows = await fetch_as(other_user)
         assert other_rows[owner_archive.id]["source_submission_ids"] == []
         assert other_rows[other_archive.id]["source_submission_ids"] == [other_submission.id]
+        assert "source_submission_id" not in other_rows[other_archive.id]
 
         admin_rows = await fetch_as(admin)
         assert admin_rows[owner_archive.id]["source_submission_ids"] == [owner_submission.id]
         assert admin_rows[other_archive.id]["source_submission_ids"] == [other_submission.id]
+        assert "source_submission_id" not in admin_rows[owner_archive.id]
 
         app.dependency_overrides.pop(get_current_user, None)
         unauthenticated_response = await client.get(f"/courses/{course.id}/archives")

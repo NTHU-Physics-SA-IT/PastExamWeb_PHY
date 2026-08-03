@@ -153,6 +153,25 @@ The separate archive-report uphold flow retains its report-owned transaction
 and internal submission takedown; it does not use the direct-client
 precondition or direct-action response contract.
 
+### Archive link conflicts
+
+Approval preserves an existing exact `created_archive_id` or establishes a
+previously null link; normal application review and restore flows never relink
+a non-null submission to a different Archive. Before link mutation, the
+application verifies that the intended Archive has no other source submission.
+The named nullable unique constraint remains the final arbiter when concurrent
+transactions both pass that precheck.
+
+An Archive already occupied by another submission, including an exact
+`23505` violation of
+`uq_archive_submissions_created_archive_id`, returns
+`409 archive_submission_link_conflict` with no occupant identity. A non-null
+relink attempt or static multi-occupant result is an internal integrity
+anomaly: the operation stops, uses the repository's generic internal-server
+response, and does not select, truncate, or repair a relationship. Submission
+restore follows only its retained exact link; a null link remains null and does
+not search for an Archive by metadata.
+
 ### Implementation gaps
 
 - The frontend does not yet consume `available_actions` or `changed`; visible
