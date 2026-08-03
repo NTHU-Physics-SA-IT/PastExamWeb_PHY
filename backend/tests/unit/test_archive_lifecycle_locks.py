@@ -6,7 +6,13 @@ import pytest
 from app.api.services.archive_submission_lifecycle import (
     acquire_stable_submission_lifecycle_locks,
 )
-from app.models.models import Archive, ArchiveSubmission, Course, CourseCategoryConfig
+from app.models.models import (
+    Archive,
+    ArchiveReport,
+    ArchiveSubmission,
+    Course,
+    CourseCategoryConfig,
+)
 from app.services import archive_lifecycle_locks
 from app.services.archive_lifecycle_locks import (
     ArchiveLifecycleLockPlan,
@@ -32,6 +38,7 @@ def test_plan_uses_resource_class_then_numeric_primary_key_order() -> None:
         course_ids=[8, 3],
         archive_ids=[7, 1],
         submission_ids=[6, 4],
+        report_ids=[12, 10],
     )
 
     assert plan.resources == (
@@ -43,6 +50,8 @@ def test_plan_uses_resource_class_then_numeric_primary_key_order() -> None:
         LifecycleResourceRef(LifecycleResourceClass.ARCHIVE, 7),
         LifecycleResourceRef(LifecycleResourceClass.ARCHIVE_SUBMISSION, 4),
         LifecycleResourceRef(LifecycleResourceClass.ARCHIVE_SUBMISSION, 6),
+        LifecycleResourceRef(LifecycleResourceClass.ARCHIVE_REPORT, 10),
+        LifecycleResourceRef(LifecycleResourceClass.ARCHIVE_REPORT, 12),
     )
 
 
@@ -52,12 +61,14 @@ def test_plan_deduplicates_omits_null_and_is_input_order_independent() -> None:
         course_ids=[7, None, 7],
         archive_ids=[5, 1, None],
         submission_ids=[11, 3, 11],
+        report_ids=[13, None, 9, 13],
     )
     second = ArchiveLifecycleLockPlan.build(
         category_ids=[2, 4],
         course_ids=[7],
         archive_ids=[1, 5],
         submission_ids=[3, 11],
+        report_ids=[9, 13],
     )
 
     assert first == second
@@ -144,6 +155,7 @@ def test_locked_result_rejects_rows_outside_plan() -> None:
         course_ids=[2],
         archive_ids=[3],
         submission_ids=[4],
+        report_ids=[5],
     )
     valid = LockedLifecycleRows(
         plan=plan,
@@ -173,8 +185,22 @@ def test_locked_result_rejects_rows_outside_plan() -> None:
                 requester_id=9,
             ),
         ),
+        reports=(
+            ArchiveReport(
+                id=5,
+                reporter_name_snapshot="x",
+                archive_id_snapshot=3,
+                reason="other",
+                archive_name_snapshot="x",
+                course_name_snapshot="x",
+                academic_year_snapshot=2026,
+                archive_type_snapshot="final",
+                professor_snapshot="x",
+            ),
+        ),
     )
     assert valid.submission(4).id == 4
+    assert valid.report(5).id == 5
 
     with pytest.raises(LifecycleLockSetExpansionError):
         LockedLifecycleRows(

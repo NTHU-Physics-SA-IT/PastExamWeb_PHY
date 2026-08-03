@@ -170,6 +170,14 @@ If notification enqueue raises, the transaction is expected to fail rather
 than commit the report alone. The unique dedupe key protects retry of the same
 logical create/review event.
 
+ArchiveReport review acquires the exact Course, Archive, optional
+ArchiveSubmission, and ArchiveReport rows in canonical parent-first order
+before either the Report decision or optional Submission takedown is mutated.
+Soft trash and restore use the same ordering and remain notification-free. The
+route/session continues to own commit and rollback; the planner performs no
+mutation, notification insert, or commit. Revalidation failure therefore
+leaves Report, Submission, and notification state unchanged.
+
 ### Test evidence
 
 - `test_comment_report_creation_validates_auth_reason_scope_and_duplicates`
@@ -282,7 +290,8 @@ integration.
 | Submission owner/admin delete | The route owns authorization, canonical parent-first locks, lifecycle mutation, and commit | Existing delete behavior remains silent; lock/revalidation failure commits no quota, status, Archive, notification, or event change |
 | Submission exact restore | The route owns canonical parent-first locks, occupancy validation, lifecycle mutation, and commit; conflict or integrity failure rolls back before returning | Restore remains silent and never infers an Archive from metadata when the retained exact link is null |
 | Course soft trash/restore | The route owns discovery, canonical Category/Course/Archive/Submission locks, one bounded membership rebuild, lifecycle mutation, and commit | Existing Course results and counts remain unchanged; both operations remain silent |
-| Report create/review | Report mutation and durable personal notification share a commit; archive report takedown is included | Comparatively complete and protected by focused tests |
+| Report create/review | Report mutation and durable personal notification share a commit; ArchiveReport review uses canonical Course/Archive/optional Submission/Report locks and includes optional takedown | Comparatively complete and protected by focused tests |
+| ArchiveReport soft trash/restore | Route-owned canonical parent-first lock plan, Report metadata mutation, then commit | Silent; existing status and pending-uniqueness behavior are unchanged |
 | Republish | Transition and notification share the caller transaction | Comparatively complete |
 | Permanent delete | MinIO call and DB delete cannot be atomic; helper may downgrade storage failure to warning | Retry and truthful result gap |
 | WebSocket discussion update | Database commit precedes broadcast | Durable write succeeds even if live delivery fails |
