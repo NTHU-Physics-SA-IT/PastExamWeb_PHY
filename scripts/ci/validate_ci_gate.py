@@ -30,6 +30,46 @@ REQUIRED_EXECUTION_JOBS = frozenset(
     }
 )
 
+CI_GATE_RESULT_LABELS = {
+    "classifier_result": "classifier",
+    "lint_result": "lint workflow",
+    "test_result": "test workflow",
+    "build_result": "build workflow",
+    "full_attestation_result": "Full CI Attestation",
+    "equivalent_result": "equivalent provenance",
+    "docs_result": "docs gate",
+}
+
+CI_GATE_EXPECTED_RESULTS = {
+    "full": {
+        "classifier_result": "success",
+        "lint_result": "success",
+        "test_result": "success",
+        "build_result": "success",
+        "full_attestation_result": "success",
+        "equivalent_result": "skipped",
+        "docs_result": "skipped",
+    },
+    "equivalent-merge": {
+        "classifier_result": "success",
+        "lint_result": "skipped",
+        "test_result": "skipped",
+        "build_result": "skipped",
+        "full_attestation_result": "skipped",
+        "equivalent_result": "success",
+        "docs_result": "skipped",
+    },
+    "docs-only": {
+        "classifier_result": "success",
+        "lint_result": "skipped",
+        "test_result": "skipped",
+        "build_result": "skipped",
+        "full_attestation_result": "skipped",
+        "equivalent_result": "skipped",
+        "docs_result": "success",
+    },
+}
+
 
 def _require_result(actual: str, expected: str, label: str) -> None:
     if actual != expected:
@@ -83,38 +123,20 @@ def attest_full_ci(arguments: argparse.Namespace) -> None:
 
 
 def validate_gate(arguments: argparse.Namespace) -> None:
-    _require_result(arguments.classifier_result, "success", "classifier")
-    _require_result(arguments.lint_result, "success", "lint workflow")
-    _require_result(arguments.test_result, "success", "test workflow")
-    _require_result(arguments.build_result, "success", "build workflow")
+    mode = getattr(arguments, "mode", None)
+    expected_results = CI_GATE_EXPECTED_RESULTS.get(mode)
+    if expected_results is None:
+        raise RuntimeError(f"unsupported CI mode: {mode!r}")
 
-    if arguments.mode == "full":
-        _require_result(
-            arguments.full_attestation_result,
-            "success",
-            "Full CI Attestation",
-        )
-        _require_result(arguments.equivalent_result, "skipped", "equivalent provenance")
-        _require_result(arguments.docs_result, "skipped", "docs gate")
-    elif arguments.mode == "equivalent-merge":
-        _require_result(
-            arguments.full_attestation_result,
-            "skipped",
-            "Full CI Attestation",
-        )
-        _require_result(arguments.equivalent_result, "success", "equivalent provenance")
-        _require_result(arguments.docs_result, "skipped", "docs gate")
-    elif arguments.mode == "docs-only":
-        _require_result(
-            arguments.full_attestation_result,
-            "skipped",
-            "Full CI Attestation",
-        )
-        _require_result(arguments.equivalent_result, "skipped", "equivalent provenance")
-        _require_result(arguments.docs_result, "success", "docs gate")
-    else:
-        raise RuntimeError(f"unsupported CI mode: {arguments.mode!r}")
-    print(f"CI Gate accepted mode={arguments.mode}")
+    missing = object()
+    for result_name, expected in expected_results.items():
+        label = CI_GATE_RESULT_LABELS[result_name]
+        actual = getattr(arguments, result_name, missing)
+        if actual is missing:
+            raise RuntimeError(f"CI mode {mode!r}: missing result for {label}")
+        _require_result(actual, expected, f"CI mode {mode!r} {label}")
+
+    print(f"CI Gate accepted mode={mode}")
 
 
 def _parser() -> argparse.ArgumentParser:
