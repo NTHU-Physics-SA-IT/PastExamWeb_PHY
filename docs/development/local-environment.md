@@ -61,6 +61,12 @@ The repository has no standalone test Compose contract. CI isolation therefore
 depends on explicit project, database, role, port, volume, and cleanup choices
 in the workflows rather than on a dedicated Compose file.
 
+Local focused PostgreSQL tests use
+`scripts/run-isolated-backend-tests.py`, not another Compose project. The
+runner requires exact canonical container IDs, creates one uniquely named
+direct-`docker run` PostgreSQL 15 container with loopback-only port and tmpfs
+data, and removes only that generated resource.
+
 ## Environment responsibility matrix
 
 | Environment | Identity guards | Allowed purpose and operations | Forbidden use | Credentials and cleanup | Startup/shutdown owner and evidence |
@@ -113,6 +119,18 @@ cannot be proven.
   an implicit part of an application change.
 - Do not copy CI cleanup commands into a local troubleshooting session without
   first proving that every affected resource belongs to an ephemeral test run.
+
+## Backend runtime inspection and recovery
+
+Use `scripts/check-backend-runtime.py` with exact backend/PostgreSQL IDs and
+explicit `backend/...` source paths. The canonical internal health path is
+`http://127.0.0.1:8000/health` inside the backend container; the canonical
+proxy path is `http://127.0.0.1:8080/api/health` on the host.
+
+The checker is read-only. Recovery must follow
+[Backend runtime recovery](backend-runtime-recovery.md): exact-container
+restart only, explicit task authority, one restart maximum, no Compose, no
+recreate, and no PostgreSQL or dependency lifecycle.
 
 ## Data lifetime
 

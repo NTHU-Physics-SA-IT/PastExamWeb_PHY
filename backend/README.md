@@ -59,6 +59,22 @@ Replace the pytest path with the smallest relevant file or test node. Backend
 tests are subject to the isolated test database guard in `tests/conftest.py`;
 even files named `unit` must not be assumed to be database-free.
 
+For local PostgreSQL-backed tests, use the repository-owned runner from the
+repository root:
+
+```bash
+python3 scripts/run-isolated-backend-tests.py \
+  --postgres-container-id <exact-canonical-postgres-id> \
+  --backend-container-id <exact-canonical-backend-id> \
+  -- backend/tests/api/test_archives.py -q
+```
+
+The runner creates one uniquely named PostgreSQL 15 container with loopback-only
+port exposure and tmpfs data, applies current migrations, passes the supplied
+arguments directly to `python -m pytest`, and removes only its exact generated
+resource. It refuses to run unless the canonical container identities and
+sealed baseline are Green. It does not use Compose or a persistent volume.
+
 Use the [validation policy](../docs/development/validation.md) for targeted
 commands, database isolation requirements, retry limits, and CI completion.
 

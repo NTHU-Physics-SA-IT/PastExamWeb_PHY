@@ -20,6 +20,8 @@
 3. State a compact plan for non-trivial work.
 4. Assign a verification risk level and finite budget before running checks.
 5. Determine whether the task has Domain impact as defined below.
+6. For PostgreSQL-backed backend work, establish Test Environment Readiness and
+   the exact isolated runner invocation before tests.
 
 ## Feature and behavior workflow
 
@@ -141,6 +143,11 @@ Do not guess which observed behavior should become the product invariant.
 - Use only sealed repository audit adapters through the bounded read-only audit
   runner. Do not pass arbitrary SQL, identifiers, or free-text output through
   that interface.
+- Affected backend implementation requires final runtime evidence after its
+  final local commits. Use the read-only checker and separately authorized
+  clean-start process in
+  [Backend runtime recovery](docs/development/backend-runtime-recovery.md);
+  checker execution does not authorize a restart.
 
 ## Bounded verification
 

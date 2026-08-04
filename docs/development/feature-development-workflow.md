@@ -408,6 +408,29 @@ Merge strategy and merge readiness are owned by
 `--no-ff`, its new merge commit needs its own pushed, exact-SHA successful CI
 run; source-branch CI is not a substitute.
 
+## Backend implementation task contract
+
+Before PostgreSQL-backed or runtime-affecting backend implementation, the task
+contract records:
+
+1. a separate read-only Readiness Gate for unresolved authority or R1 state;
+2. exact branch, SHA, tree, runtime identities, and persistent baseline;
+3. closure of every product/API decision;
+4. Test Environment Readiness;
+5. the guarded isolated PostgreSQL invocation;
+6. a source/runtime/service/data health matrix;
+7. any exact controlled-restart authorization;
+8. final clean-start runtime acceptance;
+9. one restart maximum;
+10. unchanged canonical PostgreSQL identity and sealed baseline;
+11. explicit stop conditions; and
+12. one push, exact-SHA Source Full CI, PR, true merge, and post-merge cadence.
+
+Use the repository isolated runner and
+[Backend runtime recovery](backend-runtime-recovery.md). Hot reload does not
+replace final clean-start evidence, and a read-only checker never implies
+restart authority.
+
 ## Milestone completion layers
 
 Use separate completion layers so one kind of evidence cannot silently replace

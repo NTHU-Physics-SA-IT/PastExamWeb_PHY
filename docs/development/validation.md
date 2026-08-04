@@ -69,6 +69,16 @@ Backend tests, including files named `unit`, are subject to the global guard in
 is database-free. Tests must use an explicitly isolated database URL, approved
 test identity markers, and a target distinct from runtime data.
 
+For local PostgreSQL-backed tests, use
+`scripts/run-isolated-backend-tests.py` with exact canonical PostgreSQL and
+backend container IDs. The runner creates one direct-`docker run` PostgreSQL
+15 container with loopback-only port exposure and tmpfs data, applies current
+migrations, passes only an argument vector to `python -m pytest`, and removes
+its exact generated resource on success, failure, or interruption. It must
+prove canonical identity, restart counts, and the sealed baseline before and
+after the run. Do not substitute Compose, a permanent test service, or a
+canonical database.
+
 ### Current CI implementation
 
 The workflows under `.github/workflows/` run scope detection, frontend and
@@ -160,6 +170,21 @@ mutual-exclusivity and conservation checks. A timeout, lock wait, SQL/type
 error, truncated transport, missing rollback/sentinel, unknown output label, or
 partial result is an audit error or incomplete transport, never successful
 evidence. The runner performs no implicit retry.
+
+## Backend runtime evidence
+
+Keep three evidence layers distinct:
+
+- Repository evidence proves source, focused tests, and exact-SHA CI.
+- Environment evidence proves the current bind-mounted source, process child,
+  listener, direct/proxy health, PostgreSQL identity, and sealed baseline.
+- Merge evidence proves the integration merge commit and its own CI.
+
+Use `scripts/check-backend-runtime.py` for read-only source/runtime/service/data
+classification. An affected backend implementation batch requires one final
+clean-start acceptance after its final local commits. Restart is never implied
+by running the checker and requires the explicit authority and one-restart
+limit in [Backend runtime recovery](backend-runtime-recovery.md).
 
 ## Test evidence
 
