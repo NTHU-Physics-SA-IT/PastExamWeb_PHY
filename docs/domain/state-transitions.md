@@ -350,8 +350,13 @@ closed through the generic internal-error boundary and does not borrow the
 Archive or Course lifecycle conflict contracts.
 
 This lock adoption does not change the pending-to-final matrix, finalized
-conflict, invalid action combination, legacy Archive takedown gap, result
-notification, soft-delete metadata, or pending-report restore uniqueness gap.
+conflict, invalid action combination, result notification, soft-delete
+metadata, or pending-report restore uniqueness gap. An upheld source-less
+legacy report with takedown requested now applies the established Archive
+soft-trash transition to the exact locked active Archive, without creating a
+Submission or deleting its stored object. The Archive transition, Report
+decision, and result notification commit atomically; a finalized retry remains
+a conflict.
 
 ## Public visibility
 

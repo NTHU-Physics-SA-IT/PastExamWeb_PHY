@@ -29,7 +29,7 @@ current implementation separately from the intended product relation.
 | `ArchiveSubmissionEvent` | Unique `submission_id` integer and timestamp, without a declared FK | Immutable statistical event retained after submission deletion, with active link/PII detached as needed | Implementation gap: permanent-delete helper currently deletes events |
 | `ArchiveDiscussionMessage` / `ArchiveDiscussionLike` | Message requires archive and user IDs; parent/reply references form a thread; likes cascade with message/user deletion | Discussion belongs to the referenced public item; soft-deleted messages should not remain an active source | Confirmed by code and `test_archive_discussion.py` |
 | `CommentReport` | Reporter FK cascades; target and actor/resource FKs mostly `SET NULL`; snapshots preserve context; independent soft delete | Report history survives source changes while active uniqueness and source availability remain explicit | Partially implemented |
-| `ArchiveReport` | Optional archive/submission/user FKs with `SET NULL`; required snapshots preserve archive context | May report both submission-backed and legacy archives; review can optionally take down the target | Legacy creation is supported; legacy direct takedown remains an implementation gap |
+| `ArchiveReport` | Optional archive/submission/user FKs with `SET NULL`; required snapshots preserve archive context | May report both submission-backed and legacy archives; review can optionally take down the target | A source-less legacy takedown soft-trashes the exact Archive without fabricating an ArchiveSubmission |
 | `SystemIssueReport` | Optional reporter, read/review metadata, GitHub-sync metadata, independent soft delete | Operational report independent of archive/submission lifecycle | Confirmed by code and tests |
 | `Notification` / announcement receipts | Global announcement plus per-user read receipt | Site-wide announcement, distinct from a personal event notification | Confirmed by code |
 | `PersonalNotification` | Required recipient; optional actor/source fields; unique `dedupe_key`; source message FK uses `SET NULL` | Durable, recipient-owned event record retained when its source is permanently deleted; source availability and actions follow source lifecycle | Confirmed by code; unavailable-source presentation and source resolution differ by Domain |
@@ -279,18 +279,19 @@ fully specified by code/tests.
 A historical `Archive` without an `ArchiveSubmission` remains reportable by an
 authenticated user and can be taken down directly by an administrator.
 
-### Current implementation and gap
+### Current implementation
 
 `reports.py` permits creation of an archive report when no linked submission
 exists and retains archive snapshots.
 `test_legacy_archive_can_be_reported_without_submission` confirms that an
 authenticated reporter can create the pending report with no submission link,
 the Archive snapshots and report-submission audit are retained, and one
-submitted notification is created. The current optional report-takedown path
-expects a linked active submission, so direct legacy takedown is not complete.
-Whether later implementation manages the `Archive` directly or creates a
-system-generated submission record is a decision required; this document does
-not choose the mechanism.
+submitted notification is created. When such a pending report is upheld with
+takedown requested, the review path locks and soft-trashes the exact active
+Archive directly. It does not create an ArchiveSubmission, change the Archive
+identity or object name, or perform a storage operation. The Archive mutation,
+final Report decision, and result notification share the route-owned database
+transaction.
 
 ## Blocking and orphan risks
 

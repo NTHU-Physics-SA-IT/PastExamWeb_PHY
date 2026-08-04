@@ -720,21 +720,51 @@ async def test_legacy_archive_report_plan_omits_submission_without_fabrication(
             is_admin=True,
         )
 
+        from app.api.services import reports as reports_service
+
+        original_enqueue = reports_service.enqueue_personal_notification
+
+        async def fail_result_notification(*args, **kwargs):
+            raise RuntimeError("legacy result notification failed")
+
+        monkeypatch.setattr(
+            reports_service,
+            "enqueue_personal_notification",
+            fail_result_notification,
+        )
+        with pytest.raises(RuntimeError, match="legacy result notification failed"):
+            await client.patch(
+                f"/reports/admin/archives/{report['id']}",
+                json={"status": "upheld", "take_down_archive": True},
+            )
+        monkeypatch.setattr(
+            reports_service,
+            "enqueue_personal_notification",
+            original_enqueue,
+        )
+        async with session_maker() as session:
+            rolled_back_archive = await session.get(Archive, archive.id)
+            rolled_back_report = await session.get(ArchiveReport, report["id"])
+            assert rolled_back_archive is not None
+            assert rolled_back_archive.deleted_at is None
+            assert rolled_back_report is not None
+            assert rolled_back_report.status == "pending"
+            assert rolled_back_report.archive_taken_down is False
+
         legacy_takedown = await client.patch(
             f"/reports/admin/archives/{report['id']}",
             json={"status": "upheld", "take_down_archive": True},
         )
-        response = await client.patch(
+        retry = await client.patch(
             f"/reports/admin/archives/{report['id']}",
-            json={"status": "dismissed"},
+            json={"status": "upheld", "take_down_archive": True},
         )
 
-        assert legacy_takedown.status_code == 409
-        assert (
-            legacy_takedown.json()["detail"]
-            == "This archive is not managed by an active submission"
-        )
-        assert response.status_code == 200
+        assert legacy_takedown.status_code == 200
+        assert legacy_takedown.json()["status"] == "upheld"
+        assert legacy_takedown.json()["archive_taken_down"] is True
+        assert retry.status_code == 409
+        assert retry.json()["detail"] == "A finalized report cannot be changed"
         assert traces, "Legacy ArchiveReport review did not execute the planner"
         expected = [
             (LifecycleResourceClass.COURSE, course.id),
@@ -744,7 +774,26 @@ async def test_legacy_archive_report_plan_omits_submission_without_fabrication(
         assert traces == [
             expected,
             expected,
+            expected,
         ]
+        async with session_maker() as session:
+            persisted_archive = await session.get(Archive, archive.id)
+            persisted_report = await session.get(ArchiveReport, report["id"])
+            submission_count = int(
+                await session.scalar(
+                    select(func.count(ArchiveSubmission.id)).where(
+                        ArchiveSubmission.created_archive_id == archive.id
+                    )
+                )
+                or 0
+            )
+            assert persisted_archive is not None
+            assert persisted_archive.deleted_at is not None
+            assert persisted_archive.deleted_by_id == admin.id
+            assert persisted_report is not None
+            assert persisted_report.status == "upheld"
+            assert persisted_report.archive_taken_down is True
+            assert submission_count == 0
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         await _cleanup_context(

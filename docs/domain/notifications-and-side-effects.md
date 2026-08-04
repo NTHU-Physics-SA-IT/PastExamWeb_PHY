@@ -181,10 +181,14 @@ logical create/review event.
 ArchiveReport review acquires the exact Course, Archive, optional
 ArchiveSubmission, and ArchiveReport rows in canonical parent-first order
 before either the Report decision or optional Submission takedown is mutated.
+For a source-less legacy report, an upheld takedown soft-trashes the exact
+Archive under the same locks without fabricating a Submission or touching
+object storage. That Archive mutation shares the Report and result-notification
+transaction.
 Soft trash and restore use the same ordering and remain notification-free. The
 route/session continues to own commit and rollback; the planner performs no
 mutation, notification insert, or commit. Revalidation failure therefore
-leaves Report, Submission, and notification state unchanged.
+leaves Report, Archive or Submission, and notification state unchanged.
 
 ### Test evidence
 
@@ -300,7 +304,7 @@ integration.
 | Submission direct administrator edit | The route owns authorization, canonical parent-first locks, locked state/membership validation, snapshot mutation, and one commit | Pending/rejected/takedown edits are silent and Submission-only; approved/deleted rejection or any failure leaves the linked Archive and side effects untouched |
 | Archive metadata mutation/reparent | The route owns administrator authorization, canonical source/target Course, Archive, and exact Submission locks, post-lock validation, mutation, and one commit | Silent and database-only; it creates/restores no Course, changes no Submission, performs no MinIO operation, and rolls back the complete mutation on failure |
 | Course soft trash/restore | The route owns discovery, canonical Category/Course/Archive/Submission locks, one bounded membership rebuild, lifecycle mutation, and commit | Existing Course results and counts remain unchanged; both operations remain silent |
-| Report create/review | Report mutation and durable personal notification share a commit; ArchiveReport review uses canonical Course/Archive/optional Submission/Report locks and includes optional takedown | Comparatively complete and protected by focused tests |
+| Report create/review | Report mutation and durable personal notification share a commit; ArchiveReport review uses canonical Course/Archive/optional Submission/Report locks and includes optional linked-Submission takedown or exact legacy-Archive soft trash | Database-atomic; legacy takedown fabricates no Submission and performs no storage operation |
 | ArchiveReport soft trash/restore | Route-owned canonical parent-first lock plan, Report metadata mutation, then commit | Silent; existing status and pending-uniqueness behavior are unchanged |
 | Republish | Transition and notification share the caller transaction | Comparatively complete |
 | Permanent delete | MinIO call and DB delete cannot be atomic; helper may downgrade storage failure to warning | Retry and truthful result gap |

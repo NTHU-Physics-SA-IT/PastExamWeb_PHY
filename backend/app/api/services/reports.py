@@ -9,6 +9,9 @@ from sqlalchemy.orm import aliased
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.api.services.archive_submission_lifecycle import (
+    soft_delete_archive_with_submission_takedown,
+)
 from app.db.session import get_session
 from app.models.models import (
     Archive,
@@ -1196,31 +1199,52 @@ async def review_archive_report(
 
     if payload.take_down_archive:
         if report.archive_submission_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="This archive is not managed by an active submission",
+            archive = locked.archive
+            if (
+                archive is None
+                or archive.id != report.archive_id
+                or archive.deleted_at is not None
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="The source archive is no longer publicly available",
+                )
+            result = await soft_delete_archive_with_submission_takedown(
+                db,
+                archive=archive,
+                submissions=(),
+                user_id=current_user.user_id,
+                reason=f"考古題回報 #{report.id} 成立",
             )
-        submission = locked.submission
-        if (
-            submission is None
-            or submission.id != report.archive_submission_id
-            or submission.created_archive_id != report.archive_id
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="The source archive submission no longer exists",
+            if result["archives"] != 1 or result["submissions_takedown"] != 0:
+                raise RuntimeError(
+                    "Legacy ArchiveReport takedown did not mutate exactly one Archive"
+                )
+        else:
+            submission = locked.submission
+            if (
+                submission is None
+                or submission.id != report.archive_submission_id
+                or submission.created_archive_id != report.archive_id
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="The source archive submission no longer exists",
+                )
+            if (
+                normalize_submission_status(submission.status)
+                != SubmissionStatus.APPROVED
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="The source archive is no longer publicly available",
+                )
+            await take_down_archive_submission(
+                db,
+                submission,
+                reviewer_id=current_user.user_id,
+                note=f"考古題回報 #{report.id} 成立",
             )
-        if normalize_submission_status(submission.status) != SubmissionStatus.APPROVED:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="The source archive is no longer publicly available",
-            )
-        await take_down_archive_submission(
-            db,
-            submission,
-            reviewer_id=current_user.user_id,
-            note=f"考古題回報 #{report.id} 成立",
-        )
         report.archive_taken_down = True
 
     response = (payload.admin_response or "").strip()
