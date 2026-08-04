@@ -82,6 +82,13 @@ from app.services.archive_submission_links import (
     validate_archive_source_submission_rows,
 )
 from app.services import archive_lifecycle_locks
+from app.services.archive_mutation import (
+    ArchiveMutationLifecycleConflict,
+    acquire_stable_archive_mutation_locks,
+    archive_move_target_not_found_error,
+    archive_move_target_trashed_error,
+    resolve_archive_move_target,
+)
 from app.services import course_lifecycle_locks
 from app.services.archive_lifecycle_locks import (
     LifecyclePlanRetryExhausted,
@@ -1524,15 +1531,23 @@ async def update_archive(
             detail="Only admins can update archives",
         )
 
-    query = select(Archive).where(
-        Archive.course_id == course_id,
-        Archive.id == archive_id,
-        Archive.deleted_at.is_(None),
-    )
-    result = await db.execute(query)
-    archive = result.scalar_one_or_none()
+    try:
+        locked = await acquire_stable_archive_mutation_locks(
+            db,
+            archive_id=archive_id,
+            target_course_id=None,
+            operation="archive_edit",
+        )
+    except ArchiveMutationLifecycleConflict:
+        raise archive_lifecycle_conflict_error()
+    archive = locked.archive(archive_id) if locked is not None else None
 
-    if not archive:
+    if (
+        not archive
+        or archive.course_id != course_id
+        or archive.deleted_at is not None
+    ):
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Archive not found"
         )
@@ -1566,8 +1581,7 @@ async def update_archive_course(
 ):
     """
     Update archive's course. Only admins can change archive's course.
-    Supports both transferring to existing course by ID or creating new
-    course by name and category.
+    Supports both course ID and the existing normalized name/category lookup.
     """
     if not current_user.is_admin:
         raise HTTPException(
@@ -1575,71 +1589,21 @@ async def update_archive_course(
             detail="Only admins can change archive's course",
         )
 
-    archive_query = select(Archive).where(
-        Archive.course_id == course_id,
-        Archive.id == archive_id,
-        Archive.deleted_at.is_(None),
-    )
-    archive_result = await db.execute(archive_query)
-    archive = archive_result.scalar_one_or_none()
-
-    if not archive:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Archive not found"
+    if course_update.course_id is not None:
+        target = await resolve_archive_move_target(
+            db,
+            course_id=course_update.course_id,
+            normalized_name=None,
+            category=None,
         )
-
-    # Determine target course
-    new_course = None
-
-    if course_update.course_id:
-        # Check if trying to transfer to the same course
-        if course_update.course_id == course_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot transfer archive to the same course",
-            )
-
-        # Transfer to existing course by ID
-        new_course_query = select(Course).where(
-            Course.id == course_update.course_id, Course.deleted_at.is_(None)
-        )
-        new_course_result = await db.execute(new_course_query)
-        new_course = new_course_result.scalar_one_or_none()
-
-        if not new_course:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Target course not found"
-            )
     elif course_update.course_name and course_update.course_category:
         normalized_course_name = normalize_course_search_text(course_update.course_name)
-        formatted_course_name = format_course_display_name(course_update.course_name)
-
-        # Transfer to course by name and category, create if not exists
-        new_course_query = select(Course).where(
-            normalized_course_text_expr(Course.name) == normalized_course_name,
-            Course.category == course_update.course_category,
-            Course.deleted_at.is_(None),
+        target = await resolve_archive_move_target(
+            db,
+            course_id=None,
+            normalized_name=normalized_course_name,
+            category=course_update.course_category,
         )
-        new_course_result = await db.execute(new_course_query)
-        new_course = new_course_result.scalar_one_or_none()
-
-        if new_course:
-            # Check if trying to transfer to the same course
-            if new_course.id == course_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Cannot transfer archive to the same course",
-                )
-        else:
-            # Create new course if it doesn't exist
-            new_course = Course(
-                name=formatted_course_name,
-                category=course_update.course_category,
-                order_index=await _next_order_index(db, course_update.course_category),
-            )
-            db.add(new_course)
-            await db.commit()
-            await db.refresh(new_course)
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1649,7 +1613,54 @@ async def update_archive_course(
             ),
         )
 
-    archive.course_id = new_course.id
+    try:
+        locked = await acquire_stable_archive_mutation_locks(
+            db,
+            archive_id=archive_id,
+            target_course_id=target.course_id,
+            operation="archive_move",
+        )
+    except ArchiveMutationLifecycleConflict:
+        raise archive_lifecycle_conflict_error()
+    archive = locked.archive(archive_id) if locked is not None else None
+    if (
+        archive is None
+        or archive.course_id != course_id
+        or archive.deleted_at is not None
+    ):
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Archive not found",
+        )
+
+    if target.course_id == course_id:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot transfer archive to the same course",
+        )
+
+    new_course = locked.course(target.course_id)
+    if new_course is None:
+        await db.rollback()
+        raise archive_move_target_not_found_error()
+    if new_course.deleted_at is not None:
+        await db.rollback()
+        raise archive_move_target_trashed_error()
+
+    if target.normalized_name is not None:
+        revalidated_target = await resolve_archive_move_target(
+            db,
+            course_id=None,
+            normalized_name=target.normalized_name,
+            category=target.category,
+        )
+        if revalidated_target.course_id != target.course_id:
+            await db.rollback()
+            raise course_lifecycle_conflict_error()
+
+    archive.course_id = target.course_id
     archive.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
@@ -1659,7 +1670,7 @@ async def update_archive_course(
         "message": f"Archive moved to course '{new_course.name}'",
         "archive_id": archive.id,
         "old_course_id": course_id,
-        "new_course_id": new_course.id,
+        "new_course_id": target.course_id,
     }
 
 

@@ -132,6 +132,32 @@ state and membership revalidation, snapshot mutation, and response refresh are
 inside that transaction. A failed request rolls the snapshot back and leaves
 the linked Archive and notification/event state unchanged.
 
+### Archive metadata mutation and reparenting
+
+Archive management is administrator-only. The editable metadata fields are
+`name`, `professor`, `archive_type`, `has_answers`, and `academic_year`.
+Mutation acquires and revalidates the canonical Course, Archive, and exact
+ArchiveSubmission plan before writing, and it never changes Submission status,
+delete provenance, ownership, or self-delete eligibility.
+
+Archive reparenting preserves both the exact `course_id` input and the existing
+normalized name/category input. A successful request resolves one active
+Course ID and uses that ID for planning, locking, revalidation, mutation, and
+the response. It never creates or restores a Course. A missing target returns
+`404 archive_move_target_course_not_found` with
+`目標課程不存在，請先建立課程。` and `reload_required=false`. A target found
+only in trash returns `409 course_lifecycle_conflict` with
+`目標課程已在垃圾桶，請先恢復課程。` and `reload_required=false`.
+
+For normalized name/category lookup, one active match wins even when trashed
+duplicates exist, without touching those trashed rows. Zero active matches and
+one or more trashed matches use the trash conflict above. Multiple active
+matches are a static integrity anomaly: the operation selects no Course, logs
+sanitized aggregate context, and fails through the generic internal-error
+boundary. Metadata mutation and reparenting retain one caller-owned database
+transaction, so validation, lifecycle drift, or commit failure leaves both
+metadata and the Course relationship unchanged.
+
 | Value | Canonical Chinese label |
 | --- | --- |
 | `pending` | 待審核 |
