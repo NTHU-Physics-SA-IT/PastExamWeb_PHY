@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
@@ -6,6 +7,7 @@ from fastapi import HTTPException
 from httpx import AsyncClient
 from minio.error import S3Error
 from sqlalchemy import delete, func
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from app.api.services.archive_submission_lifecycle import (
@@ -50,6 +52,7 @@ from app.utils.course_text import (
     normalize_course_search_text,
     normalized_course_text_expr,
 )
+from app.services.archive_mutation import ArchiveMoveTargetInvariantError
 
 
 async def _create_course(
@@ -1069,7 +1072,285 @@ async def test_update_archive_course_transfers_to_existing_course(
 
 
 @pytest.mark.asyncio
-async def test_update_archive_course_creates_new_course_when_missing(
+async def test_update_archive_course_name_uses_unique_active_with_trashed_duplicates(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    admin = await make_user(is_admin=True)
+    marker = uuid.uuid4().hex
+    original = await _create_course(session_maker, name=f"Original {marker}")
+    active = await _create_course(session_maker, name=f"Target ({marker})")
+    trashed = [
+        await _create_course(session_maker, name=f" Target（{marker}） "),
+        await _create_course(session_maker, name=f"Target ( {marker} )"),
+    ]
+    async with session_maker() as session:
+        for course in trashed:
+            stored = await session.get(Course, course.id)
+            stored.deleted_at = datetime.now(timezone.utc)
+        await session.commit()
+    archive = await _create_archive(
+        session_maker,
+        course_id=original.id,
+        uploader_id=admin.id,
+    )
+    submission = await _create_linked_submission(
+        session_maker,
+        archive=archive,
+        requester_id=admin.id,
+    )
+    app.dependency_overrides[get_current_user] = _override_user(admin)
+
+    try:
+        response = await client.patch(
+            f"/courses/{original.id}/archives/{archive.id}/course",
+            json={
+                "course_name": f" Target（{marker}） ",
+                "course_category": CourseCategory.FRESHMAN.value,
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["new_course_id"] == active.id
+        async with session_maker() as session:
+            stored_archive = await session.get(Archive, archive.id)
+            stored_submission = await session.get(ArchiveSubmission, submission.id)
+            assert stored_archive.course_id == active.id
+            assert stored_submission.status == SubmissionStatus.APPROVED
+            assert stored_submission.created_archive_id == archive.id
+            assert all([
+                (await session.get(Course, item.id)).deleted_at is not None
+                for item in trashed
+            ])
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(ArchiveSubmission).where(
+                    ArchiveSubmission.id == submission.id
+                )
+            )
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(
+                delete(Course).where(
+                    Course.id.in_([original.id, active.id, *(item.id for item in trashed)])
+                )
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_update_archive_course_trashed_targets_return_exact_contract(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    admin = await make_user(is_admin=True)
+    marker = uuid.uuid4().hex
+    original = await _create_course(session_maker, name=f"Original {marker}")
+    trashed = [
+        await _create_course(session_maker, name=f"Trashed ({marker})"),
+        await _create_course(session_maker, name=f" Trashed（{marker}） "),
+    ]
+    async with session_maker() as session:
+        for course in trashed:
+            stored = await session.get(Course, course.id)
+            stored.deleted_at = datetime.now(timezone.utc)
+        await session.commit()
+    archive = await _create_archive(
+        session_maker,
+        course_id=original.id,
+        uploader_id=admin.id,
+    )
+    app.dependency_overrides[get_current_user] = _override_user(admin)
+
+    expected = {
+        "detail": {
+            "code": "course_lifecycle_conflict",
+            "message": "目標課程已在垃圾桶，請先恢復課程。",
+            "reload_required": False,
+        }
+    }
+    try:
+        by_id = await client.patch(
+            f"/courses/{original.id}/archives/{archive.id}/course",
+            json={"course_id": trashed[0].id},
+        )
+        by_name = await client.patch(
+            f"/courses/{original.id}/archives/{archive.id}/course",
+            json={
+                "course_name": f"Trashed ({marker})",
+                "course_category": CourseCategory.FRESHMAN.value,
+            },
+        )
+        assert (by_id.status_code, by_id.json()) == (409, expected)
+        assert (by_name.status_code, by_name.json()) == (409, expected)
+        async with session_maker() as session:
+            assert (await session.get(Archive, archive.id)).course_id == original.id
+            assert all([
+                (await session.get(Course, item.id)).deleted_at is not None
+                for item in trashed
+            ])
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(
+                delete(Course).where(
+                    Course.id.in_([original.id, *(item.id for item in trashed)])
+                )
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_update_archive_course_multiple_active_matches_fail_closed_and_log(
+    session_maker,
+    make_user,
+    caplog,
+):
+    admin = await make_user(is_admin=True)
+    marker = uuid.uuid4().hex
+    original = await _create_course(session_maker, name=f"Original {marker}")
+    duplicates = [
+        await _create_course(session_maker, name=f"Ambiguous ({marker})"),
+        await _create_course(session_maker, name=f" Ambiguous（{marker}） "),
+    ]
+    archive = await _create_archive(
+        session_maker,
+        course_id=original.id,
+        uploader_id=admin.id,
+    )
+
+    try:
+        async with session_maker() as session:
+            with caplog.at_level("ERROR"):
+                with pytest.raises(ArchiveMoveTargetInvariantError):
+                    await update_archive_course(
+                        course_id=original.id,
+                        archive_id=archive.id,
+                        course_update=ArchiveUpdateCourse(
+                            course_name=f"Ambiguous ({marker})",
+                            course_category=CourseCategory.FRESHMAN.value,
+                        ),
+                        current_user=UserRoles(
+                            user_id=admin.id,
+                            is_admin=True,
+                        ),
+                        db=session,
+                    )
+            await session.rollback()
+        assert "archive_move_target_course_invariant_violation" in caplog.messages
+        async with session_maker() as session:
+            assert (await session.get(Archive, archive.id)).course_id == original.id
+    finally:
+        async with session_maker() as session:
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(
+                delete(Course).where(
+                    Course.id.in_([original.id, *(item.id for item in duplicates)])
+                )
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_update_archive_course_commit_failure_rolls_back_relationship(
+    session_maker,
+    make_user,
+    monkeypatch,
+):
+    admin = await make_user(is_admin=True)
+    original = await _create_course(session_maker, name=f"Original {uuid.uuid4().hex}")
+    target = await _create_course(session_maker, name=f"Target {uuid.uuid4().hex}")
+    archive = await _create_archive(
+        session_maker,
+        course_id=original.id,
+        uploader_id=admin.id,
+    )
+
+    async def fail_commit(_session):
+        raise RuntimeError("archive move commit failed")
+
+    try:
+        async with session_maker() as session:
+            with monkeypatch.context() as commit_patch:
+                commit_patch.setattr(AsyncSession, "commit", fail_commit)
+                with pytest.raises(RuntimeError, match="archive move commit failed"):
+                    await update_archive_course(
+                        course_id=original.id,
+                        archive_id=archive.id,
+                        course_update=ArchiveUpdateCourse(course_id=target.id),
+                        current_user=UserRoles(
+                            user_id=admin.id,
+                            is_admin=True,
+                        ),
+                        db=session,
+                    )
+            await session.rollback()
+        async with session_maker() as session:
+            assert (await session.get(Archive, archive.id)).course_id == original.id
+    finally:
+        async with session_maker() as session:
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(
+                delete(Course).where(Course.id.in_([original.id, target.id]))
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_archive_moves_serialize_without_deadlock(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    admin = await make_user(is_admin=True)
+    source = await _create_course(session_maker, name=f"Source {uuid.uuid4().hex}")
+    targets = [
+        await _create_course(session_maker, name=f"Target {uuid.uuid4().hex}")
+        for _ in range(2)
+    ]
+    archive = await _create_archive(
+        session_maker,
+        course_id=source.id,
+        uploader_id=admin.id,
+    )
+    app.dependency_overrides[get_current_user] = _override_user(admin)
+
+    try:
+        responses = await asyncio.wait_for(
+            asyncio.gather(
+                *(
+                    client.patch(
+                        f"/courses/{source.id}/archives/{archive.id}/course",
+                        json={"course_id": target.id},
+                    )
+                    for target in targets
+                )
+            ),
+            timeout=10,
+        )
+        assert sorted(response.status_code for response in responses) == [200, 404]
+        winner = next(response for response in responses if response.status_code == 200)
+        async with session_maker() as session:
+            assert (await session.get(Archive, archive.id)).course_id == (
+                winner.json()["new_course_id"]
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(
+                delete(Course).where(
+                    Course.id.in_([source.id, *(target.id for target in targets)])
+                )
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_update_archive_course_missing_name_returns_exact_contract_without_create(
     client: AsyncClient,
     session_maker,
     make_user,
@@ -1092,15 +1373,28 @@ async def test_update_archive_course_creates_new_course_when_missing(
                 "course_category": CourseCategory.FRESHMAN.value,
             },
         )
-        assert response.status_code == 200
-        body = response.json()
-        assert body["message"].startswith("Archive moved to course")
+        assert response.status_code == 404
+        assert response.json() == {
+            "detail": {
+                "code": "archive_move_target_course_not_found",
+                "message": "目標課程不存在，請先建立課程。",
+                "reload_required": False,
+            }
+        }
 
         async with session_maker() as session:
             refreshed = await session.get(Archive, archive.id)
-            assert refreshed.course_id != original.id
-            new_course = await session.get(Course, body["new_course_id"])
-            assert new_course.name == "New Course"
+            assert refreshed.course_id == original.id
+            assert (
+                await session.scalar(
+                    select(func.count(Course.id)).where(
+                        normalized_course_text_expr(Course.name)
+                        == normalize_course_search_text("New Course"),
+                        Course.category == CourseCategory.FRESHMAN,
+                    )
+                )
+                or 0
+            ) == 0
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
@@ -1466,6 +1760,11 @@ async def test_update_archive_course_target_course_missing(
                 db=session,
             )
         assert exc.value.status_code == 404
+        assert exc.value.detail == {
+            "code": "archive_move_target_course_not_found",
+            "message": "目標課程不存在，請先建立課程。",
+            "reload_required": False,
+        }
 
     async with session_maker() as session:
         await session.execute(delete(Archive).where(Archive.id == archive.id))
