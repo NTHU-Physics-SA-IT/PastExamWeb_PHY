@@ -20,8 +20,12 @@ from urllib.request import Request, urlopen
 
 
 CI_MODES = frozenset({"full", "equivalent-merge", "docs-only"})
-LIVE_EQUIVALENT_TARGET_REFS: frozenset[str] = frozenset()
-LIVE_EQUIVALENT_PR_BASE_REFS: frozenset[str] = frozenset()
+LIVE_EQUIVALENT_TARGET_REFS: frozenset[str] = frozenset(
+    {"refs/heads/fix/submission-status-api-conformance"}
+)
+LIVE_EQUIVALENT_PR_BASE_REFS: frozenset[str] = frozenset(
+    {"fix/submission-status-api-conformance"}
+)
 IMPLEMENTATION_BRANCH = "fix/submission-status-api-conformance"
 SUPPORTED_PR_ACTIONS = frozenset(
     {"opened", "reopened", "synchronize", "ready_for_review"}

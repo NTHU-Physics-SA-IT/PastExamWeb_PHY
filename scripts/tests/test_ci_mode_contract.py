@@ -89,9 +89,11 @@ class FakeAPI:
         runs: list[dict[str, Any]] | None = None,
         jobs: list[dict[str, Any]] | None = None,
         error: Exception | None = None,
+        target_ref: str = "target",
     ) -> None:
         self.source_sha = source_sha
         self.target_sha = target_sha
+        self.target_ref = target_ref
         self.error = error
         self.runs = runs or [
             {
@@ -124,7 +126,7 @@ class FakeAPI:
     def ref_sha(self, ref_name: str) -> str:
         if self.error:
             raise self.error
-        assert ref_name == "target"
+        assert ref_name == self.target_ref
         return self.target_sha
 
 
@@ -281,10 +283,21 @@ def _classify_pr_equivalent(
     )
 
 
-def test_classifier_defines_only_three_modes_and_empty_live_allowlist() -> None:
+def test_classifier_defines_only_three_modes_and_exact_live_allowlists() -> None:
     assert ci.CI_MODES == frozenset({"full", "equivalent-merge", "docs-only"})
-    assert ci.LIVE_EQUIVALENT_TARGET_REFS == frozenset()
-    assert ci.LIVE_EQUIVALENT_PR_BASE_REFS == frozenset()
+    assert ci.LIVE_EQUIVALENT_TARGET_REFS == frozenset(
+        {"refs/heads/fix/submission-status-api-conformance"}
+    )
+    assert ci.LIVE_EQUIVALENT_PR_BASE_REFS == frozenset(
+        {"fix/submission-status-api-conformance"}
+    )
+    assert all(
+        not any(token in ref for token in ("*", "?", "["))
+        for ref in (
+            *ci.LIVE_EQUIVALENT_TARGET_REFS,
+            *ci.LIVE_EQUIVALENT_PR_BASE_REFS,
+        )
+    )
 
 
 @pytest.mark.parametrize(
@@ -368,17 +381,26 @@ def test_valid_two_parent_equivalent_merge_is_eligible(tmp_path: Path) -> None:
     assert result.source_tree == fixture["git"].tree_sha(fixture["source"])
 
 
-def test_rollout_disabled_keeps_valid_equivalent_fixture_full(tmp_path: Path) -> None:
+def test_live_push_allowlist_accepts_valid_equivalent_fixture(
+    tmp_path: Path,
+) -> None:
     fixture = _equivalent_repository(tmp_path)
 
     result = ci.classify_ci_mode(
-        event=_event(fixture),
+        event=_event(
+            fixture,
+            ref="refs/heads/fix/submission-status-api-conformance",
+        ),
         git=fixture["git"],
-        api=FakeAPI(source_sha=fixture["source"], target_sha=fixture["merge"]),
+        api=FakeAPI(
+            source_sha=fixture["source"],
+            target_sha=fixture["merge"],
+            target_ref=ci.IMPLEMENTATION_BRANCH,
+        ),
         now=NOW,
     )
 
-    assert result.ci_mode == "full"
+    assert result.ci_mode == "equivalent-merge"
 
 
 def test_valid_pr_synthetic_candidate_is_eligible(tmp_path: Path) -> None:
@@ -392,7 +414,7 @@ def test_valid_pr_synthetic_candidate_is_eligible(tmp_path: Path) -> None:
     assert result.source_tree == fixture["git"].tree_sha(fixture["source"])
 
 
-def test_pr_rollout_disabled_keeps_valid_candidate_full(tmp_path: Path) -> None:
+def test_live_pr_allowlist_accepts_valid_candidate(tmp_path: Path) -> None:
     fixture = _equivalent_repository(tmp_path)
 
     result = ci.classify_ci_mode(
@@ -402,7 +424,37 @@ def test_pr_rollout_disabled_keeps_valid_candidate_full(tmp_path: Path) -> None:
         now=NOW,
     )
 
+    assert result.ci_mode == "equivalent-merge"
+
+
+def test_live_push_governance_merge_falls_back_to_full(
+    tmp_path: Path,
+) -> None:
+    fixture = _equivalent_repository(tmp_path)
+    git = GitOverrides(
+        fixture["git"],
+        changed_paths=("scripts/ci/classify_ci_mode.py",),
+    )
+    api = FakeAPI(
+        source_sha=fixture["source"],
+        target_sha=fixture["merge"],
+        target_ref=ci.IMPLEMENTATION_BRANCH,
+    )
+
+    result = ci.classify_ci_mode(
+        event=_event(
+            fixture,
+            ref="refs/heads/fix/submission-status-api-conformance",
+        ),
+        git=git,
+        api=api,
+        now=NOW,
+    )
+
     assert result.ci_mode == "full"
+    assert result.reason.startswith(
+        "equivalent validation failed closed: source modifies governance path:"
+    )
 
 
 def test_pr_governance_change_requires_full_before_allowlist(
