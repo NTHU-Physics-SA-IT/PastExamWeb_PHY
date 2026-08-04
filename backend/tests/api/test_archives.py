@@ -1,4 +1,5 @@
 import io
+from datetime import datetime, timezone
 import uuid
 
 import pytest
@@ -6,6 +7,7 @@ import pytest_asyncio
 from fastapi import HTTPException
 from httpx import AsyncClient
 from sqlalchemy import delete, select, func
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import UploadFile
 
 from app.api.services.archives import upload_archive
@@ -441,7 +443,9 @@ async def test_archive_review_statuses_create_deduplicated_notifications(
             )
             await session.execute(delete(Course).where(Course.id == course.id))
             await session.execute(
-                delete(CourseCategoryConfig).where(CourseCategoryConfig.key == category_key)
+                delete(CourseCategoryConfig).where(
+                    CourseCategoryConfig.key == category_key
+                )
             )
             await session.commit()
 
@@ -504,7 +508,9 @@ async def test_upload_archive_creates_course_and_archive(
             assert course is None
 
             result = await session.execute(
-                select(ArchiveSubmission).where(ArchiveSubmission.id == submission_data["id"])
+                select(ArchiveSubmission).where(
+                    ArchiveSubmission.id == submission_data["id"]
+                )
             )
             submission = result.scalar_one_or_none()
             assert submission is not None
@@ -514,7 +520,9 @@ async def test_upload_archive_creates_course_and_archive(
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
             await session.execute(
-                delete(ArchiveSubmission).where(ArchiveSubmission.requester_id == user_id)
+                delete(ArchiveSubmission).where(
+                    ArchiveSubmission.requester_id == user_id
+                )
             )
             await session.commit()
 
@@ -615,7 +623,9 @@ async def test_upload_archive_reuses_existing_course(
 
         async with session_maker() as session:
             await session.execute(
-                delete(ArchiveSubmission).where(ArchiveSubmission.requester_id == user.id)
+                delete(ArchiveSubmission).where(
+                    ArchiveSubmission.requester_id == user.id
+                )
             )
             count = await session.execute(
                 select(func.count()).where(Course.name == subject)
@@ -625,11 +635,11 @@ async def test_upload_archive_reuses_existing_course(
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
             await session.execute(
-                delete(ArchiveSubmission).where(ArchiveSubmission.requester_id == user.id)
+                delete(ArchiveSubmission).where(
+                    ArchiveSubmission.requester_id == user.id
+                )
             )
-            await session.execute(
-                delete(Archive).where(Archive.uploader_id == user.id)
-            )
+            await session.execute(delete(Archive).where(Archive.uploader_id == user.id))
             await session.execute(delete(Course).where(Course.name == subject))
             await session.commit()
 
@@ -832,9 +842,7 @@ async def test_upload_archive_handles_storage_failure(
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
-            await session.execute(
-                delete(Course).where(Course.name == "Fail Course")
-            )
+            await session.execute(delete(Course).where(Course.name == "Fail Course"))
             await session.commit()
 
 
@@ -908,13 +916,9 @@ async def test_upload_archive_function_covers_creation_and_reuse(
                 )
             )
             await session.execute(
-                delete(Archive).where(
-                    Archive.id.in_([first_id, second_id])
-                )
+                delete(Archive).where(Archive.id.in_([first_id, second_id]))
             )
-            await session.execute(
-                delete(Course).where(Course.id == course_id)
-            )
+            await session.execute(delete(Course).where(Course.id == course_id))
             await session.commit()
 
 
@@ -1038,7 +1042,7 @@ async def test_admin_upload_persists_requested_category_caller_transaction(
 
 
 @pytest.mark.asyncio
-async def test_admin_edit_persists_requested_category_caller_transaction(
+async def test_admin_edit_updates_snapshot_without_parent_or_archive_drift(
     client: AsyncClient,
     session_maker,
     make_user,
@@ -1121,7 +1125,7 @@ async def test_admin_edit_persists_requested_category_caller_transaction(
                         CourseCategoryConfig.key == new_category_key
                     )
                 )
-            ).scalar_one()
+            ).scalar_one_or_none()
             course = (
                 await session.execute(
                     select(Course).where(
@@ -1129,16 +1133,17 @@ async def test_admin_edit_persists_requested_category_caller_transaction(
                         Course.name == new_course_name,
                     )
                 )
-            ).scalar_one()
+            ).scalar_one_or_none()
             stored_archive = await session.get(Archive, archive_id)
             stored_submission = await session.get(
                 ArchiveSubmission,
                 submission_id,
             )
 
-            assert category.is_active is True
-            assert course.category == category.key
-            assert stored_archive.course_id == course.id
+            assert category is None
+            assert course is None
+            assert stored_archive.course_id == original_course_id
+            assert stored_archive.name != new_course_name
             assert stored_submission.subject == new_course_name
             assert stored_submission.category == new_category_key
             assert stored_submission.requested_category_key == new_category_key
@@ -1162,6 +1167,277 @@ async def test_admin_edit_persists_requested_category_caller_transaction(
                 )
             )
             await session.commit()
+
+
+@pytest.mark.parametrize(
+    ("submission_status", "expected_http_status", "expected_editable"),
+    (
+        (SubmissionStatus.PENDING, 200, True),
+        (SubmissionStatus.REJECTED, 200, True),
+        (SubmissionStatus.TAKEDOWN, 200, True),
+        (SubmissionStatus.APPROVED, 409, False),
+        (SubmissionStatus.DELETED, 409, False),
+    ),
+)
+@pytest.mark.asyncio
+async def test_admin_edit_enforces_submission_state_contract(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    submission_status,
+    expected_http_status,
+    expected_editable,
+):
+    unique = uuid.uuid4().hex
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    deleted_at = (
+        datetime.now(timezone.utc)
+        if submission_status == SubmissionStatus.DELETED
+        else None
+    )
+    archive_deleted_at = (
+        datetime.now(timezone.utc)
+        if submission_status == SubmissionStatus.TAKEDOWN
+        else None
+    )
+    async with session_maker() as session:
+        course = Course(
+            name=f"Edit state course {unique}",
+            category=CourseCategory.FRESHMAN.value,
+        )
+        session.add(course)
+        await session.flush()
+        archive = Archive(
+            course_id=course.id,
+            name=f"Edit state exam {unique}",
+            academic_year=2026,
+            archive_type=ArchiveType.FINAL,
+            professor="Original archive professor",
+            object_name=f"archive-submissions/edit-state-{unique}.pdf",
+            uploader_id=requester.id,
+            deleted_at=archive_deleted_at,
+        )
+        session.add(archive)
+        await session.flush()
+        submission = ArchiveSubmission(
+            subject=course.name,
+            category=CourseCategory.FRESHMAN.value,
+            name=archive.name,
+            academic_year=archive.academic_year,
+            archive_type=archive.archive_type,
+            professor="Original submission professor",
+            object_name=archive.object_name,
+            requester_id=requester.id,
+            status=submission_status,
+            previous_status=(
+                SubmissionStatus.PENDING
+                if submission_status == SubmissionStatus.DELETED
+                else None
+            ),
+            created_archive_id=archive.id,
+            deleted_at=deleted_at,
+        )
+        session.add(submission)
+        await session.commit()
+        await session.refresh(course)
+        await session.refresh(archive)
+        await session.refresh(submission)
+        course_id = course.id
+        archive_id = archive.id
+        submission_id = submission.id
+
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        response = await client.put(
+            f"/archives/admin/submissions/{submission_id}",
+            json={"professor": "Edited submission professor"},
+        )
+
+        assert response.status_code == expected_http_status
+        if expected_editable:
+            assert response.json()["status"] == submission_status.value
+            assert response.json()["professor"] == "Edited submission professor"
+        else:
+            assert response.json() == {
+                "detail": {
+                    "code": "archive_submission_edit_forbidden",
+                    "message": "此狀態的投稿不可直接編輯。",
+                    "reload_required": False,
+                }
+            }
+
+        async with session_maker() as session:
+            stored_archive = await session.get(Archive, archive_id)
+            stored_submission = await session.get(
+                ArchiveSubmission,
+                submission_id,
+            )
+            assert stored_submission.status == submission_status
+            assert stored_submission.professor == (
+                "Edited submission professor"
+                if expected_editable
+                else "Original submission professor"
+            )
+            assert stored_archive.professor == "Original archive professor"
+            assert stored_archive.deleted_at == archive_deleted_at
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(ArchiveSubmission).where(ArchiveSubmission.id == submission_id)
+            )
+            await session.execute(delete(Archive).where(Archive.id == archive_id))
+            await session.execute(delete(Course).where(Course.id == course_id))
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_admin_edit_authorization_and_missing_target_keep_existing_boundaries(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    requester = await make_user()
+    non_admin = await make_user()
+    admin = await make_user(is_admin=True)
+    course, submission = await _create_pending_review_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+
+    app.dependency_overrides[get_current_user] = lambda: UserRoles(
+        user_id=non_admin.id,
+        is_admin=False,
+    )
+    try:
+        forbidden = await client.put(
+            f"/archives/admin/submissions/{submission.id}",
+            json={"professor": "Unauthorized edit"},
+        )
+        assert forbidden.status_code == 403
+        assert forbidden.json() == {"detail": "Admin access required"}
+
+        app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+        missing = await client.put(
+            "/archives/admin/submissions/2147483647",
+            json={"professor": "Missing edit"},
+        )
+        assert missing.status_code == 404
+        assert missing.json() == {"detail": "Submission not found"}
+
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, submission.id)
+            assert stored.professor == "Lifecycle Professor"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_review_context(
+            session_maker,
+            course_id=course.id,
+            submission_id=submission.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_admin_edit_has_one_caller_owned_commit(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    course, submission = await _create_pending_review_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    commit_calls = 0
+    original_commit = AsyncSession.commit
+
+    async def observed_commit(session):
+        nonlocal commit_calls
+        commit_calls += 1
+        return await original_commit(session)
+
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        with monkeypatch.context() as request_patch:
+            request_patch.setattr(AsyncSession, "commit", observed_commit)
+            response = await client.put(
+                f"/archives/admin/submissions/{submission.id}",
+                json={"professor": "Single commit professor"},
+            )
+
+        assert response.status_code == 200
+        assert commit_calls == 1
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, submission.id)
+            assert stored.professor == "Single commit professor"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_review_context(
+            session_maker,
+            course_id=course.id,
+            submission_id=submission.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_admin_edit_rolls_back_all_fields_when_final_commit_fails(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    course, submission = await _create_pending_review_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+
+    async def fail_commit(_session):
+        raise RuntimeError("injected edit commit failure")
+
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        with monkeypatch.context() as request_patch:
+            request_patch.setattr(AsyncSession, "commit", fail_commit)
+            with pytest.raises(
+                RuntimeError,
+                match="injected edit commit failure",
+            ):
+                await client.put(
+                    f"/archives/admin/submissions/{submission.id}",
+                    json={
+                        "professor": "Must roll back",
+                        "name": "Must also roll back",
+                    },
+                )
+
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, submission.id)
+            assert stored.professor == "Lifecycle Professor"
+            assert stored.name != "Must also roll back"
+            assert (
+                int(
+                    await session.scalar(
+                        select(func.count(PersonalNotification.id)).where(
+                            PersonalNotification.source_type == "archive_submission",
+                            PersonalNotification.source_id == submission.id,
+                        )
+                    )
+                    or 0
+                )
+                == 0
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_review_context(
+            session_maker,
+            course_id=course.id,
+            submission_id=submission.id,
+        )
 
 
 @pytest.mark.asyncio

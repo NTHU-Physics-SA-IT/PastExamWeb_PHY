@@ -93,6 +93,12 @@ from app.services.archive_lifecycle_locks import (
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+ARCHIVE_SUBMISSION_EDIT_FORBIDDEN_DETAIL = {
+    "code": "archive_submission_edit_forbidden",
+    "message": "此狀態的投稿不可直接編輯。",
+    "reload_required": False,
+}
+
 
 async def _ensure_category(db: AsyncSession, category_key: str) -> None:
     category_key = canonicalize_course_category_key(category_key)
@@ -176,20 +182,22 @@ def _serialize_archive_submission_action(
     return ArchiveSubmissionActionRead.model_validate(payload)
 
 
-def _is_locked_review_submission(submission: ArchiveSubmission) -> bool:
-    normalized_status = _normalize_submission_status(submission.status)
-    return (
-        normalized_status in {SubmissionStatus.TAKEDOWN, SubmissionStatus.DELETED}
-        or submission.deleted_at is not None
+def _ensure_archive_submission_editable(submission: ArchiveSubmission) -> None:
+    actual_status = _resolve_submission_actual_status(
+        submission.status,
+        deleted_at=submission.deleted_at,
     )
-
-
-def _ensure_review_submission_mutable(submission: ArchiveSubmission) -> None:
-    if _is_locked_review_submission(submission):
+    if actual_status in {SubmissionStatus.APPROVED, SubmissionStatus.DELETED}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="此投稿已下架或已刪除，僅能查看，不能再編輯或變更審核狀態。",
+            detail=dict(ARCHIVE_SUBMISSION_EDIT_FORBIDDEN_DETAIL),
         )
+    if actual_status not in {
+        SubmissionStatus.PENDING,
+        SubmissionStatus.REJECTED,
+        SubmissionStatus.TAKEDOWN,
+    }:
+        raise ValueError("Unsupported ArchiveSubmission edit state")
 
 
 @dataclass(frozen=True)
@@ -1360,106 +1368,68 @@ async def update_archive_submission_for_admin(
             status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
         )
 
-    submission = await db.get(ArchiveSubmission, submission_id)
-    if not submission:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
+    try:
+        locked = await acquire_stable_submission_lifecycle_locks(
+            db,
+            submission_id=submission_id,
+            operation="submission_edit",
         )
-    _ensure_review_submission_mutable(submission)
-
-    if submission_data.subject is not None:
-        submission.subject = format_course_display_name(submission_data.subject)
-    if submission_data.category is not None:
-        if not (
-            submission_data.requested_category_key or submission.requested_category_key
-        ):
-            await _ensure_category(db, submission_data.category)
-        submission.category = submission_data.category
-    if submission_data.name is not None:
-        submission.name = submission_data.name
-    if submission_data.academic_year is not None:
-        submission.academic_year = submission_data.academic_year
-    if submission_data.archive_type is not None:
-        submission.archive_type = submission_data.archive_type
-    if submission_data.professor is not None:
-        submission.professor = submission_data.professor
-    if submission_data.has_answers is not None:
-        submission.has_answers = submission_data.has_answers
-    if submission_data.requested_course_name is not None:
-        submission.requested_course_name = (
-            format_course_display_name(submission_data.requested_course_name) or None
-        )
-    if submission_data.requested_category_key is not None:
-        key = submission_data.requested_category_key.strip()
-        submission.requested_category_key = (
-            _normalize_category_key(key) if key else None
-        )
-    if submission_data.requested_category_name is not None:
-        submission.requested_category_name = (
-            submission_data.requested_category_name.strip() or None
-        )
-    if submission_data.requested_category_label is not None:
-        submission.requested_category_label = (
-            submission_data.requested_category_label.strip() or None
-        )
-    if submission_data.requested_category_icon is not None:
-        submission.requested_category_icon = (
-            submission_data.requested_category_icon.strip() or None
-        )
-
-    await db.commit()
-    await db.refresh(submission)
-
-    if submission.created_archive_id:
-        course_name = format_course_display_name(
-            submission.requested_course_name or submission.subject or ""
-        )
-        course_name_for_match = _normalize_course_match_text(course_name)
-        category_key = submission.requested_category_key or submission.category
-        if submission.requested_category_key:
-            await _ensure_or_create_requested_category(
-                db,
-                submission.requested_category_key,
-                submission.requested_category_name,
-                submission.requested_category_label,
-                submission.requested_category_icon,
-                commit=True,
+        submission = locked.submission(submission_id) if locked is not None else None
+        if submission is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Submission not found",
             )
-        else:
-            await _ensure_category(db, category_key)
+        _ensure_archive_submission_editable(submission)
 
-        course = (
-            await db.execute(
-                select(Course).where(
-                    normalized_course_text_expr(Course.name) == course_name_for_match,
-                    Course.category == category_key,
-                    Course.deleted_at.is_(None),
-                )
+        if submission_data.subject is not None:
+            submission.subject = format_course_display_name(submission_data.subject)
+        if submission_data.category is not None:
+            if not (
+                submission_data.requested_category_key
+                or submission.requested_category_key
+            ):
+                await _ensure_category(db, submission_data.category)
+            submission.category = submission_data.category
+        if submission_data.name is not None:
+            submission.name = submission_data.name
+        if submission_data.academic_year is not None:
+            submission.academic_year = submission_data.academic_year
+        if submission_data.archive_type is not None:
+            submission.archive_type = submission_data.archive_type
+        if submission_data.professor is not None:
+            submission.professor = submission_data.professor
+        if submission_data.has_answers is not None:
+            submission.has_answers = submission_data.has_answers
+        if submission_data.requested_course_name is not None:
+            submission.requested_course_name = (
+                format_course_display_name(submission_data.requested_course_name)
+                or None
             )
-        ).scalar_one_or_none()
-        if not course:
-            course = Course(
-                name=course_name,
-                category=category_key,
-                order_index=await _next_course_order_index(db, category_key),
+        if submission_data.requested_category_key is not None:
+            key = submission_data.requested_category_key.strip()
+            submission.requested_category_key = (
+                _normalize_category_key(key) if key else None
             )
-            db.add(course)
-            await db.commit()
-            await db.refresh(course)
+        if submission_data.requested_category_name is not None:
+            submission.requested_category_name = (
+                submission_data.requested_category_name.strip() or None
+            )
+        if submission_data.requested_category_label is not None:
+            submission.requested_category_label = (
+                submission_data.requested_category_label.strip() or None
+            )
+        if submission_data.requested_category_icon is not None:
+            submission.requested_category_icon = (
+                submission_data.requested_category_icon.strip() or None
+            )
 
-        archive = await db.get(Archive, submission.created_archive_id)
-        if archive:
-            archive.course_id = course.id
-            archive.name = submission.name
-            archive.academic_year = submission.academic_year
-            archive.archive_type = submission.archive_type
-            archive.professor = submission.professor
-            archive.has_answers = submission.has_answers
-            archive.updated_at = datetime.now(timezone.utc)
-            db.add(archive)
-            await db.commit()
-
-    return _serialize_archive_submission_admin(submission)
+        await db.commit()
+        await db.refresh(submission)
+        return _serialize_archive_submission_admin(submission)
+    except Exception:
+        await db.rollback()
+        raise
 
 
 @router.post(

@@ -102,6 +102,36 @@ accepted by the direct API contract but are not advertised. In particular,
 normalizes the row to `deleted` for both route enforcement and capability
 projection.
 
+### Direct administrator edit
+
+After administrator authorization, the direct Submission edit route acquires
+and revalidates the canonical Course, Archive, ArchiveSubmission plan before
+classifying the locked status:
+
+| Status | Direct Submission edit |
+| --- | --- |
+| `pending` | allowed |
+| `approved` | forbidden |
+| `rejected` | allowed |
+| `takedown` | allowed without republishing |
+| `deleted` | forbidden |
+
+The editable states update only the Submission snapshot. They do not create or
+move a Course, mutate a linked Archive, publish a linked Archive, or invoke a
+review transition. Public approved content is edited through the Archive
+management API; a deleted Submission must be restored before it can be edited.
+The forbidden states return `409 Conflict` with
+`archive_submission_edit_forbidden`, the message
+`此狀態的投稿不可直接編輯。`, and `reload_required=false`. This stable
+business restriction is distinct from stale expected-state, lifecycle drift,
+one-to-one conflicts, static corruption, and
+`archive_submission_illegal_transition`.
+
+The edit route owns one database commit. Canonical plan acquisition, locked
+state and membership revalidation, snapshot mutation, and response refresh are
+inside that transaction. A failed request rolls the snapshot back and leaves
+the linked Archive and notification/event state unchanged.
+
 | Value | Canonical Chinese label |
 | --- | --- |
 | `pending` | 待審核 |
@@ -343,9 +373,10 @@ for reversible submission soft delete. It may preserve only `pending`,
 `approved`, `rejected`, or `takedown`, and only after a submission truly enters
 the `deleted` lifecycle. Every active row (`deleted_at IS NULL` and normalized
 status other than `deleted`) keeps this column null. Historical deleted rows
-whose prior state cannot be proven also keep it null; a future restore must
-fail closed for those rows rather than infer from `created_archive_id`, a
-linked Archive, or review metadata. Permanent or otherwise unrestorable rows
+whose prior state cannot be proven also keep it null. Submission restore uses
+that missing provenance as the explicit compatibility case and returns the
+Submission to `pending`; it never infers `approved` from `created_archive_id`,
+a linked Archive, or review metadata. Permanent or otherwise unrestorable rows
 have no restorable prior state.
 
 Course trash is a separate active lifecycle. Its affected submissions remain
@@ -376,16 +407,18 @@ administrator, or system/cascade soft-delete records the exact normalized
 active source status before entering `deleted`; an authorized no-op retry does
 not overwrite it. Owner deletion also consumes the submission's monotonic
 self-delete eligibility, while administrator and system/cascade deletion
-preserve the existing eligibility value. The current restore path clears the
-delete-only value when it makes the row active, as required by the existing
-database guard, but S3A-2 still owns exact-state restoration and the approved
-pending fallback for legacy null provenance. Course trash/restore continues
-using its versioned marker.
+preserve the existing eligibility value. S3A-2 restores a known
+`previous_status` exactly, falls back to `pending` when historical provenance
+is null, and clears the delete-only value only after making the row active, as
+required by the database guard. Only an exact `approved` restore makes the
+retained linked Archive active; pending, rejected, takedown, and compatibility
+fallback restores leave it non-public. Restore never resets owner self-delete
+eligibility. Course trash/restore continues using its versioned marker.
 
-### Known gap
-
-Current grouped restore can approve linked submissions without reliably
-recovering a pending/rejected previous state.
+Focused PostgreSQL coverage protects exact pending, approved, rejected, and
+takedown restoration, the null-to-pending compatibility fallback, linked
+Archive visibility, owner-eligibility preservation, exact one-to-one
+membership, canonical lock order, and delete-versus-restore serialization.
 
 ### Owner self-delete eligibility persistence
 

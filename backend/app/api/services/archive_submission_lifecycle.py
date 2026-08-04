@@ -149,6 +149,19 @@ def is_archive_submission_trashed(submission: ArchiveSubmission) -> bool:
     )
 
 
+def _resolve_submission_restore_status(
+    previous_status: Optional[SubmissionStatus],
+) -> SubmissionStatus:
+    if previous_status in {
+        SubmissionStatus.PENDING,
+        SubmissionStatus.APPROVED,
+        SubmissionStatus.REJECTED,
+        SubmissionStatus.TAKEDOWN,
+    }:
+        return previous_status
+    return SubmissionStatus.PENDING
+
+
 async def acquire_stable_submission_lifecycle_locks(
     db: SQLModelAsyncSession,
     *,
@@ -545,11 +558,23 @@ async def restore_archive_submission_group(
         submission=submission,
         exact_link_only=exact_link_only,
     )
+    restore_status_by_submission_id = {
+        item.id: _resolve_submission_restore_status(item.previous_status)
+        for item in group.submissions
+        if item.id is not None and is_archive_submission_trashed(item)
+    }
+    restorable_archive_ids = {
+        item.created_archive_id
+        for item in group.submissions
+        if item.id is not None
+        and restore_status_by_submission_id.get(item.id) == SubmissionStatus.APPROVED
+        and item.created_archive_id is not None
+    }
     restored_archives = 0
     restored_submissions = 0
 
     for item in group.archives:
-        if item.deleted_at is None:
+        if item.id not in restorable_archive_ids or item.deleted_at is None:
             continue
         item.deleted_at = None
         item.deleted_by_id = None
@@ -561,25 +586,18 @@ async def restore_archive_submission_group(
     for item in group.submissions:
         if not is_archive_submission_trashed(item):
             continue
+        restore_status = restore_status_by_submission_id.get(
+            item.id,
+            SubmissionStatus.PENDING,
+        )
         item.deleted_at = None
         item.deleted_by_id = None
         item.delete_reason = None
         item.lifecycle_reason = None
         item.restored_at = timestamp
         item.restored_by_id = user_id
-        item.status = (
-            SubmissionStatus.APPROVED
-            if item.created_archive_id
-            else SubmissionStatus.PENDING
-        )
-        # S3A-1 records the exact delete source as provenance. The current
-        # restore behavior remains unchanged until S3A-2, but active rows must
-        # consume that delete-only provenance to satisfy the existing model
-        # invariant.
+        item.status = restore_status
         item.previous_status = None
-        if item.created_archive_id:
-            item.reviewed_at = timestamp
-            item.reviewer_id = user_id
         restored_submissions += 1
 
     return {

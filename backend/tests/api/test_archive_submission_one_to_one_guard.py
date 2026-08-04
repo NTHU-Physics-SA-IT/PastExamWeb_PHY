@@ -233,10 +233,12 @@ async def test_submission_restore_accepts_its_exact_retained_link(
             object_name=archive.object_name,
             requester_id=requester.id,
             status=SubmissionStatus.DELETED,
+            previous_status=SubmissionStatus.APPROVED,
             created_archive_id=archive.id,
             deleted_at=deleted_at,
             deleted_by_id=admin.id,
             delete_reason="admin deleted",
+            owner_self_delete_consumed=True,
         )
         session.add(submission)
         await session.commit()
@@ -267,6 +269,8 @@ async def test_submission_restore_accepts_its_exact_retained_link(
             assert stored_submission.created_archive_id == archive_id
             assert stored_submission.status == SubmissionStatus.APPROVED
             assert stored_submission.deleted_at is None
+            assert stored_submission.previous_status is None
+            assert stored_submission.owner_self_delete_consumed is True
             assert stored_archive.deleted_at is None
             assert (
                 int(
@@ -468,6 +472,125 @@ async def test_restore_link_conflict_is_409_without_lifecycle_mutation(
                 == submission_before
             )
             assert _snapshot(await session.get(Archive, archive_id)) == archive_before
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup(
+            session_maker,
+            submission_ids=[submission_id],
+            archive_ids=[archive_id],
+            course_ids=[course_id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_submission_restore_rolls_back_status_provenance_and_archive(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    marker = uuid.uuid4().hex
+    requester = await make_user(name=f"o2-rollback-requester-{marker[:8]}")
+    admin = await make_user(name=f"o2-rollback-admin-{marker[:8]}", is_admin=True)
+    deleted_at = datetime.now(timezone.utc)
+    async with session_maker() as session:
+        course = Course(
+            name=f"O2 Rollback Course {marker}",
+            category=CourseCategory.FRESHMAN,
+        )
+        session.add(course)
+        await session.flush()
+        archive = Archive(
+            course_id=course.id,
+            name=f"O2 Rollback Exam {marker}",
+            academic_year=2026,
+            archive_type=ArchiveType.FINAL,
+            professor="O2 Rollback Professor",
+            object_name=f"archive-submissions/o2-rollback-{marker}.pdf",
+            uploader_id=requester.id,
+            deleted_at=deleted_at,
+        )
+        session.add(archive)
+        await session.flush()
+        submission = ArchiveSubmission(
+            subject=course.name,
+            category=CourseCategory.FRESHMAN.value,
+            name=archive.name,
+            academic_year=archive.academic_year,
+            archive_type=archive.archive_type,
+            professor=archive.professor,
+            object_name=archive.object_name,
+            requester_id=requester.id,
+            status=SubmissionStatus.DELETED,
+            previous_status=SubmissionStatus.APPROVED,
+            created_archive_id=archive.id,
+            deleted_at=deleted_at,
+            deleted_by_id=admin.id,
+            delete_reason="admin deleted",
+            owner_self_delete_consumed=True,
+        )
+        session.add(submission)
+        await session.commit()
+        await session.refresh(course)
+        await session.refresh(archive)
+        await session.refresh(submission)
+        course_id = course.id
+        archive_id = archive.id
+        submission_id = submission.id
+        archive_before = _snapshot(archive)
+        submission_before = _snapshot(submission)
+
+    original_restore = trash_service.restore_archive_submission_group
+
+    async def fail_after_restore(*args, **kwargs):
+        await original_restore(*args, **kwargs)
+        raise RuntimeError("injected restore failure")
+
+    monkeypatch.setattr(
+        trash_service,
+        "restore_archive_submission_group",
+        fail_after_restore,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        with pytest.raises(RuntimeError, match="injected restore failure"):
+            await client.post(
+                "/trash/restore",
+                json={
+                    "item_type": "archive_submission",
+                    "item_id": submission_id,
+                },
+            )
+
+        async with session_maker() as session:
+            assert (
+                _snapshot(await session.get(ArchiveSubmission, submission_id))
+                == submission_before
+            )
+            assert _snapshot(await session.get(Archive, archive_id)) == archive_before
+            assert (
+                int(
+                    await session.scalar(
+                        select(func.count(PersonalNotification.id)).where(
+                            PersonalNotification.source_type == "archive_submission",
+                            PersonalNotification.source_id == submission_id,
+                        )
+                    )
+                    or 0
+                )
+                == 0
+            )
+            assert (
+                int(
+                    await session.scalar(
+                        select(func.count(ArchiveSubmissionEvent.id)).where(
+                            ArchiveSubmissionEvent.submission_id == submission_id
+                        )
+                    )
+                    or 0
+                )
+                == 0
+            )
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         await _cleanup(
