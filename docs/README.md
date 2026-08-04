@@ -25,9 +25,12 @@ Each rule or topic should have exactly one canonical source.
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Human contribution, PR, CI, and release gates | Active | Human contributor workflow. |
 | [`../.agents/skills/pastexam-web/SKILL.md`](../.agents/skills/pastexam-web/SKILL.md) | PastExamWeb_PHY task routing and workflow | Active | Does not store project facts; follows `AGENTS.md` and canonical documents. |
 | [`development/local-environment.md`](development/local-environment.md) | Local environment identities and safe Compose boundaries | Active | Canonical local environment contract; not a recovery runbook. |
+| [`development/backend-runtime-recovery.md`](development/backend-runtime-recovery.md) | Backend runtime diagnosis, controlled restart eligibility, and clean-start acceptance | Active | The checker is read-only; restart remains separately authorized. |
 | [`development/code-organization.md`](development/code-organization.md) | Code responsibility and pattern consistency | Active | Records current structure and intended ownership direction. |
 | [`development/feature-development-workflow.md`](development/feature-development-workflow.md) | Feature and behavior-change planning, implementation, and test-design workflow | Active | Procedural authority; does not store product contracts or replace validation, Domain, UI, migration, or production guidance. |
 | [`development/validation.md`](development/validation.md) | Risk-proportional verification and CI completion policy | Active | Canonical validation budget, retry, and reporting rules. |
+| [`../scripts/run-isolated-backend-tests.py`](../scripts/run-isolated-backend-tests.py) | Guarded local isolated PostgreSQL test execution | Active tool | Direct Docker runner; no Compose or persistent test service. |
+| [`../scripts/check-backend-runtime.py`](../scripts/check-backend-runtime.py) | Read-only backend source/runtime/service/data classification | Active tool | Requires exact container IDs and explicit backend source paths. |
 | [`ui/guidelines.md`](ui/guidelines.md) | UI presentation and responsive consistency | Active | Canonical UI-level decisions; Domain meaning is linked, not duplicated. |
 | [`domain/README.md`](domain/README.md) | Domain terminology, evidence labels, and contract map | Active | Entry point for product behavior contracts. |
 | [`domain/entity-relationships.md`](domain/entity-relationships.md) | Entity ownership, grouping, and lifecycle relationships | Active | Distinguishes current implementation from intended product relations. |

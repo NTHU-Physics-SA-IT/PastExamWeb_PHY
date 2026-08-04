@@ -41,6 +41,8 @@ Read only the smallest set needed for the task:
 - Local environment, Docker, or environment configuration:
   `docs/development/local-environment.md`.
 - Validation, tests, or CI: `docs/development/validation.md`.
+- Backend runtime diagnosis or recovery:
+  `docs/development/backend-runtime-recovery.md`.
 - UI, responsive behavior, theme, accessibility, or display:
   `docs/ui/guidelines.md`.
 - Entity relationships, state, authorization, visibility, notifications, or
@@ -156,6 +158,13 @@ Use `docs/development/validation.md` as the sole validation policy. Start with
 targeted checks, keep retries finite and evidence-based, and follow its stop
 conditions. Do not create an unexplained second Compose project for ordinary
 task verification.
+
+PostgreSQL-backed local tests route through
+`scripts/run-isolated-backend-tests.py`. Backend source/runtime/service/data
+diagnosis routes through `scripts/check-backend-runtime.py` and the canonical
+recovery runbook. Both tools require exact container identities. The checker
+is read-only; restart and all other R1 lifecycle actions always require
+separate explicit task authority.
 
 ## UI advisory Skill
 
