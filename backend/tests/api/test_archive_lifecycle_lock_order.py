@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 import uuid
 
 from httpx import ASGITransport, AsyncClient
@@ -1591,6 +1592,7 @@ async def test_submission_restore_acquires_parent_first_one_to_one_plan(
             stored_submission.reviewed_at
         )
         stored_submission.status = SubmissionStatus.DELETED
+        stored_submission.previous_status = SubmissionStatus.APPROVED
         stored_submission.delete_reason = "admin deleted"
         await session.commit()
 
@@ -1628,6 +1630,70 @@ async def test_submission_restore_acquires_parent_first_one_to_one_plan(
             assert stored_submission.deleted_at is None
             assert stored_submission.previous_status is None
             assert stored_submission.owner_self_delete_consumed is False
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.parametrize(
+    ("previous_status", "expected_status", "expected_archive_restored"),
+    [
+        (SubmissionStatus.APPROVED, SubmissionStatus.APPROVED, True),
+        (SubmissionStatus.PENDING, SubmissionStatus.PENDING, False),
+        (SubmissionStatus.REJECTED, SubmissionStatus.REJECTED, False),
+        (SubmissionStatus.TAKEDOWN, SubmissionStatus.TAKEDOWN, False),
+        (None, SubmissionStatus.PENDING, False),
+    ],
+)
+@pytest.mark.asyncio
+async def test_submission_restore_uses_exact_previous_status_with_pending_fallback(
+    client,
+    session_maker,
+    make_user,
+    previous_status,
+    expected_status,
+    expected_archive_restored,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    deleted_at = datetime.now(timezone.utc)
+    async with session_maker() as session:
+        stored_archive = await session.get(Archive, archive.id)
+        stored_submission = await session.get(ArchiveSubmission, target.id)
+        stored_archive.deleted_at = deleted_at
+        stored_submission.status = SubmissionStatus.DELETED
+        stored_submission.previous_status = previous_status
+        stored_submission.deleted_at = deleted_at
+        stored_submission.delete_reason = "admin deleted"
+        stored_submission.owner_self_delete_consumed = True
+        await session.commit()
+
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        response = await client.post(
+            "/trash/restore",
+            json={"item_type": "archive_submission", "item_id": target.id},
+        )
+
+        assert response.status_code == 200
+        async with session_maker() as session:
+            stored_archive = await session.get(Archive, archive.id)
+            stored_submission = await session.get(ArchiveSubmission, target.id)
+            assert stored_submission.status == expected_status
+            assert stored_submission.deleted_at is None
+            assert stored_submission.previous_status is None
+            assert stored_submission.owner_self_delete_consumed is True
+            assert (stored_archive.deleted_at is None) is expected_archive_restored
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         await _cleanup_archive_context(
