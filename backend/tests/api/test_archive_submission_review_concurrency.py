@@ -204,6 +204,44 @@ async def _cleanup_race_context(
         await session.commit()
 
 
+async def _cleanup_shared_parent_race(
+    session_maker,
+    *,
+    submission_ids: list[int],
+    category_key: str,
+    course_name: str,
+    object_names: list[str],
+) -> None:
+    async with session_maker() as session:
+        await session.execute(
+            delete(PersonalNotification).where(
+                PersonalNotification.source_type == "archive_submission",
+                PersonalNotification.source_id.in_(submission_ids),
+            )
+        )
+        await session.execute(
+            delete(ArchiveSubmissionEvent).where(
+                ArchiveSubmissionEvent.submission_id.in_(submission_ids)
+            )
+        )
+        await session.execute(
+            delete(ArchiveSubmission).where(ArchiveSubmission.id.in_(submission_ids))
+        )
+        await session.execute(
+            delete(Archive).where(Archive.object_name.in_(object_names))
+        )
+        await session.execute(
+            delete(Course).where(
+                Course.category == category_key,
+                Course.name == course_name,
+            )
+        )
+        await session.execute(
+            delete(CourseCategoryConfig).where(CourseCategoryConfig.key == category_key)
+        )
+        await session.commit()
+
+
 async def _run_deterministic_review_race(
     *,
     client,
@@ -399,3 +437,193 @@ async def test_direct_review_races_are_deterministic_first_writer_wins(
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         await _cleanup_race_context(session_maker, context)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_approvals_reuse_one_new_category_and_course(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+):
+    marker = uuid.uuid4().hex
+    category_key = f"shared-race-{marker[:10]}"
+    category_name = f"Shared race category {marker}"
+    course_name = f"Shared Race Course {marker}"
+    object_names = [
+        f"archive-submissions/shared-race-a-{marker}.pdf",
+        f"archive-submissions/shared-race-b-{marker}.pdf",
+    ]
+    requester = await make_user(name=f"shared-race-requester-{marker[:8]}")
+    admin = await make_user(name=f"shared-race-admin-{marker[:8]}", is_admin=True)
+
+    submission_ids: list[int] = []
+    async with session_maker() as session:
+        for index, object_name in enumerate(object_names):
+            submission = ArchiveSubmission(
+                subject=course_name,
+                category=category_key,
+                name=f"Shared Race Exam {index} {marker}",
+                academic_year=2026,
+                archive_type=ArchiveType.FINAL,
+                professor="Shared Race Professor",
+                object_name=object_name,
+                requested_course_name=course_name,
+                requested_category_key=category_key,
+                requested_category_name=category_name,
+                requested_category_label=category_name,
+                requested_category_icon="pi pi-book",
+                requester_id=requester.id,
+                status=SubmissionStatus.PENDING,
+            )
+            session.add(submission)
+            await session.flush()
+            submission_ids.append(submission.id)
+        await session.commit()
+
+    first_at_commit_boundary = asyncio.Event()
+    release_first = asyncio.Event()
+    second_mutex_attempted = asyncio.Event()
+    mutex_attempts = 0
+    request_session_ids: set[int] = set()
+    original_mutex = archive_lifecycle_locks.acquire_approval_namespace_mutex
+    original_enqueue = archives_service.enqueue_submission_status_notification
+
+    async def observed_mutex(db, **kwargs):
+        nonlocal mutex_attempts
+        mutex_attempts += 1
+        request_session_ids.add(id(db))
+        if mutex_attempts == 2:
+            second_mutex_attempted.set()
+        return await original_mutex(db, **kwargs)
+
+    async def enqueue_and_hold_first(db, submission, new_status):
+        await original_enqueue(db, submission, new_status)
+        await db.flush()
+        if submission.id == submission_ids[0]:
+            first_at_commit_boundary.set()
+            await asyncio.wait_for(release_first.wait(), timeout=10)
+
+    monkeypatch.setattr(
+        archive_lifecycle_locks,
+        "acquire_approval_namespace_mutex",
+        observed_mutex,
+    )
+    monkeypatch.setattr(
+        archives_service,
+        "enqueue_submission_status_notification",
+        enqueue_and_hold_first,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        first_task = asyncio.create_task(
+            client.post(
+                f"/archives/admin/submissions/{submission_ids[0]}/approve",
+                json={
+                    "note": "first shared parent approval",
+                    "expected_status": "pending",
+                },
+            )
+        )
+        await asyncio.wait_for(first_at_commit_boundary.wait(), timeout=10)
+
+        second_task = asyncio.create_task(
+            client.post(
+                f"/archives/admin/submissions/{submission_ids[1]}/approve",
+                json={
+                    "note": "second shared parent approval",
+                    "expected_status": "pending",
+                },
+            )
+        )
+        await asyncio.wait_for(second_mutex_attempted.wait(), timeout=10)
+        assert not second_task.done()
+
+        release_first.set()
+        first_response = await asyncio.wait_for(first_task, timeout=10)
+        second_response = await asyncio.wait_for(second_task, timeout=10)
+        assert first_response.status_code == 200
+        assert second_response.status_code == 200
+        assert first_response.json()["changed"] is True
+        assert second_response.json()["changed"] is True
+        assert len(request_session_ids) == 2
+
+        async with session_maker() as session:
+            submissions = list(
+                (
+                    await session.execute(
+                        select(ArchiveSubmission)
+                        .where(ArchiveSubmission.id.in_(submission_ids))
+                        .order_by(ArchiveSubmission.id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            courses = list(
+                (
+                    await session.execute(
+                        select(Course).where(
+                            Course.category == category_key,
+                            Course.name == course_name,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            categories = list(
+                (
+                    await session.execute(
+                        select(CourseCategoryConfig).where(
+                            CourseCategoryConfig.key == category_key
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            archives = list(
+                (
+                    await session.execute(
+                        select(Archive)
+                        .where(Archive.object_name.in_(object_names))
+                        .order_by(Archive.id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            notification_count = int(
+                await session.scalar(
+                    select(func.count(PersonalNotification.id)).where(
+                        PersonalNotification.source_type == "archive_submission",
+                        PersonalNotification.source_id.in_(submission_ids),
+                        PersonalNotification.notification_type
+                        == "archive_submission_approved",
+                    )
+                )
+                or 0
+            )
+
+            assert len(categories) == 1
+            assert len(courses) == 1
+            assert len(archives) == 2
+            assert {archive.course_id for archive in archives} == {courses[0].id}
+            assert {submission.status for submission in submissions} == {
+                SubmissionStatus.APPROVED
+            }
+            assert {submission.created_archive_id for submission in submissions} == {
+                archive.id for archive in archives
+            }
+            assert notification_count == 2
+    finally:
+        release_first.set()
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_shared_parent_race(
+            session_maker,
+            submission_ids=submission_ids,
+            category_key=category_key,
+            course_name=course_name,
+            object_names=object_names,
+        )

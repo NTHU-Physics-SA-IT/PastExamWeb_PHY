@@ -635,6 +635,101 @@ async def test_upload_archive_reuses_existing_course(
 
 
 @pytest.mark.asyncio
+async def test_upload_archive_rejects_category_only_request_before_storage(
+    client: AsyncClient,
+    make_user,
+    monkeypatch,
+):
+    user = await make_user()
+
+    class UnexpectedMinio:
+        def put_object(self, **kwargs):
+            raise AssertionError("category-only validation must precede storage")
+
+    monkeypatch.setattr(
+        "app.api.services.archives.get_minio_client",
+        lambda: UnexpectedMinio(),
+    )
+
+    async def fake_get_current_user():
+        return UserRoles(user_id=user.id, is_admin=False)
+
+    app.dependency_overrides[get_current_user] = fake_get_current_user
+    try:
+        response = await client.post(
+            "/archives/upload",
+            files={
+                "file": (
+                    "category-only.pdf",
+                    io.BytesIO(b"%PDF-1.4 category-only"),
+                    "application/pdf",
+                )
+            },
+            data={
+                "subject": "Category-only Course",
+                "category": "category-only",
+                "professor": "Category-only Professor",
+                "archive_type": "final",
+                "has_answers": "false",
+                "filename": "Category-only Exam",
+                "academic_year": 2026,
+                "request_new_course": "false",
+                "request_new_category": "true",
+                "requested_category_key": "category-only",
+                "requested_category_name": "Category only",
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == "新增分類必須同時申請新增課程。"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("request_new_course", "request_new_category"),
+    [("true", "false"), ("true", "true")],
+)
+async def test_parent_requests_still_require_archive_upload(
+    client: AsyncClient,
+    make_user,
+    request_new_course,
+    request_new_category,
+):
+    user = await make_user()
+
+    async def fake_get_current_user():
+        return UserRoles(user_id=user.id, is_admin=False)
+
+    app.dependency_overrides[get_current_user] = fake_get_current_user
+    try:
+        response = await client.post(
+            "/archives/upload",
+            data={
+                "subject": "Missing File Course",
+                "category": "missing-file-category",
+                "professor": "Missing File Professor",
+                "archive_type": "final",
+                "has_answers": "false",
+                "filename": "Missing File Exam",
+                "academic_year": 2026,
+                "request_new_course": request_new_course,
+                "request_new_category": request_new_category,
+                "requested_course_name": "Missing File Course",
+                "requested_category_key": "missing-file-category",
+                "requested_category_name": "Missing File Category",
+            },
+        )
+        assert response.status_code == 422
+        assert any(
+            error["loc"][-1] == "file" and error["type"] == "missing"
+            for error in response.json()["detail"]
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
 async def test_upload_archive_rejects_large_file(
     client: AsyncClient,
     make_user,

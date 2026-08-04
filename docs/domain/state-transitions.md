@@ -452,7 +452,44 @@ predicate is only `status = 'pending'`. The predicate does not exclude
 block a new report after trash and does not provide the required restore
 conflict semantics.
 
+## ArchiveSubmission parent resolution on approval
+
+Approval resolves the requested Category/Course identity from current
+normalized database state:
+
+1. reuse an active matching Course and its Category;
+2. otherwise reuse an active matching Category and create the missing Course;
+3. otherwise, only for a valid new-Category plus new-Course upload request,
+   create both missing parents; and
+4. create or reuse the exact Archive, establish its optional one-to-one
+   submission link, transition the submission to approved, and enqueue the
+   approval notification.
+
+All steps are one caller-owned PostgreSQL transaction. Any exception rolls
+back parent creation, Archive work, link state, reviewer/reviewed-at metadata,
+approved status, and approval notification together. The original pending or
+rejected submission, its upload event, and its stored object remain under
+their pre-existing lifecycle.
+
+Two approvals for the same missing parent identity serialize through the
+approval namespace mutex. The later transaction re-reads current state and
+reuses the winner's active Course rather than returning a product-level
+duplicate. Bounded lock-plan revalidation remains fail closed.
+
+Only exact one-to-one occupancy is mapped to
+`409 archive_submission_link_conflict`. Archive and Course lifecycle drift
+retain their existing specific 409 contracts. Static relationship anomalies,
+unclassified integrity failures, deadlocks, timeouts, and serialization
+failures are not relabeled as lifecycle conflicts.
+
+The approval does not create permanent Submission ownership of Category or
+Course. Rejection, return/edit, pending state, trash, restore, or later
+submission deletion does not create or cascade-delete these parents.
+
 ## CourseSubmission approval
+
+The ArchiveSubmission requested-parent approval flow above is distinct from
+this legacy `CourseSubmission` endpoint.
 
 ### Intended invariant
 
@@ -464,10 +501,10 @@ conflict semantics.
 
 ### Current implementation
 
-Archive approval paths normalize category/course identities, use advisory
-locking, and reuse existing rows. Multi-step commits and the separate
-`CourseSubmission` model leave the end-to-end idempotency contract only
-partially implemented.
+The legacy Course request approval path normalizes category/course identities
+and reuses existing rows. It remains separate from the ArchiveSubmission
+approval caller transaction above and has its own lifecycle and idempotency
+scope.
 `test_course_request_approval_reuses_existing_course_without_duplicates`
 directly protects the separate `CourseSubmission` model's first
 `pending`-to-`approved` path when a matching Course exists by approval time:
