@@ -808,63 +808,99 @@ def test_workflow_revision_mismatch_falls_back(tmp_path: Path) -> None:
     assert result.ci_mode == "full"
 
 
+VALID_GATE_RESULTS = {
+    "full": {
+        "classifier_result": "success",
+        "lint_result": "success",
+        "test_result": "success",
+        "build_result": "success",
+        "full_attestation_result": "success",
+        "equivalent_result": "skipped",
+        "docs_result": "skipped",
+    },
+    "equivalent-merge": {
+        "classifier_result": "success",
+        "lint_result": "skipped",
+        "test_result": "skipped",
+        "build_result": "skipped",
+        "full_attestation_result": "skipped",
+        "equivalent_result": "success",
+        "docs_result": "skipped",
+    },
+    "docs-only": {
+        "classifier_result": "success",
+        "lint_result": "skipped",
+        "test_result": "skipped",
+        "build_result": "skipped",
+        "full_attestation_result": "skipped",
+        "equivalent_result": "skipped",
+        "docs_result": "success",
+    },
+}
+
+
+def _gate_arguments(
+    mode: str,
+    **overrides: str,
+) -> Any:
+    values = dict(VALID_GATE_RESULTS.get(mode, VALID_GATE_RESULTS["full"]))
+    values.update(overrides)
+    return type("Arguments", (), {"mode": mode, **values})()
+
+
+@pytest.mark.parametrize("mode", ("full", "equivalent-merge", "docs-only"))
+def test_ci_gate_accepts_exact_mode_result_matrix(mode: str) -> None:
+    gate.validate_gate(_gate_arguments(mode))
+
+
 @pytest.mark.parametrize(
+    ("mode", "result_name", "unexpected"),
     (
-        "mode",
-        "full_attestation",
-        "equivalent",
-        "docs",
-    ),
-    (
-        ("full", "success", "skipped", "skipped"),
-        ("equivalent-merge", "skipped", "success", "skipped"),
-        ("docs-only", "skipped", "skipped", "success"),
+        ("full", "lint_result", "skipped"),
+        ("full", "full_attestation_result", "skipped"),
+        ("full", "equivalent_result", "success"),
+        ("full", "docs_result", "success"),
+        ("equivalent-merge", "lint_result", "success"),
+        ("equivalent-merge", "equivalent_result", "skipped"),
+        ("equivalent-merge", "full_attestation_result", "success"),
+        ("equivalent-merge", "docs_result", "success"),
+        ("docs-only", "lint_result", "success"),
+        ("docs-only", "docs_result", "skipped"),
+        ("docs-only", "equivalent_result", "success"),
+        ("docs-only", "full_attestation_result", "success"),
     ),
 )
-def test_ci_gate_accepts_only_the_mode_specific_dependency_shape(
+def test_ci_gate_rejects_mode_result_mismatch(
     mode: str,
-    full_attestation: str,
-    equivalent: str,
-    docs: str,
+    result_name: str,
+    unexpected: str,
 ) -> None:
-    arguments = type(
-        "Arguments",
-        (),
-        {
-            "mode": mode,
-            "classifier_result": "success",
-            "lint_result": "success",
-            "test_result": "success",
-            "build_result": "success",
-            "full_attestation_result": full_attestation,
-            "equivalent_result": equivalent,
-            "docs_result": docs,
-        },
-    )()
-
-    gate.validate_gate(arguments)
+    with pytest.raises(RuntimeError, match=mode):
+        gate.validate_gate(_gate_arguments(mode, **{result_name: unexpected}))
 
 
-def test_ci_gate_rejects_illegal_mode_or_dependency_result() -> None:
-    arguments = type(
-        "Arguments",
-        (),
-        {
-            "mode": "full",
-            "classifier_result": "success",
-            "lint_result": "success",
-            "test_result": "success",
-            "build_result": "success",
-            "full_attestation_result": "skipped",
-            "equivalent_result": "skipped",
-            "docs_result": "skipped",
-        },
-    )()
-    with pytest.raises(RuntimeError):
+@pytest.mark.parametrize("unexpected", ("cancelled", "failure", "neutral"))
+def test_ci_gate_rejects_nonterminal_or_failed_result(unexpected: str) -> None:
+    with pytest.raises(RuntimeError, match="lint workflow"):
+        gate.validate_gate(_gate_arguments("full", lint_result=unexpected))
+
+
+def test_ci_gate_rejects_unknown_mode() -> None:
+    with pytest.raises(RuntimeError, match="unsupported CI mode"):
+        gate.validate_gate(_gate_arguments("unknown"))
+
+
+def test_ci_gate_rejects_missing_result() -> None:
+    arguments = _gate_arguments("full")
+    delattr(arguments.__class__, "lint_result")
+
+    with pytest.raises(RuntimeError, match="missing result.*lint workflow"):
         gate.validate_gate(arguments)
-    arguments.mode = "unknown"
-    with pytest.raises(RuntimeError):
-        gate.validate_gate(arguments)
+
+
+def test_ci_gate_rejects_malformed_result() -> None:
+    with pytest.raises(RuntimeError, match="classifier"):
+        gate.validate_gate(_gate_arguments("full", classifier_result=""))
 
 
 def test_full_attestation_checks_each_required_execution_job(
