@@ -13,6 +13,7 @@ from app.api.services.archive_submission_lifecycle import (
     COURSE_LIFECYCLE_CONFLICT_CODE,
     COURSE_LIFECYCLE_CONFLICT_MESSAGE,
     LIFECYCLE_ARCHIVE_TRASHED,
+    soft_delete_archive_submission_group,
 )
 from app.main import app
 from app.models.models import (
@@ -1181,6 +1182,7 @@ async def test_submission_delete_acquires_parent_first_one_to_one_plan(
     try:
         response = await client.delete(path)
         assert response.status_code == 200
+        assert response.json()["changed"] is True
         assert traces == [
             [
                 (LifecycleResourceClass.COURSE, course.id),
@@ -1194,8 +1196,347 @@ async def test_submission_delete_acquires_parent_first_one_to_one_plan(
             assert stored_archive.deleted_at is not None
             assert stored_submission.status == SubmissionStatus.DELETED
             assert stored_submission.deleted_at is not None
-            assert stored_submission.previous_status is None
-            assert stored_submission.owner_self_delete_consumed is False
+            assert stored_submission.previous_status == SubmissionStatus.APPROVED
+            assert stored_submission.owner_self_delete_consumed is (
+                delete_actor == "owner"
+            )
+            assert (
+                int(
+                    await session.scalar(
+                        select(func.count(PersonalNotification.id)).where(
+                            PersonalNotification.source_type == "archive_submission",
+                            PersonalNotification.source_id == target.id,
+                        )
+                    )
+                    or 0
+                )
+                == 0
+            )
+            assert (
+                int(
+                    await session.scalar(
+                        select(func.count(ArchiveSubmissionEvent.id)).where(
+                            ArchiveSubmissionEvent.submission_id == target.id
+                        )
+                    )
+                    or 0
+                )
+                == 0
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_owner_submission_delete_authorizes_before_retry_noop(
+    client,
+    session_maker,
+    make_user,
+):
+    requester = await make_user()
+    stranger = await make_user()
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    async with session_maker() as session:
+        stored = await session.get(ArchiveSubmission, target.id)
+        stored.status = SubmissionStatus.APPROVED
+        await session.commit()
+
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(
+            requester.id,
+            is_admin=False,
+        )
+        first = await client.delete(f"/archives/submissions/{target.id}")
+        retry = await client.delete(f"/archives/submissions/{target.id}")
+
+        assert first.status_code == 200
+        assert first.json()["changed"] is True
+        assert retry.status_code == 200
+        assert retry.json()["changed"] is False
+
+        app.dependency_overrides[get_current_user] = _override_user(
+            stranger.id,
+            is_admin=False,
+        )
+        forbidden = await client.delete(f"/archives/submissions/{target.id}")
+        assert forbidden.status_code == 403
+
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, target.id)
+            assert stored.status == SubmissionStatus.DELETED
+            assert stored.previous_status == SubmissionStatus.APPROVED
+            assert stored.owner_self_delete_consumed is True
+            assert (
+                int(
+                    await session.scalar(
+                        select(func.count(PersonalNotification.id)).where(
+                            PersonalNotification.source_type == "archive_submission",
+                            PersonalNotification.source_id == target.id,
+                        )
+                    )
+                    or 0
+                )
+                == 0
+            )
+            assert (
+                int(
+                    await session.scalar(
+                        select(func.count(ArchiveSubmissionEvent.id)).where(
+                            ArchiveSubmissionEvent.submission_id == target.id
+                        )
+                    )
+                    or 0
+                )
+                == 0
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_consumed_owner_submission_delete_returns_stable_conflict(
+    client,
+    session_maker,
+    make_user,
+):
+    requester = await make_user()
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    async with session_maker() as session:
+        stored = await session.get(ArchiveSubmission, target.id)
+        stored.status = SubmissionStatus.APPROVED
+        stored.owner_self_delete_consumed = True
+        await session.commit()
+
+    app.dependency_overrides[get_current_user] = _override_user(
+        requester.id,
+        is_admin=False,
+    )
+    try:
+        response = await client.delete(f"/archives/submissions/{target.id}")
+        assert response.status_code == 409
+        assert response.json()["detail"] == {
+            "code": "archive_submission_self_delete_consumed",
+            "message": "此投稿的自助刪除資格已使用。",
+            "reload_required": False,
+        }
+
+        async with session_maker() as session:
+            stored_archive = await session.get(Archive, archive.id)
+            stored = await session.get(ArchiveSubmission, target.id)
+            assert stored.status == SubmissionStatus.APPROVED
+            assert stored.deleted_at is None
+            assert stored.previous_status is None
+            assert stored.owner_self_delete_consumed is True
+            assert stored_archive.deleted_at is None
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.parametrize(
+    "prior_status",
+    [
+        SubmissionStatus.PENDING,
+        SubmissionStatus.APPROVED,
+        SubmissionStatus.REJECTED,
+        SubmissionStatus.TAKEDOWN,
+    ],
+)
+@pytest.mark.asyncio
+async def test_admin_submission_delete_records_exact_provenance(
+    client,
+    session_maker,
+    make_user,
+    prior_status,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    async with session_maker() as session:
+        stored = await session.get(ArchiveSubmission, target.id)
+        stored.status = prior_status
+        stored.owner_self_delete_consumed = prior_status == SubmissionStatus.REJECTED
+        await session.commit()
+
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        response = await client.delete(f"/archives/admin/submissions/{target.id}")
+        assert response.status_code == 200
+        assert response.json()["changed"] is True
+
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, target.id)
+            assert stored.status == SubmissionStatus.DELETED
+            assert stored.previous_status == prior_status
+            assert stored.owner_self_delete_consumed is (
+                prior_status == SubmissionStatus.REJECTED
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_admin_submission_delete_retry_preserves_existing_provenance(
+    client,
+    session_maker,
+    make_user,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    async with session_maker() as session:
+        stored = await session.get(ArchiveSubmission, target.id)
+        stored.status = SubmissionStatus.DELETED
+        stored.previous_status = SubmissionStatus.TAKEDOWN
+        stored.owner_self_delete_consumed = True
+        stored.deleted_at = stored.reviewed_at
+        await session.commit()
+
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        response = await client.delete(f"/archives/admin/submissions/{target.id}")
+        assert response.status_code == 200
+        assert response.json()["changed"] is False
+
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, target.id)
+            assert stored.status == SubmissionStatus.DELETED
+            assert stored.previous_status == SubmissionStatus.TAKEDOWN
+            assert stored.owner_self_delete_consumed is True
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_system_submission_group_delete_records_provenance_without_consuming_owner(
+    session_maker,
+    make_user,
+):
+    requester = await make_user()
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    try:
+        async with session_maker() as session:
+            stored_archive = await session.get(Archive, archive.id)
+            stored = await session.get(ArchiveSubmission, target.id)
+            stored.status = SubmissionStatus.REJECTED
+            result = await soft_delete_archive_submission_group(
+                session,
+                archive=stored_archive,
+                submission=stored,
+                user_id=None,
+                reason="system cascade",
+            )
+            await session.commit()
+            assert result["submissions"] == 1
+
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, target.id)
+            assert stored.status == SubmissionStatus.DELETED
+            assert stored.previous_status == SubmissionStatus.REJECTED
+            assert stored.owner_self_delete_consumed is False
+    finally:
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_owner_submission_delete_rolls_back_provenance_flag_and_linked_archive(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+):
+    requester = await make_user()
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    async with session_maker() as session:
+        stored = await session.get(ArchiveSubmission, target.id)
+        stored.status = SubmissionStatus.APPROVED
+        await session.commit()
+
+    original_delete = archives_service.soft_delete_submission_with_linked_archive
+
+    async def fail_after_mutation(*args, **kwargs):
+        await original_delete(*args, **kwargs)
+        raise RuntimeError("injected delete failure")
+
+    monkeypatch.setattr(
+        archives_service,
+        "soft_delete_submission_with_linked_archive",
+        fail_after_mutation,
+    )
+    app.dependency_overrides[get_current_user] = _override_user(
+        requester.id,
+        is_admin=False,
+    )
+    try:
+        with pytest.raises(RuntimeError, match="injected delete failure"):
+            await client.delete(f"/archives/submissions/{target.id}")
+
+        async with session_maker() as session:
+            stored_archive = await session.get(Archive, archive.id)
+            stored = await session.get(ArchiveSubmission, target.id)
+            assert stored_archive.deleted_at is None
+            assert stored.status == SubmissionStatus.APPROVED
+            assert stored.deleted_at is None
+            assert stored.previous_status is None
+            assert stored.owner_self_delete_consumed is False
             assert (
                 int(
                     await session.scalar(
@@ -1336,7 +1677,11 @@ async def test_owner_and_admin_submission_delete_serialize_without_deadlock(
             ),
         )
         assert first.status_code == 200
-        assert second.status_code == (409 if first_operation == "owner" else 200)
+        assert second.status_code == 200
+        assert sorted([first.json()["changed"], second.json()["changed"]]) == [
+            False,
+            True,
+        ]
         assert "40P01" not in sqlstates
         assert traces[0] == traces[1]
         assert traces[0] == [
@@ -1349,8 +1694,8 @@ async def test_owner_and_admin_submission_delete_serialize_without_deadlock(
             stored = await session.get(ArchiveSubmission, target.id)
             assert stored.status == SubmissionStatus.DELETED
             assert stored.deleted_at is not None
-            assert stored.previous_status is None
-            assert stored.owner_self_delete_consumed is False
+            assert stored.previous_status == SubmissionStatus.APPROVED
+            assert stored.owner_self_delete_consumed is (first_operation == "owner")
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         await _cleanup_archive_context(
@@ -1417,11 +1762,12 @@ async def test_submission_delete_and_restore_serialize_without_deadlock(
             if first_operation == "delete":
                 assert stored.status == SubmissionStatus.APPROVED
                 assert stored.deleted_at is None
+                assert stored.previous_status is None
             else:
                 assert stored.status == SubmissionStatus.DELETED
                 assert stored.deleted_at is not None
-            assert stored.previous_status is None
-            assert stored.owner_self_delete_consumed is False
+                assert stored.previous_status == SubmissionStatus.APPROVED
+            assert stored.owner_self_delete_consumed is True
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         await _cleanup_archive_context(

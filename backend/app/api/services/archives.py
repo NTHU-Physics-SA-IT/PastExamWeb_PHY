@@ -66,11 +66,13 @@ from app.services.archive_submission_status import (
     ArchiveSubmissionReviewAction,
     ArchiveSubmissionTransitionClassification,
     available_archive_submission_admin_actions,
+    archive_submission_self_delete_consumed_error,
     classify_archive_submission_expected_state,
     classify_archive_submission_review_transition,
     enqueue_submission_status_notification,
     normalize_submission_status,
     republish_archive_submission,
+    resolve_archive_submission_delete_source_status,
     resolve_archive_submission_actual_status,
     take_down_archive_submission,
 )
@@ -90,6 +92,7 @@ from app.services.archive_lifecycle_locks import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
 
 async def _ensure_category(db: AsyncSession, category_key: str) -> None:
     category_key = canonicalize_course_category_key(category_key)
@@ -315,12 +318,10 @@ async def _discover_direct_review_lock_context(
     category_key = submission.requested_category_key or submission.category
     approval_scope: str | None = None
     if action == ArchiveSubmissionReviewAction.APPROVE:
-        approval_scope = (
-            await archive_lifecycle_locks.acquire_approval_namespace_mutex(
-                db,
-                category_key=category_key,
-                course_name=course_name,
-            )
+        approval_scope = await archive_lifecycle_locks.acquire_approval_namespace_mutex(
+            db,
+            category_key=category_key,
+            course_name=course_name,
         )
 
     archive = (
@@ -441,18 +442,13 @@ async def _lock_direct_review_context(
             )
         plan, metadata = discovered
         locked = await archive_lifecycle_locks.acquire_lifecycle_locks(db, plan)
-        revalidation = (
-            await archive_lifecycle_locks.revalidate_lifecycle_membership(
-                db,
-                locked,
-            )
+        revalidation = await archive_lifecycle_locks.revalidate_lifecycle_membership(
+            db,
+            locked,
         )
         submission = locked.submission(submission_id)
         approval_identity_changed = False
-        if (
-            action == ArchiveSubmissionReviewAction.APPROVE
-            and submission is not None
-        ):
+        if action == ArchiveSubmissionReviewAction.APPROVE and submission is not None:
             locked_course_name = _normalize_course_name(
                 format_course_display_name(
                     submission.requested_course_name or submission.subject
@@ -525,7 +521,10 @@ def _is_admin_upload_submission(submission_data) -> bool:
     review_note = getattr(submission_data, "review_note", None)
     if isinstance(submission_data, dict):
         review_note = submission_data.get("review_note")
-    return bool(flag) or str(review_note or "").strip().lower() in {"管理員上傳", "admin upload"}
+    return bool(flag) or str(review_note or "").strip().lower() in {
+        "管理員上傳",
+        "admin upload",
+    }
 
 
 async def _ensure_or_create_requested_category(
@@ -655,7 +654,9 @@ async def upload_archive(
     category = _normalize_category_key(category)
     professor = professor.strip()
     requested_course_name = (
-        format_course_display_name(requested_course_name) if requested_course_name else None
+        format_course_display_name(requested_course_name)
+        if requested_course_name
+        else None
     )
     requested_category_key = (requested_category_key or "").strip() or None
     requested_category_name = (requested_category_name or "").strip() or None
@@ -710,7 +711,8 @@ async def upload_archive(
                 commit=True,
             )
         query = select(Course).where(
-            normalized_course_text_expr(Course.name) == normalize_course_search_text(subject),
+            normalized_course_text_expr(Course.name)
+            == normalize_course_search_text(subject),
             Course.category == category,
             Course.deleted_at.is_(None),
         )
@@ -771,11 +773,21 @@ async def upload_archive(
                 has_answers=has_answers,
                 object_name=object_name,
                 academic_year=academic_year,
-                requested_course_name=requested_course_name if request_new_course else None,
-                requested_category_key=requested_category_key if request_new_category else None,
-                requested_category_name=requested_category_name if request_new_category else None,
-                requested_category_label=requested_category_label if request_new_category else None,
-                requested_category_icon=requested_category_icon if request_new_category else None,
+                requested_course_name=requested_course_name
+                if request_new_course
+                else None,
+                requested_category_key=requested_category_key
+                if request_new_category
+                else None,
+                requested_category_name=requested_category_name
+                if request_new_category
+                else None,
+                requested_category_label=requested_category_label
+                if request_new_category
+                else None,
+                requested_category_icon=requested_category_icon
+                if request_new_category
+                else None,
                 requester_id=current_user.user_id,
             )
             db.add(submission)
@@ -825,10 +837,18 @@ async def upload_archive(
             object_name=object_name,
             academic_year=academic_year,
             requested_course_name=requested_course_name if request_new_course else None,
-            requested_category_key=requested_category_key if request_new_category else None,
-            requested_category_name=requested_category_name if request_new_category else None,
-            requested_category_label=requested_category_label if request_new_category else None,
-            requested_category_icon=requested_category_icon if request_new_category else None,
+            requested_category_key=requested_category_key
+            if request_new_category
+            else None,
+            requested_category_name=requested_category_name
+            if request_new_category
+            else None,
+            requested_category_label=requested_category_label
+            if request_new_category
+            else None,
+            requested_category_icon=requested_category_icon
+            if request_new_category
+            else None,
             status=SubmissionStatus.APPROVED,
             requester_id=current_user.user_id,
             reviewer_id=current_user.user_id,
@@ -901,54 +921,80 @@ async def delete_my_archive_submission(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
-    locked = await acquire_stable_submission_lifecycle_locks(
-        db,
-        submission_id=submission_id,
-        operation="submission_delete",
-    )
-    submission = locked.submission(submission_id) if locked is not None else None
-    if not submission:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
+    try:
+        locked = await acquire_stable_submission_lifecycle_locks(
+            db,
+            submission_id=submission_id,
+            operation="submission_delete",
+        )
+        submission = locked.submission(submission_id) if locked is not None else None
+        if not submission:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
+            )
+
+        is_owner = submission.requester_id == current_user.user_id or (
+            submission.owner_id is not None
+            and submission.owner_id == current_user.user_id
+        )
+        if not is_owner:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden",
+            )
+
+        if (
+            submission.deleted_at is not None
+            or submission.status == SubmissionStatus.DELETED
+        ):
+            target_id = submission.id
+            await db.rollback()
+            return {
+                "success": True,
+                "id": target_id,
+                "status": SubmissionStatus.DELETED,
+                "changed": False,
+            }
+
+        source_status = resolve_archive_submission_delete_source_status(
+            submission.status,
+            operation="owner_delete",
+        )
+        if source_status != SubmissionStatus.APPROVED:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only approved submissions can be deleted by users",
+            )
+        if submission.owner_self_delete_consumed:
+            raise archive_submission_self_delete_consumed_error()
+
+        result = await soft_delete_submission_with_linked_archive(
+            db,
+            submission=submission,
+            user_id=current_user.user_id,
+            reason="user deleted",
+            linked_archive=(
+                locked.archive(submission.created_archive_id)
+                if submission.created_archive_id is not None
+                else None
+            ),
+            exact_link_only=True,
+            consume_owner_self_delete=True,
         )
 
-    if submission.deleted_at is not None or submission.status == SubmissionStatus.DELETED:
-        return {"success": True, "id": submission.id}
+        await db.commit()
 
-    is_owner = submission.requester_id == current_user.user_id or (
-        submission.owner_id is not None and submission.owner_id == current_user.user_id
-    )
-    if not is_owner:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-
-    if submission.status != SubmissionStatus.APPROVED:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only approved submissions can be deleted by users",
-        )
-
-    result = await soft_delete_submission_with_linked_archive(
-        db,
-        submission=submission,
-        user_id=current_user.user_id,
-        reason="user deleted",
-        linked_archive=(
-            locked.archive(submission.created_archive_id)
-            if submission.created_archive_id is not None
-            else None
-        ),
-        exact_link_only=True,
-    )
-
-    await db.commit()
-
-    return {
-        "success": True,
-        "id": submission.id,
-        "status": submission.status,
-        "deleted": result,
-        "message": "已刪除，管理員可於垃圾桶中恢復",
-    }
+        return {
+            "success": True,
+            "id": submission.id,
+            "status": submission.status,
+            "changed": result["submissions"] == 1,
+            "deleted": result,
+            "message": "已刪除，管理員可於垃圾桶中恢復",
+        }
+    except Exception:
+        await db.rollback()
+        raise
 
 
 @router.get("/admin/submissions", response_model=list[ArchiveSubmissionAdminRead])
@@ -957,7 +1003,9 @@ async def list_archive_submissions_for_admin(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
 
     result = await db.execute(
         text("""
@@ -1040,9 +1088,7 @@ async def list_archive_submissions_for_admin(
             )
         try:
             row_dict["is_admin_upload"] = bool(row_dict.get("is_admin_upload"))
-            archive_submissions.append(
-                _serialize_archive_submission_admin(row_dict)
-            )
+            archive_submissions.append(_serialize_archive_submission_admin(row_dict))
         except Exception as exc:
             skipped_submission_count += 1
             logger.warning(
@@ -1067,13 +1113,19 @@ async def get_archive_submission_statistics(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
     config = SUBMISSION_RANGE_CONFIG.get(range_key)
     if config is None:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid range")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid range"
+        )
     expected_mode = config[0]
     if mode not in {"time", "date"} or mode != expected_mode:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid mode")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid mode"
+        )
 
     now_utc = datetime.now(timezone.utc)
     _, bucket_minutes, _, range_start, range_end = get_submission_statistics_window(
@@ -1082,13 +1134,18 @@ async def get_archive_submission_statistics(
     bucket_seconds = bucket_minutes * 60
     bucket_epoch = cast(
         func.floor(
-            (func.extract("epoch", ArchiveSubmissionEvent.submitted_at) - range_start.timestamp())
+            (
+                func.extract("epoch", ArchiveSubmissionEvent.submitted_at)
+                - range_start.timestamp()
+            )
             / bucket_seconds
         ),
         BigInteger,
     )
     result = await db.execute(
-        select(bucket_epoch.label("bucket_index"), func.count(ArchiveSubmissionEvent.id))
+        select(
+            bucket_epoch.label("bucket_index"), func.count(ArchiveSubmissionEvent.id)
+        )
         .where(
             ArchiveSubmissionEvent.submitted_at >= range_start,
             ArchiveSubmissionEvent.submitted_at < range_end,
@@ -1107,30 +1164,48 @@ async def get_archive_submission_statistics(
     )
 
 
-@router.get("/admin/submissions/{submission_id}/comparisons", response_model=list[ArchiveSubmissionComparisonRead])
+@router.get(
+    "/admin/submissions/{submission_id}/comparisons",
+    response_model=list[ArchiveSubmissionComparisonRead],
+)
 async def list_archive_submission_comparisons(
     submission_id: int,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
 
     submission = await db.get(ArchiveSubmission, submission_id)
     if not submission:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
+        )
 
     course_name = normalize_first_course_search_text(
         submission.requested_course_name,
         submission.subject,
     )
-    category_key = _normalize_match_text(submission.requested_category_key or submission.category)
+    category_key = _normalize_match_text(
+        submission.requested_category_key or submission.category
+    )
     exam_name = _normalize_match_text(submission.name)
     professor = _normalize_match_text(submission.professor)
-    if not course_name or not category_key or not exam_name or submission.academic_year is None:
+    if (
+        not course_name
+        or not category_key
+        or not exam_name
+        or submission.academic_year is None
+    ):
         return []
 
-    current_archive = await db.get(Archive, submission.created_archive_id) if submission.created_archive_id else None
+    current_archive = (
+        await db.get(Archive, submission.created_archive_id)
+        if submission.created_archive_id
+        else None
+    )
     current_course_id = current_archive.course_id if current_archive else None
     comparison_archive = aliased(Archive)
     comparable_statuses = [
@@ -1140,25 +1215,38 @@ async def list_archive_submission_comparisons(
     ]
     fallback_course_condition = and_(
         ArchiveSubmission.created_archive_id.is_(None),
-        normalized_course_text_expr(ArchiveSubmission.requested_course_name, ArchiveSubmission.subject)
+        normalized_course_text_expr(
+            ArchiveSubmission.requested_course_name, ArchiveSubmission.subject
+        )
         == course_name,
-        _normalized_text_expr(ArchiveSubmission.requested_category_key, ArchiveSubmission.category)
+        _normalized_text_expr(
+            ArchiveSubmission.requested_category_key, ArchiveSubmission.category
+        )
         == category_key,
     )
     course_condition = (
-        or_(comparison_archive.course_id == current_course_id, fallback_course_condition)
+        or_(
+            comparison_archive.course_id == current_course_id, fallback_course_condition
+        )
         if current_course_id is not None
         else and_(
-            normalized_course_text_expr(ArchiveSubmission.requested_course_name, ArchiveSubmission.subject)
+            normalized_course_text_expr(
+                ArchiveSubmission.requested_course_name, ArchiveSubmission.subject
+            )
             == course_name,
-            _normalized_text_expr(ArchiveSubmission.requested_category_key, ArchiveSubmission.category)
+            _normalized_text_expr(
+                ArchiveSubmission.requested_category_key, ArchiveSubmission.category
+            )
             == category_key,
         )
     )
     query = (
         select(ArchiveSubmission, User.name, User.email)
         .outerjoin(User, User.id == ArchiveSubmission.requester_id)
-        .outerjoin(comparison_archive, comparison_archive.id == ArchiveSubmission.created_archive_id)
+        .outerjoin(
+            comparison_archive,
+            comparison_archive.id == ArchiveSubmission.created_archive_id,
+        )
         .where(
             ArchiveSubmission.id != submission.id,
             ArchiveSubmission.deleted_at.is_(None),
@@ -1210,11 +1298,15 @@ async def get_archive_submission_preview_file(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
 
     submission = await db.get(ArchiveSubmission, submission_id)
     if not submission:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
+        )
 
     try:
         response = get_minio_client().get_object(
@@ -1264,17 +1356,23 @@ async def update_archive_submission_for_admin(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
 
     submission = await db.get(ArchiveSubmission, submission_id)
     if not submission:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
+        )
     _ensure_review_submission_mutable(submission)
 
     if submission_data.subject is not None:
         submission.subject = format_course_display_name(submission_data.subject)
     if submission_data.category is not None:
-        if not (submission_data.requested_category_key or submission.requested_category_key):
+        if not (
+            submission_data.requested_category_key or submission.requested_category_key
+        ):
             await _ensure_category(db, submission_data.category)
         submission.category = submission_data.category
     if submission_data.name is not None:
@@ -1293,13 +1391,21 @@ async def update_archive_submission_for_admin(
         )
     if submission_data.requested_category_key is not None:
         key = submission_data.requested_category_key.strip()
-        submission.requested_category_key = _normalize_category_key(key) if key else None
+        submission.requested_category_key = (
+            _normalize_category_key(key) if key else None
+        )
     if submission_data.requested_category_name is not None:
-        submission.requested_category_name = submission_data.requested_category_name.strip() or None
+        submission.requested_category_name = (
+            submission_data.requested_category_name.strip() or None
+        )
     if submission_data.requested_category_label is not None:
-        submission.requested_category_label = submission_data.requested_category_label.strip() or None
+        submission.requested_category_label = (
+            submission_data.requested_category_label.strip() or None
+        )
     if submission_data.requested_category_icon is not None:
-        submission.requested_category_icon = submission_data.requested_category_icon.strip() or None
+        submission.requested_category_icon = (
+            submission_data.requested_category_icon.strip() or None
+        )
 
     await db.commit()
     await db.refresh(submission)
@@ -1520,7 +1626,9 @@ async def reject_archive_submission(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
 
     try:
         lock_context = await _lock_direct_review_context(
@@ -1565,7 +1673,9 @@ async def takedown_archive_submission(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
 
     try:
         lock_context = await _lock_direct_review_context(
@@ -1607,7 +1717,9 @@ async def republish_archive_submission_endpoint(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
 
     try:
         lock_context = await _lock_direct_review_context(
@@ -1692,43 +1804,67 @@ async def delete_archive_submission_for_admin(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
-
-    locked = await acquire_stable_submission_lifecycle_locks(
-        db,
-        submission_id=submission_id,
-        operation="submission_delete",
-    )
-    submission = locked.submission(submission_id) if locked is not None else None
-    if not submission:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
         )
-    _ensure_review_submission_mutable(submission)
 
-    if submission.status == SubmissionStatus.DELETED:
-        now = datetime.now(timezone.utc)
-        if submission.deleted_at is None:
-            submission.deleted_at = now
-        if submission.deleted_by_id is None:
-            submission.deleted_by_id = current_user.user_id
-        if submission.delete_reason is None:
-            submission.delete_reason = "admin deleted"
-        submission.lifecycle_reason = None
+    try:
+        locked = await acquire_stable_submission_lifecycle_locks(
+            db,
+            submission_id=submission_id,
+            operation="submission_delete",
+        )
+        submission = locked.submission(submission_id) if locked is not None else None
+        if not submission:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Submission not found",
+            )
 
-    result = await soft_delete_submission_with_linked_archive(
-        db,
-        submission=submission,
-        user_id=current_user.user_id,
-        reason="admin deleted",
-        linked_archive=(
-            locked.archive(submission.created_archive_id)
-            if submission.created_archive_id is not None
-            else None
-        ),
-        exact_link_only=True,
-    )
-    submission.reviewer_id = current_user.user_id
-    submission.reviewed_at = datetime.now(timezone.utc)
-    await db.commit()
-    return {"success": True, "id": submission.id, "deleted": result}
+        if (
+            submission.deleted_at is not None
+            or submission.status == SubmissionStatus.DELETED
+        ):
+            target_id = submission.id
+            await db.rollback()
+            return {
+                "success": True,
+                "id": target_id,
+                "changed": False,
+                "deleted": {
+                    "archives": 0,
+                    "submissions": 0,
+                    "warnings": [],
+                },
+            }
+
+        resolve_archive_submission_delete_source_status(
+            submission.status,
+            operation="admin_delete",
+        )
+        result = await soft_delete_submission_with_linked_archive(
+            db,
+            submission=submission,
+            user_id=current_user.user_id,
+            reason="admin deleted",
+            linked_archive=(
+                locked.archive(submission.created_archive_id)
+                if submission.created_archive_id is not None
+                else None
+            ),
+            exact_link_only=True,
+        )
+        changed = result["submissions"] == 1
+        if changed:
+            submission.reviewer_id = current_user.user_id
+            submission.reviewed_at = datetime.now(timezone.utc)
+        await db.commit()
+        return {
+            "success": True,
+            "id": submission.id,
+            "changed": changed,
+            "deleted": result,
+        }
+    except Exception:
+        await db.rollback()
+        raise

@@ -56,12 +56,13 @@ Notify the submitter when a submission is:
 Do not notify submitters merely because a Course or Archive is moved to trash
 or restored.
 
-The ArchiveSubmission previous-status schema prerequisite does not change
-runtime notification behavior. Owner, administrator, and system deletion
-remain silent; restore remains silent; and Course trash/restore retains its
-existing notification semantics. The P0 migration and sealed audit classify
-prior-state provenance without enqueueing notifications or modifying
-notification deduplication.
+ArchiveSubmission owner, administrator, and system/cascade deletion remain
+silent while recording exact delete provenance in the caller-owned database
+transaction. An authorized completed-delete retry is a mutation-free
+`changed=false` response and does not enqueue duplicate notifications or
+events. A failed transaction rolls provenance, owner eligibility, the linked
+Archive lifecycle, and side effects back together. Restore remains silent, and
+Course trash/restore retains its existing notification semantics.
 
 Review side effects are gated by the expected-state check and transition
 policy:
