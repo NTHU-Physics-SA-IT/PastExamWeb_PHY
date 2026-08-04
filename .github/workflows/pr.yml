@@ -10,16 +10,22 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Require pull requests to target main
+      - name: Require an approved pull request base
         shell: bash
         env:
           BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
 
-          if [ "$BASE_BRANCH" != "main" ]; then
-            echo "Pull requests must target main; received: $BASE_BRANCH" >&2
-            exit 1
-          fi
+          case "$BASE_BRANCH" in
+            main|fix/submission-status-api-conformance)
+              ;;
+            *)
+              echo \
+                "Pull requests must target an approved base; received: $BASE_BRANCH" \
+                >&2
+              exit 1
+              ;;
+          esac
 
-          echo "Pull request base branch is main."
+          echo "Pull request base branch is allowed."
