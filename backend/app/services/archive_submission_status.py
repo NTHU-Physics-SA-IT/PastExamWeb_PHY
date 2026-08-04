@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -13,6 +14,11 @@ from app.models.models import (
 )
 from app.services.personal_notifications import enqueue_personal_notification
 from app.utils.course_text import format_course_display_name
+
+logger = logging.getLogger(__name__)
+
+ARCHIVE_SUBMISSION_SELF_DELETE_CONSUMED_CODE = "archive_submission_self_delete_consumed"
+ARCHIVE_SUBMISSION_SELF_DELETE_CONSUMED_MESSAGE = "此投稿的自助刪除資格已使用。"
 
 
 class ArchiveSubmissionReviewAction(str, Enum):
@@ -264,6 +270,45 @@ def normalize_submission_status(value) -> SubmissionStatus | None:
         return SubmissionStatus(str(value).strip().lower())
     except ValueError:
         return None
+
+
+def resolve_archive_submission_delete_source_status(
+    value,
+    *,
+    operation: str,
+) -> SubmissionStatus:
+    """Return an exact supported pre-delete state or fail as static corruption."""
+
+    normalized = normalize_submission_status(value)
+    if normalized not in {
+        SubmissionStatus.PENDING,
+        SubmissionStatus.APPROVED,
+        SubmissionStatus.REJECTED,
+        SubmissionStatus.TAKEDOWN,
+    }:
+        logger.error(
+            "archive_submission_delete_static_invariant operation=%s status_type=%s",
+            operation,
+            type(value).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error",
+        )
+    return normalized
+
+
+def archive_submission_self_delete_consumed_error() -> HTTPException:
+    """Return the stable public conflict for consumed owner delete eligibility."""
+
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": ARCHIVE_SUBMISSION_SELF_DELETE_CONSUMED_CODE,
+            "message": ARCHIVE_SUBMISSION_SELF_DELETE_CONSUMED_MESSAGE,
+            "reload_required": False,
+        },
+    )
 
 
 def resolve_archive_submission_actual_status(

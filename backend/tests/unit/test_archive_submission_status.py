@@ -4,6 +4,7 @@ from inspect import iscoroutinefunction, signature
 from itertools import product
 
 import pytest
+from fastapi import HTTPException
 
 from app.models.models import ArchiveSubmissionAdminAction, SubmissionStatus
 from app.services.archive_submission_status import (
@@ -13,6 +14,7 @@ from app.services.archive_submission_status import (
     available_archive_submission_admin_actions,
     classify_archive_submission_expected_state,
     classify_archive_submission_review_transition,
+    resolve_archive_submission_delete_source_status,
     resolve_archive_submission_actual_status,
 )
 
@@ -258,9 +260,9 @@ def test_archive_submission_admin_actions_follow_canonical_projection(
 
 def test_archive_submission_admin_actions_are_pure_and_keep_delete_outside_review_matrix():
     assert not iscoroutinefunction(available_archive_submission_admin_actions)
-    assert tuple(
-        signature(available_archive_submission_admin_actions).parameters
-    ) == ("status",)
+    assert tuple(signature(available_archive_submission_admin_actions).parameters) == (
+        "status",
+    )
     assert ArchiveSubmissionAdminAction.DELETE.value not in {
         action.value for action in ArchiveSubmissionReviewAction
     }
@@ -268,9 +270,7 @@ def test_archive_submission_admin_actions_are_pure_and_keep_delete_outside_revie
 
 @pytest.mark.parametrize("status", list(SubmissionStatus))
 def test_archive_submission_actual_status_normalization_preserves_active_status(status):
-    assert (
-        resolve_archive_submission_actual_status(status, deleted_at=None) == status
-    )
+    assert resolve_archive_submission_actual_status(status, deleted_at=None) == status
 
 
 @pytest.mark.parametrize(
@@ -295,9 +295,23 @@ def test_archive_submission_actual_status_normalization_prioritizes_deleted_at(
 
 
 def test_archive_submission_actual_status_normalization_rejects_unknown_status():
-    assert (
-        resolve_archive_submission_actual_status("unknown", deleted_at=None) is None
-    )
+    assert resolve_archive_submission_actual_status("unknown", deleted_at=None) is None
+
+
+def test_archive_submission_delete_source_status_rejects_static_corruption(
+    caplog,
+):
+    with pytest.raises(HTTPException) as exc_info:
+        resolve_archive_submission_delete_source_status(
+            "private-invalid-status",
+            operation="unit_test",
+        )
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Internal Server Error"
+    assert "archive_submission_delete_static_invariant" in caplog.text
+    assert "operation=unit_test" in caplog.text
+    assert "private-invalid-status" not in caplog.text
 
 
 @pytest.mark.parametrize("status", list(SubmissionStatus))

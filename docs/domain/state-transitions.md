@@ -161,17 +161,16 @@ their first row lock, reject more than one source as a static one-to-one
 integrity anomaly, revalidate the legal zero-or-one membership afterward, and
 then apply the existing transition to the locked row.
 
-Existing owner delete, administrator delete, and exact Submission restore now
-use the same planner without changing their authorization, status, quota,
-previous-status, retry, or response contracts. An unlinked Submission locks
-only its own row. A legally linked Submission discovers its retained exact
-parent before the first row lock, then locks Course, Archive, and
-ArchiveSubmission in canonical rank and ascending-primary-key order. Locked
-membership and requester/owner identity are revalidated before mutation. One
-changed discovery may roll back and rebuild internally; a second mismatch
-fails through the existing generic internal-error boundary and never borrows
-the Archive-only `archive_lifecycle_conflict` contract. Course lifecycle,
-report lifecycle, and permanent-delete lock ordering remain outside this
+Owner delete, administrator delete, and exact Submission restore use the same
+planner. An unlinked Submission locks only its own row. A legally linked
+Submission discovers its retained exact parent before the first row lock, then
+locks Course, Archive, and ArchiveSubmission in canonical rank and
+ascending-primary-key order. Locked membership and requester/owner identity
+are revalidated before mutation. One changed discovery may roll back and
+rebuild internally; a second mismatch fails through the existing generic
+internal-error boundary and never borrows the Archive-only
+`archive_lifecycle_conflict` contract. Course lifecycle, report lifecycle, and
+permanent-delete lock ordering remain outside this
 slice.
 
 If Archive trash or restore finds that a legal parent or zero-or-one exact
@@ -372,12 +371,16 @@ trash, and directly protects restoration to rejected. Both tests verify the
 persisted Course lifecycle reason and previous-status marker; they do not
 cover pending, administrator-takedown, or sibling-group cases.
 
-The current P0 milestone adds only the typed nullable column, its database
-guards, deterministic historical owner-delete backfill, schema manifest, and
-sealed read-only audit. Owner/admin delete routes do not yet write the column,
-restore does not yet consume it, and Course trash/restore continues using its
-versioned marker. S3A and S3B remain required before the new field governs
-runtime deletion or restoration.
+S3A-1 makes deletion provenance authoritative at runtime. Every true owner,
+administrator, or system/cascade soft-delete records the exact normalized
+active source status before entering `deleted`; an authorized no-op retry does
+not overwrite it. Owner deletion also consumes the submission's monotonic
+self-delete eligibility, while administrator and system/cascade deletion
+preserve the existing eligibility value. The current restore path clears the
+delete-only value when it makes the row active, as required by the existing
+database guard, but S3A-2 still owns exact-state restoration and the approved
+pending fallback for legacy null provenance. Course trash/restore continues
+using its versioned marker.
 
 ### Known gap
 
@@ -403,6 +406,12 @@ non-null identities are invalid and must fail closed.
   conservatively backfilled to `true`;
 - future administrator deletion preserves the existing value rather than
   consuming eligibility;
+- the first authorized owner deletion from `approved` changes the value to
+  `true`; after ownership authorization, retrying that completed deletion is a
+  mutation-free success with `changed=false`;
+- an authorized owner attempting a new deletion after the value is `true`
+  receives `409 archive_submission_self_delete_consumed`;
+- restoring a submission never resets the value;
 - future system/cascade deletion preserves the existing value rather than
   consuming eligibility;
 - restore, review transitions, and no-op operations never reset `true`.

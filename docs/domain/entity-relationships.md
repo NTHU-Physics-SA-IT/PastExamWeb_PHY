@@ -209,10 +209,13 @@ Consequently:
   links block the one-to-one schema migration without choosing a winner;
 - the eligibility migration does not update Archive rows.
 
-This schema establishes durable state and historical backfill only. The later
-Stage 5A application milestone still owns route authorization, conflict/no-op
-responses, future administrator and system/cascade value preservation, read
-capability projection, and frontend controls.
+S3A-1 connects that durable state to the deletion routes. Ownership is checked
+before a deleted-row retry is classified; the first owner mutation consumes
+eligibility, its authorized retry is a mutation-free `changed=false` success,
+and a later new owner mutation fails with the stable
+`archive_submission_self_delete_consumed` conflict. Administrator and
+system/cascade deletion preserve the stored value. Read capability projection
+and frontend controls remain later application work.
 
 ## ArchiveSubmissionEvent
 
