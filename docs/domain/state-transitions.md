@@ -102,6 +102,36 @@ accepted by the direct API contract but are not advertised. In particular,
 normalizes the row to `deleted` for both route enforcement and capability
 projection.
 
+### Direct administrator edit
+
+After administrator authorization, the direct Submission edit route acquires
+and revalidates the canonical Course, Archive, ArchiveSubmission plan before
+classifying the locked status:
+
+| Status | Direct Submission edit |
+| --- | --- |
+| `pending` | allowed |
+| `approved` | forbidden |
+| `rejected` | allowed |
+| `takedown` | allowed without republishing |
+| `deleted` | forbidden |
+
+The editable states update only the Submission snapshot. They do not create or
+move a Course, mutate a linked Archive, publish a linked Archive, or invoke a
+review transition. Public approved content is edited through the Archive
+management API; a deleted Submission must be restored before it can be edited.
+The forbidden states return `409 Conflict` with
+`archive_submission_edit_forbidden`, the message
+`此狀態的投稿不可直接編輯。`, and `reload_required=false`. This stable
+business restriction is distinct from stale expected-state, lifecycle drift,
+one-to-one conflicts, static corruption, and
+`archive_submission_illegal_transition`.
+
+The edit route owns one database commit. Canonical plan acquisition, locked
+state and membership revalidation, snapshot mutation, and response refresh are
+inside that transaction. A failed request rolls the snapshot back and leaves
+the linked Archive and notification/event state unchanged.
+
 | Value | Canonical Chinese label |
 | --- | --- |
 | `pending` | 待審核 |

@@ -64,6 +64,13 @@ events. A failed transaction rolls provenance, owner eligibility, the linked
 Archive lifecycle, and side effects back together. Restore remains silent, and
 Course trash/restore retains its existing notification semantics.
 
+Direct administrator edit of an editable Submission state is also silent. The
+route owns the canonical lock/revalidation and its single database commit;
+pending, rejected, and takedown edits update only the Submission snapshot.
+Takedown edit does not republish or restore its linked Archive. Forbidden,
+stale, and failed edits leave Submission, linked Archive, notification, and
+event state unchanged.
+
 Review side effects are gated by the expected-state check and transition
 policy:
 
@@ -290,6 +297,7 @@ integration.
 | Submission approve | Category/Course/Archive work, submission review metadata, and notification enqueue share the approve caller's commit | PostgreSQL operation is caller-owned and protected by focused rollback tests |
 | Submission owner/admin delete | The route owns authorization, canonical parent-first locks, lifecycle mutation, and commit | Existing delete behavior remains silent; lock/revalidation failure commits no quota, status, Archive, notification, or event change |
 | Submission exact restore | The route owns canonical parent-first locks, occupancy validation, lifecycle mutation, and commit; conflict or integrity failure rolls back before returning | Restore remains silent, consumes exact prior-state provenance, falls back to pending when it is absent, and only republishes the retained exact Archive for an approved restore |
+| Submission direct administrator edit | The route owns authorization, canonical parent-first locks, locked state/membership validation, snapshot mutation, and one commit | Pending/rejected/takedown edits are silent and Submission-only; approved/deleted rejection or any failure leaves the linked Archive and side effects untouched |
 | Course soft trash/restore | The route owns discovery, canonical Category/Course/Archive/Submission locks, one bounded membership rebuild, lifecycle mutation, and commit | Existing Course results and counts remain unchanged; both operations remain silent |
 | Report create/review | Report mutation and durable personal notification share a commit; ArchiveReport review uses canonical Course/Archive/optional Submission/Report locks and includes optional takedown | Comparatively complete and protected by focused tests |
 | ArchiveReport soft trash/restore | Route-owned canonical parent-first lock plan, Report metadata mutation, then commit | Silent; existing status and pending-uniqueness behavior are unchanged |

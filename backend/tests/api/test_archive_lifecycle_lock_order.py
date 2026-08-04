@@ -1845,6 +1845,301 @@ async def test_submission_delete_and_restore_serialize_without_deadlock(
         )
 
 
+@pytest.mark.parametrize("first_operation", ["edit", "review"])
+@pytest.mark.asyncio
+async def test_submission_edit_and_review_serialize_without_deadlock(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+    first_operation,
+):
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=admin.id,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+
+    async def edit_submission():
+        return await client.put(
+            f"/archives/admin/submissions/{target.id}",
+            json={"professor": "Serialized edit professor"},
+        )
+
+    async def approve_submission():
+        return await client.post(
+            f"/archives/admin/submissions/{target.id}/approve",
+            json={"expected_status": "pending"},
+        )
+
+    try:
+        first, second, traces, sqlstates = await _run_two_request_lock_race(
+            monkeypatch=monkeypatch,
+            first_request=(
+                edit_submission if first_operation == "edit" else approve_submission
+            ),
+            second_request=(
+                approve_submission if first_operation == "edit" else edit_submission
+            ),
+        )
+        assert first.status_code == 200
+        assert second.status_code == (200 if first_operation == "edit" else 409)
+        if first_operation == "review":
+            assert (
+                second.json()["detail"]
+                == archives_service.ARCHIVE_SUBMISSION_EDIT_FORBIDDEN_DETAIL
+            )
+        assert "40P01" not in sqlstates
+        for trace in traces:
+            assert trace == sorted(trace)
+            assert (LifecycleResourceClass.COURSE, course.id) in trace
+            assert (LifecycleResourceClass.ARCHIVE, archive.id) in trace
+            assert (
+                LifecycleResourceClass.ARCHIVE_SUBMISSION,
+                target.id,
+            ) in trace
+
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, target.id)
+            assert stored.status == SubmissionStatus.APPROVED
+            assert stored.professor == (
+                "Serialized edit professor"
+                if first_operation == "edit"
+                else "Lock Professor"
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.parametrize("first_operation", ["edit", "delete"])
+@pytest.mark.asyncio
+async def test_submission_edit_and_delete_serialize_without_deadlock(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+    first_operation,
+):
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=admin.id,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+
+    async def edit_submission():
+        return await client.put(
+            f"/archives/admin/submissions/{target.id}",
+            json={"professor": "Serialized edit professor"},
+        )
+
+    async def delete_submission():
+        return await client.delete(f"/archives/admin/submissions/{target.id}")
+
+    try:
+        first, second, traces, sqlstates = await _run_two_request_lock_race(
+            monkeypatch=monkeypatch,
+            first_request=(
+                edit_submission if first_operation == "edit" else delete_submission
+            ),
+            second_request=(
+                delete_submission if first_operation == "edit" else edit_submission
+            ),
+        )
+        assert first.status_code == 200
+        assert second.status_code == (200 if first_operation == "edit" else 409)
+        if first_operation == "delete":
+            assert (
+                second.json()["detail"]
+                == archives_service.ARCHIVE_SUBMISSION_EDIT_FORBIDDEN_DETAIL
+            )
+        assert "40P01" not in sqlstates
+        assert traces[0] == traces[1]
+
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, target.id)
+            assert stored.status == SubmissionStatus.DELETED
+            assert stored.previous_status == SubmissionStatus.PENDING
+            assert stored.professor == (
+                "Serialized edit professor"
+                if first_operation == "edit"
+                else "Lock Professor"
+            )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.parametrize("first_operation", ["edit", "restore"])
+@pytest.mark.asyncio
+async def test_submission_edit_and_restore_serialize_without_deadlock(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+    first_operation,
+):
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=admin.id,
+    )
+    deleted_at = datetime.now(timezone.utc)
+    async with session_maker() as session:
+        stored_archive = await session.get(Archive, archive.id)
+        stored = await session.get(ArchiveSubmission, target.id)
+        stored_archive.deleted_at = deleted_at
+        stored.status = SubmissionStatus.DELETED
+        stored.previous_status = SubmissionStatus.PENDING
+        stored.deleted_at = deleted_at
+        await session.commit()
+
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+
+    async def edit_submission():
+        return await client.put(
+            f"/archives/admin/submissions/{target.id}",
+            json={"professor": "Serialized edit professor"},
+        )
+
+    async def restore_submission():
+        return await client.post(
+            "/trash/restore",
+            json={"item_type": "archive_submission", "item_id": target.id},
+        )
+
+    try:
+        first, second, traces, sqlstates = await _run_two_request_lock_race(
+            monkeypatch=monkeypatch,
+            first_request=(
+                edit_submission if first_operation == "edit" else restore_submission
+            ),
+            second_request=(
+                restore_submission if first_operation == "edit" else edit_submission
+            ),
+        )
+        assert first.status_code == (409 if first_operation == "edit" else 200)
+        assert second.status_code == 200
+        if first_operation == "edit":
+            assert (
+                first.json()["detail"]
+                == archives_service.ARCHIVE_SUBMISSION_EDIT_FORBIDDEN_DETAIL
+            )
+        assert "40P01" not in sqlstates
+        assert traces[0] == traces[1]
+
+        async with session_maker() as session:
+            stored_archive = await session.get(Archive, archive.id)
+            stored = await session.get(ArchiveSubmission, target.id)
+            assert stored.status == SubmissionStatus.PENDING
+            assert stored.previous_status is None
+            assert stored.professor == (
+                "Serialized edit professor"
+                if first_operation == "restore"
+                else "Lock Professor"
+            )
+            assert stored_archive.deleted_at == deleted_at
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
+@pytest.mark.parametrize(
+    ("previous_status", "restored_status", "edit_allowed", "archive_restored"),
+    [
+        (SubmissionStatus.PENDING, SubmissionStatus.PENDING, True, False),
+        (SubmissionStatus.REJECTED, SubmissionStatus.REJECTED, True, False),
+        (SubmissionStatus.TAKEDOWN, SubmissionStatus.TAKEDOWN, True, False),
+        (SubmissionStatus.APPROVED, SubmissionStatus.APPROVED, False, True),
+        (None, SubmissionStatus.PENDING, True, False),
+    ],
+)
+@pytest.mark.asyncio
+async def test_submission_restore_then_edit_obeys_restored_state_contract(
+    client,
+    session_maker,
+    make_user,
+    previous_status,
+    restored_status,
+    edit_allowed,
+    archive_restored,
+):
+    admin = await make_user(is_admin=True)
+    category, course, archive, target = await _create_archive_context(
+        session_maker,
+        requester_id=admin.id,
+    )
+    deleted_at = datetime.now(timezone.utc)
+    async with session_maker() as session:
+        stored_archive = await session.get(Archive, archive.id)
+        stored = await session.get(ArchiveSubmission, target.id)
+        stored_archive.deleted_at = deleted_at
+        stored.status = SubmissionStatus.DELETED
+        stored.previous_status = previous_status
+        stored.owner_self_delete_consumed = True
+        stored.deleted_at = deleted_at
+        await session.commit()
+
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        restore_response = await client.post(
+            "/trash/restore",
+            json={"item_type": "archive_submission", "item_id": target.id},
+        )
+        edit_response = await client.put(
+            f"/archives/admin/submissions/{target.id}",
+            json={"professor": "Post-restore edit professor"},
+        )
+
+        assert restore_response.status_code == 200
+        assert edit_response.status_code == (200 if edit_allowed else 409)
+        if not edit_allowed:
+            assert (
+                edit_response.json()["detail"]
+                == archives_service.ARCHIVE_SUBMISSION_EDIT_FORBIDDEN_DETAIL
+            )
+
+        async with session_maker() as session:
+            stored_archive = await session.get(Archive, archive.id)
+            stored = await session.get(ArchiveSubmission, target.id)
+            assert stored.status == restored_status
+            assert stored.previous_status is None
+            assert stored.owner_self_delete_consumed is True
+            assert stored.professor == (
+                "Post-restore edit professor" if edit_allowed else "Lock Professor"
+            )
+            assert (stored_archive.deleted_at is None) is archive_restored
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_archive_context(
+            session_maker,
+            category_id=category.id,
+            course_id=course.id,
+            archive_ids=[archive.id],
+            submission_ids=[target.id],
+        )
+
+
 @pytest.mark.asyncio
 async def test_reverse_input_submission_plans_lock_same_rows_in_same_order(
     session_maker,
