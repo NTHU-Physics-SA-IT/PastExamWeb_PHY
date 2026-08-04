@@ -332,6 +332,16 @@ first-writer-wins for double approval and both winner orders for every pair
 among approve, reject, and takedown from `pending`. Later-cycle notification
 identity and dedupe remain Stage 5C work.
 
+The S3C closure matrix additionally holds the first complete canonical lock
+plan while a competing transaction reaches the same lock boundary. It covers
+both winner orders for direct review versus owner deletion, direct review
+versus administrator deletion, direct takedown versus exact restore, and the
+service-level system/cascade delete primitive versus owner deletion. Only a
+committed review transition enqueues its single existing notification.
+Deletion, exact restore, stale losers, and completed-delete retries remain
+notification- and event-free, and the final state is independently reloaded
+after both transactions complete.
+
 ArchiveSubmission approval evidence additionally injects failure after
 Category flush, after Course/Archive flush before link, after link/status
 mutation before notification, after notification flush, and at final commit.

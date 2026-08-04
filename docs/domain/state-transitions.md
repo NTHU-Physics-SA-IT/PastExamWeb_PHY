@@ -451,6 +451,17 @@ takedown restoration, the null-to-pending compatibility fallback, linked
 Archive visibility, owner-eligibility preservation, exact one-to-one
 membership, canonical lock order, and delete-versus-restore serialization.
 
+Deterministic independent-session PostgreSQL coverage closes the remaining
+submission lifecycle races. Direct review and owner/admin deletion, direct
+review and exact restore, and system/cascade deletion and owner deletion all
+serialize on the same canonical Course, Archive, ArchiveSubmission plan.
+The committed winner determines the legal second result: stale direct review
+returns `archive_submission_stale_state`, completed deletion retries are
+mutation-free, and exact restore consumes only persisted `previous_status`.
+Owner deletion is the only one of these delete authorities that changes
+`owner_self_delete_consumed` from `false` to `true`; no winner order can reset
+it.
+
 ### Owner self-delete eligibility persistence
 
 Ownership and owner self-delete eligibility are separate persisted concepts.
