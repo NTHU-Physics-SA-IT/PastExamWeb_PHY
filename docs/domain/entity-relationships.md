@@ -23,7 +23,7 @@ current implementation separately from the intended product relation.
 | `User` | Owns uploads, submissions, reports, discussion activity, and personal notifications through user IDs; many actor/deleter FKs use `SET NULL`, while some owned rows cascade | Authentication identity and audit actor; deletion must preserve required history without exposing unnecessary identity | Confirmed by code; deletion policy varies by entity |
 | `CourseCategoryConfig` | `Course.category` stores its key as a string rather than an FK; submissions also retain category snapshots | Category controls discovery and creation choices, but its soft-delete lifecycle is independent from historical submissions | Confirmed by code; no DB FK means application checks carry integrity |
 | `Course` | Required parent of `Archive`; category is a string key; has soft-delete metadata | Groups archives for navigation; course trash may hide/deactivate children but must not rewrite independent submission review results | Confirmed by code in `courses.py` and `trash.py` |
-| `CourseSubmission` | Requester/reviewer and optional `created_course_id`; no soft-delete metadata in the current model | A course/category request attached to an archive-submission flow; created category/course becomes independent after approval | Implementation gap: current model is a separate review record and has no defined trash lifecycle |
+| `CourseSubmission` | Separate legacy course-request record with requester/reviewer and optional `created_course_id`; no soft-delete metadata in the current model | Not the ownership model for an ArchiveSubmission that requests missing parent metadata | Independent legacy flow; it must not be used to add permanent Category/Course ownership to ArchiveSubmission |
 | `Archive` | Required `course_id`, optional uploader, one `object_name`, optional soft-delete metadata; at most one submission points to it through the named nullable unique `created_archive_id` constraint | One independently accessible approved public file for authenticated system users, optionally created by exactly one submission | Administrator-created Archives may have no source submission; approval, exact restore, and source projection fail closed on occupancy or cardinality violations |
 | `ArchiveSubmission` | Required requester and object name; optional reviewer, legacy owner, and nullable unique `created_archive_id`; review/trash fields and monotonic owner-self-delete eligibility coexist | One independent submission and PDF, optionally paired with exactly one Archive. Ownership survives eligibility consumption | Database uniqueness and application fail-fast guards are enforced; group-lifecycle corrections remain a later milestone |
 | `ArchiveSubmissionEvent` | Unique `submission_id` integer and timestamp, without a declared FK | Immutable statistical event retained after submission deletion, with active link/PII detached as needed | Implementation gap: permanent-delete helper currently deletes events |
@@ -73,6 +73,49 @@ inference.
 Archive has either `[]` or one source-submission ID. Source projection validates
 cardinality before applying requester visibility and fails closed instead of
 truncating an anomalous multi-source result.
+
+## ArchiveSubmission requested parent metadata
+
+### Intended invariant
+
+An upload that requests a new Course, or a new Category plus Course, remains
+one ordinary `ArchiveSubmission`. The requested names and keys are review-time
+metadata, not separate Course/Category applications or permanent ownership
+links.
+
+- A new Course request always includes the exam-file upload.
+- A new Category request always includes both a new Course request and the
+  exam-file upload; category-only requests are invalid.
+- Approval resolves parents from current normalized state. An active matching
+  Category or Course is reused even when the request originally marked it as
+  new or another actor created it after submission.
+- Only approval may create a missing Category or Course. Pending, rejected,
+  edit/return, trash, and restore operations do not create them.
+- Category, Course, Archive creation/linking, approval metadata, and durable
+  approval notification share one PostgreSQL transaction.
+- A failed approval retains the original submission and uploaded object but
+  leaves no new Category, Course, Archive, link, approved state, or approval
+  notification.
+- After approval, Category and Course lifecycle is independent from the source
+  submission. No `created_course_id`, `created_category_id`, cascade ownership,
+  or equivalent permanent relation is added.
+
+The only exact approval result link remains the optional one-to-one
+`ArchiveSubmission.created_archive_id → Archive`. Consequently
+`source_submission_ids` remains `[]` or `[submission_id]`; parent resolution
+does not expand that compatibility shape.
+
+### Current implementation and test evidence
+
+`archives.py::approve_archive_submission` owns the transaction. Its approval
+Category helper flushes without committing; Course and Archive work, the exact
+link, review transition, and notification enqueue are committed together.
+The approval namespace mutex serializes the normalized Category/Course
+identity before the canonical parent-first row-lock plan.
+
+Focused approval atomicity and concurrency tests protect missing-parent
+creation, parent reuse after submission, rollback at intermediate boundaries,
+and two independent approvals reusing one concurrently created Course.
 
 ### Frontend rendering evidence
 
@@ -202,8 +245,8 @@ intended invariant.
 
 ### Intended invariant
 
-- It represents an archive submission that also requests a new course or
-  category.
+- It is the existing separate legacy Course request flow; it is not created by
+  the ArchiveSubmission upload/approval contract above.
 - Existing normalized category/course identities are reused rather than
   duplicated.
 - Once created, the category and course are independent of the
@@ -217,9 +260,8 @@ intended invariant.
 ### Current implementation
 
 `CourseSubmission` has requester, reviewer, status, and `created_course_id`.
-Archive approval paths also carry requested course/category snapshots directly
-on `ArchiveSubmission` and reuse existing records under application-level
-locking.
+Archive approval instead carries requested course/category snapshots directly
+on `ArchiveSubmission`; it does not create or link a `CourseSubmission`.
 
 ### Known gap
 

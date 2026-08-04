@@ -9,6 +9,7 @@ from app.main import app
 from app.models.models import (
     Archive,
     ArchiveSubmission,
+    ArchiveSubmissionEvent,
     ArchiveType,
     Course,
     CourseCategoryConfig,
@@ -43,6 +44,11 @@ async def _cleanup_approval_context(
 ) -> None:
     async with session_maker() as session:
         await session.execute(
+            delete(ArchiveSubmissionEvent).where(
+                ArchiveSubmissionEvent.submission_id == submission_id
+            )
+        )
+        await session.execute(
             delete(PersonalNotification).where(
                 PersonalNotification.source_type == "archive_submission",
                 PersonalNotification.source_id == submission_id,
@@ -64,6 +70,58 @@ async def _cleanup_approval_context(
             delete(CourseCategoryConfig).where(CourseCategoryConfig.key == category_key)
         )
         await session.commit()
+
+
+async def _approval_counts(
+    session,
+    *,
+    submission_id: int,
+    category_key: str,
+    course_name: str,
+    object_name: str,
+) -> dict[str, int]:
+    return {
+        "category": int(
+            await session.scalar(
+                select(func.count(CourseCategoryConfig.id)).where(
+                    CourseCategoryConfig.key == category_key
+                )
+            )
+            or 0
+        ),
+        "course": int(
+            await session.scalar(
+                select(func.count(Course.id)).where(
+                    Course.category == category_key,
+                    Course.name == course_name,
+                )
+            )
+            or 0
+        ),
+        "archive": int(
+            await session.scalar(
+                select(func.count(Archive.id)).where(Archive.object_name == object_name)
+            )
+            or 0
+        ),
+        "notification": int(
+            await session.scalar(
+                select(func.count(PersonalNotification.id)).where(
+                    PersonalNotification.source_type == "archive_submission",
+                    PersonalNotification.source_id == submission_id,
+                )
+            )
+            or 0
+        ),
+        "event": int(
+            await session.scalar(
+                select(func.count(ArchiveSubmissionEvent.id)).where(
+                    ArchiveSubmissionEvent.submission_id == submission_id
+                )
+            )
+            or 0
+        ),
+    }
 
 
 def _install_notification_failure(
@@ -164,6 +222,13 @@ async def test_approve_rolls_back_new_category_course_archive_on_notification_fa
             status=SubmissionStatus.PENDING,
         )
         session.add(submission)
+        await session.flush()
+        session.add(
+            ArchiveSubmissionEvent(
+                submission_id=submission.id,
+                submitted_at=submission.created_at,
+            )
+        )
         await session.commit()
         await session.refresh(submission)
         submission_id = submission.id
@@ -187,42 +252,13 @@ async def test_approve_rolls_back_new_category_course_archive_on_notification_fa
 
         async with session_maker() as session:
             stored_submission = await session.get(ArchiveSubmission, submission_id)
-            counts = {
-                "category": int(
-                    await session.scalar(
-                        select(func.count(CourseCategoryConfig.id)).where(
-                            CourseCategoryConfig.key == category_key
-                        )
-                    )
-                    or 0
-                ),
-                "course": int(
-                    await session.scalar(
-                        select(func.count(Course.id)).where(
-                            Course.category == category_key,
-                            Course.name == course_name,
-                        )
-                    )
-                    or 0
-                ),
-                "archive": int(
-                    await session.scalar(
-                        select(func.count(Archive.id)).where(
-                            Archive.object_name == object_name
-                        )
-                    )
-                    or 0
-                ),
-                "notification": int(
-                    await session.scalar(
-                        select(func.count(PersonalNotification.id)).where(
-                            PersonalNotification.source_type == "archive_submission",
-                            PersonalNotification.source_id == submission_id,
-                        )
-                    )
-                    or 0
-                ),
-            }
+            counts = await _approval_counts(
+                session,
+                submission_id=submission_id,
+                category_key=category_key,
+                course_name=course_name,
+                object_name=object_name,
+            )
 
             assert stored_submission is not None
             assert _column_snapshot(stored_submission) == submission_snapshot
@@ -231,6 +267,7 @@ async def test_approve_rolls_back_new_category_course_archive_on_notification_fa
                 "course": 0,
                 "archive": 0,
                 "notification": 0,
+                "event": 1,
             }
     finally:
         app.dependency_overrides.pop(get_current_user, None)
@@ -486,11 +523,14 @@ async def test_approve_rolls_back_existing_archive_update_on_notification_failur
         )
 
 
+@pytest.mark.parametrize("precreate_category", [False, True])
 @pytest.mark.asyncio
 async def test_approve_commits_complete_result_visible_to_new_session(
     client,
     session_maker,
     make_user,
+    monkeypatch,
+    precreate_category,
 ):
     unique = uuid.uuid4().hex
     category_key = f"success-{unique[:10]}"
@@ -501,6 +541,17 @@ async def test_approve_commits_complete_result_visible_to_new_session(
     admin = await make_user(name=f"success-admin-{unique[:8]}", is_admin=True)
 
     async with session_maker() as session:
+        if precreate_category:
+            session.add(
+                CourseCategoryConfig(
+                    key=category_key,
+                    name=category_name,
+                    label=category_name,
+                    icon="pi pi-book",
+                    order_index=803,
+                    is_active=True,
+                )
+            )
         submission = ArchiveSubmission(
             subject=course_name,
             category=category_key,
@@ -522,17 +573,32 @@ async def test_approve_commits_complete_result_visible_to_new_session(
         await session.refresh(submission)
         submission_id = submission.id
 
+    commit_calls: list[int] = []
+    original_commit = session_maker.class_.commit
+
+    async def tracked_commit(session):
+        commit_calls.append(id(session))
+        return await original_commit(session)
+
     app.dependency_overrides[get_current_user] = _override_admin(admin.id)
     try:
-        response = await client.post(
-            f"/archives/admin/submissions/{submission_id}/approve",
-            json={
-                "note": "complete approval",
-                "expected_status": "pending",
-            },
-        )
+        with monkeypatch.context() as commit_patch:
+            commit_patch.setattr(
+                session_maker.class_,
+                "commit",
+                tracked_commit,
+            )
+            response = await client.post(
+                f"/archives/admin/submissions/{submission_id}/approve",
+                json={
+                    "note": "complete approval",
+                    "expected_status": "pending",
+                },
+            )
         assert response.status_code == 200
         assert response.json()["status"] == SubmissionStatus.APPROVED.value
+        assert len(commit_calls) == 1
+        assert len(set(commit_calls)) == 1
 
         async with session_maker() as session:
             category = (
@@ -672,5 +738,283 @@ async def test_approve_invalid_course_rolls_back_without_mutation(
             submission_id=submission_id,
             category_key=category_key,
             course_name="",
+            object_names=[object_name],
+        )
+
+
+@pytest.mark.parametrize(
+    "failure_stage",
+    [
+        "after_category",
+        "before_link",
+        "before_notification",
+        "before_commit",
+    ],
+)
+@pytest.mark.asyncio
+async def test_approve_failpoints_roll_back_every_parent_and_transition_write(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+    failure_stage,
+):
+    unique = uuid.uuid4().hex
+    category_key = f"failpoint-{unique[:10]}"
+    category_name = f"Failpoint category {unique}"
+    course_name = f"Failpoint Course {unique}"
+    object_name = f"archive-submissions/failpoint-{unique}.pdf"
+    requester = await make_user(name=f"failpoint-requester-{unique[:8]}")
+    admin = await make_user(name=f"failpoint-admin-{unique[:8]}", is_admin=True)
+
+    async with session_maker() as session:
+        submission = ArchiveSubmission(
+            subject=course_name,
+            category=category_key,
+            name=f"Failpoint Exam {unique}",
+            academic_year=2026,
+            archive_type=ArchiveType.FINAL,
+            professor="Failpoint Professor",
+            object_name=object_name,
+            requested_course_name=course_name,
+            requested_category_key=category_key,
+            requested_category_name=category_name,
+            requested_category_label=category_name,
+            requested_category_icon="pi pi-book",
+            requester_id=requester.id,
+            status=SubmissionStatus.PENDING,
+        )
+        session.add(submission)
+        await session.flush()
+        session.add(
+            ArchiveSubmissionEvent(
+                submission_id=submission.id,
+                submitted_at=submission.created_at,
+            )
+        )
+        await session.commit()
+        await session.refresh(submission)
+        submission_id = submission.id
+        submission_snapshot = _column_snapshot(submission)
+
+    failure = RuntimeError(f"approval failpoint: {failure_stage}")
+    patch_context = monkeypatch.context()
+    with patch_context as stage_patch:
+        if failure_stage == "after_category":
+            original = (
+                archives_service._ensure_or_create_requested_category_for_approval
+            )
+
+            async def create_category_then_fail(*args, **kwargs):
+                category = await original(*args, **kwargs)
+                assert category.id is not None
+                raise failure
+
+            stage_patch.setattr(
+                archives_service,
+                "_ensure_or_create_requested_category_for_approval",
+                create_category_then_fail,
+            )
+        elif failure_stage == "before_link":
+            original = archives_service.ensure_archive_submission_link_available
+
+            async def verify_parents_then_fail(db, **kwargs):
+                await original(db, **kwargs)
+                assert (
+                    await db.scalar(
+                        select(func.count(CourseCategoryConfig.id)).where(
+                            CourseCategoryConfig.key == category_key
+                        )
+                    )
+                    == 1
+                )
+                assert (
+                    await db.scalar(
+                        select(func.count(Course.id)).where(
+                            Course.category == category_key,
+                            Course.name == course_name,
+                        )
+                    )
+                    == 1
+                )
+                assert (
+                    await db.scalar(
+                        select(func.count(Archive.id)).where(
+                            Archive.object_name == object_name
+                        )
+                    )
+                    == 1
+                )
+                raise failure
+
+            stage_patch.setattr(
+                archives_service,
+                "ensure_archive_submission_link_available",
+                verify_parents_then_fail,
+            )
+        elif failure_stage == "before_notification":
+
+            async def fail_before_notification(db, submission, new_status):
+                assert new_status == SubmissionStatus.APPROVED
+                assert submission.status == SubmissionStatus.APPROVED
+                assert submission.created_archive_id is not None
+                raise failure
+
+            stage_patch.setattr(
+                archives_service,
+                "enqueue_submission_status_notification",
+                fail_before_notification,
+            )
+        else:
+
+            async def fail_final_commit(self):
+                raise failure
+
+            stage_patch.setattr(
+                session_maker.class_,
+                "commit",
+                fail_final_commit,
+            )
+
+        app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+        try:
+            with pytest.raises(RuntimeError, match=failure_stage):
+                await client.post(
+                    f"/archives/admin/submissions/{submission_id}/approve",
+                    json={
+                        "note": "must roll back",
+                        "expected_status": "pending",
+                    },
+                )
+        finally:
+            app.dependency_overrides.pop(get_current_user, None)
+
+    try:
+        async with session_maker() as session:
+            stored_submission = await session.get(
+                ArchiveSubmission,
+                submission_id,
+            )
+            counts = await _approval_counts(
+                session,
+                submission_id=submission_id,
+                category_key=category_key,
+                course_name=course_name,
+                object_name=object_name,
+            )
+            assert _column_snapshot(stored_submission) == submission_snapshot
+            assert counts == {
+                "category": 0,
+                "course": 0,
+                "archive": 0,
+                "notification": 0,
+                "event": 1,
+            }
+    finally:
+        await _cleanup_approval_context(
+            session_maker,
+            submission_id=submission_id,
+            category_key=category_key,
+            course_name=course_name,
+            object_names=[object_name],
+        )
+
+
+@pytest.mark.asyncio
+async def test_approve_reuses_course_created_after_submission(
+    client,
+    session_maker,
+    make_user,
+):
+    unique = uuid.uuid4().hex
+    category_key = f"late-parent-{unique[:10]}"
+    category_name = f"Late parent category {unique}"
+    course_name = f"Late Parent Course {unique}"
+    object_name = f"archive-submissions/late-parent-{unique}.pdf"
+    requester = await make_user(name=f"late-parent-requester-{unique[:8]}")
+    admin = await make_user(name=f"late-parent-admin-{unique[:8]}", is_admin=True)
+
+    async with session_maker() as session:
+        submission = ArchiveSubmission(
+            subject=course_name,
+            category=category_key,
+            name=f"Late Parent Exam {unique}",
+            academic_year=2026,
+            archive_type=ArchiveType.FINAL,
+            professor="Late Parent Professor",
+            object_name=object_name,
+            requested_course_name=course_name,
+            requested_category_key=category_key,
+            requested_category_name=category_name,
+            requested_category_label=category_name,
+            requested_category_icon="pi pi-book",
+            requester_id=requester.id,
+            status=SubmissionStatus.PENDING,
+        )
+        session.add(submission)
+        await session.commit()
+        await session.refresh(submission)
+        submission_id = submission.id
+
+    async with session_maker() as session:
+        category = CourseCategoryConfig(
+            key=category_key,
+            name=category_name,
+            label=category_name,
+            icon="pi pi-book",
+            order_index=804,
+            is_active=True,
+        )
+        course = Course(
+            name=course_name,
+            category=category_key,
+            order_index=31,
+        )
+        session.add_all([category, course])
+        await session.commit()
+        await session.refresh(course)
+        course_id = course.id
+
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        response = await client.post(
+            f"/archives/admin/submissions/{submission_id}/approve",
+            json={
+                "note": "reuse the parent created after submission",
+                "expected_status": "pending",
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["changed"] is True
+
+        async with session_maker() as session:
+            stored_submission = await session.get(ArchiveSubmission, submission_id)
+            archive = await session.get(
+                Archive,
+                stored_submission.created_archive_id,
+            )
+            counts = await _approval_counts(
+                session,
+                submission_id=submission_id,
+                category_key=category_key,
+                course_name=course_name,
+                object_name=object_name,
+            )
+            assert stored_submission.status == SubmissionStatus.APPROVED
+            assert archive.course_id == course_id
+            assert counts == {
+                "category": 1,
+                "course": 1,
+                "archive": 1,
+                "notification": 1,
+                "event": 0,
+            }
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_approval_context(
+            session_maker,
+            submission_id=submission_id,
+            category_key=category_key,
+            course_name=course_name,
             object_names=[object_name],
         )

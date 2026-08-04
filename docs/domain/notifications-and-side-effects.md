@@ -318,6 +318,17 @@ first-writer-wins for double approval and both winner orders for every pair
 among approve, reject, and takedown from `pending`. Later-cycle notification
 identity and dedupe remain Stage 5C work.
 
+ArchiveSubmission approval evidence additionally injects failure after
+Category flush, after Course/Archive flush before link, after link/status
+mutation before notification, after notification flush, and at final commit.
+Every case retains the pre-existing submission and upload event while removing
+all transaction-local parent, Archive, link, status, reviewer, and notification
+work. A separate independent-session race holds the first approval at its
+commit boundary while a second approval requests the same missing
+Category/Course identity; both complete without deadlock, with one Category,
+one Course, two independent Archives/links, and one approval notification per
+submission.
+
 ## Required follow-up
 
 Prioritize characterization tests for permanent-delete partial failure,
