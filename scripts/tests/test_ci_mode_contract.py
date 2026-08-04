@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
-import hashlib
 import importlib
 from pathlib import Path
 import subprocess
@@ -129,6 +128,62 @@ class FakeAPI:
         return self.target_sha
 
 
+class FakePRAPI(FakeAPI):
+    def __init__(
+        self,
+        fixture: dict[str, Any],
+        *,
+        pull_request_changes: dict[str, Any] | None = None,
+        ref_overrides: dict[str, str] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        super().__init__(
+            source_sha=fixture["source"],
+            target_sha=fixture["merge"],
+            error=error,
+        )
+        self.refs = {
+            ci.IMPLEMENTATION_BRANCH: fixture["base"],
+            "source": fixture["source"],
+        }
+        self.refs.update(ref_overrides or {})
+        self.pull_request_payload = {
+            "number": 17,
+            "state": "open",
+            "draft": False,
+            "mergeable": True,
+            "merge_commit_sha": fixture["merge"],
+            "base": {
+                "ref": ci.IMPLEMENTATION_BRANCH,
+                "sha": fixture["base"],
+                "repo": {
+                    "id": REPOSITORY_ID,
+                    "full_name": REPOSITORY,
+                },
+            },
+            "head": {
+                "ref": "source",
+                "sha": fixture["source"],
+                "repo": {
+                    "id": REPOSITORY_ID,
+                    "full_name": REPOSITORY,
+                },
+            },
+        }
+        self.pull_request_payload.update(pull_request_changes or {})
+
+    def ref_sha(self, ref_name: str) -> str:
+        if self.error:
+            raise self.error
+        return self.refs[ref_name]
+
+    def pull_request(self, number: int) -> dict[str, Any]:
+        if self.error:
+            raise self.error
+        assert number == 17
+        return deepcopy(self.pull_request_payload)
+
+
 class GitOverrides:
     def __init__(self, delegate: Any, **overrides: Any) -> None:
         self.delegate = delegate
@@ -187,9 +242,49 @@ def _classify_equivalent(
     )
 
 
+def _pr_event(fixture: dict[str, Any], **changes: Any) -> Any:
+    values = {
+        "event_name": "pull_request",
+        "before_sha": "",
+        "current_sha": fixture["merge"],
+        "ref": "refs/pull/17/merge",
+        "forced": False,
+        "repository": REPOSITORY,
+        "repository_id": REPOSITORY_ID,
+        "action": "synchronize",
+        "pr_number": 17,
+        "draft": False,
+        "base_ref": ci.IMPLEMENTATION_BRANCH,
+        "base_sha": fixture["base"],
+        "head_ref": "source",
+        "head_sha": fixture["source"],
+        "head_repository": REPOSITORY,
+        "head_repository_id": REPOSITORY_ID,
+    }
+    values.update(changes)
+    return ci.CIEvent(**values)
+
+
+def _classify_pr_equivalent(
+    fixture: dict[str, Any],
+    *,
+    event_changes: dict[str, Any] | None = None,
+    git: Any | None = None,
+    api: Any | None = None,
+) -> Any:
+    return ci.classify_ci_mode(
+        event=_pr_event(fixture, **(event_changes or {})),
+        git=git or fixture["git"],
+        api=api or FakePRAPI(fixture),
+        pr_equivalent_allowlist=frozenset({ci.IMPLEMENTATION_BRANCH}),
+        now=NOW,
+    )
+
+
 def test_classifier_defines_only_three_modes_and_empty_live_allowlist() -> None:
     assert ci.CI_MODES == frozenset({"full", "equivalent-merge", "docs-only"})
     assert ci.LIVE_EQUIVALENT_TARGET_REFS == frozenset()
+    assert ci.LIVE_EQUIVALENT_PR_BASE_REFS == frozenset()
 
 
 @pytest.mark.parametrize(
@@ -284,6 +379,204 @@ def test_rollout_disabled_keeps_valid_equivalent_fixture_full(tmp_path: Path) ->
     )
 
     assert result.ci_mode == "full"
+
+
+def test_valid_pr_synthetic_candidate_is_eligible(tmp_path: Path) -> None:
+    fixture = _equivalent_repository(tmp_path)
+
+    result = _classify_pr_equivalent(fixture)
+
+    assert result.ci_mode == "equivalent-merge"
+    assert result.source_sha == fixture["source"]
+    assert result.source_run_id == "9001"
+    assert result.source_tree == fixture["git"].tree_sha(fixture["source"])
+
+
+def test_pr_rollout_disabled_keeps_valid_candidate_full(tmp_path: Path) -> None:
+    fixture = _equivalent_repository(tmp_path)
+
+    result = ci.classify_ci_mode(
+        event=_pr_event(fixture),
+        git=fixture["git"],
+        api=FakePRAPI(fixture),
+        now=NOW,
+    )
+
+    assert result.ci_mode == "full"
+
+
+def test_pr_governance_change_requires_full_before_allowlist(
+    tmp_path: Path,
+) -> None:
+    fixture = _equivalent_repository(tmp_path)
+    git = GitOverrides(
+        fixture["git"],
+        changed_paths=(".github/workflows/main.yml",),
+    )
+
+    result = ci.classify_ci_mode(
+        event=_pr_event(fixture),
+        git=git,
+        api=FakePRAPI(fixture),
+        pr_equivalent_allowlist=frozenset({ci.IMPLEMENTATION_BRANCH}),
+        now=NOW,
+    )
+
+    assert result.ci_mode == "full"
+    assert result.reason.startswith("governance path requires full CI:")
+
+
+def test_main_pr_candidate_always_runs_full(tmp_path: Path) -> None:
+    fixture = _equivalent_repository(tmp_path)
+
+    result = _classify_pr_equivalent(
+        fixture,
+        event_changes={
+            "base_ref": "main",
+            "ref": "refs/pull/17/merge",
+        },
+    )
+
+    assert result.ci_mode == "full"
+    assert result.reason == "main pull request candidates always run full CI"
+
+
+@pytest.mark.parametrize(
+    ("event_changes", "git_overrides"),
+    (
+        ({"action": "closed"}, {}),
+        ({"draft": True}, {}),
+        ({"pr_number": 0}, {}),
+        ({"base_ref": "topic"}, {}),
+        ({"ref": "refs/heads/source"}, {}),
+        ({"head_repository": "other/repository"}, {}),
+        ({"head_repository_id": 999}, {}),
+        ({"base_sha": "bad"}, {}),
+        ({"head_sha": "bad"}, {}),
+        ({}, {"parents": ("1" * 40,)}),
+        ({}, {"parents": ("1" * 40, "2" * 40)}),
+        ({}, {"parents": ("1" * 40, "2" * 40, "3" * 40)}),
+        ({}, {"is_ancestor": False}),
+        ({}, {"trees_are_equal": False}),
+        ({}, {"diff_is_empty": False}),
+        ({}, {"changed_paths": (".github/workflows/main.yml",)}),
+    ),
+)
+def test_pr_candidate_event_topology_and_governance_fail_closed(
+    tmp_path: Path,
+    event_changes: dict[str, Any],
+    git_overrides: dict[str, Any],
+) -> None:
+    fixture = _equivalent_repository(tmp_path)
+    adjusted = dict(git_overrides)
+    if "parents" in adjusted:
+        parents = adjusted["parents"]
+        if len(parents) == 1:
+            adjusted["parents"] = (fixture["base"],)
+        elif len(parents) == 2:
+            adjusted["parents"] = (fixture["base"], "f" * 40)
+        else:
+            adjusted["parents"] = (
+                fixture["base"],
+                fixture["source"],
+                "3" * 40,
+            )
+
+    result = _classify_pr_equivalent(
+        fixture,
+        event_changes=event_changes,
+        git=GitOverrides(fixture["git"], **adjusted),
+    )
+
+    assert result.ci_mode == "full"
+
+
+@pytest.mark.parametrize(
+    "pull_request_changes",
+    (
+        {"state": "closed"},
+        {"draft": True},
+        {"mergeable": False},
+        {"mergeable": None},
+        {"merge_commit_sha": "f" * 40},
+        {"base": {}},
+        {"head": {}},
+        {"base": {"ref": "topic", "sha": "1" * 40, "repo": {}}},
+        {"head": {"ref": "source", "sha": "2" * 40, "repo": {}}},
+    ),
+)
+def test_pr_api_metadata_mismatch_falls_back(
+    tmp_path: Path,
+    pull_request_changes: dict[str, Any],
+) -> None:
+    fixture = _equivalent_repository(tmp_path)
+    api = FakePRAPI(fixture, pull_request_changes=pull_request_changes)
+
+    assert _classify_pr_equivalent(fixture, api=api).ci_mode == "full"
+
+
+def test_pr_base_or_head_advance_falls_back(tmp_path: Path) -> None:
+    fixture = _equivalent_repository(tmp_path)
+    base_advanced = FakePRAPI(
+        fixture,
+        ref_overrides={ci.IMPLEMENTATION_BRANCH: "f" * 40},
+    )
+    head_advanced = FakePRAPI(
+        fixture,
+        ref_overrides={"source": "f" * 40},
+    )
+
+    assert _classify_pr_equivalent(fixture, api=base_advanced).ci_mode == "full"
+    assert _classify_pr_equivalent(fixture, api=head_advanced).ci_mode == "full"
+
+
+@pytest.mark.parametrize(
+    ("run_change", "job_overrides"),
+    (
+        ({"conclusion": "failure"}, {}),
+        ({"updated_at": (NOW - timedelta(hours=73)).isoformat()}, {}),
+        ({}, {"Full CI Attestation": "skipped"}),
+        ({}, {"CI Gate": "cancelled"}),
+    ),
+)
+def test_pr_source_attestation_must_be_exact_fresh_and_full(
+    tmp_path: Path,
+    run_change: dict[str, Any],
+    job_overrides: dict[str, str],
+) -> None:
+    fixture = _equivalent_repository(tmp_path)
+    api = FakePRAPI(fixture)
+    api.runs[0].update(run_change)
+    api.jobs = _jobs(overrides=job_overrides)
+
+    assert _classify_pr_equivalent(fixture, api=api).ci_mode == "full"
+
+
+@pytest.mark.parametrize(
+    "error",
+    (
+        ci.ClassificationFailure("HTTP 401"),
+        ci.ClassificationFailure("HTTP 403"),
+        ci.ClassificationFailure("HTTP 404"),
+        ci.ClassificationFailure("HTTP 500"),
+        ci.ClassificationFailure("rate limit"),
+        ci.ClassificationFailure("timeout"),
+        ci.ClassificationFailure("malformed JSON"),
+    ),
+)
+def test_pr_api_failures_fall_back(
+    tmp_path: Path,
+    error: Exception,
+) -> None:
+    fixture = _equivalent_repository(tmp_path)
+
+    assert (
+        _classify_pr_equivalent(
+            fixture,
+            api=FakePRAPI(fixture, error=error),
+        ).ci_mode
+        == "full"
+    )
 
 
 @pytest.mark.parametrize(
@@ -614,20 +907,75 @@ def test_full_attestation_rejects_a_skipped_required_job(
 def test_workflow_contracts_and_check_branch_remain_stable() -> None:
     workflow = MAIN_WORKFLOW.read_text(encoding="utf-8")
     parsed = yaml.load(workflow, Loader=yaml.BaseLoader)
-    pr_workflow = PR_WORKFLOW.read_bytes()
-    git_blob = f"blob {len(pr_workflow)}\0".encode() + pr_workflow
+    pr_workflow = PR_WORKFLOW.read_text(encoding="utf-8")
+    pr_parsed = yaml.load(pr_workflow, Loader=yaml.BaseLoader)
 
     assert parsed["on"]["push"]["branches-ignore"] == ["analytics-assets"]
+    assert parsed["on"]["pull_request"]["branches"] == [ci.IMPLEMENTATION_BRANCH]
+    assert parsed["on"]["pull_request"]["types"] == [
+        "opened",
+        "reopened",
+        "synchronize",
+        "ready_for_review",
+    ]
+    assert "paths" not in parsed["on"]["pull_request"]
+    assert "paths-ignore" not in parsed["on"]["pull_request"]
+    assert "pull_request_target" not in parsed["on"]
     assert "merge_group" not in parsed["on"]
     assert parsed["permissions"]["actions"] == "read"
     assert parsed["jobs"]["ci_mode"]["name"] == "Detect CI mode"
+    assert parsed["jobs"]["ci_mode"]["permissions"] == {
+        "contents": "read",
+        "actions": "read",
+        "pull-requests": "read",
+    }
+    assert parsed["jobs"]["equivalent_provenance"]["permissions"] == {
+        "contents": "read",
+        "actions": "read",
+        "pull-requests": "read",
+    }
     assert parsed["jobs"]["full_attestation"]["name"] == "Full CI Attestation"
     assert parsed["jobs"]["ci_gate"]["name"] == "CI Gate"
     assert parsed["jobs"]["ci_gate"]["if"] == "${{ always() }}"
     assert "needs.ci_mode.outputs.ci_mode == 'full'" in workflow
     assert "github.ref == 'refs/heads/main'" in workflow
     assert "needs.ci_gate.result == 'success'" in workflow
-    assert "CI Gate" not in PR_WORKFLOW.read_text(encoding="utf-8")
-    assert (
-        hashlib.sha1(git_blob).hexdigest() == "3de5e768e262493c1e766d206e21ae44e347fd23"
+    assert "github.event_name == 'push'" in workflow
+    assert "--pr-number" in workflow
+    assert "--base-sha" in workflow
+    assert "--head-sha" in workflow
+    assert "--head-repository-id" in workflow
+    assert "CI Gate" not in pr_workflow
+    assert pr_parsed["name"] == "Validate PR base branch"
+    assert set(pr_parsed["jobs"]) == {"check-branch"}
+    assert pr_parsed["jobs"]["check-branch"]["permissions"] == {"contents": "read"}
+    assert "main" in pr_workflow
+    assert ci.IMPLEMENTATION_BRANCH in pr_workflow
+    assert "Pull request base branch is allowed." in pr_workflow
+    assert "pull_request_target" not in pr_parsed["on"]
+    assert "merge_group" not in pr_parsed["on"]
+
+
+@pytest.mark.parametrize(
+    ("base_branch", "expected_returncode"),
+    (
+        ("main", 0),
+        (ci.IMPLEMENTATION_BRANCH, 0),
+        ("feat/other", 1),
+    ),
+)
+def test_check_branch_accepts_only_approved_bases(
+    base_branch: str,
+    expected_returncode: int,
+) -> None:
+    parsed = yaml.load(PR_WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    run = parsed["jobs"]["check-branch"]["steps"][0]["run"]
+    process = subprocess.run(
+        ["bash", "-c", run],
+        env={"BASE_BRANCH": base_branch},
+        text=True,
+        capture_output=True,
+        check=False,
     )
+
+    assert process.returncode == expected_returncode

@@ -21,6 +21,11 @@ from urllib.request import Request, urlopen
 
 CI_MODES = frozenset({"full", "equivalent-merge", "docs-only"})
 LIVE_EQUIVALENT_TARGET_REFS: frozenset[str] = frozenset()
+LIVE_EQUIVALENT_PR_BASE_REFS: frozenset[str] = frozenset()
+IMPLEMENTATION_BRANCH = "fix/submission-status-api-conformance"
+SUPPORTED_PR_ACTIONS = frozenset(
+    {"opened", "reopened", "synchronize", "ready_for_review"}
+)
 APPROVED_WORKFLOW_PATH = ".github/workflows/main.yml"
 APPROVED_WORKFLOW_ID = 299724871
 SOURCE_CI_FRESHNESS = timedelta(hours=72)
@@ -103,6 +108,15 @@ class CIEvent:
     repository: str
     repository_id: int
     comparison_ref_ready: bool = True
+    action: str = ""
+    pr_number: int = 0
+    draft: bool = False
+    base_ref: str = ""
+    base_sha: str = ""
+    head_ref: str = ""
+    head_sha: str = ""
+    head_repository: str = ""
+    head_repository_id: int = 0
 
 
 @dataclass(frozen=True)
@@ -126,6 +140,8 @@ class ActionsEvidence(Protocol):
     def run_jobs(self, run_id: int) -> list[dict[str, Any]]: ...
 
     def ref_sha(self, ref_name: str) -> str: ...
+
+    def pull_request(self, number: int) -> dict[str, Any]: ...
 
 
 class GitRepository:
@@ -328,6 +344,15 @@ class GitHubActionsAPI:
             raise ClassificationFailure("GitHub ref SHA is malformed")
         return sha
 
+    def pull_request(self, number: int) -> dict[str, Any]:
+        if number < 1:
+            raise ClassificationFailure("pull request number is malformed")
+        repository = quote(self.repository, safe="/")
+        payload, _ = self._get(self._url(f"/repos/{repository}/pulls/{number}"))
+        if not isinstance(payload, dict):
+            raise ClassificationFailure("GitHub pull request response is malformed")
+        return payload
+
 
 def is_governance_path(path: str) -> bool:
     if path in GOVERNANCE_EXACT_PATHS:
@@ -499,18 +524,180 @@ def validate_equivalent_merge(
     )
 
 
+def _pr_repository_identity(section: Any) -> tuple[str, int]:
+    if not isinstance(section, dict):
+        raise ClassificationFailure("pull request ref metadata is malformed")
+    repository = section.get("repo")
+    if not isinstance(repository, dict):
+        raise ClassificationFailure("pull request repository metadata is malformed")
+    full_name = repository.get("full_name")
+    repository_id = repository.get("id")
+    if not isinstance(full_name, str) or not isinstance(repository_id, int):
+        raise ClassificationFailure("pull request repository identity is malformed")
+    return full_name, repository_id
+
+
+def validate_equivalent_pull_request(
+    *,
+    event: CIEvent,
+    git: GitRepository,
+    api: ActionsEvidence,
+    now: datetime,
+) -> Classification:
+    if event.event_name != "pull_request":
+        raise ClassificationFailure(
+            "pull request equivalent mode requires a pull_request event"
+        )
+    if event.action not in SUPPORTED_PR_ACTIONS:
+        raise ClassificationFailure("pull request action is unsupported")
+    if event.draft:
+        raise ClassificationFailure("draft pull requests cannot use equivalent mode")
+    if event.pr_number < 1:
+        raise ClassificationFailure("pull request number is malformed")
+    if event.base_ref != IMPLEMENTATION_BRANCH:
+        raise ClassificationFailure("pull request base is not approved")
+    if (
+        event.head_repository != event.repository
+        or event.head_repository_id != event.repository_id
+    ):
+        raise ClassificationFailure("fork pull requests cannot use equivalent mode")
+    if not SHA_PATTERN.fullmatch(event.current_sha):
+        raise ClassificationFailure("synthetic merge SHA is malformed")
+    if not SHA_PATTERN.fullmatch(event.base_sha):
+        raise ClassificationFailure("pull request base SHA is malformed")
+    if not SHA_PATTERN.fullmatch(event.head_sha):
+        raise ClassificationFailure("pull request head SHA is malformed")
+    if event.ref != f"refs/pull/{event.pr_number}/merge":
+        raise ClassificationFailure("synthetic merge ref is malformed")
+
+    parents = git.parents(event.current_sha)
+    if parents != (event.base_sha, event.head_sha):
+        raise ClassificationFailure(
+            "synthetic merge parents do not match pull request base and head"
+        )
+    if not git.is_ancestor(event.base_sha, event.head_sha):
+        raise ClassificationFailure(
+            "pull request head is not descended from the current base"
+        )
+    if not git.trees_are_equal(event.current_sha, event.head_sha):
+        raise ClassificationFailure(
+            "synthetic merge tree differs from pull request head tree"
+        )
+    if not git.diff_is_empty(event.head_sha, event.current_sha):
+        raise ClassificationFailure("synthetic merge contains candidate-only content")
+
+    source_paths = git.changed_paths(event.base_sha, event.head_sha)
+    if not source_paths:
+        raise ClassificationFailure("pull request source change set is empty")
+    governance_paths = tuple(path for path in source_paths if is_governance_path(path))
+    if governance_paths:
+        raise ClassificationFailure(
+            f"source modifies governance path: {governance_paths[0]}"
+        )
+
+    pull_request = api.pull_request(event.pr_number)
+    if (
+        pull_request.get("number") != event.pr_number
+        or pull_request.get("state") != "open"
+        or pull_request.get("draft") is not False
+        or pull_request.get("mergeable") is not True
+        or pull_request.get("merge_commit_sha") != event.current_sha
+    ):
+        raise ClassificationFailure(
+            "current pull request metadata does not match the candidate event"
+        )
+    base = pull_request.get("base")
+    head = pull_request.get("head")
+    if not isinstance(base, dict) or not isinstance(head, dict):
+        raise ClassificationFailure("pull request base or head metadata is malformed")
+    if base.get("ref") != event.base_ref or base.get("sha") != event.base_sha:
+        raise ClassificationFailure("current pull request base has changed")
+    if head.get("ref") != event.head_ref or head.get("sha") != event.head_sha:
+        raise ClassificationFailure("current pull request head has changed")
+    if _pr_repository_identity(base) != (event.repository, event.repository_id):
+        raise ClassificationFailure("pull request base repository does not match")
+    if _pr_repository_identity(head) != (event.repository, event.repository_id):
+        raise ClassificationFailure("pull request head repository does not match")
+    if api.ref_sha(event.base_ref) != event.base_sha:
+        raise ClassificationFailure("pull request base branch advanced")
+    if api.ref_sha(event.head_ref) != event.head_sha:
+        raise ClassificationFailure("pull request head branch advanced")
+
+    run_id, workflow_revision = _require_source_ci(
+        event=event,
+        source_sha=event.head_sha,
+        git=git,
+        api=api,
+        now=now,
+    )
+    return Classification(
+        "equivalent-merge",
+        "synthetic merge tree matches an exactly attested full-CI PR head",
+        comparison_base=event.base_sha,
+        source_sha=event.head_sha,
+        source_run_id=str(run_id),
+        source_tree=git.tree_sha(event.head_sha),
+        workflow_revision=workflow_revision,
+    )
+
+
 def classify_ci_mode(
     *,
     event: CIEvent,
     git: GitRepository,
     api: ActionsEvidence | None = None,
     equivalent_allowlist: frozenset[str] = LIVE_EQUIVALENT_TARGET_REFS,
+    pr_equivalent_allowlist: frozenset[str] = LIVE_EQUIVALENT_PR_BASE_REFS,
     now: datetime | None = None,
 ) -> Classification:
     if event.ref == "refs/heads/main":
         return _full("main always runs full CI")
     if event.ref in FINAL_FULL_REFS or event.ref.startswith(FINAL_FULL_PREFIXES):
         return _full("final, release, or production branch always runs full CI")
+    if event.event_name == "pull_request":
+        if event.base_ref == "main":
+            return _full("main pull request candidates always run full CI")
+        if event.base_ref != IMPLEMENTATION_BRANCH:
+            return _full("unapproved pull request base falls back to full CI")
+        try:
+            changed_paths = git.changed_paths(event.base_sha, event.head_sha)
+        except (subprocess.SubprocessError, OSError, ValueError) as error:
+            return _full(
+                f"pull request comparison failed closed: {type(error).__name__}"
+            )
+        if not changed_paths:
+            return _full("empty pull request change set falls back to full CI")
+        governance_paths = tuple(
+            path for path in changed_paths if is_governance_path(path)
+        )
+        if governance_paths:
+            return _full(
+                f"governance path requires full CI: {governance_paths[0]}",
+                comparison_base=event.base_sha,
+            )
+        if event.base_ref not in pr_equivalent_allowlist:
+            return _full(
+                "pull request equivalent rollout is disabled",
+                comparison_base=event.base_sha,
+            )
+        if api is None:
+            return _full("pull request equivalent evidence API is unavailable")
+        try:
+            return validate_equivalent_pull_request(
+                event=event,
+                git=git,
+                api=api,
+                now=(now or datetime.now(timezone.utc)),
+            )
+        except (
+            ClassificationFailure,
+            subprocess.SubprocessError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as error:
+            return _full(f"pull request validation failed closed: {error}")
+
     if event.event_name != "push":
         return _full("unsupported event falls back to full CI")
 
@@ -598,6 +785,15 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repository", required=True)
     parser.add_argument("--repository-id", type=int, required=True)
     parser.add_argument("--comparison-ref-ready", type=_boolean, default=True)
+    parser.add_argument("--action", default="")
+    parser.add_argument("--pr-number", type=int, default=0)
+    parser.add_argument("--draft", type=_boolean, default=False)
+    parser.add_argument("--base-ref", default="")
+    parser.add_argument("--base-sha", default="")
+    parser.add_argument("--head-ref", default="")
+    parser.add_argument("--head-sha", default="")
+    parser.add_argument("--head-repository", default="")
+    parser.add_argument("--head-repository-id", type=int, default=0)
     parser.add_argument("--api-url", default="https://api.github.com")
     parser.add_argument("--repository-root", type=Path, default=Path.cwd())
     parser.add_argument("--github-output", type=Path)
@@ -616,10 +812,22 @@ def main(argv: list[str] | None = None) -> int:
         repository=arguments.repository,
         repository_id=arguments.repository_id,
         comparison_ref_ready=arguments.comparison_ref_ready,
+        action=arguments.action,
+        pr_number=arguments.pr_number,
+        draft=arguments.draft,
+        base_ref=arguments.base_ref,
+        base_sha=arguments.base_sha,
+        head_ref=arguments.head_ref,
+        head_sha=arguments.head_sha,
+        head_repository=arguments.head_repository,
+        head_repository_id=arguments.head_repository_id,
     )
     git = GitRepository(arguments.repository_root)
     api: GitHubActionsAPI | None = None
-    if event.ref in LIVE_EQUIVALENT_TARGET_REFS:
+    if (
+        event.ref in LIVE_EQUIVALENT_TARGET_REFS
+        or event.base_ref in LIVE_EQUIVALENT_PR_BASE_REFS
+    ):
         try:
             api = GitHubActionsAPI(
                 api_url=arguments.api_url,

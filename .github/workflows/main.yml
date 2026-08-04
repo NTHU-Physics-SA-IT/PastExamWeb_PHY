@@ -4,6 +4,14 @@ on:
   push:
     branches-ignore:
       - "analytics-assets"
+  pull_request:
+    branches:
+      - "fix/submission-status-api-conformance"
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
 
 permissions:
   contents: read
@@ -14,6 +22,10 @@ jobs:
   ci_mode:
     name: Detect CI mode
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
     outputs:
       ci_mode: ${{ steps.classify.outputs.ci_mode }}
       reason: ${{ steps.classify.outputs.reason }}
@@ -31,7 +43,9 @@ jobs:
 
       - name: Fetch main comparison ref
         id: fetch_main
-        if: ${{ github.ref != 'refs/heads/main' }}
+        if: >-
+          ${{ github.event_name == 'push' &&
+              github.ref != 'refs/heads/main' }}
         shell: bash
         run: |
           if git fetch \
@@ -48,18 +62,47 @@ jobs:
         id: classify
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: >-
-          python3 scripts/ci/classify_ci_mode.py
-          --event-name '${{ github.event_name }}'
-          --before-sha '${{ github.event.before }}'
-          --current-sha '${{ github.sha }}'
-          --ref '${{ github.ref }}'
-          --forced '${{ github.event.forced }}'
-          --repository '${{ github.repository }}'
-          --repository-id '${{ github.repository_id }}'
-          --comparison-ref-ready '${{ steps.fetch_main.outputs.ready }}'
-          --api-url '${{ github.api_url }}'
-          --github-output "$GITHUB_OUTPUT"
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_BEFORE_SHA: ${{ github.event.before }}
+          EVENT_CURRENT_SHA: ${{ github.sha }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_FORCED: ${{ github.event.forced || false }}
+          EVENT_REPOSITORY: ${{ github.repository }}
+          EVENT_REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number || 0 }}
+          EVENT_PR_DRAFT: ${{ github.event.pull_request.draft || false }}
+          EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_HEAD_REPOSITORY: >-
+            ${{ github.event.pull_request.head.repo.full_name }}
+          EVENT_HEAD_REPOSITORY_ID: >-
+            ${{ github.event.pull_request.head.repo.id || 0 }}
+          COMPARISON_REF_READY: ${{ steps.fetch_main.outputs.ready }}
+          API_URL: ${{ github.api_url }}
+        run: |
+          python3 scripts/ci/classify_ci_mode.py \
+            --event-name "$EVENT_NAME" \
+            --action "$EVENT_ACTION" \
+            --before-sha "$EVENT_BEFORE_SHA" \
+            --current-sha "$EVENT_CURRENT_SHA" \
+            --ref "$EVENT_REF" \
+            --forced "$EVENT_FORCED" \
+            --repository "$EVENT_REPOSITORY" \
+            --repository-id "$EVENT_REPOSITORY_ID" \
+            --pr-number "$EVENT_PR_NUMBER" \
+            --draft "$EVENT_PR_DRAFT" \
+            --base-ref "$EVENT_BASE_REF" \
+            --base-sha "$EVENT_BASE_SHA" \
+            --head-ref "$EVENT_HEAD_REF" \
+            --head-sha "$EVENT_HEAD_SHA" \
+            --head-repository "$EVENT_HEAD_REPOSITORY" \
+            --head-repository-id "$EVENT_HEAD_REPOSITORY_ID" \
+            --comparison-ref-ready "$COMPARISON_REF_READY" \
+            --api-url "$API_URL" \
+            --github-output "$GITHUB_OUTPUT"
 
   lint:
     needs: ci_mode
@@ -88,6 +131,7 @@ jobs:
             needs.test.result == 'success' }}
       push_images: >-
         ${{ needs.ci_mode.outputs.ci_mode == 'full' &&
+            github.event_name == 'push' &&
             github.ref == 'refs/heads/main' }}
     secrets: inherit
 
@@ -102,6 +146,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      pull-requests: read
     steps:
       - name: Checkout repository with complete history
         uses: actions/checkout@v7
@@ -111,17 +156,45 @@ jobs:
       - name: Revalidate equivalent merge evidence
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: >-
-          python3 scripts/ci/classify_ci_mode.py
-          --event-name '${{ github.event_name }}'
-          --before-sha '${{ github.event.before }}'
-          --current-sha '${{ github.sha }}'
-          --ref '${{ github.ref }}'
-          --forced '${{ github.event.forced }}'
-          --repository '${{ github.repository }}'
-          --repository-id '${{ github.repository_id }}'
-          --api-url '${{ github.api_url }}'
-          --expect-mode equivalent-merge
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_BEFORE_SHA: ${{ github.event.before }}
+          EVENT_CURRENT_SHA: ${{ github.sha }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_FORCED: ${{ github.event.forced || false }}
+          EVENT_REPOSITORY: ${{ github.repository }}
+          EVENT_REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number || 0 }}
+          EVENT_PR_DRAFT: ${{ github.event.pull_request.draft || false }}
+          EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_HEAD_REPOSITORY: >-
+            ${{ github.event.pull_request.head.repo.full_name }}
+          EVENT_HEAD_REPOSITORY_ID: >-
+            ${{ github.event.pull_request.head.repo.id || 0 }}
+          API_URL: ${{ github.api_url }}
+        run: |
+          python3 scripts/ci/classify_ci_mode.py \
+            --event-name "$EVENT_NAME" \
+            --action "$EVENT_ACTION" \
+            --before-sha "$EVENT_BEFORE_SHA" \
+            --current-sha "$EVENT_CURRENT_SHA" \
+            --ref "$EVENT_REF" \
+            --forced "$EVENT_FORCED" \
+            --repository "$EVENT_REPOSITORY" \
+            --repository-id "$EVENT_REPOSITORY_ID" \
+            --pr-number "$EVENT_PR_NUMBER" \
+            --draft "$EVENT_PR_DRAFT" \
+            --base-ref "$EVENT_BASE_REF" \
+            --base-sha "$EVENT_BASE_SHA" \
+            --head-ref "$EVENT_HEAD_REF" \
+            --head-sha "$EVENT_HEAD_SHA" \
+            --head-repository "$EVENT_HEAD_REPOSITORY" \
+            --head-repository-id "$EVENT_HEAD_REPOSITORY_ID" \
+            --api-url "$API_URL" \
+            --expect-mode equivalent-merge
 
   docs_gate:
     name: Docs-only gate
@@ -239,6 +312,7 @@ jobs:
       needs.test.result == 'success' &&
       needs.build.result == 'success' &&
       needs.ci_gate.result == 'success' &&
+      github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
       vars.PRODUCTION_DEPLOY_ENABLED == 'true'
     uses: ./.github/workflows/deploy.yml
