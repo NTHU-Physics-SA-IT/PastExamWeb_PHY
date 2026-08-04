@@ -7,14 +7,21 @@ on:
 
 permissions:
   contents: read
+  actions: read
   packages: write
 
 jobs:
-  changes:
-    name: Detect CI scope
+  ci_mode:
+    name: Detect CI mode
     runs-on: ubuntu-latest
     outputs:
-      run_checks: ${{ steps.scope.outputs.run_checks }}
+      ci_mode: ${{ steps.classify.outputs.ci_mode }}
+      reason: ${{ steps.classify.outputs.reason }}
+      comparison_base: ${{ steps.classify.outputs.comparison_base }}
+      source_sha: ${{ steps.classify.outputs.source_sha }}
+      source_run_id: ${{ steps.classify.outputs.source_run_id }}
+      source_tree: ${{ steps.classify.outputs.source_tree }}
+      workflow_revision: ${{ steps.classify.outputs.workflow_revision }}
 
     steps:
       - name: Checkout repository
@@ -22,120 +29,216 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Classify changed files
-        id: scope
+      - name: Fetch main comparison ref
+        id: fetch_main
+        if: ${{ github.ref != 'refs/heads/main' }}
         shell: bash
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-          CURRENT_SHA: ${{ github.sha }}
-          REF_NAME: ${{ github.ref_name }}
         run: |
-          set -euo pipefail
-
-          run_full_ci_fallback() {
-            echo "$1" >&2
-            echo "run_checks=true" >> "$GITHUB_OUTPUT"
-            echo "Run expensive CI: true"
-            exit 0
-          }
-
-          if [ "$REF_NAME" = "main" ]; then
-            if [[ "$BEFORE_SHA" =~ ^0+$ ]] ||
-              ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
-              if ! base="$(git rev-parse "${CURRENT_SHA}^")"; then
-                run_full_ci_fallback \
-                  "Unable to determine the previous commit; running full CI."
-              fi
-            else
-              base="$BEFORE_SHA"
-            fi
+          if git fetch \
+            --no-tags \
+            origin \
+            main:refs/remotes/origin/main; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
           else
-            if ! git fetch --no-tags origin main; then
-              run_full_ci_fallback \
-                "Unable to fetch origin/main; running full CI."
-            fi
-            if ! base="$(git merge-base "$CURRENT_SHA" origin/main)"; then
-              run_full_ci_fallback \
-                "Unable to determine the merge base; running full CI."
-            fi
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "origin/main unavailable; classifier will fail closed to full CI."
           fi
 
-          echo "Comparing $base..$CURRENT_SHA"
-
-          mapfile -t changed_files < <(
-            git diff \
-              --name-only \
-              --no-renames \
-              "$base" \
-              "$CURRENT_SHA"
-          )
-
-          printf 'Changed files:\n'
-          printf ' - %s\n' "${changed_files[@]}"
-
-          run_checks=false
-
-          if [ "${#changed_files[@]}" -eq 0 ]; then
-            echo "No changed files detected; running CI as a safe fallback."
-            run_checks=true
-          fi
-
-          for path in "${changed_files[@]}"; do
-            if [[ "$path" =~ ^[^/]+\.md$ ]] ||
-              [[ "$path" == docs/* ]] ||
-              [[ "$path" =~ ^LICENSE[^/]*$ ]] ||
-              [[ "$path" == .github/ISSUE_TEMPLATE/* ]] ||
-              [[ "$path" == .github/PULL_REQUEST_TEMPLATE.md ]] ||
-              [[ "$path" == .github/PULL_REQUEST_TEMPLATE/* ]] ||
-              [[ "$path" =~ ^\.github/.+\.md$ ]] ||
-              [[ "$path" == .github/assets/* ]]; then
-              echo "Documentation-only path: $path"
-              continue
-            fi
-
-            echo "CI-relevant path: $path"
-            run_checks=true
-          done
-
-          echo "run_checks=$run_checks" >> "$GITHUB_OUTPUT"
-          echo "Run expensive CI: $run_checks"
+      - name: Classify CI mode
+        id: classify
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          python3 scripts/ci/classify_ci_mode.py
+          --event-name '${{ github.event_name }}'
+          --before-sha '${{ github.event.before }}'
+          --current-sha '${{ github.sha }}'
+          --ref '${{ github.ref }}'
+          --forced '${{ github.event.forced }}'
+          --repository '${{ github.repository }}'
+          --repository-id '${{ github.repository_id }}'
+          --comparison-ref-ready '${{ steps.fetch_main.outputs.ready }}'
+          --api-url '${{ github.api_url }}'
+          --github-output "$GITHUB_OUTPUT"
 
   lint:
-    needs: changes
-    if: ${{ always() && needs.changes.result == 'success' }}
+    needs: ci_mode
+    if: ${{ always() && needs.ci_mode.result == 'success' }}
     uses: ./.github/workflows/lint.yml
     with:
-      run_checks: ${{ needs.changes.outputs.run_checks == 'true' }}
+      run_checks: ${{ needs.ci_mode.outputs.ci_mode == 'full' }}
 
   test:
-    needs: [changes, lint]
-    if: ${{ always() && needs.changes.result == 'success' }}
+    needs: [ci_mode, lint]
+    if: ${{ always() && needs.ci_mode.result == 'success' }}
     uses: ./.github/workflows/test.yml
     with:
       run_checks: >-
-        ${{ needs.changes.outputs.run_checks == 'true' &&
+        ${{ needs.ci_mode.outputs.ci_mode == 'full' &&
             needs.lint.result == 'success' }}
 
   build:
-    needs: [changes, lint, test]
-    if: ${{ always() && needs.changes.result == 'success' }}
+    needs: [ci_mode, lint, test]
+    if: ${{ always() && needs.ci_mode.result == 'success' }}
     uses: ./.github/workflows/build.yml
     with:
       run_checks: >-
-        ${{ needs.changes.outputs.run_checks == 'true' &&
+        ${{ needs.ci_mode.outputs.ci_mode == 'full' &&
             needs.lint.result == 'success' &&
             needs.test.result == 'success' }}
-      push_images: ${{ github.ref == 'refs/heads/main' }}
+      push_images: >-
+        ${{ needs.ci_mode.outputs.ci_mode == 'full' &&
+            github.ref == 'refs/heads/main' }}
     secrets: inherit
 
+  equivalent_provenance:
+    name: Equivalent merge provenance
+    needs: ci_mode
+    if: >-
+      ${{ always() &&
+          needs.ci_mode.result == 'success' &&
+          needs.ci_mode.outputs.ci_mode == 'equivalent-merge' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout repository with complete history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Revalidate equivalent merge evidence
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          python3 scripts/ci/classify_ci_mode.py
+          --event-name '${{ github.event_name }}'
+          --before-sha '${{ github.event.before }}'
+          --current-sha '${{ github.sha }}'
+          --ref '${{ github.ref }}'
+          --forced '${{ github.event.forced }}'
+          --repository '${{ github.repository }}'
+          --repository-id '${{ github.repository_id }}'
+          --api-url '${{ github.api_url }}'
+          --expect-mode equivalent-merge
+
+  docs_gate:
+    name: Docs-only gate
+    needs: ci_mode
+    if: >-
+      ${{ always() &&
+          needs.ci_mode.result == 'success' &&
+          needs.ci_mode.outputs.ci_mode == 'docs-only' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository with complete history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Fetch main comparison ref
+        shell: bash
+        run: |
+          if ! git fetch \
+            --no-tags \
+            origin \
+            main:refs/remotes/origin/main; then
+            echo "Unable to fetch origin/main for docs-only revalidation." >&2
+            exit 1
+          fi
+
+      - name: Revalidate documentation-only scope
+        run: >-
+          python3 scripts/ci/classify_ci_mode.py
+          --event-name '${{ github.event_name }}'
+          --before-sha '${{ github.event.before }}'
+          --current-sha '${{ github.sha }}'
+          --ref '${{ github.ref }}'
+          --forced '${{ github.event.forced }}'
+          --repository '${{ github.repository }}'
+          --repository-id '${{ github.repository_id }}'
+          --api-url '${{ github.api_url }}'
+          --expect-mode docs-only
+
+  full_attestation:
+    name: Full CI Attestation
+    needs: [ci_mode, lint, test, build]
+    if: >-
+      ${{ always() &&
+          needs.ci_mode.result == 'success' &&
+          needs.ci_mode.outputs.ci_mode == 'full' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      mode: ${{ steps.attest.outputs.mode }}
+      sha: ${{ steps.attest.outputs.sha }}
+      tree_sha: ${{ steps.attest.outputs.tree_sha }}
+      workflow_revision: ${{ steps.attest.outputs.workflow_revision }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Validate complete full-CI evidence
+        id: attest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          python3 scripts/ci/validate_ci_gate.py full-attestation
+          --mode '${{ needs.ci_mode.outputs.ci_mode }}'
+          --classifier-result '${{ needs.ci_mode.result }}'
+          --lint-result '${{ needs.lint.result }}'
+          --test-result '${{ needs.test.result }}'
+          --build-result '${{ needs.build.result }}'
+          --api-url '${{ github.api_url }}'
+          --repository '${{ github.repository }}'
+          --run-id '${{ github.run_id }}'
+          --sha '${{ github.sha }}'
+          --github-output "$GITHUB_OUTPUT"
+
+  ci_gate:
+    name: CI Gate
+    needs:
+      - ci_mode
+      - lint
+      - test
+      - build
+      - equivalent_provenance
+      - docs_gate
+      - full_attestation
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Validate aggregate CI result
+        run: >-
+          python3 scripts/ci/validate_ci_gate.py ci-gate
+          --mode '${{ needs.ci_mode.outputs.ci_mode }}'
+          --classifier-result '${{ needs.ci_mode.result }}'
+          --lint-result '${{ needs.lint.result }}'
+          --test-result '${{ needs.test.result }}'
+          --build-result '${{ needs.build.result }}'
+          --equivalent-result '${{ needs.equivalent_provenance.result }}'
+          --docs-result '${{ needs.docs_gate.result }}'
+          --full-attestation-result '${{ needs.full_attestation.result }}'
+
   deploy:
-    needs: [changes, lint, test, build]
+    needs: [ci_mode, lint, test, build, ci_gate]
     if: >-
       always() &&
-      needs.changes.outputs.run_checks == 'true' &&
+      needs.ci_mode.outputs.ci_mode == 'full' &&
       needs.lint.result == 'success' &&
       needs.test.result == 'success' &&
       needs.build.result == 'success' &&
+      needs.ci_gate.result == 'success' &&
       github.ref == 'refs/heads/main' &&
       vars.PRODUCTION_DEPLOY_ENABLED == 'true'
     uses: ./.github/workflows/deploy.yml
