@@ -7,4 +7,8 @@ RUN corepack enable \
 
 ENV HUSKY=0
 
+COPY package.json pnpm-lock.yaml ./
+
+RUN CI=true HUSKY=0 pnpm install --frozen-lockfile
+
 CMD ["pnpm", "run", "dev", "--host", "0.0.0.0", "--port", "80"]
