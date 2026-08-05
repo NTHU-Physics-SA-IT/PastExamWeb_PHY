@@ -150,6 +150,8 @@ async def test_admin_can_crud_notifications(
         trashed = next(item for item in response.json() if item["id"] == created_id)
         assert trashed["deleted_by_id"] == admin.id
         assert trashed["deleted_by_name"] == admin.name
+        assert trashed["canRestore"] is True
+        assert trashed["canPermanentDelete"] is True
 
         response = await client.post(
             "/trash/restore",

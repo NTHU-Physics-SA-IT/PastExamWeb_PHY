@@ -299,12 +299,17 @@ response, and does not select, truncate, or repair a relationship. Submission
 restore follows only its retained exact link; a null link remains null and does
 not search for an Archive by metadata.
 
-### Implementation gaps
+### Frontend review presentation
 
-- The frontend does not yet consume `available_actions` or `changed`; visible
-  action projection and no-op/stale feedback remain later Stage 5A work.
-- Backend rejection notification copy and `frontend/src/views/Admin.vue` still
-  use `已退回` in places.
+The administrator review UI presents the approved product action matrix
+intersected with backend `available_actions`; missing, malformed, empty, or
+unknown capability values fail closed. A `changed=false` response is
+informational, refreshes authoritative list data, and does not claim a new
+mutation. The human-visible `rejected` status is `未通過`, while the action verb
+remains `退回`.
+
+Backend rejection notification copy still uses `已退回`; that action-oriented
+copy remains a separate follow-up from the status-label contract.
 
 `test_archive_review_statuses_create_deduplicated_notifications` and
 `test_republish_restores_approved_and_notifies_requester_once` cover parts of
@@ -392,6 +397,13 @@ takedown are separate concepts.
 
 ### Intended invariant
 
+- The administrator Trash list projects `canRestore` and
+  `canPermanentDelete` as non-null legal-action authority for every returned
+  entity. The projection uses the same current parent, lifecycle, and
+  dependency conditions enforced by the corresponding mutation.
+- Trash dependency strings are display-only context. Frontends do not parse
+  localized wording to grant an action; missing, malformed, or non-boolean
+  authority fails closed.
 - Course or Archive trash/restore does not notify submitters.
 - Submission trash follows the paired-item rule in
   [Entity relationships](entity-relationships.md).

@@ -1933,10 +1933,22 @@ const handleEdit = async () => {
     if (isUnauthorizedError(error)) {
       return
     }
+    const detail = error?.response?.data?.detail
+    const approvedMoveErrorCodes = new Set([
+      'archive_move_target_course_not_found',
+      'course_lifecycle_conflict',
+    ])
+    const errorMessage =
+      detail &&
+      typeof detail === 'object' &&
+      approvedMoveErrorCodes.has(detail.code) &&
+      typeof detail.message === 'string'
+        ? detail.message
+        : '發生錯誤，請稍後再試'
     toast.add({
       severity: 'error',
       summary: '更新失敗',
-      detail: '發生錯誤，請稍後再試',
+      detail: errorMessage,
       life: 3000,
     })
   } finally {

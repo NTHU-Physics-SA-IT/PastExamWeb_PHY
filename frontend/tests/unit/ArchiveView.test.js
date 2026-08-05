@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref, nextTick } from 'vue'
@@ -626,6 +628,126 @@ describe('ArchiveView', () => {
     expect(Array.isArray(mobileMenu)).toBe(true)
 
     wrapper.unmount()
+  })
+
+  it.each([
+    {
+      path: 'course id',
+      code: 'archive_move_target_course_not_found',
+      message: '目標課程不存在，請先建立課程。',
+      configure(vm) {
+        vm.editForm.targetCourseId = 'missing-course'
+      },
+      rejectMove() {
+        updateArchiveCourseMock.mockRejectedValueOnce({
+          response: {
+            status: 404,
+            data: {
+              detail: {
+                code: 'archive_move_target_course_not_found',
+                message: '目標課程不存在，請先建立課程。',
+                reload_required: false,
+              },
+            },
+          },
+        })
+      },
+    },
+    {
+      path: 'course name and category',
+      code: 'course_lifecycle_conflict',
+      message: '目標課程已在垃圾桶，請先恢復課程。',
+      configure(vm) {
+        vm.editForm.targetCourse = '已刪除課程'
+        vm.editForm.targetCourseId = null
+      },
+      rejectMove() {
+        updateArchiveCourseByCategoryAndNameMock.mockRejectedValueOnce({
+          response: {
+            status: 409,
+            data: {
+              detail: {
+                code: 'course_lifecycle_conflict',
+                message: '目標課程已在垃圾桶，請先恢復課程。',
+                reload_required: false,
+              },
+            },
+          },
+        })
+      },
+    },
+  ])(
+    'preserves the edit dialog for the structured $path move error',
+    async ({ message, configure, rejectMove }) => {
+      const wrapper = mount(ArchiveView, {
+        global: {
+          provide: {
+            toast: { add: toastAddMock },
+            confirm: { require: confirmRequireMock },
+            sidebarVisible: ref(true),
+          },
+          stubs: componentStubs,
+        },
+      })
+      await flushPromises()
+
+      const vm = wrapper.vm
+      const initialCourseLoads = listCoursesMock.mock.calls.length
+      vm.selectedCourse = 'c1'
+      vm.showEditDialog = true
+      vm.editForm = {
+        id: 'a1',
+        name: '保留名稱',
+        professor: '保留教授',
+        type: 'midterm',
+        hasAnswers: true,
+        academicYear: new Date('2023-01-01T00:00:00Z'),
+        shouldTransfer: true,
+        targetCategory: 'freshman',
+        targetCourse: '',
+        targetCourseId: null,
+      }
+      await nextTick()
+      configure(vm)
+      const preservedForm = {
+        name: vm.editForm.name,
+        professor: vm.editForm.professor,
+        targetCategory: vm.editForm.targetCategory,
+        targetCourse: vm.editForm.targetCourse,
+        targetCourseId: vm.editForm.targetCourseId,
+      }
+      rejectMove()
+
+      await vm.handleEdit()
+      await flushPromises()
+
+      expect(vm.showEditDialog).toBe(true)
+      expect(vm.editForm).toMatchObject(preservedForm)
+      expect(listCoursesMock).toHaveBeenCalledTimes(initialCourseLoads)
+      expect(toastAddMock).toHaveBeenCalledTimes(1)
+      expect(toastAddMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          severity: 'error',
+          summary: '更新失敗',
+          detail: message,
+        })
+      )
+      expect(toastAddMock).not.toHaveBeenCalledWith(
+        expect.objectContaining({ severity: 'success' })
+      )
+
+      wrapper.unmount()
+    }
+  )
+
+  it('keeps owner submission status informational without a delete action', () => {
+    const archiveViewSource = readFileSync(
+      resolve(globalThis.process.cwd(), 'src/views/Archive.vue'),
+      'utf8'
+    )
+
+    expect(archiveViewSource).not.toContain('deleteMySubmission')
+    expect(archiveViewSource).not.toContain('owner_self_delete_consumed')
   })
 
   it('covers remaining utility branches', async () => {
