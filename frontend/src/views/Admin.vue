@@ -5113,6 +5113,7 @@ const getTrashContextLine = (item) => {
   if (item.item_type === 'archive' && item.course_name) return `課程：${item.course_name}`
   if (item.item_type === 'course' && item.parent_name) return `隸屬分類：${item.parent_name}`
   if (item.item_type === 'archive_submission') {
+    if (item.parent_type === 'course' && item.parent_name) return `關聯課程：${item.parent_name}`
     if (item.parent_name) return `關聯考古題：${item.parent_name}`
     if (item.course_name) return `課程：${item.course_name}`
   }
@@ -6526,27 +6527,11 @@ const getTrashDependencies = (item) => {
 }
 
 const canRestoreTrashItem = (item) => {
-  if (item?.canRestore === false) return false
-  if (item?.canRestore === true) return true
-  return !getTrashDependencyHasRestoreBlocker(item)
+  return item?.canRestore === true
 }
 
 const canPermanentDeleteTrashItem = (item) => {
-  if (item?.canPermanentDelete === false) return false
-  if (item?.canPermanentDelete === true) return true
-  return !getTrashDependencyHasPermanentDeleteBlocker(item)
-}
-
-const getTrashDependencyHasRestoreBlocker = (item) => {
-  return getTrashDependencies(item).some((dependency) =>
-    String(dependency?.label || '').startsWith('阻擋還原：')
-  )
-}
-
-const getTrashDependencyHasPermanentDeleteBlocker = (item) => {
-  return getTrashDependencies(item).some((dependency) =>
-    String(dependency?.label || '').startsWith('阻擋永久刪除：')
-  )
+  return item?.canPermanentDelete === true
 }
 
 const getTrashDependencySeverity = (dependency) => {

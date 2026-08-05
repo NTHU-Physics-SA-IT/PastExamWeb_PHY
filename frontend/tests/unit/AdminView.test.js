@@ -564,6 +564,56 @@ describe('AdminView', () => {
     expect(wrapper.vm.newSubmissionRows).toBe(10)
   })
 
+  it('uses only explicit Trash authority and labels submission parents accurately', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    for (const value of [false, null, undefined, 'true', 1, {}, []]) {
+      expect(wrapper.vm.canRestoreTrashItem({ canRestore: value })).toBe(false)
+      expect(wrapper.vm.canPermanentDeleteTrashItem({ canPermanentDelete: value })).toBe(false)
+    }
+
+    expect(
+      wrapper.vm.canRestoreTrashItem({
+        canRestore: true,
+        dependencies: [{ label: '阻擋還原：仍有相依項目' }],
+      })
+    ).toBe(true)
+    expect(
+      wrapper.vm.canPermanentDeleteTrashItem({
+        canPermanentDelete: true,
+        dependencies: [{ label: '阻擋永久刪除：仍有相依項目' }],
+      })
+    ).toBe(true)
+    expect(
+      wrapper.vm.canRestoreTrashItem({
+        dependencies: [{ label: '無阻擋' }],
+      })
+    ).toBe(false)
+    expect(
+      wrapper.vm.canPermanentDeleteTrashItem({
+        dependencies: [{ label: '無阻擋' }],
+      })
+    ).toBe(false)
+
+    expect(
+      wrapper.vm.getTrashContextLine({
+        item_type: 'archive_submission',
+        parent_type: 'course',
+        parent_name: '普通物理',
+      })
+    ).toBe('關聯課程：普通物理')
+    expect(
+      wrapper.vm.getTrashContextLine({
+        item_type: 'archive_submission',
+        parent_type: 'archive',
+        parent_name: '期中考',
+      })
+    ).toBe('關聯考古題：期中考')
+
+    wrapper.unmount()
+  })
+
   it('keeps the shared mobile action row breakpoint-agnostic for five actions', () => {
     expect(adminViewSource).not.toMatch(/@media\s*\(max-width:\s*337px\)/)
     expect(adminViewSource).toContain('grid-template-columns: repeat(5, minmax(2.5rem, 1fr))')
