@@ -18,6 +18,17 @@
     <template #maximizebutton="{ maximized, maximizeCallback }">
       <Button
         v-if="discussionEnabled"
+        icon="pi pi-flag"
+        severity="secondary"
+        text
+        rounded
+        aria-label="回報考古題"
+        title="回報考古題"
+        style="width: 2.5rem; height: 2.5rem; padding: 0"
+        @click="handleArchiveReportClick"
+      />
+      <Button
+        v-if="discussionEnabled"
         :icon="discussionOpen ? 'pi pi-comments' : 'pi pi-comment'"
         severity="secondary"
         text
@@ -65,8 +76,10 @@
             class="flex-1 flex flex-column align-items-center justify-content-center gap-4"
           >
             <i class="pi pi-exclamation-circle text-6xl text-red-500" />
-            <div class="text-xl">無法載入預覽</div>
-            <div class="text-sm text-gray-600">請嘗試下載檔案查看</div>
+            <div class="text-xl">{{ errorMessage }}</div>
+            <div v-if="errorMessage === '無法載入預覽'" class="text-sm text-gray-600">
+              請嘗試下載檔案查看
+            </div>
           </div>
 
           <div v-else-if="currentPdf && renderPdf" class="flex-1 pdf-container">
@@ -97,10 +110,20 @@
           :class="{ 'is-open': discussionOpen, 'is-closed': !discussionOpen }"
         >
           <ArchiveDiscussionPanel
+            v-show="sidePanelMode === 'discussion'"
             :courseId="courseId"
             :archiveId="archiveId"
             width="100%"
             @desktop-default-open-change="handleDesktopDefaultOpenChange"
+          />
+          <ArchiveReportPanel
+            v-if="archiveReportActivated"
+            v-show="sidePanelMode === 'exam-report'"
+            :courseId="courseId"
+            :archiveId="archiveId"
+            :courseName="courseName"
+            :archiveName="title"
+            @back="returnToDiscussion"
           />
         </div>
       </div>
@@ -132,12 +155,24 @@
   >
     <template #header>
       <div class="flex align-items-center gap-2.5">
-        <i class="pi pi-comments text-2xl" />
-        <div class="text-xl leading-tight">討論區</div>
+        <i :class="`pi ${sidePanelMode === 'exam-report' ? 'pi-flag' : 'pi-comments'} text-2xl`" />
+        <div class="text-xl leading-tight">
+          {{ sidePanelMode === 'exam-report' ? '回報考古題' : '討論區' }}
+        </div>
       </div>
     </template>
     <template #closebutton="{ closeCallback }">
       <Button
+        :icon="sidePanelMode === 'exam-report' ? 'pi pi-comments' : 'pi pi-flag'"
+        severity="secondary"
+        text
+        rounded
+        :aria-label="sidePanelMode === 'exam-report' ? '返回留言區' : '回報考古題'"
+        style="width: 2.5rem; height: 2.5rem; padding: 0"
+        @click="toggleSidePanelMode"
+      />
+      <Button
+        v-if="sidePanelMode === 'discussion'"
         icon="pi pi-cog"
         severity="secondary"
         text
@@ -158,6 +193,7 @@
     </template>
     <div class="h-full min-h-0">
       <ArchiveDiscussionPanel
+        v-show="sidePanelMode === 'discussion'"
         ref="discussionPanelRef"
         :courseId="courseId"
         :archiveId="archiveId"
@@ -167,6 +203,15 @@
         :showSettings="false"
         @desktop-default-open-change="handleDesktopDefaultOpenChange"
       />
+      <ArchiveReportPanel
+        v-if="archiveReportActivated"
+        v-show="sidePanelMode === 'exam-report'"
+        :courseId="courseId"
+        :archiveId="archiveId"
+        :courseName="courseName"
+        :archiveName="title"
+        @back="returnToDiscussion"
+      />
     </div>
   </Dialog>
 </template>
@@ -175,6 +220,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useUnauthorizedEvent } from '../utils/useUnauthorizedEvent'
 import ArchiveDiscussionPanel from './ArchiveDiscussionPanel.vue'
+import ArchiveReportPanel from './ArchiveReportPanel.vue'
 import { getBooleanPreference } from '../utils/usePreferences'
 import { STORAGE_KEYS } from '../utils/storage'
 
@@ -225,6 +271,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  errorMessage: {
+    type: String,
+    default: '無法載入預覽',
+  },
   showDownload: {
     type: Boolean,
     default: true,
@@ -250,6 +300,8 @@ const isMaximized = ref(false)
 const isMobile = ref(false)
 const discussionOpen = ref(false)
 const discussionModalVisible = ref(false)
+const sidePanelMode = ref('discussion')
+const archiveReportActivated = ref(false)
 const discussionPanelRef = ref(null)
 const discussionEnabled = computed(
   () => props.showDiscussion && Boolean(props.courseId) && Boolean(props.archiveId)
@@ -326,6 +378,8 @@ function onHide() {
     ? false
     : getBooleanPreference(DESKTOP_DEFAULT_OPEN_KEY, true)
   discussionModalVisible.value = false
+  sidePanelMode.value = 'discussion'
+  archiveReportActivated.value = false
   emit('hide')
 }
 
@@ -347,6 +401,29 @@ function handleDiscussionClick() {
     return
   }
   toggleDiscussion()
+}
+
+function handleArchiveReportClick() {
+  archiveReportActivated.value = true
+  sidePanelMode.value = 'exam-report'
+  if (isMobile.value) {
+    discussionModalVisible.value = true
+    return
+  }
+  discussionOpen.value = true
+}
+
+function returnToDiscussion() {
+  sidePanelMode.value = 'discussion'
+}
+
+function toggleSidePanelMode() {
+  if (sidePanelMode.value === 'exam-report') {
+    sidePanelMode.value = 'discussion'
+    return
+  }
+  archiveReportActivated.value = true
+  sidePanelMode.value = 'exam-report'
 }
 
 function openDiscussionSettings() {

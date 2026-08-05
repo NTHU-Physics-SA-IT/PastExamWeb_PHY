@@ -1,0 +1,32 @@
+name: Activate reviewed production release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_manifest_sha256:
+        description: SHA-256 of the reviewed immutable release manifest
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  activation-gate:
+    if: ${{ vars.PRODUCTION_DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Validate manual activation inputs
+        env:
+          RELEASE_MANIFEST_SHA256: ${{ inputs.release_manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "A 64-character lowercase SHA-256 digest is required." >&2
+            exit 2
+          fi
+      - name: Activation remains host-authorized
+        run: |
+          echo "Approval gate passed."
+          echo "Host activation is intentionally not performed by a feature push."

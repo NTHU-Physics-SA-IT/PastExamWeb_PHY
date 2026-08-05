@@ -1,4 +1,9 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -32,9 +37,11 @@ class Settings(BaseSettings):
     DEFAULT_ADMIN_NAME: str
     DEFAULT_ADMIN_PASSWORD: str
     DEFAULT_ADMIN_EMAIL: str
+    ALLOW_DATABASE_BOOTSTRAP: bool = False
 
     class Config:
-        env_file = ".env"
+        # Resolve independently of the caller's current working directory.
+        env_file = BACKEND_ROOT / ".env"
         from_attributes = True
 
 

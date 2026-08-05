@@ -1,0 +1,4 @@
+interface:
+  display_name: "PastExamWeb_PHY Workflow"
+  short_description: "Route PastExamWeb_PHY tasks through project contracts"
+  default_prompt: "Use $pastexam-web to follow AGENTS.md, route through docs/README.md, assess Domain impact, and apply bounded verification."

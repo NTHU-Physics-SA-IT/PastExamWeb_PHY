@@ -7,6 +7,7 @@ from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core.config import settings
 from app.db.session import get_session
 from app.models.models import (
     ArchiveSubmission,
@@ -35,8 +36,6 @@ from app.api.services.presence import (
     merge_presence_intervals,
 )
 from app.utils.auth import get_current_user, get_password_hash
-from app.core.config import settings
-
 router = APIRouter()
 
 NICKNAME_MAX_LENGTH = 15

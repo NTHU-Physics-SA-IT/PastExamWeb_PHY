@@ -579,6 +579,16 @@ export default {
             messageId: metadata.message_id || metadata.reply_message_id || item.source_message_id,
           },
         })
+        return
+      }
+      if (item?.source_type === 'archive_report') {
+        await this.$router.push({
+          path: '/archive',
+          query: {
+            courseId: metadata.course_id,
+            archiveId: metadata.archive_id,
+          },
+        })
       }
     },
 
@@ -694,10 +704,20 @@ export default {
       } catch (error) {
         console.error('Login failed:', error)
         trackEvent(EVENTS.LOGIN_LOCAL, { success: false })
+
+        let detail = '無法連線至後端，請確認服務是否正常'
+        if (error.isInvalidCredentials || error.response?.status === 401) {
+          detail = '帳號或密碼錯誤'
+        } else if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+          detail = '伺服器回應逾時，請稍後再試'
+        } else if (error.response?.status >= 500) {
+          detail = '伺服器發生錯誤，請稍後再試'
+        }
+
         this.toast.add({
           severity: 'error',
           summary: '登入失敗',
-          detail: '帳號或密碼錯誤',
+          detail,
           life: 3000,
         })
       } finally {
@@ -1063,22 +1083,23 @@ export default {
 
       const items = [
         {
-          label: '個人化設定',
-          icon: 'pi pi-sliders-h',
-          command: () => this.invokeMenuAction(() => this.handleNavigatePersonalSettings()),
-        },
-        {
           label: '公告與通知',
           icon: 'pi pi-bell',
           badge: this.notificationStore?.unreadTotal?.value || null,
           command: () => this.invokeMenuAction(() => this.openNotificationCenter('navbar-menu')),
         },
-        {
-          label: '系統問題回報',
-          icon: 'pi pi-comments',
-          command: () => this.invokeMenuAction(() => this.openIssueReportDialog()),
-        },
       ]
+
+      items.unshift({
+        label: '個人化設定',
+        icon: 'pi pi-sliders-h',
+        command: () => this.invokeMenuAction(() => this.handleNavigatePersonalSettings()),
+      })
+      items.push({
+        label: '系統問題回報',
+        icon: 'pi pi-comments',
+        command: () => this.invokeMenuAction(() => this.openIssueReportDialog()),
+      })
 
       if (this.isAuthenticated && !this.isDesktopView) {
         items.push({ separator: true })

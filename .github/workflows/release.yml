@@ -1,22 +1,21 @@
 name: Release
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "*.md"
-      - "docs/**"
-      - "LICENSE*"
-      - ".github/ISSUE_TEMPLATE/**"
-      - ".github/PULL_REQUEST_TEMPLATE.md"
-      - ".github/PULL_REQUEST_TEMPLATE/**"
-      - ".github/**/*.md"
-      - ".github/assets/**"
+  workflow_call:
+    inputs:
+      release_sha:
+        description: Exact validated main SHA eligible for semantic-release
+        required: true
+        type: string
 
 permissions:
   contents: write
   issues: write
   pull-requests: write
+
+concurrency:
+  group: semantic-release-${{ inputs.release_sha }}
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -27,6 +26,29 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ inputs.release_sha }}
+
+      - name: Verify exact validated main SHA
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          EVENT_SHA: ${{ github.sha }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" != "push" ] ||
+            [ "$EVENT_REF" != "refs/heads/main" ] ||
+            [ "$RELEASE_SHA" != "$EVENT_SHA" ]; then
+            echo "semantic-release requires the exact validated main push SHA." >&2
+            exit 1
+          fi
+
+          checked_out_sha="$(git rev-parse HEAD)"
+          if [ "$checked_out_sha" != "$RELEASE_SHA" ]; then
+            echo "Checked-out SHA does not match the validated release SHA." >&2
+            exit 1
+          fi
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6

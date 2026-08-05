@@ -388,6 +388,7 @@
             :professorName="selectedArchive?.professor || ''"
             :loading="previewLoading"
             :error="previewError"
+            :errorMessage="previewErrorMessage"
             @hide="closePreview"
             @error="handlePreviewError"
             @download="handlePreviewDownload"
@@ -932,12 +933,17 @@ const expandedMenuItems = ref({})
 const shouldResetPanels = ref(true)
 
 const fallbackCategories = [
-  { key: 'freshman', name: '基礎必修', icon: 'pi pi-fw pi-book', label: '基礎' },
-  { key: 'sophomore', name: '專業必修', icon: 'pi pi-fw pi-compass', label: '必修' },
-  { key: 'junior', name: '實驗課程', icon: 'pi pi-fw pi-sparkles', label: '實驗' },
-  { key: 'senior', name: '專業選修', icon: 'pi pi-fw pi-book', label: '選修' },
+  { key: 'fundamental', name: '基礎必修', icon: 'pi pi-fw pi-book', label: '基礎' },
+  { key: 'required', name: '專業必修', icon: 'pi pi-fw pi-compass', label: '必修' },
+  { key: 'experience', name: '實驗課程', icon: 'pi pi-fw pi-sparkles', label: '實驗' },
+  { key: 'optional', name: '專業選修', icon: 'pi pi-fw pi-book', label: '選修' },
   { key: 'graduate', name: '研究所', icon: 'pi pi-fw pi-graduation-cap', label: '研究所' },
-  { key: 'interdisciplinary', name: '戳戳數學系', icon: 'pi pi-fw pi-calculator', label: '數學' },
+  {
+    key: 'math-department',
+    name: '戳戳數學系',
+    icon: 'pi pi-fw pi-calculator',
+    label: '數學',
+  },
 ]
 
 const courseCategories = ref([...fallbackCategories])
@@ -1601,7 +1607,7 @@ async function downloadArchive(archive) {
     toast.add({
       severity: 'error',
       summary: '下載失敗',
-      detail: '無法取得下載連結',
+      detail: error.response?.status === 404 ? '此筆考古題的 PDF 檔案缺失' : '無法取得下載連結',
       life: 3000,
     })
   } finally {
@@ -1611,11 +1617,13 @@ async function downloadArchive(archive) {
 
 const previewLoading = ref(false)
 const previewError = ref(false)
+const previewErrorMessage = ref('無法載入預覽')
 
 async function previewArchive(archive) {
   try {
     previewLoading.value = true
     previewError.value = false
+    previewErrorMessage.value = '無法載入預覽'
     showPreview.value = true
 
     const { data } = await archiveService.getArchivePreviewFile(selectedCourse.value, archive.id)
@@ -1636,13 +1644,15 @@ async function previewArchive(archive) {
   } catch (error) {
     console.error('Preview error:', error)
     previewError.value = true
+    const isMissingFile = error.response?.status === 404
+    previewErrorMessage.value = isMissingFile ? '檔案缺失' : '無法載入預覽'
     if (isUnauthorizedError(error)) {
       return
     }
     toast.add({
       severity: 'error',
       summary: '預覽失敗',
-      detail: '無法取得預覽連結',
+      detail: isMissingFile ? '此筆考古題的 PDF 檔案缺失' : '無法取得預覽連結',
       life: 3000,
     })
   } finally {
@@ -1923,10 +1933,22 @@ const handleEdit = async () => {
     if (isUnauthorizedError(error)) {
       return
     }
+    const detail = error?.response?.data?.detail
+    const approvedMoveErrorCodes = new Set([
+      'archive_move_target_course_not_found',
+      'course_lifecycle_conflict',
+    ])
+    const errorMessage =
+      detail &&
+      typeof detail === 'object' &&
+      approvedMoveErrorCodes.has(detail.code) &&
+      typeof detail.message === 'string'
+        ? detail.message
+        : '發生錯誤，請稍後再試'
     toast.add({
       severity: 'error',
       summary: '更新失敗',
-      detail: '發生錯誤，請稍後再試',
+      detail: errorMessage,
       life: 3000,
     })
   } finally {
@@ -2078,7 +2100,7 @@ async function handlePreviewDownload(onComplete) {
     toast.add({
       severity: 'error',
       summary: '下載失敗',
-      detail: '無法取得下載連結',
+      detail: error.response?.status === 404 ? '此筆考古題的 PDF 檔案缺失' : '無法取得下載連結',
       life: 3000,
     })
   } finally {

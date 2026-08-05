@@ -150,6 +150,8 @@ async def test_admin_can_crud_notifications(
         trashed = next(item for item in response.json() if item["id"] == created_id)
         assert trashed["deleted_by_id"] == admin.id
         assert trashed["deleted_by_name"] == admin.name
+        assert trashed["canRestore"] is True
+        assert trashed["canPermanentDelete"] is True
 
         response = await client.post(
             "/trash/restore",
@@ -346,6 +348,7 @@ async def test_personal_notifications_are_owned_and_can_be_marked_read(
                 delete(PersonalNotification).where(PersonalNotification.id == item.id)
             )
             await session.commit()
+
 
 
 @pytest.mark.asyncio

@@ -85,7 +85,7 @@ cd PastExamWeb_PHY
 範例值僅供本地開發；部署時請改用安全且獨立的密碼與金鑰。
 
 ```bash
-cp docker/.env.example .env
+cp docker/.env.example docker/.env
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 ```
@@ -93,23 +93,48 @@ cp frontend/.env.example frontend/.env
 ### 3. 建置並啟動開發環境
 
 ```bash
-docker compose -f docker/docker-compose.dev.yml build
-docker compose -f docker/docker-compose.dev.yml up -d
+./scripts/dev-compose.sh start
 ```
 
 啟動後可使用：
 
 - 網站與 API 反向代理：<http://localhost:8080>（API 位於 `/api/`）
-- pgAdmin：<http://localhost:8081>
-- MinIO S3 API：<http://localhost:9000>
-- MinIO Console：<http://localhost:9001>
-
-PostgreSQL、Redis、後端及前端開發伺服器預設在 Docker Compose 網路內互通，不另外暴露主機連接埠。可用下列指令查看狀態與停止服務：
+PostgreSQL、Redis、MinIO、後端及前端開發伺服器預設在 Docker Compose
+網路內互通，不另外暴露主機連接埠。可用下列指令查看狀態與停止服務：
 
 ```bash
-docker compose -f docker/docker-compose.dev.yml ps
-docker compose -f docker/docker-compose.dev.yml down
+./scripts/dev-compose.sh status
+./scripts/dev-compose.sh stop
 ```
+
+本機開發使用 `docker/docker-compose.dev.yml` 與 ignored
+`docker/.env`；正式 VPS 部署使用
+`docker/docker-compose.prod.yml` 與 repository 外的
+`/etc/pastexam/compose.prod.env`。正式 backend runtime 與 migrator
+credentials 使用另外兩份外部 env，不放入 Compose interpolation env。
+測試必須使用通過隔離 guard 的專用 test database。資料恢復應遵循
+`docs/migration-safety.md` 與 `docs/production-deployment.md` 的備份、
+隔離還原及 migration 檢查原則，不保留常駐的恢復網站環境。
+
+### Environment files
+
+| Scope | Actual local file | Tracked example | Consumer |
+|---|---|---|---|
+| Docker Compose Dev | `docker/.env` | `docker/.env.example` | Docker Compose／`scripts/dev-compose.sh` |
+| Backend local | `backend/.env` | `backend/.env.example` | Pydantic backend settings／Alembic |
+| Frontend local | `frontend/.env` | `frontend/.env.example` | Vite |
+| Backend production runtime | repository 外部檔案 | `backend/.env.production.runtime.example` | Backend application |
+| Backend production migrator | repository 外部檔案 | `backend/.env.production.migrator.example` | Alembic／migration CLI |
+| Production Compose | `/etc/pastexam/compose.prod.env` | `docker/.env.production.example` | Docker Compose |
+
+實際 env 檔不得提交 Git；可提交的 example 只描述設定契約。Dotfile
+雖然在 Unix／macOS 中預設隱藏，但隱藏不等於安全，仍必須搭配 Git
+ignore、適當檔案權限及 secrets 管理。Compose interpolation env 與
+backend runtime env 是不同邊界，migrator credentials 也不得提供給
+一般 backend runtime 使用。
+
+Repository root 的 `.env` 沒有 consumer，僅保留 Git ignore 規則以防
+未來誤提交 secrets；各子系統應使用上表所列的專屬 env。
 
 ## 參與貢獻
 

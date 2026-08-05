@@ -1,30 +1,46 @@
-import os
-import subprocess
+import asyncio
 from datetime import datetime, timezone
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
 
-from sqlalchemy import inspect, text
 import yaml
-from sqlmodel import SQLModel, func, select
+from sqlmodel import func, select
 
 from app.core.config import settings
-from app.db.session import AsyncSessionLocal, engine
-from app.models.models import Course, CourseCategory, CourseCategoryConfig, Meme, User
+from app.db.course_categories import (
+    CANONICAL_COURSE_CATEGORY_KEYS,
+    DEFAULT_COURSE_CATEGORY_DEFINITIONS,
+    RESERVED_LEGACY_COURSE_CATEGORY_KEYS,
+    normalize_course_category_name,
+)
+from app.db.migration_safety import MigrationReport, inspect_database
+from app.db.session import AsyncSessionLocal
+from app.models.models import (
+    Archive,
+    ArchiveDiscussionMessage,
+    ArchiveSubmission,
+    CommentReport,
+    Course,
+    CourseCategory,
+    CourseCategoryConfig,
+    CourseSubmission,
+    Meme,
+    Notification,
+    PersonalNotification,
+    SystemIssueReport,
+    SystemSetting,
+    User,
+)
 from app.utils.auth import get_password_hash
 from app.utils.course_text import format_course_display_name
 
 SEED_DATA_PATH = Path(__file__).with_name("seed_data.yaml")
-DEFAULT_CATEGORY_CONFIGS = [
-    ("fundamental", "基礎必修", "基礎", "pi pi-fw pi-book"),
-    ("required", "專業必修", "必修", "pi pi-fw pi-compass"),
-    ("experience", "實驗課程", "實驗", "pi pi-fw pi-sparkles"),
-    ("optional", "專業選修", "選修", "pi pi-fw pi-book"),
-    ("graduate", "研究所", "研究所", "pi pi-fw pi-graduation-cap"),
-    ("math-department", "戳戳數學系", "數學", "pi pi-fw pi-calculator"),
-]
-COURSE_CATEGORY_BADGE_COLOR_DEFAULT = "blue"
+BOOTSTRAP_MARKER_KEY = "database.explicit_bootstrap.v1"
+ALLOWED_BOOTSTRAP_DATABASE_PREFIXES = (
+    "archive_db_dev_",
+    "pastexam_test_",
+)
 
 
 @lru_cache(maxsize=1)
@@ -38,7 +54,7 @@ def _seed_course_key(course: Course) -> tuple[str, str]:
     return (str(category), format_course_display_name(course.name))
 
 
-async def sync_course_catalog(session):
+async def sync_course_catalog(session, *, commit: bool = True):
     seed_courses = [
         (
             course["category"],
@@ -105,115 +121,183 @@ async def sync_course_catalog(session):
         )
         changed = True
 
-    if changed:
+    if changed and commit:
         await session.commit()
 
 
-async def sync_course_categories(session):
+async def sync_course_categories(session, *, commit: bool = True):
     result = await session.execute(select(CourseCategoryConfig))
-    existing_by_key = {category.key: category for category in result.scalars().all()}
+    existing_categories = result.scalars().all()
+    legacy_keys = sorted(
+        category.key
+        for category in existing_categories
+        if category.key.strip().lower() in RESERVED_LEGACY_COURSE_CATEGORY_KEYS
+    )
+    if legacy_keys:
+        raise RuntimeError(
+            "Legacy course categories remain in the database; "
+            "run the canonicalization migration before bootstrapping"
+        )
+
+    existing_by_key = {category.key: category for category in existing_categories}
+    existing_by_name = {
+        normalize_course_category_name(category.name): category
+        for category in existing_categories
+    }
     changed = False
 
-    for order_index, (key, name, label, icon) in enumerate(DEFAULT_CATEGORY_CONFIGS):
-        category = existing_by_key.get(key)
+    for definition in DEFAULT_COURSE_CATEGORY_DEFINITIONS:
+        category = existing_by_key.get(definition.key)
         if category:
-            if not category.name:
-                category.name = name
-                changed = True
-            if not category.label:
-                category.label = label
-                changed = True
-            if not category.icon:
-                category.icon = icon
-                changed = True
-            if category.order_index is None:
-                category.order_index = order_index
-                changed = True
-            if not category.is_active:
-                category.is_active = True
-                changed = True
             continue
+        name_conflict = existing_by_name.get(
+            normalize_course_category_name(definition.name)
+        )
+        if name_conflict:
+            raise RuntimeError(
+                "Course category name already exists under a different key: "
+                f"{definition.name}"
+            )
 
         session.add(
             CourseCategoryConfig(
-                key=key,
-                name=name,
-                label=label,
-                icon=icon,
-                order_index=order_index,
+                key=definition.key,
+                name=definition.name,
+                label=definition.label,
+                icon=definition.icon,
+                badge_color=definition.badge_color,
+                order_index=definition.order_index,
                 is_active=True,
             )
         )
         changed = True
 
-    if changed:
+    if changed and commit:
         await session.commit()
 
 
-async def _ensure_course_category_badge_color_column() -> None:
-    async with engine.begin() as conn:
-        has_table = await conn.run_sync(
-            lambda sync_conn: inspect(sync_conn).has_table("course_category_configs")
-        )
-        if not has_table:
-            return
+def _startup_readiness_errors(report: MigrationReport) -> list[str]:
+    errors = list(report.errors)
+    if not report.database_connected:
+        errors.append("database connection failed")
+    if report.multiple_heads:
+        errors.append("repository has multiple Alembic heads")
+    if not report.alembic_version_exists:
+        errors.append("Alembic ledger is missing")
+    if len(report.alembic_versions) != 1:
+        errors.append("Alembic ledger must contain exactly one revision")
+    if (
+        len(report.repository_heads) == 1
+        and report.current_revision != report.repository_heads[0]
+    ):
+        errors.append("database migration is not at repository head")
+    if report.current_revision == (
+        report.repository_heads[0] if len(report.repository_heads) == 1 else None
+    ) and not report.schema_matches_head:
+        errors.append("database schema does not match repository head")
+    return list(dict.fromkeys(errors))
 
-        columns = await conn.run_sync(
-            lambda sync_conn: {
-                column["name"]
-                for column in inspect(sync_conn).get_columns("course_category_configs")
-            }
-        )
-        if "badge_color" in columns:
-            return
 
-        await conn.execute(
-            text(
-                "ALTER TABLE course_category_configs ADD COLUMN IF NOT EXISTS badge_color VARCHAR"
+def validate_database_ready() -> MigrationReport:
+    """Fail fast without migrating, creating tables, or seeding data."""
+    report = inspect_database()
+    errors = _startup_readiness_errors(report)
+    if errors:
+        raise RuntimeError(
+            "Database startup check failed: "
+            + "; ".join(errors)
+            + ". Run the explicit migration preflight/upgrade command."
+        )
+    return report
+
+
+async def init_db() -> None:
+    """Read-only startup compatibility check retained as the app hook."""
+    await asyncio.to_thread(validate_database_ready)
+
+
+def _is_allowed_bootstrap_database_name(database_name: str) -> bool:
+    normalized = database_name.strip().lower()
+    return any(
+        normalized.startswith(prefix)
+        for prefix in ALLOWED_BOOTSTRAP_DATABASE_PREFIXES
+    ) and all(
+        forbidden not in normalized
+        for forbidden in ("production", "prod")
+    )
+
+
+async def _validate_bootstrap_contents(session) -> bool:
+    marker = (
+        await session.execute(
+            select(SystemSetting).where(
+                SystemSetting.key == BOOTSTRAP_MARKER_KEY
             )
         )
-        await conn.execute(
-            text(
-                "ALTER TABLE course_category_configs ALTER COLUMN badge_color SET DEFAULT :default_color"
-            ),
-            {"default_color": COURSE_CATEGORY_BADGE_COLOR_DEFAULT},
-        )
-        await conn.execute(
-            text(
-                "UPDATE course_category_configs SET badge_color = :default_color WHERE badge_color IS NULL"
-            ),
-            {"default_color": COURSE_CATEGORY_BADGE_COLOR_DEFAULT},
+    ).scalar_one_or_none()
+    if marker is not None:
+        return False
+
+    category_rows = (
+        await session.execute(select(CourseCategoryConfig))
+    ).scalars().all()
+    category_keys = {item.key for item in category_rows}
+    if (
+        len(category_rows) != len(CANONICAL_COURSE_CATEGORY_KEYS)
+        or category_keys != CANONICAL_COURSE_CATEGORY_KEYS
+    ):
+        raise RuntimeError(
+            "First bootstrap requires only the six migration-created "
+            "canonical course categories"
         )
 
-
-async def init_db():
-    # Run Alembic migrations instead of create_all
-    try:
-        # Run alembic upgrade head to apply all migrations
-        result = subprocess.run(
-            ["uv", "run", "alembic", "upgrade", "head"],
-            cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            capture_output=True,
-            text=True,
+    protected_models = (
+        User,
+        Course,
+        CourseSubmission,
+        ArchiveSubmission,
+        Archive,
+        ArchiveDiscussionMessage,
+        Notification,
+        PersonalNotification,
+        SystemIssueReport,
+        CommentReport,
+        Meme,
+    )
+    nonempty_tables = []
+    for model in protected_models:
+        count = (
+            await session.execute(select(func.count()).select_from(model))
+        ).scalar()
+        if count:
+            nonempty_tables.append(model.__tablename__)
+    if nonempty_tables:
+        raise RuntimeError(
+            "First bootstrap requires an empty application database; "
+            f"found data in {', '.join(nonempty_tables)}"
         )
-        if result.returncode != 0:
-            print(f"Alembic migration failed: {result.stderr}")
-            # Fallback to create_all if migration fails
-            async with engine.begin() as conn:
-                await conn.run_sync(SQLModel.metadata.create_all)
-                await conn.commit()
-        else:
-            print("Database migrations applied successfully")
-    except Exception as e:
-        print(f"Error running migrations: {e}")
-        # Fallback to create_all
-        async with engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
-            await conn.commit()
+    return True
 
-    await _ensure_course_category_badge_color_column()
+
+async def bootstrap_db(*, confirmed_database_name: str) -> None:
+    """Explicitly seed an already-migrated database; never called at startup."""
+    if not settings.ALLOW_DATABASE_BOOTSTRAP:
+        raise RuntimeError(
+            "Database bootstrap is disabled; set ALLOW_DATABASE_BOOTSTRAP=true "
+            "only for an explicitly confirmed local or isolated test database"
+        )
+    if confirmed_database_name != settings.DB_NAME:
+        raise RuntimeError(
+            "Explicit bootstrap confirmation does not match the configured database"
+        )
+    if not _is_allowed_bootstrap_database_name(settings.DB_NAME):
+        raise RuntimeError(
+            "Database bootstrap is allowed only for explicit dev/test names"
+        )
+    await asyncio.to_thread(validate_database_ready)
 
     async with AsyncSessionLocal() as session:
+        is_first_bootstrap = await _validate_bootstrap_contents(session)
         result = await session.execute(
             select(User).where(User.name == settings.DEFAULT_ADMIN_NAME)
         )
@@ -226,9 +310,19 @@ async def init_db():
             )
             admin_user.is_local = True
             admin_user.is_admin = True
-            await session.commit()
-            await session.refresh(admin_user)
         elif not admin_user:
+            email_owner = (
+                await session.execute(
+                    select(User).where(
+                        User.email == settings.DEFAULT_ADMIN_EMAIL
+                    )
+                )
+            ).scalar_one_or_none()
+            if email_owner is not None:
+                raise RuntimeError(
+                    "Default administrator email is already used by a "
+                    "different account; refusing to create or reset users"
+                )
             admin_user = User(
                 name=settings.DEFAULT_ADMIN_NAME,
                 email=settings.DEFAULT_ADMIN_EMAIL,
@@ -237,11 +331,9 @@ async def init_db():
                 is_admin=True,
             )
             session.add(admin_user)
-            await session.commit()
-            await session.refresh(admin_user)
 
-        await sync_course_categories(session)
-        await sync_course_catalog(session)
+        await sync_course_categories(session, commit=False)
+        await sync_course_catalog(session, commit=False)
 
         result = await session.execute(select(func.count()).select_from(Meme))
         count = result.scalar()
@@ -255,7 +347,17 @@ async def init_db():
                 for meme in seed_data.get("memes", [])
             ]
             session.add_all(initial_memes)
-            await session.commit()
+        if is_first_bootstrap:
+            session.add(
+                SystemSetting(
+                    key=BOOTSTRAP_MARKER_KEY,
+                    value={
+                        "kind": "explicit_dev_test",
+                        "version": 1,
+                    },
+                )
+            )
+        await session.commit()
 
 
 async def get_session():

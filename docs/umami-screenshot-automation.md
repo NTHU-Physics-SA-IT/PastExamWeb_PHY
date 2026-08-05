@@ -26,7 +26,9 @@
 
 請勿將 Share URL、管理員帳密、Website ID、API token 或其他敏感資料寫入 workflow、README、issue、commit 或 Action logs。
 
-GitHub 的 `schedule` 與 `workflow_dispatch` 事件只會在 workflow 檔案存在於 default branch 時生效。因此，本功能分支只負責準備與審查自動化；未來經正常 Pull Request 合併後，才能從 Actions 頁面首次手動執行及啟用每日排程。
+目前 Repository 已包含 `.github/workflows/update-umami-screenshot.yml`，
+並由 default branch 上的 `schedule` 與 `workflow_dispatch` 提供每日排程及手動執行。
+根目錄 `README.md` 已直接引用 `analytics-assets` branch 的正式圖片。
 
 ## 排程與輸出
 
@@ -47,9 +49,11 @@ GitHub 的 `schedule` 與 `workflow_dispatch` 事件只會在 workflow 檔案存
 
 第一次成功執行時，workflow 會建立 orphan `analytics-assets` branch；後續只在圖片內容改變時建立正常 commit，不會 force push。
 
-## README 圖片啟用
+## README 圖片引用
 
-第一組真實圖片成功產生並確認可公開後，再用下列區塊取代 README 目前的 placeholder。網址依 canonical repository `NTHU-Physics-SA-IT/PastExamWeb_PHY` 組成：
+根目錄 `README.md` 目前使用下列 `<picture>` 結構，網址依 canonical
+repository `NTHU-Physics-SA-IT/PastExamWeb_PHY` 組成。這是已上線的引用，
+不是待取代的 placeholder：
 
 ```html
 <p align="center">
@@ -75,4 +79,6 @@ GitHub 的 `schedule` 與 `workflow_dispatch` 事件只會在 workflow 檔案存
 </p>
 ```
 
-在圖片 branch 尚未建立或首次截圖尚未成功前，不要啟用這段引用，以免 README 顯示破圖。
+若自動化失敗或 `analytics-assets` 圖片不可用，應先檢查 workflow run、
+公開 Share URL 與 asset branch；不要在未確認根因時改寫 README URL、
+提交假圖片或把敏感診斷資訊放進公開頁面。

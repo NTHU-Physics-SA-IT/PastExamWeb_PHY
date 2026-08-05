@@ -138,6 +138,12 @@ const notificationUpdateMock = vi.hoisted(() => vi.fn())
 const notificationRemoveMock = vi.hoisted(() => vi.fn())
 const listAdminSubmissionsMock = vi.hoisted(() => vi.fn())
 const getSubmissionStatisticsMock = vi.hoisted(() => vi.fn())
+const listSubmissionComparisonsMock = vi.hoisted(() => vi.fn())
+const approveSubmissionMock = vi.hoisted(() => vi.fn())
+const rejectSubmissionMock = vi.hoisted(() => vi.fn())
+const takedownSubmissionMock = vi.hoisted(() => vi.fn())
+const republishSubmissionMock = vi.hoisted(() => vi.fn())
+const deleteSubmissionMock = vi.hoisted(() => vi.fn())
 
 const trackEventMock = vi.hoisted(() => vi.fn())
 const isUnauthorizedErrorMock = vi.hoisted(() => vi.fn(() => false))
@@ -206,6 +212,12 @@ vi.mock('@/api', () => ({
   archiveService: {
     listAdminSubmissions: listAdminSubmissionsMock,
     getSubmissionStatistics: getSubmissionStatisticsMock,
+    listSubmissionComparisons: listSubmissionComparisonsMock,
+    approveSubmission: approveSubmissionMock,
+    rejectSubmission: rejectSubmissionMock,
+    takedownSubmission: takedownSubmissionMock,
+    republishSubmission: republishSubmissionMock,
+    deleteSubmission: deleteSubmissionMock,
   },
 }))
 
@@ -243,6 +255,17 @@ describe('AdminView', () => {
     notificationUpdateMock.mockResolvedValue()
     notificationRemoveMock.mockResolvedValue()
     listAdminSubmissionsMock.mockResolvedValue({ data: [] })
+    listSubmissionComparisonsMock.mockResolvedValue({ data: [] })
+    approveSubmissionMock.mockReset()
+    rejectSubmissionMock.mockReset()
+    takedownSubmissionMock.mockReset()
+    republishSubmissionMock.mockReset()
+    deleteSubmissionMock.mockReset()
+    approveSubmissionMock.mockResolvedValue({ data: {} })
+    rejectSubmissionMock.mockResolvedValue({ data: {} })
+    takedownSubmissionMock.mockResolvedValue({ data: {} })
+    republishSubmissionMock.mockResolvedValue({ data: {} })
+    deleteSubmissionMock.mockResolvedValue({ data: { changed: true } })
     getSubmissionStatisticsMock.mockImplementation((range) =>
       Promise.resolve({ data: makeSubmissionStatistics(range, { 0: 2, 1: 1 }) })
     )
@@ -363,6 +386,243 @@ describe('AdminView', () => {
     expect(wrapper.vm.formatAdminActorTime(now.toISOString())).not.toBe('—')
 
     wrapper.unmount()
+  })
+
+  it('preserves distinct comparison submission identities returned by the API', async () => {
+    const currentSubmissionId = 7001
+    const candidateIds = [7002, 7003]
+    const comparisons = [
+      {
+        id: candidateIds[0],
+        status: 'approved',
+        subject: '普通物理（一）',
+        name: 'final',
+        professor: '王進維',
+        academic_year: 1131,
+      },
+      {
+        id: candidateIds[1],
+        status: 'pending',
+        subject: '普通物理（一）',
+        name: 'final',
+        professor: '王進維',
+        academic_year: 1131,
+      },
+    ]
+    listSubmissionComparisonsMock.mockResolvedValueOnce({ data: comparisons })
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    await wrapper.vm.loadArchiveComparison({ id: currentSubmissionId })
+
+    expect(listSubmissionComparisonsMock).toHaveBeenCalledWith(currentSubmissionId)
+    expect(wrapper.vm.comparisonArchives.map(({ id }) => id)).toEqual(candidateIds)
+    expect(wrapper.vm.comparisonArchives).toEqual(comparisons)
+  })
+
+  it('uses each review row status as the direct review precondition', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    await wrapper.vm.reviewArchiveSubmission({ id: 7101, status: 'pending' }, 'approve')
+    await wrapper.vm.reviewArchiveSubmission({ id: 7102, status: 'approved' }, 'reject')
+    await wrapper.vm.reviewArchiveSubmission({ id: 7103, status: 'pending' }, 'takedown')
+    await wrapper.vm.reviewArchiveSubmission({ id: 7104, status: 'takedown' }, 'republish')
+
+    expect(approveSubmissionMock).toHaveBeenCalledWith(7101, 'pending')
+    expect(rejectSubmissionMock).toHaveBeenCalledWith(7102, 'approved')
+    expect(takedownSubmissionMock).toHaveBeenCalledWith(7103, 'pending')
+    expect(republishSubmissionMock).toHaveBeenCalledWith(7104, 'takedown')
+  })
+
+  it('uses comparison candidate status and fails closed when row status is missing', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    await wrapper.vm.takedownComparisonItem({ id: 7201, status: 'approved' })
+    await wrapper.vm.reviewArchiveSubmission({ id: 7202 }, 'approve')
+
+    expect(takedownSubmissionMock).toHaveBeenCalledTimes(1)
+    expect(takedownSubmissionMock).toHaveBeenCalledWith(7201, 'approved')
+    expect(approveSubmissionMock).not.toHaveBeenCalled()
+  })
+
+  it('intersects the approved review product matrix with backend authority', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    const actionKeys = (item) => wrapper.vm.getReviewRowActions(item).map(({ key }) => key)
+
+    expect(
+      actionKeys({
+        status: 'pending',
+        available_actions: ['approve', 'takedown', 'reject', 'delete'],
+      })
+    ).toEqual(['approve', 'takedown', 'reject', 'delete'])
+    expect(
+      actionKeys({ status: 'pending', available_actions: ['approve', 'reject', 'delete'] })
+    ).toEqual(['approve', 'reject', 'delete'])
+    expect(actionKeys({ status: 'takedown', available_actions: ['republish', 'delete'] })).toEqual([
+      'republish',
+      'delete',
+    ])
+    expect(
+      actionKeys({
+        status: 'approved',
+        available_actions: ['approve', 'takedown', 'reject', 'delete'],
+      })
+    ).toEqual(['takedown', 'reject', 'delete'])
+    expect(
+      actionKeys({ status: 'rejected', available_actions: ['approve', 'takedown', 'delete'] })
+    ).toEqual(['approve', 'delete'])
+    expect(actionKeys({ status: 'deleted', available_actions: ['delete'] })).toEqual([])
+    expect(actionKeys({ status: 'pending' })).toEqual([])
+    expect(actionKeys({ status: 'pending', available_actions: 'approve' })).toEqual([])
+    expect(actionKeys({ status: 'pending', available_actions: ['unknown'] })).toEqual([])
+
+    expect(
+      wrapper.vm.getReviewRowActions({ status: 'pending', available_actions: ['takedown'] }).at(0)
+    ).toMatchObject({
+      label: '下架',
+      icon: 'pi pi-eye-slash',
+      severity: 'secondary',
+      outlined: true,
+    })
+
+    confirmRequireMock.mockClear()
+    wrapper.vm.runReviewRowAction(
+      {
+        id: 7299,
+        subject: '已下架課程',
+        name: '期中考',
+        status: 'takedown',
+        available_actions: ['republish', 'delete'],
+      },
+      'delete'
+    )
+    expect(confirmRequireMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        header: '確認刪除投稿紀錄',
+        accept: expect.any(Function),
+      })
+    )
+  })
+
+  it('uses approved rejected terminology and distinguishes review no-ops', async () => {
+    rejectSubmissionMock
+      .mockResolvedValueOnce({ data: { changed: true } })
+      .mockResolvedValueOnce({ data: { changed: false } })
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    expect(wrapper.vm.getSubmissionLabel('rejected')).toBe('未通過')
+    expect(wrapper.vm.getTrashStatusLabel('rejected')).toBe('未通過')
+
+    await wrapper.vm.reviewArchiveSubmission({ id: 7301, status: 'approved' }, 'reject')
+    expect(toastAddMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ severity: 'success', detail: '投稿已設為未通過。' })
+    )
+
+    await wrapper.vm.reviewArchiveSubmission({ id: 7302, status: 'rejected' }, 'reject')
+    expect(toastAddMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        severity: 'info',
+        detail: '投稿狀態未變更，已重新整理最新資料。',
+      })
+    )
+  })
+
+  it('uses informational feedback for an administrator delete no-op', async () => {
+    deleteSubmissionMock.mockResolvedValueOnce({ data: { changed: false } })
+    listAdminSubmissionsMock.mockResolvedValueOnce({
+      data: Array.from({ length: 25 }, (_, index) => ({
+        id: index + 1,
+        status: 'pending',
+        subject: `Physics ${index + 1}`,
+        requested_course_name: 'Physics',
+        available_actions: [],
+      })),
+    })
+    const wrapper = createWrapper()
+    await flushPromises()
+    wrapper.vm.reviewSearchQuery = 'Physics'
+    await wrapper.vm.$nextTick()
+    wrapper.vm.newSubmissionFirst = 10
+    wrapper.vm.newSubmissionRows = 10
+
+    await wrapper.vm.deleteArchiveSubmissionAction({ id: 7401 })
+    await wrapper.vm.$nextTick()
+
+    expect(toastAddMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        severity: 'info',
+        detail: '此投稿已在垃圾桶中，未重複刪除。',
+      })
+    )
+    expect(listAdminSubmissionsMock).toHaveBeenCalled()
+    expect(wrapper.vm.reviewSearchQuery).toBe('Physics')
+    expect(wrapper.vm.newSubmissionFirst).toBe(10)
+    expect(wrapper.vm.newSubmissionRows).toBe(10)
+  })
+
+  it('uses only explicit Trash authority and labels submission parents accurately', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    for (const value of [false, null, undefined, 'true', 1, {}, []]) {
+      expect(wrapper.vm.canRestoreTrashItem({ canRestore: value })).toBe(false)
+      expect(wrapper.vm.canPermanentDeleteTrashItem({ canPermanentDelete: value })).toBe(false)
+    }
+
+    expect(
+      wrapper.vm.canRestoreTrashItem({
+        canRestore: true,
+        dependencies: [{ label: '阻擋還原：仍有相依項目' }],
+      })
+    ).toBe(true)
+    expect(
+      wrapper.vm.canPermanentDeleteTrashItem({
+        canPermanentDelete: true,
+        dependencies: [{ label: '阻擋永久刪除：仍有相依項目' }],
+      })
+    ).toBe(true)
+    expect(
+      wrapper.vm.canRestoreTrashItem({
+        dependencies: [{ label: '無阻擋' }],
+      })
+    ).toBe(false)
+    expect(
+      wrapper.vm.canPermanentDeleteTrashItem({
+        dependencies: [{ label: '無阻擋' }],
+      })
+    ).toBe(false)
+
+    expect(
+      wrapper.vm.getTrashContextLine({
+        item_type: 'archive_submission',
+        parent_type: 'course',
+        parent_name: '普通物理',
+      })
+    ).toBe('關聯課程：普通物理')
+    expect(
+      wrapper.vm.getTrashContextLine({
+        item_type: 'archive_submission',
+        parent_type: 'archive',
+        parent_name: '期中考',
+      })
+    ).toBe('關聯考古題：期中考')
+
+    wrapper.unmount()
+  })
+
+  it('keeps the shared mobile action row breakpoint-agnostic for five actions', () => {
+    expect(adminViewSource).not.toMatch(/@media\s*\(max-width:\s*337px\)/)
+    expect(adminViewSource).toContain('grid-template-columns: repeat(5, minmax(2.5rem, 1fr))')
+    expect(adminViewSource).toMatch(
+      /@media \(max-width: 640px\)[\s\S]*?review-card-actions[\s\S]*?flex-wrap: nowrap/
+    )
+    expect(adminViewSource).toMatch(
+      /review-card-actions \.p-button[\s\S]*?flex: 1 1 0[\s\S]*?min-width: 0/
+    )
   })
 
   it('keeps desktop actor-time columns while restoring compact mobile metadata', async () => {

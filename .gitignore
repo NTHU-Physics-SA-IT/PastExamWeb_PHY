@@ -1,11 +1,15 @@
 .vscode
 .env*
 !.env.example
-
+/docker/.env
+/docker/.env.production
+!/docker/.env.example
+!/docker/.env.production.example
 .DS_Store
 
 .codex/skills/
 node_modules/
+.pnpm-store/
 backup/
 frontend/playwright/.auth
 *.temp

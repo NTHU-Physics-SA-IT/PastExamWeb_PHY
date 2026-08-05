@@ -1,81 +1,110 @@
-# pastexam API
+# PastExamWeb_PHY API
 
-1. Install [uv](https://docs.astral.sh/uv) if it is not already available:
+## Overview
 
-   ```bash
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   ```
+The backend is a FastAPI application using SQLModel and asynchronous SQLAlchemy
+access to PostgreSQL. Redis supports runtime features, MinIO stores archive
+objects, and Alembic manages schema migrations. Uvicorn serves the application.
+Exact dependency versions are defined by `pyproject.toml` and `uv.lock`.
 
-2. From the `backend` directory, run:
+## Application layout
 
-   ```bash
-   uv sync
-   uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-   ```
+- `app/main.py`: FastAPI application creation, router registration, health
+  endpoint, and startup readiness.
+- `app/api/`: top-level API router wiring.
+- `app/api/services/`: FastAPI routers and many endpoint implementations.
+- `app/services/`: reusable application and Domain operations.
+- `app/models/`: SQLModel tables, request schemas, and response schemas.
+- `app/utils/`: authentication, storage, and other cross-cutting helpers.
+- `app/db/`: sessions, startup checks, test guards, and migration safety.
+- `alembic/`: migration environment and revision graph.
+- `tests/`: API, unit, database, utility, and migration/integration tests.
 
-3. Open [http://localhost:8000/docs](http://localhost:8000/docs) to load Swagger UI and exercise the API endpoints.
+There is currently no repository layer. Routes, authorization, business rules,
+side effects, and commits are still mixed in parts of the application. This is
+a documented current limitation, not a reason to invent a new layer during an
+unrelated change. Follow [Code organization](../docs/development/code-organization.md)
+for the intended responsibility direction.
 
-## Updating the Database Schema
+## Running locally
 
-1. Update the models
-
-   Edit `backend/app/models/models.py`:
-
-   ```python
-   # Example: add a new column
-   class User(SQLModel, table=True):
-      id: Optional[int] = Field(default=None, primary_key=True)
-      name: str
-      email: str
-      # New column
-      phone: Optional[str] = None  # Added column
-   ```
-
-2. Create a migration
-
-   ```bash
-   cd backend
-   uv run migrate.py create "Add phone field to User table"
-   ```
-
-3. Inspect the generated migration
-
-   Check the new file under `backend/alembic/versions/` to ensure the diff is correct.
-
-4. Apply the migration
-
-   ```bash
-   uv run migrate.py upgrade
-
-   docker compose down
-   docker compose up -d
-   ```
-
-## Migration Management Commands
-
-Read the repository [migration safety runbook](../docs/migration-safety.md)
-before operating on an existing database. `migrate.py upgrade` performs a
-read-only, fail-closed preflight and never stamps or repairs a ledger.
+From the repository root, start the canonical complete local stack with:
 
 ```bash
-cd backend
-
-# Create a new migration
-uv run migrate.py create "Your migration message"
-
-# Apply all pending migrations
-uv run migrate.py preflight
-uv run migrate.py upgrade
-
-# Read-only assessment for a non-empty database with a missing ledger
-uv run migrate.py reconcile --check
-
-# Show the current database revision
-uv run migrate.py current
-
-# Show migration history
-uv run migrate.py history
-
-# Downgrade to a specific revision (use with caution!)
-uv run migrate.py downgrade <revision_id>
+scripts/dev-compose.sh start
 ```
+
+For focused backend development, the API can be started from `backend/`:
+
+```bash
+uv sync --locked
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Standalone startup still requires valid environment configuration and
+available PostgreSQL, Redis, and MinIO services. See the
+[local development environment](../docs/development/local-environment.md)
+instead of creating a second Compose setup.
+
+## Validation
+
+From `backend/`, the minimal tooling entry points are:
+
+```bash
+uv run ruff check app tests
+uv run pytest tests/path.py
+```
+
+Replace the pytest path with the smallest relevant file or test node. Backend
+tests are subject to the isolated test database guard in `tests/conftest.py`;
+even files named `unit` must not be assumed to be database-free.
+
+For local PostgreSQL-backed tests, use the repository-owned runner from the
+repository root:
+
+```bash
+python3 scripts/run-isolated-backend-tests.py \
+  --postgres-container-id <exact-canonical-postgres-id> \
+  --backend-container-id <exact-canonical-backend-id> \
+  -- backend/tests/api/test_archives.py -q
+```
+
+The runner creates one uniquely named PostgreSQL 15 container with loopback-only
+port exposure and tmpfs data, applies current migrations, passes the supplied
+arguments directly to `python -m pytest`, and removes only its exact generated
+resource. It refuses to run unless the canonical container identities and
+sealed baseline are Green. It does not use Compose or a persistent volume.
+
+Use the [validation policy](../docs/development/validation.md) for targeted
+commands, database isolation requirements, retry limits, and CI completion.
+
+## Database migrations
+
+Schema changes use Alembic and must add a reviewed migration without rewriting
+an applied revision. Migration generation, preflight, upgrade, bootstrap, and
+recovery rules are maintained only in
+[Migration safety](../docs/migration-safety.md).
+
+## Domain contracts
+
+API and service behavior must follow the
+[Domain contracts](../docs/domain/README.md). Behavior changes require focused
+tests and corresponding contract updates. The backend is the final enforcement
+boundary for authorization and state transitions.
+
+## Production
+
+Production candidate, backup, configuration, activation, and rollback
+procedures are defined in
+[Production deployment safety](../docs/production-deployment.md). They are not
+development commands.
+
+## Related documentation
+
+- [Documentation index](../docs/README.md)
+- [Local development environment](../docs/development/local-environment.md)
+- [Code organization](../docs/development/code-organization.md)
+- [Validation policy](../docs/development/validation.md)
+- [Domain contracts](../docs/domain/README.md)
+- [Migration safety](../docs/migration-safety.md)
+- [Production deployment safety](../docs/production-deployment.md)

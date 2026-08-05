@@ -14,6 +14,10 @@ const mocks = vi.hoisted(() => ({
   reviewComment: vi.fn(),
   deleteSystem: vi.fn(),
   deleteComment: vi.fn(),
+  listArchives: vi.fn(),
+  getArchive: vi.fn(),
+  reviewArchive: vi.fn(),
+  deleteArchive: vi.fn(),
   confirm: vi.fn((options) => options.accept?.()),
   toast: vi.fn(),
   push: vi.fn(),
@@ -29,6 +33,10 @@ vi.mock('@/api', () => ({
     reviewCommentReport: mocks.reviewComment,
     deleteSystemIssue: mocks.deleteSystem,
     deleteCommentReport: mocks.deleteComment,
+    listArchiveReports: mocks.listArchives,
+    getArchiveReport: mocks.getArchive,
+    reviewArchiveReport: mocks.reviewArchive,
+    deleteArchiveReport: mocks.deleteArchive,
   },
 }))
 vi.mock('@/utils/auth', () => ({ getCurrentUser: () => ({ id: 1, is_admin: true }) }))
@@ -67,13 +75,16 @@ const rowDataTableStub = {
   },
 }
 
-function mountPanel({ renderRows = false, cardLayout = false } = {}) {
+function mountPanel({ renderRows = false, cardLayout = false, mediaQuery = null } = {}) {
   if (renderRows) {
-    window.matchMedia = vi.fn(() => ({
-      matches: cardLayout,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    }))
+    window.matchMedia = vi.fn(
+      () =>
+        mediaQuery || {
+          matches: cardLayout,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        }
+    )
   }
   return mount(ReportManagementPanel, {
     global: {
@@ -105,6 +116,7 @@ describe('ReportManagementPanel', () => {
     mocks.getSystem.mockResolvedValue({ data: { id: 1, is_read: false } })
     mocks.updateSystemReadState.mockResolvedValue({ data: { id: 1, is_read: true } })
     mocks.listComments.mockResolvedValue({ data: { items: [], total: 0 } })
+    mocks.listArchives.mockResolvedValue({ data: { items: [], total: 0 } })
     mocks.deleteSystem.mockResolvedValue({ data: { success: true } })
     mocks.deleteComment.mockResolvedValue({ data: { success: true } })
     mocks.confirm.mockImplementation((options) => options.accept?.())
@@ -116,9 +128,11 @@ describe('ReportManagementPanel', () => {
 
     expect(wrapper.text()).toContain('系統問題回報')
     expect(wrapper.text()).toContain('留言回報')
-    expect(wrapper.text()).toContain('考古題回報功能尚未開放')
+    expect(wrapper.text()).toContain('考古題回報')
+    expect(wrapper.text()).toContain('依課程、考古題、回報者、原因與狀態搜尋')
     expect(mocks.listSystem).toHaveBeenCalled()
     expect(mocks.listComments).toHaveBeenCalled()
+    expect(mocks.listArchives).toHaveBeenCalled()
     expect(wrapper.findAll('.report-section')).toHaveLength(3)
     expect(wrapper.find('.report-management__header').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('檢視系統問題摘要並審核留言回報')
@@ -159,6 +173,89 @@ describe('ReportManagementPanel', () => {
     expect(reportManagementSource).toContain('rel="noopener noreferrer"')
   })
 
+  it('renders archive reports on mobile and wires optional takedown review', async () => {
+    const report = {
+      id: 31,
+      reporter_name: '考古題回報者',
+      created_at: '2026-07-28T01:00:00Z',
+      reason: 'incomplete_or_low_quality',
+      supplementary_detail: '第三頁模糊',
+      course_name: '電磁學',
+      archive_name: '期中考',
+      archive_id: 88,
+      archive_id_snapshot: 88,
+      professor: '王老師',
+      status: 'pending',
+      reviewer_name: null,
+      reviewed_at: null,
+      source_exists: true,
+      source_state: 'available',
+      can_take_down: true,
+      archive_taken_down: false,
+    }
+    mocks.listArchives.mockResolvedValue({ data: { items: [report], total: 1 } })
+    mocks.getArchive.mockResolvedValue({ data: report })
+    mocks.reviewArchive.mockResolvedValue({
+      data: { ...report, status: 'upheld', archive_taken_down: true },
+    })
+
+    const wrapper = mountPanel({ renderRows: true, cardLayout: true })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('考古題回報者')
+    expect(wrapper.text()).toContain('第三頁模糊')
+    expect(wrapper.text()).toContain('電磁學')
+    const archiveCard = wrapper.get('.report-management__archive-table .report-mobile-card')
+    expect(archiveCard.text()).toContain('檔案模糊、缺頁或內容不完整')
+    expect(archiveCard.text()).toContain('待審核')
+    expect(archiveCard.text()).toContain('期中考')
+    expect(archiveCard.text()).toContain('#88')
+    expect(
+      archiveCard
+        .findAll('.report-mobile-info-item')
+        .find((item) => item.text().includes('審核時間'))
+        ?.text()
+    ).toContain('--')
+    expect(archiveCard.findAll('button').map((button) => button.text())).toEqual([
+      '檢視／審核',
+      '刪除',
+    ])
+
+    await wrapper.vm.openArchiveReport(report.id)
+    wrapper.vm.archiveReviewForm.status = 'upheld'
+    wrapper.vm.archiveReviewForm.admin_response = '已確認'
+    wrapper.vm.archiveReviewForm.take_down_archive = true
+    await wrapper.vm.saveArchiveReview()
+    await flushPromises()
+
+    expect(mocks.reviewArchive).toHaveBeenCalledWith(report.id, {
+      status: 'upheld',
+      admin_response: '已確認',
+      take_down_archive: true,
+    })
+    expect(wrapper.vm.selectedArchiveReport.archive_taken_down).toBe(true)
+  })
+
+  it('clears archive takedown when review is dismissed or source is unavailable', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    wrapper.vm.selectedArchiveReport = {
+      id: 32,
+      status: 'pending',
+      source_state: 'trashed',
+      can_take_down: false,
+    }
+    wrapper.vm.archiveReviewForm.status = 'upheld'
+    wrapper.vm.archiveReviewForm.take_down_archive = true
+    await wrapper.vm.$nextTick()
+    expect(wrapper.vm.canSaveArchiveReview).toBe(false)
+
+    wrapper.vm.archiveReviewForm.status = 'dismissed'
+    await wrapper.vm.$nextTick()
+    expect(wrapper.vm.archiveReviewForm.take_down_archive).toBe(false)
+    expect(wrapper.vm.canSaveArchiveReview).toBe(true)
+  })
+
   it('opens a full local-summary detail without unsafe HTML', async () => {
     const wrapper = mountPanel()
     await flushPromises()
@@ -184,8 +281,127 @@ describe('ReportManagementPanel', () => {
     expect(wrapper.text()).toContain('無法確認使用者是否已在 GitHub 正式建立 Issue')
     expect(reportManagementSource).not.toContain('v-html')
     expect(reportManagementSource).toContain('aria-label="檢視系統問題回報"')
+    const fields = wrapper.findAll('.system-report-detail__content.report-review__content-field')
+    expect(fields).toHaveLength(2)
+    expect(fields[0].get('.report-review__content-label').text()).toBe('問題標題')
+    expect(fields[0].get('.report-review__content-block').text()).toBe('完整標題')
+    expect(fields[1].get('.report-review__content-label').text()).toBe('完整詳細描述')
+    expect(fields[1].get('.report-review__content-block').text()).toContain(
+      '第一行\n第二行很長的完整內容'
+    )
+    expect(reportManagementSource).toContain('overflow-wrap: anywhere')
+    expect(reportManagementSource).toContain('word-break: break-word')
+    expect(reportManagementSource).toContain('white-space: pre-wrap')
     expect(mocks.getSystem).toHaveBeenCalledWith(report.id)
     expect(mocks.updateSystemReadState).not.toHaveBeenCalled()
+  })
+
+  it('frames reporter-authored comment and archive content consistently', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    mocks.getComment.mockResolvedValueOnce({
+      data: {
+        id: 71,
+        status: 'pending',
+        reporter_name: 'Reporter',
+        comment_author_name: 'Author',
+        reason: 'misinformation',
+        course_name: 'Course',
+        archive_name: 'Exam',
+        comment_content_snapshot: 'snapshot\nwith-a-very-long-token-abcdef',
+        comment_created_at_snapshot: '2026-07-28T00:00:00Z',
+        custom_message: null,
+        source_exists: true,
+      },
+    })
+    await wrapper.vm.openCommentReport(71)
+    await flushPromises()
+
+    let fields = wrapper.findAll('.report-review__content-field')
+    let blocks = wrapper.findAll('.report-review__content-block')
+    expect(fields).toHaveLength(2)
+    expect(blocks).toHaveLength(2)
+    expect(fields[0].get('.report-review__content-label').text()).toBe('留言內容快照')
+    expect(blocks[0].text()).toContain('snapshot\nwith-a-very-long-token-abcdef')
+    expect(fields[1].get('.report-review__content-label').text()).toBe('回報者補充')
+    expect(blocks[1].text()).toContain('未提供補充')
+    wrapper.vm.selectedReport = null
+
+    mocks.getArchive.mockResolvedValueOnce({
+      data: {
+        id: 72,
+        status: 'pending',
+        reporter_name: 'Reporter',
+        reason: 'metadata_mismatch',
+        course_name: 'Course',
+        archive_name: 'Exam',
+        archive_id_snapshot: 99,
+        academic_year: 2026,
+        professor: 'Professor',
+        source_exists: true,
+        source_state: 'available',
+        can_take_down: true,
+        archive_taken_down: false,
+        supplementary_detail: null,
+      },
+    })
+    await wrapper.vm.openArchiveReport(72)
+    await flushPromises()
+
+    fields = wrapper.findAll('.report-review__content-field')
+    blocks = wrapper.findAll('.report-review__content-block')
+    expect(fields).toHaveLength(1)
+    expect(blocks).toHaveLength(1)
+    expect(fields[0].get('.report-review__content-label').text()).toBe('補充說明')
+    expect(blocks[0].text()).toContain('未提供補充說明')
+    expect(reportManagementSource).toContain('border: 1px solid var(--border-color)')
+    expect(reportManagementSource).toContain('background: var(--bg-secondary)')
+    expect(reportManagementSource).not.toContain('var(--surface-border)')
+    expect(reportManagementSource).not.toContain('var(--surface-50)')
+    expect(reportManagementSource).toContain('var(--app-font-size-base)')
+  })
+
+  it('submits archive review without an admin response and renders the fallback', async () => {
+    const report = {
+      id: 73,
+      status: 'pending',
+      reporter_name: 'Reporter',
+      reason: 'metadata_mismatch',
+      course_name: 'Course',
+      archive_name: 'Exam',
+      archive_id_snapshot: 99,
+      academic_year: 2026,
+      professor: 'Professor',
+      source_exists: true,
+      source_state: 'available',
+      can_take_down: true,
+      archive_taken_down: false,
+      supplementary_detail: 'Details',
+      admin_response: null,
+    }
+    mocks.getArchive.mockResolvedValueOnce({ data: report })
+    mocks.reviewArchive.mockResolvedValueOnce({
+      data: { ...report, status: 'dismissed', admin_response: null },
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.vm.openArchiveReport(report.id)
+    expect(wrapper.get('#archive-admin-response').attributes('placeholder')).toBe(
+      '可留空；若未提供答覆，通知中將顯示「未提供答覆」。'
+    )
+    wrapper.vm.archiveReviewForm.status = 'dismissed'
+    wrapper.vm.archiveReviewForm.admin_response = '   '
+    await wrapper.vm.saveArchiveReview()
+    await flushPromises()
+
+    expect(mocks.reviewArchive).toHaveBeenCalledWith(report.id, {
+      status: 'dismissed',
+      admin_response: null,
+      take_down_archive: false,
+    })
+    expect(wrapper.text()).toContain('管理員答覆：')
+    expect(wrapper.text()).toContain('未提供答覆')
   })
 
   it('updates read state only after explicit save and supports marking unread again', async () => {
@@ -266,16 +482,16 @@ describe('ReportManagementPanel', () => {
     )
     expect(reportManagementSource).toContain("data.reviewer_name || '尚未審核'")
     expect(reportManagementSource).toContain(
-      '<span v-else class="report-person-time__time">—</span>'
+      '<span v-else class="report-person-time__time">--</span>'
     )
   })
 
-  it('keeps both report action groups aligned without wrapping button labels', () => {
-    expect(reportManagementSource.match(/class="report-row-actions"/g)).toHaveLength(4)
+  it('keeps all report action groups aligned without wrapping button labels', () => {
+    expect(reportManagementSource.match(/class="report-row-actions"/g)).toHaveLength(6)
     expect(
       reportManagementSource.match(/v-if="!isCardLayout" class="report-desktop-actions"/g)
     ).toHaveLength(2)
-    expect(reportManagementSource.match(/class="report-mobile-card__footer"/g)).toHaveLength(2)
+    expect(reportManagementSource.match(/class="report-mobile-card__footer"/g)).toHaveLength(3)
     expect(reportManagementSource).toContain(
       'headerClass="report-actions-column report-actions-column--system"'
     )
@@ -291,7 +507,7 @@ describe('ReportManagementPanel', () => {
       ':deep(.report-management__table .p-datatable-tbody > tr > td:last-child)'
     )
     expect(reportManagementSource).not.toContain('justify-content: flex-end;\n  flex-wrap: nowrap')
-    expect(reportManagementSource.match(/breakpoint="1399px"/g)).toHaveLength(2)
+    expect(reportManagementSource.match(/breakpoint="1399\.98px"/g)).toHaveLength(3)
   })
 
   it('keeps pagination and server sorting independent for each report list', async () => {
@@ -354,7 +570,7 @@ describe('ReportManagementPanel', () => {
     expect(ADMIN_PAGE_SIZE_OPTIONS).toEqual([5, 10, 15, 25, 50])
     expect(
       reportManagementSource.match(/:rowsPerPageOptions="ADMIN_PAGE_SIZE_OPTIONS"/g)
-    ).toHaveLength(2)
+    ).toHaveLength(3)
     expect(wrapper.vm.systemPage).toMatchObject({ first: 0, rows: 10 })
     expect(wrapper.vm.commentPage).toMatchObject({ first: 0, rows: 10 })
 
@@ -613,7 +829,7 @@ describe('ReportManagementPanel', () => {
   })
 
   it('scopes personalized font tokens across report lists, controls, and dialogs', () => {
-    expect(reportManagementSource.match(/class="report-management-dialog"/g)).toHaveLength(2)
+    expect(reportManagementSource.match(/class="report-management-dialog"/g)).toHaveLength(3)
     expect(reportManagementSource).toMatch(
       /\.report-management :deep\(\.p-inputtext\)[\s\S]*?font-size:\s*var\(--app-font-size-sm\) !important;/
     )
@@ -667,17 +883,20 @@ describe('ReportManagementPanel', () => {
   })
 
   it('uses responsive filter grids and dedicated full-width mobile summaries', () => {
-    expect(reportManagementSource.match(/breakpoint="1399px"/g)).toHaveLength(2)
-    expect(reportManagementSource).toContain('@media (max-width: 1399px)')
+    expect(reportManagementSource.match(/breakpoint="1399\.98px"/g)).toHaveLength(3)
+    expect(reportManagementSource).toContain('@media (max-width: 1399.98px)')
+    expect(reportManagementSource).toContain(
+      "const REPORT_CARD_MEDIA_QUERY = '(max-width: 1399.98px)'"
+    )
     expect(reportManagementSource).not.toContain('@media (max-width: 899px)')
-    expect(reportManagementSource.match(/class="report-filter-search"/g)).toHaveLength(2)
+    expect(reportManagementSource.match(/class="report-filter-search"/g)).toHaveLength(3)
     expect(
       reportManagementSource.match(/class="report-filter-select report-filter-select--primary"/g)
-    ).toHaveLength(2)
+    ).toHaveLength(3)
     expect(
       reportManagementSource.match(/class="report-filter-select report-filter-select--secondary"/g)
-    ).toHaveLength(2)
-    expect(reportManagementSource.match(/class="report-filter-submit"/g)).toHaveLength(2)
+    ).toHaveLength(3)
+    expect(reportManagementSource.match(/class="report-filter-submit"/g)).toHaveLength(3)
     expect(reportManagementSource).toContain('container-name: report-section;')
     expect(reportManagementSource).toContain(
       "grid-template-areas: 'search primary secondary submit';"
@@ -690,16 +909,16 @@ describe('ReportManagementPanel', () => {
     )
     expect(
       reportManagementSource.match(/class="report-mobile-card report-mobile-card-content"/g)
-    ).toHaveLength(2)
+    ).toHaveLength(3)
     expect(
       reportManagementSource.match(/class="report-mobile-card__header report-mobile-card-header"/g)
-    ).toHaveLength(2)
+    ).toHaveLength(3)
     expect(reportManagementSource).toContain('class="report-mobile-card-badges"')
     expect(
       reportManagementSource.match(
         /class="report-mobile-card__summary report-mobile-summary-preview"/g
       )
-    ).toHaveLength(2)
+    ).toHaveLength(3)
     expect(reportManagementSource).toContain('class="report-mobile-summary-preview__label"')
     expect(reportManagementSource).toContain("data.description || '未提供詳細描述'")
     expect(reportManagementSource).toContain("data.comment_content_snapshot || '無留言摘要'")
@@ -727,8 +946,11 @@ describe('ReportManagementPanel', () => {
     expect(reportManagementSource).toMatch(
       /\.report-management__table \.p-datatable-tbody > tr > td\)\s*\{[^}]*display:\s*none !important;[^}]*min-height:\s*0;/
     )
-    expect(reportManagementSource).toMatch(
-      /\.report-management__comment-table \.p-datatable-tbody > tr > td:nth-child\(2\)\)\s*\{[^}]*display:\s*flex !important;/
+    expect(reportManagementSource).toContain(
+      ':deep(.report-management__comment-table .p-datatable-tbody > tr > td:nth-child(2)),'
+    )
+    expect(reportManagementSource).toContain(
+      ':deep(.report-management__archive-table .p-datatable-tbody > tr > td:nth-child(2)) {'
     )
     expect(reportManagementSource).toMatch(
       /\.report-mobile-card__header\s*\{[^}]*grid-area:\s*header;[^}]*min-height:\s*0;[^}]*margin-top:\s*0;[^}]*align-self:\s*start;/
@@ -760,6 +982,32 @@ describe('ReportManagementPanel', () => {
       /\.report-row-actions\s*\{[\s\S]*?justify-content:\s*flex-end;/
     )
     expect(reportManagementSource).not.toContain('GitHub Issue</')
+  })
+
+  it('updates all report layouts when the shared media query changes', async () => {
+    let changeListener
+    const mediaQuery = {
+      matches: false,
+      addEventListener: vi.fn((event, listener) => {
+        if (event === 'change') changeListener = listener
+      }),
+      removeEventListener: vi.fn(),
+    }
+    const wrapper = mountPanel({ renderRows: true, mediaQuery })
+    await flushPromises()
+
+    expect(window.matchMedia).toHaveBeenCalledWith('(max-width: 1399.98px)')
+    expect(wrapper.vm.isCardLayout).toBe(false)
+
+    mediaQuery.matches = true
+    changeListener?.({ matches: true })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.vm.isCardLayout).toBe(true)
+
+    mediaQuery.matches = false
+    changeListener?.({ matches: false })
+    await wrapper.vm.$nextTick()
+    expect(wrapper.vm.isCardLayout).toBe(false)
   })
 
   it('renders each system and comment report field exactly once in card layout', async () => {

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref, nextTick } from 'vue'
@@ -32,6 +34,14 @@ let originalFetch
 let consoleErrorSpy
 
 const sampleCourses = {
+  fundamental: [
+    { id: 'c1', name: 'Calculus I', english_name: 'Calculus I (English)' },
+    { id: 'c2', name: 'Linear Algebra' },
+  ],
+  required: [{ id: 'c3', name: 'Data Structures' }],
+  experience: [],
+  optional: [],
+  'math-department': [],
   freshman: [
     { id: 'c1', name: 'Calculus I', english_name: 'Calculus I (English)' },
     { id: 'c2', name: 'Linear Algebra' },
@@ -214,6 +224,79 @@ describe('ArchiveView', () => {
     window.URL.revokeObjectURL = originalRevokeObjectURL
   })
 
+  it('renders each archive when exam metadata matches but ids differ', async () => {
+    const matchingArchives = [
+      {
+        ...baseArchives[0],
+        id: 'matching-a',
+        academic_year: '20231',
+        name: 'Midterm',
+        archive_type: 'midterm',
+        professor: 'Prof. Chen',
+        object_name: 'archives/matching-a.pdf',
+      },
+      {
+        ...baseArchives[0],
+        id: 'matching-b',
+        academic_year: '20231',
+        name: 'Midterm',
+        archive_type: 'midterm',
+        professor: 'Prof. Chen',
+        object_name: 'archives/matching-b.pdf',
+      },
+    ]
+    getCourseArchivesMock.mockReset()
+    getCourseArchivesMock.mockResolvedValue({ data: matchingArchives })
+    getArchiveDownloadUrlMock.mockImplementation((_courseId, archiveId) =>
+      Promise.resolve({
+        data: { url: `https://example.com/${archiveId}.pdf` },
+      })
+    )
+    globalThis.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['dummy'])),
+      })
+    )
+    const wrapper = mount(ArchiveView, {
+      global: {
+        provide: {
+          toast: { add: toastAddMock },
+          confirm: { require: confirmRequireMock },
+          sidebarVisible: ref(true),
+        },
+        stubs: componentStubs,
+      },
+    })
+
+    await flushPromises()
+    wrapper.vm.filterBySubject({ label: 'Calculus I', id: 'c1' })
+    await flushPromises()
+
+    const renderedIds = wrapper.vm.groupedArchives.flatMap((group) =>
+      group.list.map((archive) => archive.id)
+    )
+    const archiveCards = wrapper.findAll('.archive-record-card')
+    const downloadActions = wrapper.findAll('.archive-action-download')
+    expect(renderedIds).toEqual(['matching-a', 'matching-b'])
+    expect(archiveCards).toHaveLength(2)
+    expect(archiveCards.every((card) => card.text().includes('Midterm'))).toBe(true)
+    expect(downloadActions).toHaveLength(2)
+    expect(downloadActions.every((action) => action.attributes('aria-label') === '下載')).toBe(true)
+
+    await wrapper.vm.downloadArchive(wrapper.vm.groupedArchives[0].list[0])
+    await wrapper.vm.downloadArchive(wrapper.vm.groupedArchives[0].list[1])
+    await flushPromises()
+
+    expect(getArchiveDownloadUrlMock).toHaveBeenNthCalledWith(1, 'c1', 'matching-a')
+    expect(getArchiveDownloadUrlMock).toHaveBeenNthCalledWith(2, 'c1', 'matching-b')
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(1, 'https://example.com/matching-a.pdf')
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(2, 'https://example.com/matching-b.pdf')
+
+    vi.runAllTimers()
+    wrapper.unmount()
+  })
+
   it('handles core archive interactions', async () => {
     const sidebarInjected = ref(true)
 
@@ -238,6 +321,15 @@ describe('ArchiveView', () => {
     expect(initialIssueContext.page).toBe('archive')
 
     const vm = wrapper.vm
+    expect(vm.courseCategories.map(({ key }) => key)).toEqual([
+      'fundamental',
+      'required',
+      'experience',
+      'optional',
+      'graduate',
+      'math-department',
+    ])
+    expect(new Set(vm.courseCategories.map(({ name }) => name)).size).toBe(6)
 
     vm.filterBySubject({ label: 'Calculus I', id: 'c1' })
     await flushPromises()
@@ -536,6 +628,126 @@ describe('ArchiveView', () => {
     expect(Array.isArray(mobileMenu)).toBe(true)
 
     wrapper.unmount()
+  })
+
+  it.each([
+    {
+      path: 'course id',
+      code: 'archive_move_target_course_not_found',
+      message: '目標課程不存在，請先建立課程。',
+      configure(vm) {
+        vm.editForm.targetCourseId = 'missing-course'
+      },
+      rejectMove() {
+        updateArchiveCourseMock.mockRejectedValueOnce({
+          response: {
+            status: 404,
+            data: {
+              detail: {
+                code: 'archive_move_target_course_not_found',
+                message: '目標課程不存在，請先建立課程。',
+                reload_required: false,
+              },
+            },
+          },
+        })
+      },
+    },
+    {
+      path: 'course name and category',
+      code: 'course_lifecycle_conflict',
+      message: '目標課程已在垃圾桶，請先恢復課程。',
+      configure(vm) {
+        vm.editForm.targetCourse = '已刪除課程'
+        vm.editForm.targetCourseId = null
+      },
+      rejectMove() {
+        updateArchiveCourseByCategoryAndNameMock.mockRejectedValueOnce({
+          response: {
+            status: 409,
+            data: {
+              detail: {
+                code: 'course_lifecycle_conflict',
+                message: '目標課程已在垃圾桶，請先恢復課程。',
+                reload_required: false,
+              },
+            },
+          },
+        })
+      },
+    },
+  ])(
+    'preserves the edit dialog for the structured $path move error',
+    async ({ message, configure, rejectMove }) => {
+      const wrapper = mount(ArchiveView, {
+        global: {
+          provide: {
+            toast: { add: toastAddMock },
+            confirm: { require: confirmRequireMock },
+            sidebarVisible: ref(true),
+          },
+          stubs: componentStubs,
+        },
+      })
+      await flushPromises()
+
+      const vm = wrapper.vm
+      const initialCourseLoads = listCoursesMock.mock.calls.length
+      vm.selectedCourse = 'c1'
+      vm.showEditDialog = true
+      vm.editForm = {
+        id: 'a1',
+        name: '保留名稱',
+        professor: '保留教授',
+        type: 'midterm',
+        hasAnswers: true,
+        academicYear: new Date('2023-01-01T00:00:00Z'),
+        shouldTransfer: true,
+        targetCategory: 'freshman',
+        targetCourse: '',
+        targetCourseId: null,
+      }
+      await nextTick()
+      configure(vm)
+      const preservedForm = {
+        name: vm.editForm.name,
+        professor: vm.editForm.professor,
+        targetCategory: vm.editForm.targetCategory,
+        targetCourse: vm.editForm.targetCourse,
+        targetCourseId: vm.editForm.targetCourseId,
+      }
+      rejectMove()
+
+      await vm.handleEdit()
+      await flushPromises()
+
+      expect(vm.showEditDialog).toBe(true)
+      expect(vm.editForm).toMatchObject(preservedForm)
+      expect(listCoursesMock).toHaveBeenCalledTimes(initialCourseLoads)
+      expect(toastAddMock).toHaveBeenCalledTimes(1)
+      expect(toastAddMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          severity: 'error',
+          summary: '更新失敗',
+          detail: message,
+        })
+      )
+      expect(toastAddMock).not.toHaveBeenCalledWith(
+        expect.objectContaining({ severity: 'success' })
+      )
+
+      wrapper.unmount()
+    }
+  )
+
+  it('keeps owner submission status informational without a delete action', () => {
+    const archiveViewSource = readFileSync(
+      resolve(globalThis.process.cwd(), 'src/views/Archive.vue'),
+      'utf8'
+    )
+
+    expect(archiveViewSource).not.toContain('deleteMySubmission')
+    expect(archiveViewSource).not.toContain('owner_self_delete_consumed')
   })
 
   it('covers remaining utility branches', async () => {

@@ -17,8 +17,8 @@ services:
     container_name: pastexam-backend
     restart: always
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_started
       minio:
@@ -26,11 +26,23 @@ services:
     # ports:
     #   - "8000:8000"
     env_file:
-      - ../backend/.env
+      - ${PRODUCTION_BACKEND_ENV_FILE:-/opt/pastexam-config/backend.env}
     networks:
       app_network:
         aliases:
           - backend
+
+  migrate:
+    image: ${BACKEND_IMAGE:-ghcr.io/nthu-physics-sa-it/pastexam:backend}
+    restart: "no"
+    command: ["python", "migrate.py", "upgrade"]
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ${PRODUCTION_MIGRATOR_ENV_FILE:-/opt/pastexam-config/migrator.env}
+    networks:
+      - app_network
 
   db:
     image: postgres:15.14-alpine3.22
