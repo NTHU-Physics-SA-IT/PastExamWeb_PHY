@@ -154,11 +154,34 @@ describe('PdfPreviewModal', () => {
           ProgressSpinner: stubComponent,
           Button: stubComponent,
           ArchiveDiscussionPanel: { template: '<div class="discussion-panel-stub"></div>' },
+          ArchiveReportPanel: { template: '<div class="archive-report-panel-stub"></div>' },
         },
       },
     })
 
     expect(wrapper.find('.discussion-panel-stub').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('顯示明確的考古題檔案缺失訊息', async () => {
+    const wrapper = mount(PdfPreviewModal, {
+      props: {
+        visible: true,
+        previewUrl: '',
+        error: true,
+        errorMessage: '檔案缺失：找不到這份考古題檔案。',
+      },
+      global: {
+        stubs: {
+          Dialog: stubComponent,
+          ProgressSpinner: stubComponent,
+          Button: stubComponent,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('檔案缺失')
+    expect(wrapper.text()).toContain('考古題檔案')
     wrapper.unmount()
   })
 
@@ -177,11 +200,56 @@ describe('PdfPreviewModal', () => {
           ProgressSpinner: stubComponent,
           Button: stubComponent,
           ArchiveDiscussionPanel: { template: '<div class="discussion-panel-stub"></div>' },
+          ArchiveReportPanel: { template: '<div class="archive-report-panel-stub"></div>' },
         },
       },
     })
 
     expect(wrapper.find('.discussion-panel-stub').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('switches between discussion and archive report without unmounting discussion', async () => {
+    const wrapper = mount(PdfPreviewModal, {
+      props: {
+        visible: true,
+        previewUrl: '',
+        courseId: 1,
+        archiveId: 2,
+        courseName: '電磁學',
+        title: '期中考',
+      },
+      global: {
+        stubs: {
+          Dialog: stubComponent,
+          ProgressSpinner: stubComponent,
+          Button: {
+            inheritAttrs: false,
+            props: ['label'],
+            template: '<button v-bind="$attrs">{{ label }}</button>',
+          },
+          ArchiveDiscussionPanel: {
+            template: '<div class="discussion-panel-stub"><textarea value="draft" /></div>',
+          },
+          ArchiveReportPanel: {
+            template: '<div class="archive-report-panel-stub"></div>',
+          },
+        },
+      },
+    })
+
+    expect(wrapper.vm.sidePanelMode).toBe('discussion')
+    expect(wrapper.find('.archive-report-panel-stub').exists()).toBe(false)
+    wrapper.vm.handleArchiveReportClick()
+    await nextTick()
+    expect(wrapper.vm.sidePanelMode).toBe('exam-report')
+    expect(wrapper.find('.discussion-panel-stub').exists()).toBe(true)
+    expect(wrapper.find('.archive-report-panel-stub').exists()).toBe(true)
+
+    wrapper.vm.returnToDiscussion()
+    await nextTick()
+    expect(wrapper.vm.sidePanelMode).toBe('discussion')
+    expect(wrapper.find('.discussion-panel-stub textarea').element.value).toBe('draft')
     wrapper.unmount()
   })
 })

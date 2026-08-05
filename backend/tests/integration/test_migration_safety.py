@@ -1,31 +1,99 @@
 from __future__ import annotations
 
 import json
+import os
 from urllib.parse import quote, quote_plus
 
 import pytest
 from alembic import command
 from sqlalchemy import create_engine, inspect as sa_inspect, text
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, make_url
 
 import migrate
+from app.core.config import settings
+from app.db.test_database_guard import (
+    validate_connected_test_database,
+    validate_test_database_target,
+)
 from app.db.migration_safety import (
     alembic_config,
     database_url,
     inspect_database,
+    migration_advisory_lock,
     revision_graph,
     safe_error,
 )
 
 
 @pytest.fixture(autouse=True)
-def clean_public_schema() -> Engine:
-    engine = create_engine(alembic_config().get_main_option("sqlalchemy.url"))
+def clean_public_schema(monkeypatch: pytest.MonkeyPatch) -> Engine:
+    test_database_url = os.environ["TEST_DATABASE_URL"]
+    test_url = make_url(test_database_url)
+    runtime_url = database_url().render_as_string(hide_password=False)
+    target = validate_test_database_target(
+        test_database_url=test_database_url,
+        runtime_database_url=runtime_url,
+        isolation_confirmed=os.environ.get("PASTEXAM_TEST_DATABASE_ISOLATED"),
+        allowed_hosts=os.environ.get(
+            "TEST_DATABASE_ALLOWED_HOSTS",
+            "127.0.0.1,localhost,db",
+        ).split(","),
+    )
+
+    monkeypatch.setattr(settings, "DB_HOST", test_url.host)
+    monkeypatch.setattr(settings, "DB_PORT", test_url.port)
+    monkeypatch.setattr(settings, "DB_USER", test_url.username)
+    monkeypatch.setattr(settings, "DB_PASSWORD", test_url.password)
+    monkeypatch.setattr(settings, "DB_NAME", target.database_name)
+    cleanup_database_settings = {
+        "DB_HOST": settings.DB_HOST,
+        "DB_PORT": settings.DB_PORT,
+        "DB_USER": settings.DB_USER,
+        "DB_PASSWORD": settings.DB_PASSWORD,
+        "DB_NAME": settings.DB_NAME,
+    }
+
+    cleanup_config = alembic_config()
+    engine = create_engine(cleanup_config.get_main_option("sqlalchemy.url"))
     with engine.begin() as connection:
+        (
+            actual_database_name,
+            actual_user_name,
+            actual_database_owner,
+            is_superuser,
+            can_create_database,
+            can_create_role,
+        ) = connection.execute(
+            text(
+                "SELECT current_database(), current_user, "
+                "pg_get_userbyid(database.datdba), "
+                "role.rolsuper, role.rolcreatedb, role.rolcreaterole "
+                "FROM pg_database AS database "
+                "JOIN pg_roles AS role ON role.rolname = current_user "
+                "WHERE database.datname = current_database()"
+            )
+        ).one()
+        validate_connected_test_database(
+            actual_database_name=actual_database_name,
+            actual_user_name=actual_user_name,
+            actual_database_owner=actual_database_owner,
+            is_superuser=is_superuser,
+            can_create_database=can_create_database,
+            can_create_role=can_create_role,
+            target=target,
+        )
         connection.execute(text("DROP SCHEMA public CASCADE"))
         connection.execute(text("CREATE SCHEMA public"))
-    yield engine
-    engine.dispose()
+    try:
+        yield engine
+    finally:
+        for setting_name, setting_value in cleanup_database_settings.items():
+            setattr(settings, setting_name, setting_value)
+        with engine.begin() as connection:
+            connection.execute(text("DROP SCHEMA public CASCADE"))
+            connection.execute(text("CREATE SCHEMA public"))
+        command.upgrade(cleanup_config, "head")
+        engine.dispose()
 
 
 def upgrade(revision: str = "head") -> None:
@@ -77,10 +145,53 @@ def test_head_database_preflight_is_read_only(clean_public_schema: Engine) -> No
 
     assert before == after
     with clean_public_schema.connect() as connection:
-        assert connection.scalar(
-            text("SELECT count(*) FROM courses WHERE id = :course_id"),
-            {"course_id": course_id},
-        ) == 1
+        assert (
+            connection.scalar(
+                text("SELECT count(*) FROM courses WHERE id = :course_id"),
+                {"course_id": course_id},
+            )
+            == 1
+        )
+
+
+def test_head_schema_matches_sqlmodel_autogenerate_contract() -> None:
+    upgrade()
+
+    command.check(alembic_config())
+
+
+def test_head_schema_accepts_equivalent_postgresql_check_reflection(
+    clean_public_schema: Engine,
+) -> None:
+    upgrade()
+
+    with clean_public_schema.connect() as connection:
+        reflected = {
+            item["name"]: item["sqltext"]
+            for item in sa_inspect(connection).get_check_constraints(
+                "archive_submissions",
+                schema="public",
+            )
+        }
+
+    previous_status_check = reflected[
+        "ck_archive_submissions_previous_status_not_deleted"
+    ]
+    active_status_check = reflected[
+        "ck_archive_submissions_active_previous_status_null"
+    ]
+    assert "previous_status::text" in previous_status_check
+    assert "status::text" in active_status_check
+    assert "cast(" not in previous_status_check.lower()
+    assert "cast(" not in active_status_check.lower()
+
+    report = inspect_database()
+    check = next(
+        item
+        for item in report.schema_checks
+        if item.name == "archive_submissions.check_constraints"
+    )
+    assert check.passed is True
 
 
 def test_missing_ledger_reports_candidate_but_never_stamps(
@@ -99,10 +210,13 @@ def test_missing_ledger_reports_candidate_but_never_stamps(
     assert report.upgrade_allowed is False
     with clean_public_schema.connect() as connection:
         assert "alembic_version" not in sa_inspect(connection).get_table_names()
-        assert connection.scalar(
-            text("SELECT count(*) FROM courses WHERE id = :course_id"),
-            {"course_id": course_id},
-        ) == 1
+        assert (
+            connection.scalar(
+                text("SELECT count(*) FROM courses WHERE id = :course_id"),
+                {"course_id": course_id},
+            )
+            == 1
+        )
 
 
 def test_missing_ledger_with_drift_fails_without_mutation(
@@ -159,18 +273,147 @@ def test_unknown_and_multiple_ledger_revisions_fail(
     assert any("exactly one revision" in error for error in multiple.errors)
 
 
-def test_known_non_head_revision_is_not_auto_upgraded() -> None:
+def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
     script, _ = revision_graph()
     previous_revision = script.get_revision(head_revision()).down_revision
     assert isinstance(previous_revision, str)
     upgrade(previous_revision)
 
-    before = inspect_database().alembic_versions
-    assert migrate.main(["upgrade", "--json"]) == 2
-    after = inspect_database().alembic_versions
+    before = inspect_database()
+    assert before.alembic_versions == [previous_revision]
+    assert before.upgrade_allowed is True
+    assert migrate.main(["upgrade", "--json"]) == 0
+    after = inspect_database()
+    assert after.current_revision == head_revision()
+    assert after.schema_matches_head is True
 
-    assert before == [previous_revision]
-    assert after == before
+
+@pytest.mark.parametrize(
+    "source_revision",
+    [
+        "a4c7e9d2f6b1",
+        "c9e4f1a7b2d6",
+        "e3b7c1d9f5a2",
+        "a7c3e9f1b5d2",
+    ],
+)
+def test_model_derived_reviewed_sources_have_validated_forward_upgrade(
+    source_revision: str,
+) -> None:
+    upgrade(source_revision)
+
+    before = inspect_database()
+    assert before.alembic_versions == [source_revision]
+    assert before.upgrade_allowed is True
+    assert migrate.main(["upgrade", "--json"]) == 0
+
+    after = inspect_database()
+    assert after.current_revision == head_revision()
+    assert after.schema_matches_head is True
+
+
+def test_archive_report_revision_is_additive_and_reversible(
+    clean_public_schema: Engine,
+) -> None:
+    previous_revision = "e3b7c1d9f5a2"
+    new_revision = "a7c3e9f1b5d2"
+    config = alembic_config()
+    upgrade(previous_revision)
+
+    def schema_signature() -> dict[str, tuple[str, ...]]:
+        with clean_public_schema.connect() as connection:
+            inspector = sa_inspect(connection)
+            return {
+                table_name: tuple(
+                    column["name"]
+                    for column in inspector.get_columns(table_name, schema="public")
+                )
+                for table_name in inspector.get_table_names(schema="public")
+                if table_name != "alembic_version"
+            }
+
+    baseline = schema_signature()
+    assert "archive_reports" not in baseline
+
+    command.upgrade(config, new_revision)
+    upgraded = schema_signature()
+    assert set(upgraded) == {*baseline, "archive_reports"}
+    assert all(upgraded[name] == columns for name, columns in baseline.items())
+    assert {
+        "reporter_user_id",
+        "archive_id",
+        "archive_submission_id",
+        "archive_id_snapshot",
+        "status",
+        "archive_taken_down",
+        "deleted_at",
+    }.issubset(upgraded["archive_reports"])
+
+    command.downgrade(config, previous_revision)
+    assert schema_signature() == baseline
+
+    command.upgrade(config, new_revision)
+    assert schema_signature() == upgraded
+    _, heads = revision_graph(config)
+    assert heads == [head_revision()]
+    with clean_public_schema.connect() as connection:
+        assert (
+            connection.scalar(text("SELECT version_num FROM alembic_version"))
+            == new_revision
+        )
+
+
+def test_known_revision_without_manifest_is_blocked() -> None:
+    upgrade("d1e6c8a4f2b9")
+
+    report = inspect_database()
+
+    assert report.current_revision == "d1e6c8a4f2b9"
+    assert report.upgrade_allowed is False
+    assert any(
+        "no reviewed schema manifest" in error and "d1e6c8a4f2b9" in error
+        for error in report.errors
+    )
+    assert migrate.main(["upgrade", "--json"]) == 2
+
+
+def test_reviewed_source_schema_drift_is_blocked(
+    clean_public_schema: Engine,
+) -> None:
+    upgrade("c9e4f1a7b2d6")
+    with clean_public_schema.begin() as connection:
+        connection.execute(text("DROP INDEX ix_users_deleted_by_id"))
+
+    report = inspect_database()
+
+    assert report.current_revision == "c9e4f1a7b2d6"
+    assert report.upgrade_allowed is False
+    assert any("source schema" in error.lower() for error in report.errors)
+
+
+def test_head_schema_drift_is_blocked(clean_public_schema: Engine) -> None:
+    upgrade()
+    with clean_public_schema.begin() as connection:
+        connection.execute(text("DROP INDEX ix_courses_category"))
+
+    report = inspect_database()
+
+    assert report.current_revision == head_revision()
+    assert report.upgrade_allowed is False
+    assert any("head" in error.lower() for error in report.errors)
+
+
+def test_concurrent_migration_advisory_lock_fails_closed(
+    clean_public_schema: Engine,
+) -> None:
+    second_engine = create_engine(alembic_config().get_main_option("sqlalchemy.url"))
+    try:
+        with migration_advisory_lock(clean_public_schema):
+            with pytest.raises(RuntimeError, match="advisory lock"):
+                with migration_advisory_lock(second_engine):
+                    pass
+    finally:
+        second_engine.dispose()
 
 
 def test_multiple_repository_heads_fail_closed(
@@ -217,8 +460,7 @@ def test_multiple_repository_heads_fail_closed(
             "announcement_read_receipts.unique_constraints",
         ),
         (
-            "ALTER TABLE comment_reports "
-            "DROP CONSTRAINT ck_comment_reports_status",
+            "ALTER TABLE comment_reports DROP CONSTRAINT ck_comment_reports_status",
             "comment_reports.check_constraints",
         ),
         ("DROP INDEX ix_users_deleted_by_id", "users.indexes"),
@@ -257,8 +499,7 @@ def test_credentials_are_redacted_from_errors_and_json(
     raw_url = database_url().render_as_string(hide_password=False)
     error = safe_error(
         RuntimeError(
-            f"{password} {quote(password, safe='')} "
-            f"{quote_plus(password)} {raw_url}"
+            f"{password} {quote(password, safe='')} {quote_plus(password)} {raw_url}"
         )
     )
     assert report.database_connected is False

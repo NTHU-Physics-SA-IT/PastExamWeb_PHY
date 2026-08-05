@@ -1,0 +1,1010 @@
+{
+  "manifest_version": 1,
+  "revision": "c4d8e2f1a6b9",
+  "schema": {
+    "enums": {
+      "archivetype": [
+        "FINAL",
+        "MIDTERM",
+        "OTHER",
+        "QUIZ"
+      ],
+      "coursecategory": [
+        "FRESHMAN",
+        "GENERAL",
+        "GRADUATE",
+        "INTERDISCIPLINARY",
+        "JUNIOR",
+        "SENIOR",
+        "SOPHOMORE"
+      ],
+      "notificationseverity": [
+        "DANGER",
+        "INFO"
+      ],
+      "submissionstatus": [
+        "APPROVED",
+        "DELETED",
+        "PENDING",
+        "REJECTED",
+        "TAKEDOWN"
+      ]
+    },
+    "tables": {
+      "archive_discussion_messages": {
+        "check_constraints": [],
+        "columns": {
+          "archive_id": {
+            "nullable": false,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "content": {
+            "nullable": false,
+            "server_default": null,
+            "type": "TEXT"
+          },
+          "created_at": {
+            "nullable": false,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "deleted_at": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "id": {
+            "nullable": false,
+            "server_default": "nextval('\"public\".archive_discussion_messages_id_seq'::regclass)",
+            "type": "INTEGER"
+          },
+          "is_pinned": {
+            "nullable": false,
+            "server_default": null,
+            "type": "BOOLEAN"
+          },
+          "user_id": {
+            "nullable": false,
+            "server_default": null,
+            "type": "INTEGER"
+          }
+        },
+        "foreign_keys": [
+          {
+            "columns": [
+              "archive_id"
+            ],
+            "ondelete": "",
+            "referred_columns": [
+              "id"
+            ],
+            "referred_table": "archives"
+          },
+          {
+            "columns": [
+              "user_id"
+            ],
+            "ondelete": "",
+            "referred_columns": [
+              "id"
+            ],
+            "referred_table": "users"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "ix_archive_discussion_messages_archive_id",
+            "signature": [
+              [
+                "archive_id"
+              ],
+              false,
+              null
+            ]
+          },
+          {
+            "name": "ix_archive_discussion_messages_is_pinned",
+            "signature": [
+              [
+                "is_pinned"
+              ],
+              false,
+              null
+            ]
+          },
+          {
+            "name": "ix_archive_discussion_messages_user_id",
+            "signature": [
+              [
+                "user_id"
+              ],
+              false,
+              null
+            ]
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "unique_constraints": []
+      },
+      "archive_submissions": {
+        "check_constraints": [],
+        "columns": {
+          "academic_year": {
+            "nullable": false,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "archive_type": {
+            "nullable": false,
+            "server_default": null,
+            "type": "ARCHIVETYPE"
+          },
+          "category": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "created_archive_id": {
+            "nullable": true,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "created_at": {
+            "nullable": false,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "delete_reason": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TEXT"
+          },
+          "deleted_at": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "deleted_by_id": {
+            "nullable": true,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "has_answers": {
+            "nullable": false,
+            "server_default": null,
+            "type": "BOOLEAN"
+          },
+          "id": {
+            "nullable": false,
+            "server_default": "nextval('\"public\".archive_submissions_id_seq'::regclass)",
+            "type": "INTEGER"
+          },
+          "is_admin_upload": {
+            "nullable": false,
+            "server_default": "false",
+            "type": "BOOLEAN"
+          },
+          "lifecycle_reason": {
+            "nullable": true,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "name": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "object_name": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "owner_id": {
+            "nullable": true,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "professor": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "requested_category_icon": {
+            "nullable": true,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "requested_category_key": {
+            "nullable": true,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "requested_category_label": {
+            "nullable": true,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "requested_category_name": {
+            "nullable": true,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "requested_course_name": {
+            "nullable": true,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "requester_id": {
+            "nullable": false,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "restored_at": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "restored_by_id": {
+            "nullable": true,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "review_note": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TEXT"
+          },
+          "reviewed_at": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "reviewer_id": {
+            "nullable": true,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "status": {
+            "nullable": false,
+            "server_default": null,
+            "type": "SUBMISSIONSTATUS"
+          },
+          "subject": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          }
+        },
+        "foreign_keys": [
+          {
+            "columns": [
+              "created_archive_id"
+            ],
+            "ondelete": "",
+            "referred_columns": [
+              "id"
+            ],
+            "referred_table": "archives"
+          },
+          {
+            "columns": [
+              "requester_id"
+            ],
+            "ondelete": "",
+            "referred_columns": [
+              "id"
+            ],
+            "referred_table": "users"
+          },
+          {
+            "columns": [
+              "reviewer_id"
+            ],
+            "ondelete": "",
+            "referred_columns": [
+              "id"
+            ],
+            "referred_table": "users"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "ix_archive_submissions_professor",
+            "signature": [
+              [
+                "professor"
+              ],
+              false,
+              null
+            ]
+          },
+          {
+            "name": "ix_archive_submissions_requester_id",
+            "signature": [
+              [
+                "requester_id"
+              ],
+              false,
+              null
+            ]
+          },
+          {
+            "name": "ix_archive_submissions_status",
+            "signature": [
+              [
+                "status"
+              ],
+              false,
+              null
+            ]
+          },
+          {
+            "name": "ix_archive_submissions_subject",
+            "signature": [
+              [
+                "subject"
+              ],
+              false,
+              null
+            ]
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "unique_constraints": []
+      },
+      "archives": {
+        "check_constraints": [],
+        "columns": {
+          "academic_year": {
+            "nullable": false,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "archive_type": {
+            "nullable": false,
+            "server_default": null,
+            "type": "ARCHIVETYPE"
+          },
+          "course_id": {
+            "nullable": false,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "created_at": {
+            "nullable": false,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "deleted_at": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "deleted_by_id": {
+            "nullable": true,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "deleted_reason": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TEXT"
+          },
+          "download_count": {
+            "nullable": false,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "has_answers": {
+            "nullable": false,
+            "server_default": null,
+            "type": "BOOLEAN"
+          },
+          "id": {
+            "nullable": false,
+            "server_default": "nextval('\"public\".archives_id_seq'::regclass)",
+            "type": "INTEGER"
+          },
+          "name": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "object_name": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "professor": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "restored_at": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "restored_by_id": {
+            "nullable": true,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "updated_at": {
+            "nullable": false,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "uploader_id": {
+            "nullable": true,
+            "server_default": null,
+            "type": "INTEGER"
+          }
+        },
+        "foreign_keys": [
+          {
+            "columns": [
+              "course_id"
+            ],
+            "ondelete": "",
+            "referred_columns": [
+              "id"
+            ],
+            "referred_table": "courses"
+          },
+          {
+            "columns": [
+              "uploader_id"
+            ],
+            "ondelete": "",
+            "referred_columns": [
+              "id"
+            ],
+            "referred_table": "users"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "ix_archives_professor",
+            "signature": [
+              [
+                "professor"
+              ],
+              false,
+              null
+            ]
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "unique_constraints": []
+      },
+      "course_category_configs": {
+        "check_constraints": [],
+        "columns": {
+          "badge_color": {
+            "nullable": false,
+            "server_default": "blue",
+            "type": "VARCHAR"
+          },
+          "created_at": {
+            "nullable": false,
+            "server_default": "now()",
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "deleted_at": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "deleted_by_id": {
+            "nullable": true,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "icon": {
+            "nullable": false,
+            "server_default": "pi pi-fw pi-book",
+            "type": "VARCHAR"
+          },
+          "id": {
+            "nullable": false,
+            "server_default": "nextval('\"public\".course_category_configs_id_seq'::regclass)",
+            "type": "INTEGER"
+          },
+          "is_active": {
+            "nullable": false,
+            "server_default": "true",
+            "type": "BOOLEAN"
+          },
+          "key": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "label": {
+            "nullable": false,
+            "server_default": "",
+            "type": "VARCHAR"
+          },
+          "name": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "order_index": {
+            "nullable": false,
+            "server_default": "0",
+            "type": "INTEGER"
+          },
+          "restored_at": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "restored_by_id": {
+            "nullable": true,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "updated_at": {
+            "nullable": false,
+            "server_default": "now()",
+            "type": "TIMESTAMP WITH TIME ZONE"
+          }
+        },
+        "foreign_keys": [],
+        "indexes": [
+          {
+            "name": "ix_course_category_configs_is_active",
+            "signature": [
+              [
+                "is_active"
+              ],
+              false,
+              null
+            ]
+          },
+          {
+            "name": "ix_course_category_configs_key",
+            "signature": [
+              [
+                "key"
+              ],
+              true,
+              null
+            ]
+          },
+          {
+            "name": "ix_course_category_configs_name",
+            "signature": [
+              [
+                "name"
+              ],
+              false,
+              null
+            ]
+          },
+          {
+            "name": "ix_course_category_configs_order_index",
+            "signature": [
+              [
+                "order_index"
+              ],
+              false,
+              null
+            ]
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "unique_constraints": [
+          [
+            "key"
+          ]
+        ]
+      },
+      "course_submissions": {
+        "check_constraints": [],
+        "columns": {
+          "category": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "created_at": {
+            "nullable": false,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "created_course_id": {
+            "nullable": true,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "id": {
+            "nullable": false,
+            "server_default": "nextval('\"public\".course_submissions_id_seq'::regclass)",
+            "type": "INTEGER"
+          },
+          "name": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "requester_id": {
+            "nullable": false,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "review_note": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TEXT"
+          },
+          "reviewed_at": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "reviewer_id": {
+            "nullable": true,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "status": {
+            "nullable": false,
+            "server_default": null,
+            "type": "SUBMISSIONSTATUS"
+          }
+        },
+        "foreign_keys": [
+          {
+            "columns": [
+              "created_course_id"
+            ],
+            "ondelete": "",
+            "referred_columns": [
+              "id"
+            ],
+            "referred_table": "courses"
+          },
+          {
+            "columns": [
+              "requester_id"
+            ],
+            "ondelete": "",
+            "referred_columns": [
+              "id"
+            ],
+            "referred_table": "users"
+          },
+          {
+            "columns": [
+              "reviewer_id"
+            ],
+            "ondelete": "",
+            "referred_columns": [
+              "id"
+            ],
+            "referred_table": "users"
+          }
+        ],
+        "indexes": [
+          {
+            "name": "ix_course_submissions_name",
+            "signature": [
+              [
+                "name"
+              ],
+              false,
+              null
+            ]
+          },
+          {
+            "name": "ix_course_submissions_requester_id",
+            "signature": [
+              [
+                "requester_id"
+              ],
+              false,
+              null
+            ]
+          },
+          {
+            "name": "ix_course_submissions_status",
+            "signature": [
+              [
+                "status"
+              ],
+              false,
+              null
+            ]
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "unique_constraints": []
+      },
+      "courses": {
+        "check_constraints": [],
+        "columns": {
+          "category": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "deleted_at": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "deleted_by_id": {
+            "nullable": true,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "id": {
+            "nullable": false,
+            "server_default": "nextval('\"public\".courses_id_seq'::regclass)",
+            "type": "INTEGER"
+          },
+          "name": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "order_index": {
+            "nullable": false,
+            "server_default": null,
+            "type": "INTEGER"
+          },
+          "restored_at": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "restored_by_id": {
+            "nullable": true,
+            "server_default": null,
+            "type": "INTEGER"
+          }
+        },
+        "foreign_keys": [],
+        "indexes": [
+          {
+            "name": "ix_courses_name",
+            "signature": [
+              [
+                "name"
+              ],
+              false,
+              null
+            ]
+          },
+          {
+            "name": "ix_courses_order_index",
+            "signature": [
+              [
+                "order_index"
+              ],
+              false,
+              null
+            ]
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "unique_constraints": []
+      },
+      "memes": {
+        "check_constraints": [],
+        "columns": {
+          "content": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "id": {
+            "nullable": false,
+            "server_default": "nextval('\"public\".memes_id_seq'::regclass)",
+            "type": "INTEGER"
+          },
+          "language": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          }
+        },
+        "foreign_keys": [],
+        "indexes": [],
+        "primary_key": [
+          "id"
+        ],
+        "unique_constraints": []
+      },
+      "notifications": {
+        "check_constraints": [],
+        "columns": {
+          "body": {
+            "nullable": false,
+            "server_default": null,
+            "type": "TEXT"
+          },
+          "created_at": {
+            "nullable": false,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "deleted_at": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "ends_at": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "id": {
+            "nullable": false,
+            "server_default": "nextval('\"public\".notifications_id_seq'::regclass)",
+            "type": "INTEGER"
+          },
+          "is_active": {
+            "nullable": false,
+            "server_default": null,
+            "type": "BOOLEAN"
+          },
+          "severity": {
+            "nullable": false,
+            "server_default": null,
+            "type": "NOTIFICATIONSEVERITY"
+          },
+          "starts_at": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "title": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR(150)"
+          },
+          "updated_at": {
+            "nullable": false,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          }
+        },
+        "foreign_keys": [],
+        "indexes": [],
+        "primary_key": [
+          "id"
+        ],
+        "unique_constraints": []
+      },
+      "users": {
+        "check_constraints": [],
+        "columns": {
+          "deleted_at": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "email": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "id": {
+            "nullable": false,
+            "server_default": "nextval('\"public\".users_id_seq'::regclass)",
+            "type": "INTEGER"
+          },
+          "is_admin": {
+            "nullable": false,
+            "server_default": null,
+            "type": "BOOLEAN"
+          },
+          "is_local": {
+            "nullable": false,
+            "server_default": null,
+            "type": "BOOLEAN"
+          },
+          "last_login": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "last_logout": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "last_seen_at": {
+            "nullable": true,
+            "server_default": null,
+            "type": "TIMESTAMP WITH TIME ZONE"
+          },
+          "name": {
+            "nullable": false,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "nickname": {
+            "nullable": true,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "oauth_provider": {
+            "nullable": true,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "oauth_sub": {
+            "nullable": true,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "password_hash": {
+            "nullable": true,
+            "server_default": null,
+            "type": "VARCHAR"
+          },
+          "show_level_title": {
+            "nullable": false,
+            "server_default": "true",
+            "type": "BOOLEAN"
+          }
+        },
+        "foreign_keys": [],
+        "indexes": [
+          {
+            "name": "ix_users_email",
+            "signature": [
+              [
+                "email"
+              ],
+              true,
+              null
+            ]
+          },
+          {
+            "name": "ix_users_name",
+            "signature": [
+              [
+                "name"
+              ],
+              true,
+              null
+            ]
+          },
+          {
+            "name": "ix_users_nickname",
+            "signature": [
+              [
+                "nickname"
+              ],
+              false,
+              null
+            ]
+          }
+        ],
+        "primary_key": [
+          "id"
+        ],
+        "unique_constraints": []
+      }
+    }
+  }
+}

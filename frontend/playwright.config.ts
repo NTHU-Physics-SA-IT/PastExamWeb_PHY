@@ -22,6 +22,7 @@ const webServer = shouldStartServer
   : undefined
 
 const AUTH_FILE = 'playwright/.auth/admin.json'
+const chromiumExecutablePath = env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
 
 const config: PlaywrightTestConfig = {
   testDir: './tests/e2e',
@@ -46,7 +47,12 @@ const config: PlaywrightTestConfig = {
       name: 'chromium',
       dependencies: ['setup'],
       testMatch: /.*\.spec\.ts/,
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        ...(chromiumExecutablePath
+          ? { launchOptions: { executablePath: chromiumExecutablePath } }
+          : {}),
+      },
     },
     {
       name: 'firefox',

@@ -36,6 +36,9 @@ jobs:
       DB_USER: migration_test
       DB_PASSWORD: migration_test_password
       DB_NAME: migration_test
+      TEST_DB_USER: pastexam_test_migration_guard
+      TEST_DB_PASSWORD: migration-test-isolated-password
+      TEST_DATABASE_NAME: pastexam_test_migration_guard
       SECRET_KEY: migration-test-secret
       FRONTEND_URL: http://localhost
       MINIO_ENDPOINT: localhost:9000
@@ -78,7 +81,19 @@ jobs:
           connection.autocommit = True
           try:
               with connection.cursor() as cursor:
-                  cursor.execute("CREATE DATABASE test_migration_guard")
+                  cursor.execute(
+                      """
+                      CREATE ROLE pastexam_test_migration_guard
+                      LOGIN PASSWORD 'migration-test-isolated-password'
+                      NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
+                      """
+                  )
+                  cursor.execute(
+                      """
+                      CREATE DATABASE pastexam_test_migration_guard
+                      OWNER pastexam_test_migration_guard
+                      """
+                  )
           finally:
               connection.close()
           PY
@@ -86,8 +101,24 @@ jobs:
       - name: Run isolated migration safety scenarios
         working-directory: backend
         run: |
-          export TEST_DATABASE_URL="postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/test_migration_guard"
-          uv run python -m pytest -q tests/integration/test_migration_safety.py
+          export TEST_DATABASE_URL="postgresql+asyncpg://${TEST_DB_USER}:${TEST_DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${TEST_DATABASE_NAME}"
+          export PASTEXAM_TEST_DATABASE_ISOLATED=true
+          export TEST_DATABASE_ALLOWED_HOSTS="127.0.0.1,localhost,db"
+          export PASTEXAM_AUDIT_TEST_CONTAINER="${{ job.services.postgres.id }}"
+          uv run python -m pytest -q \
+            tests/integration/test_migration_safety.py \
+            tests/unit/test_audit_policy.py \
+            tests/unit/test_read_only_audit.py \
+            tests/integration/test_read_only_audit_integration.py
+          uv run python audit.py run \
+            --audit archive-submission-self-delete-eligibility \
+            --mode isolated-test \
+            --repository-revision "${GITHUB_SHA}" \
+            --output json
+          uv run python -m pytest -q \
+            ../scripts/tests/test_dev_compose_schema_controls.py \
+            ../scripts/tests/test_postgres_test_bootstrap_contract.py \
+            --confcutdir=../scripts/tests
 
   backend:
     if: ${{ inputs.run_checks }}
@@ -115,67 +146,69 @@ jobs:
 
       - name: Start core services
         run: |
-          docker compose -f docker/docker-compose.dev.yml up -d --wait --wait-timeout 60 \
+          docker compose \
+            --env-file docker/.env \
+            -f docker/docker-compose.dev.yml \
+            up -d --wait --wait-timeout 60 \
             db redis minio
 
-      - name: Create test database
+      - name: Verify isolated test database
         run: |
           set -euo pipefail
 
-          docker compose -f docker/docker-compose.dev.yml exec -T db \
-            sh -eu -c '
-              echo "PostgreSQL user: $POSTGRES_USER"
-              echo "PostgreSQL database: $POSTGRES_DB"
-              echo "Waiting for PostgreSQL..."
-
-              attempt=0
-              until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
-                attempt=$((attempt + 1))
-                if [ "$attempt" -ge 30 ]; then
-                  echo "PostgreSQL did not become ready within 60 seconds" >&2
-                  exit 1
-                fi
-                sleep 2
-              done
-
-              echo "Recreating isolated test database..."
-              dropdb --if-exists -U "$POSTGRES_USER" test_archive_db
-              createdb -U "$POSTGRES_USER" test_archive_db
-
-              database_name="$(
-                psql -U "$POSTGRES_USER" -d test_archive_db -tAc \
-                  "SELECT current_database()"
-              )"
-              if [ "$database_name" != "test_archive_db" ]; then
-                echo "Failed to verify test_archive_db" >&2
-                exit 1
-              fi
-              echo "Test database is ready: $database_name"
-            '
+          docker compose \
+            --env-file docker/.env \
+            -f docker/docker-compose.dev.yml \
+            exec -T db \
+            sh -eu -s \
+            < scripts/ci/verify-isolated-test-database.sh
 
       - name: Show database diagnostics
         if: failure()
         run: |
-          docker compose -f docker/docker-compose.dev.yml ps
-          docker compose -f docker/docker-compose.dev.yml logs db
+          docker compose \
+            --env-file docker/.env \
+            -f docker/docker-compose.dev.yml \
+            ps
+          docker compose \
+            --env-file docker/.env \
+            -f docker/docker-compose.dev.yml \
+            logs db
 
       - name: Run migrations
         run: |
-          docker compose -f docker/docker-compose.dev.yml run --rm \
-            -e DB_NAME=test_archive_db \
+          docker compose \
+            --env-file docker/.env \
+            -f docker/docker-compose.dev.yml \
+            run --rm \
+            -e DB_NAME=pastexam_test_local \
+            -e DB_USER=pastexam_test_local \
+            -e DB_PASSWORD=local-test-only \
             backend uv run python migrate.py upgrade
 
       - name: Seed database
         run: |
-          docker compose -f docker/docker-compose.dev.yml run --rm \
-            -e DB_NAME=test_archive_db \
-            backend uv run python app/scripts/seed_db.py
+          docker compose \
+            --env-file docker/.env \
+            -f docker/docker-compose.dev.yml \
+            run --rm \
+            -e DB_NAME=pastexam_test_local \
+            -e DB_USER=pastexam_test_local \
+            -e DB_PASSWORD=local-test-only \
+            -e ALLOW_DATABASE_BOOTSTRAP=true \
+            backend uv run python app/scripts/seed_db.py \
+              --confirm-database-name pastexam_test_local
 
       - name: Run backend tests with coverage
         run: |
-          docker compose -f docker/docker-compose.dev.yml run --rm backend \
-            sh -c 'TEST_DATABASE_URL="postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/test_archive_db" \
-              uv run pytest --cov=app --cov-report=term-missing --cov-report=html'
+          docker compose \
+            --env-file docker/.env \
+            -f docker/docker-compose.dev.yml \
+            run --rm \
+            -e TEST_DATABASE_URL=postgresql+asyncpg://pastexam_test_local:local-test-only@db:5432/pastexam_test_local \
+            -e PASTEXAM_TEST_DATABASE_ISOLATED=true \
+            backend \
+            uv run pytest --cov=app --cov-report=term-missing --cov-report=html
 
       - name: Upload backend coverage report
         if: always()
@@ -187,7 +220,11 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose -f docker/docker-compose.dev.yml down --volumes --remove-orphans
+        run: >-
+          docker compose
+          --env-file docker/.env
+          -f docker/docker-compose.dev.yml
+          down --volumes --remove-orphans
 
   frontend-unit:
     if: ${{ inputs.run_checks }}
@@ -297,10 +334,26 @@ jobs:
           echo "__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=nginx" >> frontend/.env
 
       - name: Prepare docker env
-        run: cp docker/.env.example docker/.env
+        run: |
+          cp docker/.env.example docker/.env
+          sed -i \
+            "s/^POSTGRES_DB=.*/POSTGRES_DB=archive_db_dev_e2e/" \
+            docker/.env
 
       - name: Start application stack
-        run: docker compose -f docker/docker-compose.dev.yml up -d
+        run: >-
+          docker compose
+          --env-file docker/.env
+          -f docker/docker-compose.dev.yml
+          up -d
+
+      - name: Bootstrap isolated E2E database
+        run: >-
+          docker compose
+          --env-file docker/.env
+          -f docker/docker-compose.dev.yml
+          --profile bootstrap
+          run --rm bootstrap
 
       - name: Proxy Vite HMR through nginx
         shell: bash
@@ -342,13 +395,21 @@ jobs:
             sleep 3
           done
           echo "API did not become ready in time" >&2
-          docker compose -f docker/docker-compose.dev.yml logs backend
-          docker compose -f docker/docker-compose.dev.yml logs nginx
+          docker compose \
+            --env-file docker/.env \
+            -f docker/docker-compose.dev.yml \
+            logs backend
+          docker compose \
+            --env-file docker/.env \
+            -f docker/docker-compose.dev.yml \
+            logs nginx
           exit 1
 
       - name: Run frontend E2E tests
         env:
           PLAYWRIGHT_IMAGE: ${{ steps.playwright-image.outputs.image }}
+          PLAYWRIGHT_ADMIN_USERNAME: admin
+          PLAYWRIGHT_ADMIN_PASSWORD: local-admin-only
         run: |
           set -euo pipefail
 
@@ -364,6 +425,8 @@ jobs:
             -e CI=true \
             -e PLAYWRIGHT_START_SERVER=false \
             -e PLAYWRIGHT_BASE_URL=http://nginx:8080 \
+            -e PLAYWRIGHT_ADMIN_USERNAME \
+            -e PLAYWRIGHT_ADMIN_PASSWORD \
             -v "$GITHUB_WORKSPACE:/work" \
             -w /work/frontend \
             "$PLAYWRIGHT_IMAGE" \
@@ -382,4 +445,8 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose -f docker/docker-compose.dev.yml down --volumes --remove-orphans
+        run: >-
+          docker compose
+          --env-file docker/.env
+          -f docker/docker-compose.dev.yml
+          down --volumes --remove-orphans

@@ -7,70 +7,48 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, text
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 from unittest.mock import AsyncMock
 
 from app.core.config import settings
+from app.db.test_database_guard import (
+    validate_connected_test_database,
+    validate_test_database_target,
+)
 from app.main import app
 from app.models.models import Archive, User
 from app.utils.auth import get_password_hash
 
-RUNTIME_DATABASE_URL = (
-    "postgresql+asyncpg://"
-    f"{settings.DB_USER}:{settings.DB_PASSWORD}@"
-    f"{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
-)
+RUNTIME_DATABASE_URL = URL.create(
+    "postgresql+asyncpg",
+    username=settings.DB_USER,
+    password=settings.DB_PASSWORD,
+    host=settings.DB_HOST,
+    port=settings.DB_PORT,
+    database=settings.DB_NAME,
+).render_as_string(hide_password=False)
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
-FORBIDDEN_DATABASE_NAMES = {"archive_db"}
-
-
-def is_test_database_name(database_name: str | None) -> bool:
-    normalized = str(database_name or "").strip().lower()
-    return bool(normalized) and normalized not in FORBIDDEN_DATABASE_NAMES and (
-        normalized.startswith("test_") or normalized.endswith("_test")
-    )
-
-
-def validate_test_database_url(
-    test_database_url: str | None, runtime_database_url: str
-) -> str:
-    if not test_database_url:
-        raise ValueError("TEST_DATABASE_URL must be explicitly configured")
-    test_url = make_url(test_database_url)
-    runtime_url = make_url(runtime_database_url)
-    test_database_name = test_url.database or ""
-    runtime_database_name = runtime_url.database or ""
-    if test_url == runtime_url or test_database_name == runtime_database_name:
-        raise ValueError("TEST_DATABASE_URL must not target the runtime database")
-    if not is_test_database_name(test_database_name):
-        raise ValueError("Test database name must start with 'test_' or end with '_test'")
-    return test_database_name
-
-
-def validate_connected_database_name(
-    actual_database_name: str | None,
-    configured_database_name: str,
-    runtime_database_name: str,
-) -> None:
-    actual = str(actual_database_name or "").strip()
-    if (
-        actual != configured_database_name
-        or actual == runtime_database_name
-        or not is_test_database_name(actual)
-    ):
-        raise ValueError("Connected database does not match the isolated test database")
+TEST_DATABASE_ALLOWED_HOSTS = os.getenv(
+    "TEST_DATABASE_ALLOWED_HOSTS",
+    "127.0.0.1,localhost,db",
+)
 
 
 try:
-    CONFIGURED_DATABASE_NAME = validate_test_database_url(
-        TEST_DATABASE_URL, RUNTIME_DATABASE_URL
+    TEST_DATABASE_TARGET = validate_test_database_target(
+        test_database_url=TEST_DATABASE_URL,
+        runtime_database_url=RUNTIME_DATABASE_URL,
+        isolation_confirmed=os.getenv("PASTEXAM_TEST_DATABASE_ISOLATED"),
+        allowed_hosts=TEST_DATABASE_ALLOWED_HOSTS.split(","),
     )
 except (TypeError, ValueError):
     pytest.exit(
         "Refusing to run backend tests without an explicit, isolated TEST_DATABASE_URL. "
-        "The database name must start with 'test_' or end with '_test'.",
+        "The database and role names must start with 'pastexam_test_', "
+        "the host must be explicitly allowed, and "
+        "PASTEXAM_TEST_DATABASE_ISOLATED=true is required.",
         returncode=2,
     )
 
@@ -101,12 +79,34 @@ async def override_db_session(monkeypatch):
     )
 
     async with engine.connect() as connection:
-        actual_database_name = await connection.scalar(text("SELECT current_database()"))
-    try:
-        validate_connected_database_name(
+        (
             actual_database_name,
-            CONFIGURED_DATABASE_NAME,
-            make_url(RUNTIME_DATABASE_URL).database or "",
+            actual_user_name,
+            actual_database_owner,
+            is_superuser,
+            can_create_database,
+            can_create_role,
+        ) = (
+            await connection.execute(
+                text(
+                    "SELECT current_database(), current_user, "
+                    "pg_get_userbyid(database.datdba), "
+                    "role.rolsuper, role.rolcreatedb, role.rolcreaterole "
+                    "FROM pg_database AS database "
+                    "JOIN pg_roles AS role ON role.rolname = current_user "
+                    "WHERE database.datname = current_database()"
+                )
+            )
+        ).one()
+    try:
+        validate_connected_test_database(
+            actual_database_name=actual_database_name,
+            actual_user_name=actual_user_name,
+            actual_database_owner=actual_database_owner,
+            is_superuser=is_superuser,
+            can_create_database=can_create_database,
+            can_create_role=can_create_role,
+            target=TEST_DATABASE_TARGET,
         )
     except ValueError:
         await engine.dispose()

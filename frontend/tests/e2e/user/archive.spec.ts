@@ -6,15 +6,15 @@ import { clickWhenVisible } from '../support/ui'
 test.describe('User › Archive browsing', () => {
   test('restricts admin area and supports archive browsing', async ({ page }) => {
     const coursesResponse = {
-      freshman: [
+      fundamental: [
         { id: 101, name: '普通物理(一)' },
         { id: 102, name: '微積分(一)' },
       ],
-      sophomore: [],
-      junior: [],
-      senior: [],
+      required: [],
+      experience: [],
+      optional: [],
       graduate: [],
-      interdisciplinary: [],
+      'math-department': [],
     }
 
     let archiveDownloadCount = 3

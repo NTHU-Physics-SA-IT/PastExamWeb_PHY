@@ -21,6 +21,7 @@ from app.models.models import (
     PersonalNotification,
     PersonalNotificationRead,
     ArchiveDiscussionMessage,
+    ArchiveReport,
     CommentReport,
     User,
     UserRoles,
@@ -99,13 +100,13 @@ async def _list_personal_notifications(
 ) -> list[PersonalNotificationRead]:
     statement = (
         select(PersonalNotification)
-        .where(PersonalNotification.user_id == user_id)
         .order_by(
             PersonalNotification.created_at.desc(), PersonalNotification.id.desc()
         )
         .limit(max(1, min(limit, 100)))
         .offset(max(0, offset))
     )
+    statement = statement.where(PersonalNotification.user_id == user_id)
     if unread_only:
         statement = statement.where(PersonalNotification.read_at.is_(None))
     items = list((await db.execute(statement)).scalars().all())
@@ -145,6 +146,26 @@ async def _list_personal_notifications(
             .all()
         )
 
+    archive_report_source_ids = {
+        item.source_id
+        for item in items
+        if item.source_type == "archive_report" and item.source_id is not None
+    }
+    available_archive_report_ids: set[int] = set()
+    if archive_report_source_ids:
+        available_archive_report_ids = set(
+            (
+                await db.execute(
+                    select(ArchiveReport.id).where(
+                        ArchiveReport.id.in_(archive_report_source_ids),
+                        ArchiveReport.deleted_at.is_(None),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
     def source_is_available(item: PersonalNotification) -> bool:
         if item.source_type == "comment_report":
             return bool(
@@ -154,6 +175,8 @@ async def _list_personal_notifications(
                     or item.source_message_id in available_source_ids
                 )
             )
+        if item.source_type == "archive_report":
+            return item.source_id in available_archive_report_ids
         if item.source_message_id is not None:
             return item.source_message_id in available_source_ids
         return item.source_type in {None, "archive_submission"}
@@ -176,7 +199,10 @@ async def _list_personal_notifications(
     ]
 
 
-async def _unread_counts(db: AsyncSession, user_id: int) -> NotificationUnreadCounts:
+async def _unread_counts(
+    db: AsyncSession,
+    user_id: int,
+) -> NotificationUnreadCounts:
     announcement_statement = (
         select(func.count(Notification.id))
         .outerjoin(
@@ -193,15 +219,11 @@ async def _unread_counts(db: AsyncSession, user_id: int) -> NotificationUnreadCo
     )
     announcement_statement = _apply_time_filters(announcement_statement)
     announcement_count = int(await db.scalar(announcement_statement) or 0)
-    personal_count = int(
-        await db.scalar(
-            select(func.count(PersonalNotification.id)).where(
-                PersonalNotification.user_id == user_id,
-                PersonalNotification.read_at.is_(None),
-            )
-        )
-        or 0
+    personal_statement = select(func.count(PersonalNotification.id)).where(
+        PersonalNotification.read_at.is_(None),
+        PersonalNotification.user_id == user_id,
     )
+    personal_count = int(await db.scalar(personal_statement) or 0)
     return NotificationUnreadCounts(
         announcements=announcement_count,
         personal_notifications=personal_count,
@@ -275,7 +297,10 @@ async def get_unread_notification_summary(
         db, current_user.user_id, unread_only=True, limit=limit
     )
     personal_notifications = await _list_personal_notifications(
-        db, current_user.user_id, unread_only=True, limit=limit
+        db,
+        current_user.user_id,
+        unread_only=True,
+        limit=limit,
     )
     counts = await _unread_counts(db, current_user.user_id)
     return NotificationUnreadSummary(

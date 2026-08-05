@@ -1,13 +1,29 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Sequence
 
+from fastapi import HTTPException, status
 from minio.error import S3Error
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
 from app.core.config import settings
-from app.models.models import Archive, ArchiveDiscussionMessage, ArchiveSubmission, SubmissionStatus
+from app.models.models import (
+    Archive,
+    ArchiveDiscussionMessage,
+    ArchiveSubmission,
+    ArchiveSubmissionEvent,
+    SubmissionStatus,
+)
+from app.services import archive_lifecycle_locks
+from app.services.archive_lifecycle_locks import (
+    LockedLifecycleRows,
+    PlanRebuildBudget,
+)
+from app.services.archive_submission_links import ArchiveSubmissionLinkOperation
+from app.services.archive_submission_status import (
+    resolve_archive_submission_delete_source_status,
+)
 from app.utils.storage import get_minio_client
 
 LIFECYCLE_ARCHIVE_TRASHED = "archive_trashed"
@@ -17,6 +33,38 @@ COURSE_TRASH_LIFECYCLE_PREFIX = f"{LIFECYCLE_COURSE_TRASHED}|"
 COURSE_TRASH_PREVIOUS_STATUS_KEY = "previous_status"
 COURSE_TRASH_COURSE_ID_KEY = "course_id"
 COURSE_TRASH_ARCHIVE_ID_KEY = "archive_id"
+ARCHIVE_LIFECYCLE_CONFLICT_CODE = "archive_lifecycle_conflict"
+ARCHIVE_LIFECYCLE_CONFLICT_MESSAGE = (
+    "Archive lifecycle changed during this request. Please retry."
+)
+COURSE_LIFECYCLE_CONFLICT_CODE = "course_lifecycle_conflict"
+COURSE_LIFECYCLE_CONFLICT_MESSAGE = (
+    "Course lifecycle changed during this request. Please retry."
+)
+
+
+def archive_lifecycle_conflict_error() -> HTTPException:
+    """Return the shared public contract for an exhausted Archive plan rebuild."""
+
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": ARCHIVE_LIFECYCLE_CONFLICT_CODE,
+            "message": ARCHIVE_LIFECYCLE_CONFLICT_MESSAGE,
+        },
+    )
+
+
+def course_lifecycle_conflict_error() -> HTTPException:
+    """Return the public contract for an exhausted Course plan rebuild."""
+
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": COURSE_LIFECYCLE_CONFLICT_CODE,
+            "message": COURSE_LIFECYCLE_CONFLICT_MESSAGE,
+        },
+    )
 
 
 def make_course_trash_lifecycle_reason(
@@ -25,9 +73,7 @@ def make_course_trash_lifecycle_reason(
     course_id: Optional[int],
     archive_id: Optional[int],
 ) -> str:
-    fields: list[str] = [
-        f"{COURSE_TRASH_PREVIOUS_STATUS_KEY}={previous_status.value}"
-    ]
+    fields: list[str] = [f"{COURSE_TRASH_PREVIOUS_STATUS_KEY}={previous_status.value}"]
     if course_id is not None:
         fields.append(f"{COURSE_TRASH_COURSE_ID_KEY}={course_id}")
     if archive_id is not None:
@@ -38,19 +84,31 @@ def make_course_trash_lifecycle_reason(
 def is_course_trash_lifecycle_reason(reason: Optional[str]) -> bool:
     if reason is None:
         return False
-    return reason == LIFECYCLE_COURSE_TRASHED or reason.startswith(COURSE_TRASH_LIFECYCLE_PREFIX)
+    return reason == LIFECYCLE_COURSE_TRASHED or reason.startswith(
+        COURSE_TRASH_LIFECYCLE_PREFIX
+    )
 
 
-def get_course_trash_previous_status(reason: Optional[str]) -> Optional[SubmissionStatus]:
+def get_course_trash_previous_status(
+    reason: Optional[str],
+) -> Optional[SubmissionStatus]:
     marker_data = _parse_course_trash_lifecycle_reason(reason)
     raw_status = marker_data.get(COURSE_TRASH_PREVIOUS_STATUS_KEY)
-    if raw_status not in {SubmissionStatus.APPROVED.value, SubmissionStatus.PENDING.value, SubmissionStatus.TAKEDOWN.value, SubmissionStatus.REJECTED.value, SubmissionStatus.DELETED.value}:
+    if raw_status not in {
+        SubmissionStatus.APPROVED.value,
+        SubmissionStatus.PENDING.value,
+        SubmissionStatus.TAKEDOWN.value,
+        SubmissionStatus.REJECTED.value,
+        SubmissionStatus.DELETED.value,
+    }:
         return None
     return SubmissionStatus(raw_status)
 
 
 def get_course_trash_course_id(reason: Optional[str]) -> Optional[int]:
-    raw_course_id = _parse_course_trash_lifecycle_reason(reason).get(COURSE_TRASH_COURSE_ID_KEY)
+    raw_course_id = _parse_course_trash_lifecycle_reason(reason).get(
+        COURSE_TRASH_COURSE_ID_KEY
+    )
     if raw_course_id is None:
         return None
     try:
@@ -85,7 +143,66 @@ class ArchiveSubmissionGroup:
 
 
 def is_archive_submission_trashed(submission: ArchiveSubmission) -> bool:
-    return submission.deleted_at is not None or submission.status == SubmissionStatus.DELETED
+    return (
+        submission.deleted_at is not None
+        or submission.status == SubmissionStatus.DELETED
+    )
+
+
+def _resolve_submission_restore_status(
+    previous_status: Optional[SubmissionStatus],
+) -> SubmissionStatus:
+    if previous_status in {
+        SubmissionStatus.PENDING,
+        SubmissionStatus.APPROVED,
+        SubmissionStatus.REJECTED,
+        SubmissionStatus.TAKEDOWN,
+    }:
+        return previous_status
+    return SubmissionStatus.PENDING
+
+
+async def acquire_stable_submission_lifecycle_locks(
+    db: SQLModelAsyncSession,
+    *,
+    submission_id: int,
+    operation: ArchiveSubmissionLinkOperation,
+) -> LockedLifecycleRows | None:
+    """Acquire one stable exact Submission plan with one transparent rebuild."""
+
+    budget = PlanRebuildBudget()
+    while True:
+        (
+            locked,
+            revalidation,
+        ) = await archive_lifecycle_locks.acquire_exact_submission_lifecycle_locks(
+            db,
+            submission_id=submission_id,
+            operation=operation,
+        )
+        if locked is None:
+            return None
+        if revalidation is not None and revalidation.valid:
+            return locked
+
+        await db.rollback()
+        budget = budget.consume()
+
+
+async def delete_archive_submission_events(
+    db: SQLModelAsyncSession,
+    submission_ids: set[int],
+) -> int:
+    """Remove immutable ledger rows when their submissions are permanently deleted."""
+    if not submission_ids:
+        return 0
+
+    result = await db.execute(
+        delete(ArchiveSubmissionEvent).where(
+            ArchiveSubmissionEvent.submission_id.in_(submission_ids)
+        )
+    )
+    return int(result.rowcount or 0)
 
 
 async def _resolve_linked_archive(
@@ -114,7 +231,9 @@ async def _resolve_linked_archive(
     fallback_archive = (
         (
             await db.execute(
-                select(Archive).where(and_(*fallback_conditions)).order_by(Archive.created_at.desc())
+                select(Archive)
+                .where(and_(*fallback_conditions))
+                .order_by(Archive.created_at.desc())
             )
         )
         .scalars()
@@ -128,6 +247,7 @@ async def collect_archive_submission_group(
     *,
     archive: Optional[Archive] = None,
     submission: Optional[ArchiveSubmission] = None,
+    exact_link_only: bool = False,
 ) -> ArchiveSubmissionGroup:
     group = ArchiveSubmissionGroup()
     archive_ids: set[int] = set()
@@ -148,17 +268,29 @@ async def collect_archive_submission_group(
 
     linked_archive = archive
     if submission:
-        linked_archive, link_warnings = await _resolve_linked_archive(db, submission=submission)
+        if exact_link_only and submission.created_archive_id is None:
+            linked_archive, link_warnings = None, []
+        else:
+            linked_archive, link_warnings = await _resolve_linked_archive(
+                db,
+                submission=submission,
+            )
         group.warnings.extend(link_warnings)
         if linked_archive:
             add_archive(linked_archive)
 
     for item in list(group.archives):
         siblings = (
-            await db.execute(
-                select(ArchiveSubmission).where(ArchiveSubmission.created_archive_id == item.id)
+            (
+                await db.execute(
+                    select(ArchiveSubmission).where(
+                        ArchiveSubmission.created_archive_id == item.id
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for sibling in siblings:
             add_submission(sibling)
 
@@ -168,7 +300,9 @@ async def collect_archive_submission_group(
     return group
 
 
-def _soft_delete_archive(archive: Archive, *, now: datetime, user_id: Optional[int], reason: str) -> bool:
+def _soft_delete_archive(
+    archive: Archive, *, now: datetime, user_id: Optional[int], reason: str
+) -> bool:
     if archive.deleted_at is not None:
         return False
     archive.deleted_at = now
@@ -185,9 +319,17 @@ def _soft_delete_submission(
     now: datetime,
     user_id: Optional[int],
     reason: str,
+    consume_owner_self_delete: bool = False,
 ) -> bool:
     if is_archive_submission_trashed(submission):
         return False
+    previous_status = resolve_archive_submission_delete_source_status(
+        submission.status,
+        operation="soft_delete",
+    )
+    submission.previous_status = previous_status
+    if consume_owner_self_delete:
+        submission.owner_self_delete_consumed = True
     submission.status = SubmissionStatus.DELETED
     submission.deleted_at = now
     submission.deleted_by_id = user_id
@@ -220,32 +362,34 @@ async def soft_delete_archive_with_submission_takedown(
     db: SQLModelAsyncSession,
     *,
     archive: Archive,
+    submissions: Sequence[ArchiveSubmission],
     user_id: Optional[int],
     reason: str,
     now: Optional[datetime] = None,
 ) -> dict:
     timestamp = now or datetime.now(timezone.utc)
-    archive_count = 1 if _soft_delete_archive(archive, now=timestamp, user_id=user_id, reason=reason) else 0
-    submissions = (
-        await db.execute(
-            select(ArchiveSubmission).where(
-                ArchiveSubmission.created_archive_id == archive.id,
-                ArchiveSubmission.deleted_at.is_(None),
-                ArchiveSubmission.status != SubmissionStatus.DELETED,
-            )
-        )
-    ).scalars().all()
+    archive_count = (
+        1
+        if _soft_delete_archive(archive, now=timestamp, user_id=user_id, reason=reason)
+        else 0
+    )
     submission_count = sum(
         1
         for item in submissions
-        if _temporarily_takedown_submission(
+        if item.deleted_at is None
+        and item.status != SubmissionStatus.DELETED
+        and _temporarily_takedown_submission(
             item,
             reason=LIFECYCLE_ARCHIVE_TRASHED,
             reviewer_id=user_id,
             now=timestamp,
         )
     )
-    return {"archives": archive_count, "submissions_takedown": submission_count, "warnings": []}
+    return {
+        "archives": archive_count,
+        "submissions_takedown": submission_count,
+        "warnings": [],
+    }
 
 
 async def soft_delete_submission_with_linked_archive(
@@ -255,41 +399,54 @@ async def soft_delete_submission_with_linked_archive(
     user_id: Optional[int],
     reason: str,
     now: Optional[datetime] = None,
+    linked_archive: Optional[Archive] = None,
+    exact_link_only: bool = False,
+    consume_owner_self_delete: bool = False,
 ) -> dict:
-    timestamp = now or datetime.now(timezone.utc)
-    submission_count = 1 if _soft_delete_submission(submission, now=timestamp, user_id=user_id, reason=reason) else 0
-    archive_count = 0
     warnings: list[str] = []
-    linked_archive, link_warnings = await _resolve_linked_archive(db, submission=submission)
-    warnings.extend(link_warnings)
+    if exact_link_only:
+        if submission.created_archive_id is not None and linked_archive is None:
+            warnings.append(f"關聯考古題 #{submission.created_archive_id} 已不存在")
+    else:
+        linked_archive, link_warnings = await _resolve_linked_archive(
+            db,
+            submission=submission,
+        )
+        warnings.extend(link_warnings)
+
+    timestamp = now or datetime.now(timezone.utc)
+    submission_count = (
+        1
+        if _soft_delete_submission(
+            submission,
+            now=timestamp,
+            user_id=user_id,
+            reason=reason,
+            consume_owner_self_delete=consume_owner_self_delete,
+        )
+        else 0
+    )
+    archive_count = 0
     if linked_archive:
-        archive_count = 1 if _soft_delete_archive(linked_archive, now=timestamp, user_id=user_id, reason=reason) else 0
-        linked_submissions = (
-            await db.execute(
-                select(ArchiveSubmission).where(
-                    ArchiveSubmission.created_archive_id == linked_archive.id,
-                    ArchiveSubmission.id != submission.id,
-                    ArchiveSubmission.deleted_at.is_(None),
-                    ArchiveSubmission.status != SubmissionStatus.DELETED,
-                )
+        archive_count = (
+            1
+            if _soft_delete_archive(
+                linked_archive, now=timestamp, user_id=user_id, reason=reason
             )
-        ).scalars().all()
-        for linked in linked_submissions:
-            if linked.status in {SubmissionStatus.REJECTED, SubmissionStatus.TAKEDOWN}:
-                continue
-            _temporarily_takedown_submission(
-                linked,
-                reason=LIFECYCLE_ARCHIVE_TRASHED,
-                reviewer_id=user_id,
-                now=timestamp,
-            )
-    return {"archives": archive_count, "submissions": submission_count, "warnings": warnings}
+            else 0
+        )
+    return {
+        "archives": archive_count,
+        "submissions": submission_count,
+        "warnings": warnings,
+    }
 
 
 async def restore_archive_with_temporary_submissions(
     db: SQLModelAsyncSession,
     *,
     archive: Archive,
+    submissions: Sequence[ArchiveSubmission],
     user_id: Optional[int],
     now: Optional[datetime] = None,
 ) -> dict:
@@ -303,22 +460,23 @@ async def restore_archive_with_temporary_submissions(
         archive.restored_by_id = user_id
         restored_archives = 1
 
-    submissions = (
-        await db.execute(
-            select(ArchiveSubmission).where(
-                ArchiveSubmission.created_archive_id == archive.id,
-                ArchiveSubmission.status == SubmissionStatus.TAKEDOWN,
-                ArchiveSubmission.lifecycle_reason == LIFECYCLE_ARCHIVE_TRASHED,
-            )
-        )
-    ).scalars().all()
-    for item in submissions:
+    restored_submissions = [
+        item
+        for item in submissions
+        if item.status == SubmissionStatus.TAKEDOWN
+        and item.lifecycle_reason == LIFECYCLE_ARCHIVE_TRASHED
+    ]
+    for item in restored_submissions:
         item.status = SubmissionStatus.APPROVED
         item.lifecycle_reason = None
         item.reviewer_id = user_id
         item.reviewed_at = timestamp
 
-    return {"archives": restored_archives, "submissions_restored": len(submissions), "warnings": []}
+    return {
+        "archives": restored_archives,
+        "submissions_restored": len(restored_submissions),
+        "warnings": [],
+    }
 
 
 async def mark_linked_submissions_archive_permanently_deleted(
@@ -330,10 +488,16 @@ async def mark_linked_submissions_archive_permanently_deleted(
 ) -> int:
     timestamp = now or datetime.now(timezone.utc)
     submissions = (
-        await db.execute(
-            select(ArchiveSubmission).where(ArchiveSubmission.created_archive_id == archive.id)
+        (
+            await db.execute(
+                select(ArchiveSubmission).where(
+                    ArchiveSubmission.created_archive_id == archive.id
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for item in submissions:
         item.status = SubmissionStatus.DELETED
         item.deleted_at = item.deleted_at or timestamp
@@ -358,9 +522,13 @@ async def soft_delete_archive_submission_group(
     now: Optional[datetime] = None,
 ) -> dict:
     timestamp = now or datetime.now(timezone.utc)
-    group = await collect_archive_submission_group(db, archive=archive, submission=submission)
+    group = await collect_archive_submission_group(
+        db, archive=archive, submission=submission
+    )
     archive_count = sum(
-        1 for item in group.archives if _soft_delete_archive(item, now=timestamp, user_id=user_id, reason=reason)
+        1
+        for item in group.archives
+        if _soft_delete_archive(item, now=timestamp, user_id=user_id, reason=reason)
     )
     submission_count = sum(
         1
@@ -381,14 +549,32 @@ async def restore_archive_submission_group(
     submission: Optional[ArchiveSubmission] = None,
     user_id: Optional[int],
     now: Optional[datetime] = None,
+    exact_link_only: bool = False,
 ) -> dict:
     timestamp = now or datetime.now(timezone.utc)
-    group = await collect_archive_submission_group(db, archive=archive, submission=submission)
+    group = await collect_archive_submission_group(
+        db,
+        archive=archive,
+        submission=submission,
+        exact_link_only=exact_link_only,
+    )
+    restore_status_by_submission_id = {
+        item.id: _resolve_submission_restore_status(item.previous_status)
+        for item in group.submissions
+        if item.id is not None and is_archive_submission_trashed(item)
+    }
+    restorable_archive_ids = {
+        item.created_archive_id
+        for item in group.submissions
+        if item.id is not None
+        and restore_status_by_submission_id.get(item.id) == SubmissionStatus.APPROVED
+        and item.created_archive_id is not None
+    }
     restored_archives = 0
     restored_submissions = 0
 
     for item in group.archives:
-        if item.deleted_at is None:
+        if item.id not in restorable_archive_ids or item.deleted_at is None:
             continue
         item.deleted_at = None
         item.deleted_by_id = None
@@ -400,16 +586,18 @@ async def restore_archive_submission_group(
     for item in group.submissions:
         if not is_archive_submission_trashed(item):
             continue
+        restore_status = restore_status_by_submission_id.get(
+            item.id,
+            SubmissionStatus.PENDING,
+        )
         item.deleted_at = None
         item.deleted_by_id = None
         item.delete_reason = None
         item.lifecycle_reason = None
         item.restored_at = timestamp
         item.restored_by_id = user_id
-        item.status = SubmissionStatus.APPROVED if item.created_archive_id else SubmissionStatus.PENDING
-        if item.created_archive_id:
-            item.reviewed_at = timestamp
-            item.reviewer_id = user_id
+        item.status = restore_status
+        item.previous_status = None
         restored_submissions += 1
 
     return {
@@ -438,28 +626,46 @@ async def _remove_storage_object_if_unreferenced(
     exclude_archive_ids = exclude_archive_ids or set()
     exclude_submission_ids = exclude_submission_ids or set()
 
-    archive_query = select(func.count(Archive.id)).where(Archive.object_name == object_name)
+    archive_query = select(func.count(Archive.id)).where(
+        Archive.object_name == object_name
+    )
     live_archive_query = archive_query.where(Archive.deleted_at.is_(None))
     if exclude_archive_ids:
         archive_query = archive_query.where(~Archive.id.in_(exclude_archive_ids))
-        live_archive_query = live_archive_query.where(~Archive.id.in_(exclude_archive_ids))
+        live_archive_query = live_archive_query.where(
+            ~Archive.id.in_(exclude_archive_ids)
+        )
 
-    submission_query = select(func.count(ArchiveSubmission.id)).where(ArchiveSubmission.object_name == object_name)
+    submission_query = select(func.count(ArchiveSubmission.id)).where(
+        ArchiveSubmission.object_name == object_name
+    )
     live_submission_query = submission_query.where(
         ArchiveSubmission.deleted_at.is_(None),
         ArchiveSubmission.status != SubmissionStatus.DELETED,
     )
     if exclude_submission_ids:
-        submission_query = submission_query.where(~ArchiveSubmission.id.in_(exclude_submission_ids))
-        live_submission_query = live_submission_query.where(~ArchiveSubmission.id.in_(exclude_submission_ids))
+        submission_query = submission_query.where(
+            ~ArchiveSubmission.id.in_(exclude_submission_ids)
+        )
+        live_submission_query = live_submission_query.where(
+            ~ArchiveSubmission.id.in_(exclude_submission_ids)
+        )
 
-    live_refs = await _count_rows(db, live_archive_query) + await _count_rows(db, live_submission_query)
-    all_refs = await _count_rows(db, archive_query) + await _count_rows(db, submission_query)
+    live_refs = await _count_rows(db, live_archive_query) + await _count_rows(
+        db, live_submission_query
+    )
+    all_refs = await _count_rows(db, archive_query) + await _count_rows(
+        db, submission_query
+    )
     if live_refs:
-        warnings.append(f"Storage object kept because live records still reference it: {object_name}")
+        warnings.append(
+            f"Storage object kept because live records still reference it: {object_name}"
+        )
         return 0
     if all_refs:
-        warnings.append(f"Storage object kept because other trashed records still reference it: {object_name}")
+        warnings.append(
+            f"Storage object kept because other trashed records still reference it: {object_name}"
+        )
         return 0
 
     try:
@@ -483,18 +689,34 @@ async def hard_delete_archive_submission_group(
     submission: Optional[ArchiveSubmission] = None,
     warnings: list[str],
 ) -> dict:
-    group = await collect_archive_submission_group(db, archive=archive, submission=submission)
+    group = await collect_archive_submission_group(
+        db, archive=archive, submission=submission
+    )
     group.warnings.extend(warnings)
     timestamp = datetime.now(timezone.utc)
 
     for item in group.archives:
-        _soft_delete_archive(item, now=timestamp, user_id=item.deleted_by_id, reason=item.deleted_reason or "group hard delete")
+        _soft_delete_archive(
+            item,
+            now=timestamp,
+            user_id=item.deleted_by_id,
+            reason=item.deleted_reason or "group hard delete",
+        )
     for item in group.submissions:
-        _soft_delete_submission(item, now=timestamp, user_id=item.deleted_by_id, reason=item.delete_reason or "group hard delete")
+        _soft_delete_submission(
+            item,
+            now=timestamp,
+            user_id=item.deleted_by_id,
+            reason=item.delete_reason or "group hard delete",
+        )
 
     archive_ids = {item.id for item in group.archives if item.id is not None}
     submission_ids = {item.id for item in group.submissions if item.id is not None}
-    object_names = {item.object_name for item in [*group.archives, *group.submissions] if item.object_name}
+    object_names = {
+        item.object_name
+        for item in [*group.archives, *group.submissions]
+        if item.object_name
+    }
 
     deleted_objects = 0
     for object_name in object_names:
@@ -509,13 +731,20 @@ async def hard_delete_archive_submission_group(
     messages = []
     if archive_ids:
         messages = (
-            await db.execute(
-                select(ArchiveDiscussionMessage).where(ArchiveDiscussionMessage.archive_id.in_(archive_ids))
+            (
+                await db.execute(
+                    select(ArchiveDiscussionMessage).where(
+                        ArchiveDiscussionMessage.archive_id.in_(archive_ids)
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     for item in group.submissions:
         await db.delete(item)
+    deleted_events = await delete_archive_submission_events(db, submission_ids)
     for message in messages:
         await db.delete(message)
     await db.flush()
@@ -528,10 +757,15 @@ async def hard_delete_archive_submission_group(
     return {
         "type": "archive_submission_group",
         "id": archive.id if archive else submission.id if submission else None,
-        "name": archive.name if archive else f"{submission.subject} / {submission.name}" if submission else "archive group",
+        "name": archive.name
+        if archive
+        else f"{submission.subject} / {submission.name}"
+        if submission
+        else "archive group",
         "deletedChildren": {
             "archives": archive_count,
             "linkedSubmissionsDeleted": submission_count,
+            "submissionEvents": deleted_events,
             "comments": len(messages),
             "files": deleted_objects,
         },

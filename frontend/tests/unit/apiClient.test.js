@@ -87,6 +87,14 @@ describe('api client interceptors', () => {
     expect(requestSuccess(configWithToken).headers.Authorization).toBe('Bearer token-xyz')
   })
 
+  it('uses a finite request timeout', () => {
+    expect(axiosCreateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timeout: 15_000,
+      })
+    )
+  })
+
   it('propagates request errors', async () => {
     const error = new Error('request failed')
     await expect(requestError(error)).rejects.toThrow('request failed')
@@ -131,6 +139,28 @@ describe('api client interceptors', () => {
     expect(routerPushMock).toHaveBeenCalledWith('/')
 
     vi.runAllTimers()
+    dispatchSpy.mockRestore()
+  })
+
+  it('allows a request to handle unauthorized responses locally', async () => {
+    sessionStorage.setItem('auth-token', 'token-xyz')
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
+    const error = {
+      response: { status: 401 },
+      config: {
+        method: 'get',
+        url: '/reports/courses/1/archives/2/pending',
+        skipUnauthorizedHandling: true,
+      },
+    }
+
+    await expect(responseError(error)).rejects.toBe(error)
+
+    expect(sessionStorage.getItem('auth-token')).toBe('token-xyz')
+    expect(error.isUnauthorized).toBeUndefined()
+    expect(toastAddMock).not.toHaveBeenCalled()
+    expect(dispatchSpy).not.toHaveBeenCalled()
+    expect(routerPushMock).not.toHaveBeenCalled()
     dispatchSpy.mockRestore()
   })
 

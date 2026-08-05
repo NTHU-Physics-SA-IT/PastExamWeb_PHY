@@ -27,7 +27,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: production-acceptance
+    environment: production
 
     steps:
       - name: Checkout release commit
@@ -61,6 +61,10 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Validate production Compose safety contract
+        shell: bash
+        run: ./scripts/validate-compose-safety.sh
 
       - name: Package candidate checkout
         id: package

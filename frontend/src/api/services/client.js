@@ -10,6 +10,7 @@ import {
 } from '../../utils/storage'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL
+const API_TIMEOUT_MS = 15_000
 let unauthorizedToastActive = false
 let unauthorizedToastTimer = null
 
@@ -80,6 +81,7 @@ export const bindUnauthorizedWebSocket = (ws) => {
 
 export const api = axios.create({
   baseURL: apiBaseUrl,
+  timeout: API_TIMEOUT_MS,
   withCredentials: true,
 })
 
@@ -148,7 +150,7 @@ api.interceptors.response.use(
       return Promise.reject(error)
     }
 
-    if (status === 401) {
+    if (status === 401 && !error.config?.skipUnauthorizedHandling) {
       error.isUnauthorized = true
       handleUnauthorized()
     }

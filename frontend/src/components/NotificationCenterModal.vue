@@ -281,7 +281,7 @@ function openPersonal(item) {
   if (!item.read_at) emit('mark-personal-read', item.id)
   if (
     item.source_available &&
-    ['archive_discussion_thread', 'archive_submission'].includes(item.source_type)
+    ['archive_discussion_thread', 'archive_submission', 'archive_report'].includes(item.source_type)
   ) {
     emit('open-personal-source', item)
     return
@@ -298,8 +298,11 @@ function notificationIcon(type) {
     archive_submission_approved: 'pi pi-check-circle',
     archive_submission_rejected: 'pi pi-undo',
     archive_submission_takedown: 'pi pi-eye-slash',
+    archive_submission_republished: 'pi pi-eye',
     comment_report_submitted: 'pi pi-flag',
     comment_report_result: 'pi pi-verified',
+    archive_report_submitted: 'pi pi-flag-fill',
+    archive_report_result: 'pi pi-verified',
   }
   return `${icons[type] || 'pi pi-bell'} notification-card__icon`
 }

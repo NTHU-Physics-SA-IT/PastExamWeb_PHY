@@ -13,14 +13,26 @@ from fastapi import (
 )
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
-from sqlalchemy import and_, delete, exists, func, or_
+from minio.error import S3Error
+from sqlalchemy import and_, delete, exists, func, or_, update as sql_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db.session import get_session
+from app.db.course_categories import (
+    DEFAULT_COURSE_CATEGORY_DEFINITIONS,
+    LEGACY_COURSE_CATEGORY_ALIASES,
+    RESERVED_LEGACY_COURSE_CATEGORY_KEYS,
+    canonicalize_course_category_key,
+    normalize_course_category_key,
+    normalize_course_category_name,
+)
 from app.api.services.archive_submission_lifecycle import (
+    archive_lifecycle_conflict_error,
+    course_lifecycle_conflict_error,
     make_course_trash_lifecycle_reason,
     is_course_trash_lifecycle_reason,
     soft_delete_archive_with_submission_takedown,
@@ -66,21 +78,41 @@ from app.utils.course_text import (
 from app.core.config import settings
 from app.services.personal_notifications import enqueue_personal_notification
 from app.services.discussions import soft_delete_discussion_message
+from app.services.archive_submission_links import (
+    validate_archive_source_submission_rows,
+)
+from app.services import archive_lifecycle_locks
+from app.services.archive_mutation import (
+    ArchiveMutationLifecycleConflict,
+    acquire_stable_archive_mutation_locks,
+    archive_move_target_not_found_error,
+    archive_move_target_trashed_error,
+    resolve_archive_move_target,
+)
+from app.services import course_lifecycle_locks
+from app.services.archive_lifecycle_locks import (
+    LifecyclePlanRetryExhausted,
+    LockedLifecycleRows,
+    PlanRebuildBudget,
+)
+from app.services.course_lifecycle_locks import CourseLifecycleOperation
 
 router = APIRouter()
 
 # In-memory connection registry (single-process broadcast).
 _discussion_connections_by_archive: dict[int, set[WebSocket]] = {}
 DISCUSSION_MESSAGE_MAX_LENGTH = 200
+ARCHIVE_FILE_MISSING_DETAIL = {
+    "code": "archive_file_missing",
+    "message": "此筆考古題的 PDF 檔案缺失，無法預覽或下載。",
+}
 DEFAULT_CATEGORIES = [
-    ("fundamental", "基礎必修", "基礎", "pi pi-fw pi-book"),
-    ("required", "專業必修", "必修", "pi pi-fw pi-compass"),
-    ("experience", "實驗課程", "實驗", "pi pi-fw pi-sparkles"),
-    ("optional", "專業選修", "選修", "pi pi-fw pi-book"),
-    ("graduate", "研究所", "研究所", "pi pi-fw pi-graduation-cap"),
-    ("math-department", "戳戳數學系", "數學", "pi pi-fw pi-calculator"),
+    (category.key, category.name, category.label, category.icon)
+    for category in DEFAULT_COURSE_CATEGORY_DEFINITIONS
 ]
-DEFAULT_CATEGORY_ORDER = {item[0]: index for index, item in enumerate(DEFAULT_CATEGORIES)}
+DEFAULT_CATEGORY_ORDER = {
+    item[0]: index for index, item in enumerate(DEFAULT_CATEGORIES)
+}
 DEFAULT_CATEGORY_BADGE_COLOR = "slate"
 CATEGORY_BADGE_COLOR_TOKENS = {
     "navy",
@@ -100,20 +132,10 @@ CATEGORY_BADGE_COLOR_ALIASES = {
     "gray": "slate",
 }
 DEFAULT_CATEGORY_BADGE_COLORS = {
-    "fundamental": "navy",
-    "required": "forest",
-    "experience": "amber",
-    "optional": "violet",
-    "graduate": "burgundy",
-    "math-department": "slate",
+    category.key: category.badge_color
+    for category in DEFAULT_COURSE_CATEGORY_DEFINITIONS
 }
-LEGACY_CATEGORY_ALIASES = {
-    "freshman": "fundamental",
-    "sophomore": "required",
-    "junior": "experience",
-    "senior": "optional",
-    "interdisciplinary": "math-department",
-}
+LEGACY_CATEGORY_ALIASES = LEGACY_COURSE_CATEGORY_ALIASES
 
 
 class CategorizedCourses(dict):
@@ -170,69 +192,6 @@ def _normalize_category_badge_color(color: str | None) -> str:
     return normalized
 
 
-def _build_course_submission_match_conditions(
-    course_name: str,
-    course_category: str,
-) -> list:
-    conditions = []
-    normalized_course_name = normalize_course_search_text(course_name)
-    if normalized_course_name:
-        requested_name_match = normalized_course_text_expr(ArchiveSubmission.requested_course_name) == normalized_course_name
-        subject_match = normalized_course_text_expr(ArchiveSubmission.subject) == normalized_course_name
-        name_match = or_(requested_name_match, subject_match)
-        normalized_category = (course_category or "").strip().lower()
-        if normalized_category:
-            category_match = or_(
-                func.lower(func.trim(ArchiveSubmission.requested_category_key)) == normalized_category,
-                func.lower(func.trim(ArchiveSubmission.category)) == normalized_category,
-            )
-            conditions.append(and_(name_match, category_match))
-        else:
-            conditions.append(name_match)
-    return conditions
-
-
-async def _find_submissions_related_to_course(
-    db: AsyncSession,
-    *,
-    course_name: str,
-    course_category: str,
-    archive_ids: list[int],
-) -> list[ArchiveSubmission]:
-    archive_id_set = set(archive_ids)
-    conditions = []
-
-    if archive_id_set:
-        conditions.append(ArchiveSubmission.created_archive_id.in_(archive_id_set))
-
-    conditions.extend(_build_course_submission_match_conditions(course_name, course_category))
-
-    if not conditions:
-        return []
-
-    linked_submissions = (
-        await db.execute(
-            select(ArchiveSubmission).where(
-                or_(*conditions),
-                ArchiveSubmission.deleted_at.is_(None),
-                ArchiveSubmission.status != SubmissionStatus.DELETED,
-            )
-        )
-    ).scalars().all()
-
-    result = []
-    seen_ids: set[int] = set()
-    for submission in linked_submissions:
-        if submission.id is None:
-            continue
-        if submission.id in seen_ids:
-            continue
-        seen_ids.add(submission.id)
-        result.append(submission)
-
-    return result
-
-
 def _public_archive_conditions(course_id: int | None = None, archive_id: int | None = None) -> list:
     trashed_submission_exists = exists().where(
         ArchiveSubmission.created_archive_id == Archive.id,
@@ -283,6 +242,7 @@ async def _admin_category_order_map(db: AsyncSession) -> dict[str, int]:
 
 
 async def _ensure_category(db: AsyncSession, category_key: str) -> CourseCategoryConfig:
+    category_key = canonicalize_course_category_key(category_key)
     result = await db.execute(
         select(CourseCategoryConfig).where(
             CourseCategoryConfig.key == category_key,
@@ -304,6 +264,47 @@ async def _ensure_category(db: AsyncSession, category_key: str) -> CourseCategor
             order_index=DEFAULT_CATEGORY_ORDER[category_key],
         )
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Course category does not exist")
+
+
+def _validated_admin_category_key(value: str) -> str:
+    key = normalize_course_category_key(value)
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category key is required",
+        )
+    if key in RESERVED_LEGACY_COURSE_CATEGORY_KEYS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Legacy category keys are reserved",
+        )
+    return key
+
+
+async def _ensure_unique_category_name(
+    db: AsyncSession,
+    value: str,
+    *,
+    exclude_category_id: int | None = None,
+) -> str:
+    name = value.strip()
+    normalized_name = normalize_course_category_name(name)
+    if not normalized_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category name is required",
+        )
+    query = select(CourseCategoryConfig).where(
+        func.lower(func.trim(CourseCategoryConfig.name)) == normalized_name
+    )
+    if exclude_category_id is not None:
+        query = query.where(CourseCategoryConfig.id != exclude_category_id)
+    if (await db.execute(query)).scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category name already exists",
+        )
+    return name
 
 
 async def _next_order_index(db: AsyncSession, category) -> int:
@@ -342,15 +343,15 @@ async def list_course_categories(
     return [
         CourseCategoryRead(
             id=index + 1,
-            key=key,
-            name=name,
-            label=label,
-            icon=icon,
-            badge_color=DEFAULT_CATEGORY_BADGE_COLORS.get(key, DEFAULT_CATEGORY_BADGE_COLOR),
-            order_index=index,
+            key=category.key,
+            name=category.name,
+            label=category.label,
+            icon=category.icon,
+            badge_color=category.badge_color,
+            order_index=category.order_index,
             is_active=True,
         )
-        for index, (key, name, label, icon) in enumerate(DEFAULT_CATEGORIES)
+        for index, category in enumerate(DEFAULT_COURSE_CATEGORY_DEFINITIONS)
     ]
 
 
@@ -390,9 +391,9 @@ async def create_course_request(
     current_user: UserRoles = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
-    await _ensure_category(db, course_data.category)
+    normalized_category = canonicalize_course_category_key(course_data.category)
+    await _ensure_category(db, normalized_category)
     normalized_name = normalize_course_search_text(course_data.name)
-    normalized_category = course_data.category
     formatted_name = format_course_display_name(course_data.name)
 
     existing_course = (
@@ -428,8 +429,8 @@ async def create_course_request(
     if current_user.is_admin:
         course = Course(
             name=formatted_name,
-            category=course_data.category,
-            order_index=await _next_order_index(db, course_data.category),
+            category=normalized_category,
+            order_index=await _next_order_index(db, normalized_category),
         )
         db.add(course)
         await db.commit()
@@ -446,7 +447,7 @@ async def create_course_request(
     else:
         submission = CourseSubmission(
             name=formatted_name,
-            category=course_data.category,
+            category=normalized_category,
             requester_id=current_user.user_id,
         )
 
@@ -622,20 +623,35 @@ async def get_course_archives(
             ArchiveSubmission.deleted_at.is_(None),
             ArchiveSubmission.status != SubmissionStatus.DELETED,
         ]
-        if not current_user.is_admin:
-            submission_visibility_conditions.append(
-                ArchiveSubmission.requester_id == current_user.user_id
-            )
         linked_submissions = (
             await db.execute(
-                select(ArchiveSubmission.id, ArchiveSubmission.created_archive_id).where(
+                select(
+                    ArchiveSubmission.id,
+                    ArchiveSubmission.created_archive_id,
+                    ArchiveSubmission.requester_id,
+                ).where(
                     *submission_visibility_conditions
                 )
             )
         ).all()
-        for submission_id, created_archive_id in linked_submissions:
-            if submission_id is not None and created_archive_id is not None:
-                source_submission_ids_by_archive.setdefault(created_archive_id, []).append(submission_id)
+        validated_sources = validate_archive_source_submission_rows(
+            [
+                (created_archive_id, submission_id)
+                for submission_id, created_archive_id, _requester_id in linked_submissions
+            ],
+            operation="source_lookup",
+        )
+        for submission_id, created_archive_id, requester_id in linked_submissions:
+            if (
+                created_archive_id in validated_sources
+                and (
+                    current_user.is_admin
+                    or requester_id == current_user.user_id
+                )
+            ):
+                source_submission_ids_by_archive[created_archive_id] = (
+                    validated_sources[created_archive_id]
+                )
 
     return [
         ArchiveRead.model_validate(archive).model_copy(
@@ -665,6 +681,19 @@ async def get_archive_preview_url(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Archive not found"
         )
+
+    try:
+        get_minio_client().stat_object(
+            settings.MINIO_BUCKET_NAME,
+            archive.object_name,
+        )
+    except S3Error as exc:
+        if exc.code in {"NoSuchKey", "NoSuchObject", "NoSuchBucket"}:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ARCHIVE_FILE_MISSING_DETAIL,
+            ) from exc
+        raise
 
     return {
         "url": presigned_get_url(archive.object_name, expires=timedelta(minutes=30))
@@ -701,11 +730,21 @@ async def get_archive_preview_file(
         data = response.read()
         response.close()
         response.release_conn()
+    except S3Error as exc:
+        if exc.code in {"NoSuchKey", "NoSuchObject", "NoSuchBucket"}:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ARCHIVE_FILE_MISSING_DETAIL,
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to load preview file from object storage",
+        ) from exc
     except Exception as exc:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to load preview file: {exc}",
-        )
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to load preview file from object storage",
+        ) from exc
 
     return StreamingResponse(
         iter([data]),
@@ -738,6 +777,19 @@ async def get_archive_download_url(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Archive not found"
         )
+
+    try:
+        get_minio_client().stat_object(
+            settings.MINIO_BUCKET_NAME,
+            archive.object_name,
+        )
+    except S3Error as exc:
+        if exc.code in {"NoSuchKey", "NoSuchObject", "NoSuchBucket"}:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=ARCHIVE_FILE_MISSING_DETAIL,
+            ) from exc
+        raise
 
     archive.download_count += 1
     await db.commit()
@@ -1038,7 +1090,6 @@ async def archive_discussion_ws(
             msg_type = str(data.get("type") or "").strip().lower()
             if msg_type != "send":
                 continue
-
             raw_content = str(data.get("content") or "")
             content = raw_content.strip()
             if not content:
@@ -1480,15 +1531,23 @@ async def update_archive(
             detail="Only admins can update archives",
         )
 
-    query = select(Archive).where(
-        Archive.course_id == course_id,
-        Archive.id == archive_id,
-        Archive.deleted_at.is_(None),
-    )
-    result = await db.execute(query)
-    archive = result.scalar_one_or_none()
+    try:
+        locked = await acquire_stable_archive_mutation_locks(
+            db,
+            archive_id=archive_id,
+            target_course_id=None,
+            operation="archive_edit",
+        )
+    except ArchiveMutationLifecycleConflict:
+        raise archive_lifecycle_conflict_error()
+    archive = locked.archive(archive_id) if locked is not None else None
 
-    if not archive:
+    if (
+        not archive
+        or archive.course_id != course_id
+        or archive.deleted_at is not None
+    ):
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Archive not found"
         )
@@ -1522,8 +1581,7 @@ async def update_archive_course(
 ):
     """
     Update archive's course. Only admins can change archive's course.
-    Supports both transferring to existing course by ID or creating new
-    course by name and category.
+    Supports both course ID and the existing normalized name/category lookup.
     """
     if not current_user.is_admin:
         raise HTTPException(
@@ -1531,71 +1589,21 @@ async def update_archive_course(
             detail="Only admins can change archive's course",
         )
 
-    archive_query = select(Archive).where(
-        Archive.course_id == course_id,
-        Archive.id == archive_id,
-        Archive.deleted_at.is_(None),
-    )
-    archive_result = await db.execute(archive_query)
-    archive = archive_result.scalar_one_or_none()
-
-    if not archive:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Archive not found"
+    if course_update.course_id is not None:
+        target = await resolve_archive_move_target(
+            db,
+            course_id=course_update.course_id,
+            normalized_name=None,
+            category=None,
         )
-
-    # Determine target course
-    new_course = None
-
-    if course_update.course_id:
-        # Check if trying to transfer to the same course
-        if course_update.course_id == course_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Cannot transfer archive to the same course",
-            )
-
-        # Transfer to existing course by ID
-        new_course_query = select(Course).where(
-            Course.id == course_update.course_id, Course.deleted_at.is_(None)
-        )
-        new_course_result = await db.execute(new_course_query)
-        new_course = new_course_result.scalar_one_or_none()
-
-        if not new_course:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="Target course not found"
-            )
     elif course_update.course_name and course_update.course_category:
         normalized_course_name = normalize_course_search_text(course_update.course_name)
-        formatted_course_name = format_course_display_name(course_update.course_name)
-
-        # Transfer to course by name and category, create if not exists
-        new_course_query = select(Course).where(
-            normalized_course_text_expr(Course.name) == normalized_course_name,
-            Course.category == course_update.course_category,
-            Course.deleted_at.is_(None),
+        target = await resolve_archive_move_target(
+            db,
+            course_id=None,
+            normalized_name=normalized_course_name,
+            category=course_update.course_category,
         )
-        new_course_result = await db.execute(new_course_query)
-        new_course = new_course_result.scalar_one_or_none()
-
-        if new_course:
-            # Check if trying to transfer to the same course
-            if new_course.id == course_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Cannot transfer archive to the same course",
-                )
-        else:
-            # Create new course if it doesn't exist
-            new_course = Course(
-                name=formatted_course_name,
-                category=course_update.course_category,
-                order_index=await _next_order_index(db, course_update.course_category),
-            )
-            db.add(new_course)
-            await db.commit()
-            await db.refresh(new_course)
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1605,7 +1613,54 @@ async def update_archive_course(
             ),
         )
 
-    archive.course_id = new_course.id
+    try:
+        locked = await acquire_stable_archive_mutation_locks(
+            db,
+            archive_id=archive_id,
+            target_course_id=target.course_id,
+            operation="archive_move",
+        )
+    except ArchiveMutationLifecycleConflict:
+        raise archive_lifecycle_conflict_error()
+    archive = locked.archive(archive_id) if locked is not None else None
+    if (
+        archive is None
+        or archive.course_id != course_id
+        or archive.deleted_at is not None
+    ):
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Archive not found",
+        )
+
+    if target.course_id == course_id:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot transfer archive to the same course",
+        )
+
+    new_course = locked.course(target.course_id)
+    if new_course is None:
+        await db.rollback()
+        raise archive_move_target_not_found_error()
+    if new_course.deleted_at is not None:
+        await db.rollback()
+        raise archive_move_target_trashed_error()
+
+    if target.normalized_name is not None:
+        revalidated_target = await resolve_archive_move_target(
+            db,
+            course_id=None,
+            normalized_name=target.normalized_name,
+            category=target.category,
+        )
+        if revalidated_target.course_id != target.course_id:
+            await db.rollback()
+            raise course_lifecycle_conflict_error()
+
+    archive.course_id = target.course_id
     archive.updated_at = datetime.now(timezone.utc)
 
     await db.commit()
@@ -1615,7 +1670,7 @@ async def update_archive_course(
         "message": f"Archive moved to course '{new_course.name}'",
         "archive_id": archive.id,
         "old_course_id": course_id,
-        "new_course_id": new_course.id,
+        "new_course_id": target.course_id,
     }
 
 
@@ -1630,20 +1685,58 @@ async def delete_archive(
     Soft delete an archive. Users can only delete their own uploads.
     Admins can delete any archive.
     """
-    query = select(Archive).where(
-        Archive.course_id == course_id,
-        Archive.id == archive_id,
-        Archive.deleted_at.is_(None),
-    )
-    result = await db.execute(query)
-    archive = result.scalar_one_or_none()
+    budget = PlanRebuildBudget()
+    locked: LockedLifecycleRows | None = None
+    while True:
+        (
+            locked,
+            revalidation,
+        ) = await archive_lifecycle_locks.acquire_exact_archive_lifecycle_locks(
+            db,
+            archive_id=archive_id,
+            operation="archive_trash",
+        )
+        if locked is None:
+            break
+        if revalidation is not None and revalidation.valid:
+            break
+        conflict_archive = locked.archive(archive_id)
+        terminal_error = None
+        if (
+            conflict_archive is None
+            or conflict_archive.course_id != course_id
+            or conflict_archive.deleted_at is not None
+        ):
+            terminal_error = HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Archive not found",
+            )
+        elif (
+            not current_user.is_admin
+            and conflict_archive.uploader_id != current_user.user_id
+        ):
+            terminal_error = HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to delete this archive",
+            )
+        await db.rollback()
+        try:
+            budget = budget.consume()
+        except LifecyclePlanRetryExhausted:
+            if terminal_error is not None:
+                raise terminal_error
+            raise archive_lifecycle_conflict_error()
 
-    if not archive:
+    archive = locked.archive(archive_id) if locked is not None else None
+
+    if not archive or archive.course_id != course_id or archive.deleted_at is not None:
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Archive not found"
         )
 
     if not current_user.is_admin and archive.uploader_id != current_user.user_id:
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have permission to delete this archive",
@@ -1652,6 +1745,7 @@ async def delete_archive(
     result = await soft_delete_archive_with_submission_takedown(
         db,
         archive=archive,
+        submissions=locked.submissions,
         user_id=current_user.user_id,
         reason="archive deleted",
     )
@@ -1853,19 +1947,47 @@ async def delete_course(
             detail="Only admins can delete courses",
         )
 
-    query = select(Course).where(Course.id == course_id, Course.deleted_at.is_(None))
-    result = await db.execute(query)
-    course = result.scalar_one_or_none()
+    budget = PlanRebuildBudget()
+    locked_course_plan = None
+    while True:
+        locked_course_plan, revalidation = (
+            await course_lifecycle_locks.acquire_course_lifecycle_plan_once(
+                db,
+                course_id=course_id,
+                operation=CourseLifecycleOperation.TRASH,
+            )
+        )
+        if locked_course_plan is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="Course not found"
+            )
+        if revalidation is not None and revalidation.valid:
+            break
 
-    if not course:
+        await db.rollback()
+        try:
+            budget = budget.consume()
+        except LifecyclePlanRetryExhausted:
+            raise course_lifecycle_conflict_error()
+
+    course = locked_course_plan.rows.course(course_id)
+    if course is None or course.deleted_at is not None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Course not found"
         )
 
-    archives_query = select(Archive).where(Archive.course_id == course_id)
-    archives_result = await db.execute(archives_query)
-    all_course_archives = archives_result.scalars().all()
-    active_archives = [archive for archive in all_course_archives if archive.deleted_at is None]
+    mutable_archive_ids = set(locked_course_plan.plan.mutable_archive_ids)
+    active_archives = [
+        archive
+        for archive in locked_course_plan.rows.archives
+        if archive.id in mutable_archive_ids
+    ]
+    mutable_submission_ids = set(locked_course_plan.plan.mutable_submission_ids)
+    linked_submissions = [
+        submission
+        for submission in locked_course_plan.rows.submissions
+        if submission.id in mutable_submission_ids
+    ]
 
     # Soft delete all associated archives and the course
     current_time = datetime.now(timezone.utc)
@@ -1873,35 +1995,6 @@ async def delete_course(
         archive.deleted_at = current_time
         archive.deleted_by_id = current_user.user_id
         archive.deleted_reason = "course deleted"
-
-    archive_ids = [archive.id for archive in all_course_archives if archive.id is not None]
-    linked_submissions = await _find_submissions_related_to_course(
-        db,
-        course_name=course.name,
-        course_category=course.category,
-        archive_ids=archive_ids,
-    )
-    active_archive_ids = {archive.id for archive in active_archives if archive.id is not None}
-    linked_archive_ids = {
-        submission.created_archive_id
-        for submission in linked_submissions
-        if submission.created_archive_id is not None
-    }
-    missing_linked_archive_ids = linked_archive_ids - active_archive_ids
-    if missing_linked_archive_ids:
-        linked_archives = (
-            await db.execute(
-                select(Archive).where(
-                    Archive.id.in_(missing_linked_archive_ids),
-                    Archive.deleted_at.is_(None),
-                )
-            )
-        ).scalars().all()
-        for archive in linked_archives:
-            archive.deleted_at = current_time
-            archive.deleted_by_id = current_user.user_id
-            archive.deleted_reason = "course deleted"
-            active_archives.append(archive)
 
     for submission in linked_submissions:
         if is_course_trash_lifecycle_reason(submission.lifecycle_reason):
@@ -1981,9 +2074,8 @@ async def create_course_category(
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
-    key = category_data.key.strip().lower().replace(" ", "-")
-    if not key:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category key is required")
+    key = _validated_admin_category_key(category_data.key)
+    name = await _ensure_unique_category_name(db, category_data.name)
 
     existing = (
         await db.execute(select(CourseCategoryConfig).where(CourseCategoryConfig.key == key))
@@ -2000,7 +2092,7 @@ async def create_course_category(
 
     category = CourseCategoryConfig(
         key=key,
-        name=category_data.name.strip(),
+        name=name,
         label=category_data.label.strip(),
         icon=category_data.icon.strip() or "pi pi-fw pi-book",
         badge_color=_normalize_category_badge_color(category_data.badge_color),
@@ -2008,7 +2100,14 @@ async def create_course_category(
         is_active=True,
     )
     db.add(category)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category key or name already exists",
+        ) from exc
     await db.refresh(category)
     return category
 
@@ -2029,9 +2128,7 @@ async def update_course_category(
 
     old_key = category.key
     if category_data.key is not None:
-        new_key = category_data.key.strip().lower().replace(" ", "-")
-        if not new_key:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category key is required")
+        new_key = _validated_admin_category_key(category_data.key)
         existing = (
             await db.execute(
                 select(CourseCategoryConfig).where(
@@ -2045,12 +2142,23 @@ async def update_course_category(
         category.key = new_key
         if new_key != old_key:
             for model in (Course, CourseSubmission, ArchiveSubmission):
-                result = await db.execute(select(model).where(model.category == old_key))
-                for item in result.scalars().all():
-                    item.category = new_key
+                await db.execute(
+                    sql_update(model)
+                    .where(model.category == old_key)
+                    .values(category=new_key)
+                )
+            await db.execute(
+                sql_update(ArchiveSubmission)
+                .where(ArchiveSubmission.requested_category_key == old_key)
+                .values(requested_category_key=new_key)
+            )
 
     if category_data.name is not None:
-        category.name = category_data.name.strip()
+        category.name = await _ensure_unique_category_name(
+            db,
+            category_data.name,
+            exclude_category_id=category_id,
+        )
     if category_data.label is not None:
         category.label = category_data.label.strip()
     if category_data.icon is not None:
@@ -2062,8 +2170,24 @@ async def update_course_category(
     if category_data.is_active is not None:
         category.is_active = category_data.is_active
     category.updated_at = datetime.now(timezone.utc)
+    await db.execute(
+        sql_update(ArchiveSubmission)
+        .where(ArchiveSubmission.requested_category_key == category.key)
+        .values(
+            requested_category_name=category.name,
+            requested_category_label=category.label,
+            requested_category_icon=category.icon,
+        )
+    )
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category key or name already exists",
+        ) from exc
     await db.refresh(category)
     return category
 

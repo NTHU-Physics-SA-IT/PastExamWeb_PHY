@@ -4485,7 +4485,7 @@ const submissionStatusPriority = {
 const reviewStatusOptions = [
   { name: '待審核', value: 'pending' },
   { name: '已通過', value: 'approved' },
-  { name: '已退回', value: 'rejected' },
+  { name: '未通過', value: 'rejected' },
   { name: '已下架', value: 'takedown' },
   { name: '已刪除', value: 'deleted' },
 ]
@@ -4544,6 +4544,20 @@ const normalizeSubmissionStatus = (status) => {
 const getReviewItemStatus = (item) => {
   if (item?.deletedAt || item?.deleted_at) return 'deleted'
   return normalizeSubmissionStatus(item?.status)
+}
+const directReviewExpectedStatuses = new Set([
+  'pending',
+  'approved',
+  'rejected',
+  'takedown',
+  'deleted',
+])
+const getDirectReviewExpectedStatus = (item) => {
+  const status = getReviewItemStatus(item)
+  if (!directReviewExpectedStatuses.has(status)) {
+    throw new TypeError('Archive submission status is required')
+  }
+  return status
 }
 const getReviewStatusFilterValue = (status) => {
   const raw = String(status || '').trim()
@@ -5099,6 +5113,7 @@ const getTrashContextLine = (item) => {
   if (item.item_type === 'archive' && item.course_name) return `課程：${item.course_name}`
   if (item.item_type === 'course' && item.parent_name) return `隸屬分類：${item.parent_name}`
   if (item.item_type === 'archive_submission') {
+    if (item.parent_type === 'course' && item.parent_name) return `關聯課程：${item.parent_name}`
     if (item.parent_name) return `關聯考古題：${item.parent_name}`
     if (item.course_name) return `課程：${item.course_name}`
   }
@@ -5721,7 +5736,7 @@ const getSubmissionLabel = (status) => {
   const labels = {
     pending: '待審核',
     approved: '已通過',
-    rejected: '已退回',
+    rejected: '未通過',
     takedown: '已下架',
     deleted: '已刪除',
   }
@@ -5766,50 +5781,31 @@ const reviewActionDefinitions = {
   delete: { key: 'delete', label: '刪除', icon: 'pi pi-trash', severity: 'danger', outlined: true },
 }
 
+const reviewProductActionKeys = {
+  pending: ['approve', 'takedown', 'reject', 'delete'],
+  approved: ['takedown', 'reject', 'delete'],
+  rejected: ['approve', 'delete'],
+  takedown: ['republish', 'delete'],
+  deleted: [],
+}
+
 const getReviewRowActions = (item) => {
   const status = getReviewItemStatus(item)
-  if (status === 'pending') {
-    return [
-      reviewActionDefinitions.approve,
-      reviewActionDefinitions.reject,
-      reviewActionDefinitions.delete,
-    ]
-  }
-  if (status === 'approved') {
-    return [
-      reviewActionDefinitions.takedown,
-      reviewActionDefinitions.reject,
-      reviewActionDefinitions.delete,
-    ]
-  }
-  if (status === 'takedown' && canShowRepublishReviewSubmission(item)) {
-    return [reviewActionDefinitions.republish]
-  }
-  if (status === 'rejected') {
-    return [reviewActionDefinitions.approve, reviewActionDefinitions.delete]
-  }
-  return []
+  const productActions = reviewProductActionKeys[status] || []
+  if (!Array.isArray(item?.available_actions)) return []
+  const availableActions = new Set(
+    item.available_actions.filter((action) =>
+      Object.prototype.hasOwnProperty.call(reviewActionDefinitions, action)
+    )
+  )
+  return productActions
+    .filter((action) => availableActions.has(action))
+    .map((action) => reviewActionDefinitions[action])
 }
 
 const isCourseTrashLifecycleReason = (reason) => {
   if (!reason) return false
   return reason === 'course_trashed' || reason.startsWith('course_trashed|')
-}
-
-const canShowRepublishReviewSubmission = (item) => {
-  if (getReviewItemStatus(item) !== 'takedown') return false
-  if (!item?.created_archive_id) return false
-  if (item?.linked_course_deleted === true || item?.linked_archive_deleted === true) {
-    return false
-  }
-  if (
-    isCourseTrashLifecycleReason(item?.lifecycle_reason) ||
-    item?.lifecycle_reason === 'archive_trashed' ||
-    item?.lifecycle_reason === 'linked_archive_permanently_deleted'
-  ) {
-    return false
-  }
-  return true
 }
 
 const getReviewTrashNote = (item, fullText = false) => {
@@ -5854,6 +5850,10 @@ const getReviewTrashNoteIcon = (item) => {
 
 const runReviewRowAction = (item, action) => {
   if (!item?.id) return
+  if (action === 'delete') {
+    confirmDeleteArchiveSubmission(item)
+    return
+  }
   if (isReadonlyReviewSubmission(item) && action !== 'republish') {
     toast.add({
       severity: 'info',
@@ -5861,10 +5861,6 @@ const runReviewRowAction = (item, action) => {
       detail: getReadonlyReviewSubmissionMessage(item) || '此投稿目前不能變更審核狀態。',
       life: 3000,
     })
-    return
-  }
-  if (action === 'delete') {
-    confirmDeleteArchiveSubmission(item)
     return
   }
   reviewArchiveSubmission(item, action)
@@ -6482,7 +6478,7 @@ const getTrashStatusLabel = (statusValue, itemType = null) => {
   const labels = {
     pending: '待審核',
     approved: '已通過',
-    rejected: '已退回',
+    rejected: '未通過',
     takedown: '已下架',
     deleted: '已刪除',
   }
@@ -6531,27 +6527,11 @@ const getTrashDependencies = (item) => {
 }
 
 const canRestoreTrashItem = (item) => {
-  if (item?.canRestore === false) return false
-  if (item?.canRestore === true) return true
-  return !getTrashDependencyHasRestoreBlocker(item)
+  return item?.canRestore === true
 }
 
 const canPermanentDeleteTrashItem = (item) => {
-  if (item?.canPermanentDelete === false) return false
-  if (item?.canPermanentDelete === true) return true
-  return !getTrashDependencyHasPermanentDeleteBlocker(item)
-}
-
-const getTrashDependencyHasRestoreBlocker = (item) => {
-  return getTrashDependencies(item).some((dependency) =>
-    String(dependency?.label || '').startsWith('阻擋還原：')
-  )
-}
-
-const getTrashDependencyHasPermanentDeleteBlocker = (item) => {
-  return getTrashDependencies(item).some((dependency) =>
-    String(dependency?.label || '').startsWith('阻擋永久刪除：')
-  )
+  return item?.canPermanentDelete === true
 }
 
 const getTrashDependencySeverity = (dependency) => {
@@ -7269,8 +7249,20 @@ const confirmTakedownComparisonItem = (item) => {
 const takedownComparisonItem = async (item) => {
   if (!item?.id) return
   try {
-    await archiveService.takedownSubmission(item.id)
-    toast.add({ severity: 'success', summary: '完成', detail: '已下架', life: 3000 })
+    const { data } = await archiveService.takedownSubmission(
+      item.id,
+      getDirectReviewExpectedStatus(item)
+    )
+    toast.add(
+      data?.changed === false
+        ? {
+            severity: 'info',
+            summary: '未變更',
+            detail: '投稿狀態未變更，已重新整理最新資料。',
+            life: 3000,
+          }
+        : { severity: 'success', summary: '完成', detail: '已下架', life: 3000 }
+    )
     await loadReviewItems()
     await loadArchiveComparison(selectedArchiveRequest.value)
   } catch (error) {
@@ -7282,6 +7274,9 @@ const takedownComparisonItem = async (item) => {
       detail: getTrashErrorMessage(error, '下架比對項目失敗'),
       life: 3000,
     })
+    if (error?.response?.data?.detail?.reload_required === true) {
+      await loadReviewItems()
+    }
   }
 }
 
@@ -7302,27 +7297,38 @@ const reviewArchiveSubmission = async (submission, action) => {
     return
   }
   try {
+    const expectedStatus = getDirectReviewExpectedStatus(submission)
+    let response
     if (action === 'approve') {
-      await archiveService.approveSubmission(submission.id)
+      response = await archiveService.approveSubmission(submission.id, expectedStatus)
     } else if (action === 'takedown') {
-      await archiveService.takedownSubmission(submission.id)
+      response = await archiveService.takedownSubmission(submission.id, expectedStatus)
     } else if (action === 'republish') {
-      await archiveService.republishSubmission(submission.id)
+      response = await archiveService.republishSubmission(submission.id, expectedStatus)
     } else {
-      await archiveService.rejectSubmission(submission.id)
+      response = await archiveService.rejectSubmission(submission.id, expectedStatus)
     }
     const actionMessages = {
       approve: '考古題投稿已通過',
-      reject: '考古題投稿已退回',
+      reject: '投稿已設為未通過。',
       takedown: '考古題投稿已下架',
       republish: '考古題投稿已重新上架',
     }
-    toast.add({
-      severity: 'success',
-      summary: '完成',
-      detail: actionMessages[action] || '考古題投稿狀態已更新',
-      life: 3000,
-    })
+    toast.add(
+      response?.data?.changed === false
+        ? {
+            severity: 'info',
+            summary: '未變更',
+            detail: '投稿狀態未變更，已重新整理最新資料。',
+            life: 3000,
+          }
+        : {
+            severity: 'success',
+            summary: '完成',
+            detail: actionMessages[action] || '考古題投稿狀態已更新',
+            life: 3000,
+          }
+    )
     await loadReviewItems()
     showArchiveRequestDialog.value = false
   } catch (error) {
@@ -7334,6 +7340,9 @@ const reviewArchiveSubmission = async (submission, action) => {
       detail: getTrashErrorMessage(error, '審核考古題投稿失敗'),
       life: 3000,
     })
+    if (error?.response?.data?.detail?.reload_required === true) {
+      await loadReviewItems()
+    }
   }
 }
 
@@ -7349,14 +7358,24 @@ const confirmDeleteArchiveSubmission = (submission) => {
 
 const deleteArchiveSubmissionAction = async (submission) => {
   try {
-    await archiveService.deleteSubmission(submission.id)
-    toast.add({
-      severity: 'success',
-      summary: '已刪除',
-      detail: '投稿紀錄已刪除',
-      life: 3000,
-    })
-    if (selectedArchiveRequest.value?.id === submission.id) {
+    const { data } = await archiveService.deleteSubmission(submission.id)
+    const changed = data?.changed !== false
+    toast.add(
+      changed
+        ? {
+            severity: 'success',
+            summary: '已刪除',
+            detail: '投稿紀錄已刪除',
+            life: 3000,
+          }
+        : {
+            severity: 'info',
+            summary: '未重複刪除',
+            detail: '此投稿已在垃圾桶中，未重複刪除。',
+            life: 3000,
+          }
+    )
+    if (changed && selectedArchiveRequest.value?.id === submission.id) {
       showArchiveRequestDialog.value = false
       selectedArchiveRequest.value = null
     }
@@ -7364,7 +7383,15 @@ const deleteArchiveSubmissionAction = async (submission) => {
   } catch (error) {
     console.error('刪除考古題投稿失敗:', error)
     if (isUnauthorizedError(error)) return
-    toast.add({ severity: 'error', summary: '錯誤', detail: '投稿紀錄刪除失敗', life: 3000 })
+    toast.add({
+      severity: 'error',
+      summary: '錯誤',
+      detail: getTrashErrorMessage(error, '投稿紀錄刪除失敗'),
+      life: 3000,
+    })
+    if (error?.response?.data?.detail?.reload_required === true) {
+      await loadReviewItems()
+    }
   }
 }
 
@@ -11161,7 +11188,7 @@ onBeforeUnmount(() => {
 
   :deep(.review-card-actions) {
     display: grid;
-    grid-template-columns: repeat(4, minmax(2.5rem, 1fr));
+    grid-template-columns: repeat(5, minmax(2.5rem, 1fr));
     width: 100%;
     gap: 0.45rem;
   }

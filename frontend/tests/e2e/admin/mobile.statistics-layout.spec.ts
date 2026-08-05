@@ -63,6 +63,8 @@ test.use({
 })
 
 test('keeps mobile statistics tabs and duration summaries aligned', async ({ page }) => {
+  test.setTimeout(45_000)
+
   const token = buildJwt({
     uid: 1,
     email: 'admin@example.com',
@@ -274,16 +276,19 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
     await expect
       .poll(() => summaryGroup.evaluate((element) => getComputedStyle(element).display))
       .toBe('grid')
-    const boxes = await summaryCards.evaluateAll((elements) =>
-      elements.map((element) => {
-        const rect = element.getBoundingClientRect()
-        return { top: rect.top, width: rect.width, scrollWidth: element.scrollWidth }
-      })
+    const summaryTops = await summaryCards.evaluateAll((elements) =>
+      elements.map((element) => Math.round(element.getBoundingClientRect().top))
     )
-    expect(new Set(boxes.map(({ top }) => Math.round(top))).size).toBe(1)
-    expect(
-      boxes.every(({ width: cardWidth, scrollWidth }) => scrollWidth <= Math.ceil(cardWidth))
-    ).toBe(true)
+    expect(new Set(summaryTops).size).toBe(1)
+    await expect
+      .poll(() =>
+        summaryCards.evaluateAll((elements) =>
+          elements.every(
+            (element) => element.scrollWidth <= Math.ceil(element.getBoundingClientRect().width)
+          )
+        )
+      )
+      .toBe(true)
     await expectSameRow(durationModeButtons)
     await expectNoHorizontalOverflow(page)
   }

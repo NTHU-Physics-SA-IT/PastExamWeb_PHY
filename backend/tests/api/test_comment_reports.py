@@ -840,9 +840,13 @@ async def test_admin_moves_report_records_to_independent_trash_and_restores_them
         assert trashed_system["deleted_by_id"] == admin.id
         assert trashed_system["github_issue_number"] == 321
         assert trashed_system["dependencies"] == []
+        assert trashed_system["canRestore"] is True
+        assert trashed_system["canPermanentDelete"] is True
         assert trashed_comment["deleted_by_id"] == admin.id
         assert trashed_comment["comment_snapshot"] == messages[0].content
         assert trashed_comment["dependencies"] == []
+        assert trashed_comment["canRestore"] is True
+        assert trashed_comment["canPermanentDelete"] is True
 
         async with session_maker() as session:
             source = await session.get(ArchiveDiscussionMessage, messages[0].id)

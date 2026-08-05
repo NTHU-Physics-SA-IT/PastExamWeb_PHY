@@ -50,9 +50,12 @@ class PersonalNotificationType(str, PyEnum):
     DISCUSSION_PIN = "discussion_pin"
     COMMENT_REPORT_SUBMITTED = "comment_report_submitted"
     COMMENT_REPORT_RESULT = "comment_report_result"
+    ARCHIVE_REPORT_SUBMITTED = "archive_report_submitted"
+    ARCHIVE_REPORT_RESULT = "archive_report_result"
     ARCHIVE_SUBMISSION_APPROVED = "archive_submission_approved"
     ARCHIVE_SUBMISSION_REJECTED = "archive_submission_rejected"
     ARCHIVE_SUBMISSION_TAKEDOWN = "archive_submission_takedown"
+    ARCHIVE_SUBMISSION_REPUBLISHED = "archive_submission_republished"
 
 
 class CommentReportReason(str, PyEnum):
@@ -61,6 +64,15 @@ class CommentReportReason(str, PyEnum):
     INAPPROPRIATE_OR_ILLEGAL = "inappropriate_or_illegal"
     PRIVACY_VIOLATION = "privacy_violation"
     MISINFORMATION = "misinformation"
+    OTHER = "other"
+
+
+class ArchiveReportReason(str, PyEnum):
+    FILE_UNAVAILABLE_OR_CORRUPT = "file_unavailable_or_corrupt"
+    METADATA_MISMATCH = "metadata_mismatch"
+    DUPLICATE_ARCHIVE = "duplicate_archive"
+    INCOMPLETE_OR_LOW_QUALITY = "incomplete_or_low_quality"
+    PERSONAL_INFORMATION = "personal_information"
     OTHER = "other"
 
 
@@ -90,6 +102,14 @@ class SubmissionStatus(str, PyEnum):
     TAKEDOWN = "takedown"
 
 
+class ArchiveSubmissionAdminAction(str, PyEnum):
+    APPROVE = "approve"
+    REJECT = "reject"
+    TAKEDOWN = "takedown"
+    REPUBLISH = "republish"
+    DELETE = "delete"
+
+
 class User(SQLModel, table=True):
     __tablename__ = "users"
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -98,7 +118,14 @@ class User(SQLModel, table=True):
     email: str = Field(unique=True, index=True)
     name: str = Field(unique=True, index=True)
     nickname: Optional[str] = Field(default=None, index=True)
-    show_level_title: bool = Field(default=True)
+    show_level_title: bool = Field(
+        default=True,
+        sa_column=Column(
+            Boolean,
+            nullable=False,
+            server_default=text("true"),
+        ),
+    )
     is_admin: bool = Field(default=False)
     password_hash: Optional[str] = Field(default=None)
     is_local: bool = Field(default=False)
@@ -159,22 +186,68 @@ class UserPresenceSession(SQLModel, table=True):
 
 class CourseCategoryConfig(SQLModel, table=True):
     __tablename__ = "course_category_configs"
+    __table_args__ = (
+        UniqueConstraint("key"),
+        Index("ix_course_category_configs_key", "key", unique=True),
+        Index(
+            "uq_course_category_configs_normalized_name",
+            text("lower(btrim(name))"),
+            unique=True,
+        ),
+        Index(
+            "uq_course_category_configs_normalized_key",
+            text("lower(btrim(key))"),
+            unique=True,
+        ),
+        CheckConstraint(
+            "lower(btrim(key)) NOT IN "
+            "('freshman', 'sophomore', 'junior', 'senior', 'interdisciplinary')",
+            name="ck_course_category_configs_no_legacy_key",
+        ),
+    )
     id: Optional[int] = Field(default=None, primary_key=True)
-    key: str = Field(unique=True, index=True)
+    key: str = Field(sa_column=Column(String, nullable=False))
     name: str = Field(index=True)
-    label: str = Field(default="")
-    icon: str = Field(default="pi pi-fw pi-book")
+    label: str = Field(
+        default="",
+        sa_column=Column(String, nullable=False, server_default=text("''")),
+    )
+    icon: str = Field(
+        default="pi pi-fw pi-book",
+        sa_column=Column(
+            String,
+            nullable=False,
+            server_default=text("'pi pi-fw pi-book'"),
+        ),
+    )
     badge_color: str = Field(
         default="blue",
         sa_column=Column(String, nullable=False, server_default="blue"),
     )
-    order_index: int = Field(default=0, index=True)
-    is_active: bool = Field(default=True, index=True)
+    order_index: int = Field(
+        default=0,
+        sa_column=Column(
+            Integer,
+            nullable=False,
+            index=True,
+            server_default=text("0"),
+        ),
+    )
+    is_active: bool = Field(
+        default=True,
+        sa_column=Column(
+            Boolean,
+            nullable=False,
+            index=True,
+            server_default=text("true"),
+        ),
+    )
     created_at: datetime = Field(
         sa_column=Column(
             DateTime(timezone=True),
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
+            server_default=text("now()"),
         )
     )
     updated_at: datetime = Field(
@@ -182,6 +255,7 @@ class CourseCategoryConfig(SQLModel, table=True):
             DateTime(timezone=True),
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
+            server_default=text("now()"),
         )
     )
     deleted_at: Optional[datetime] = Field(
@@ -196,16 +270,19 @@ class CourseCategoryConfig(SQLModel, table=True):
 
 class SystemSetting(SQLModel, table=True):
     __tablename__ = "system_settings"
-    id: Optional[int] = Field(default=None, primary_key=True)
-    key: str = Field(
-        sa_column=Column(String(128), nullable=False, unique=True, index=True)
+    __table_args__ = (
+        UniqueConstraint("key", name="uq_system_settings_key"),
+        Index("ix_system_settings_key", "key"),
     )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    key: str = Field(sa_column=Column(String(128), nullable=False))
     value: Any = Field(sa_column=Column(JSONB, nullable=False))
     created_at: datetime = Field(
         sa_column=Column(
             DateTime(timezone=True),
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
         )
     )
     updated_at: datetime = Field(
@@ -213,6 +290,7 @@ class SystemSetting(SQLModel, table=True):
             DateTime(timezone=True),
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
+            server_default=text("CURRENT_TIMESTAMP"),
         )
     )
     updated_by_id: Optional[int] = Field(
@@ -280,7 +358,9 @@ class Archive(SQLModel, table=True):
         sa_column=Column(DateTime(timezone=True), nullable=True)
     )
     deleted_by_id: Optional[int] = Field(default=None)
-    deleted_reason: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    deleted_reason: Optional[str] = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
     restored_at: Optional[datetime] = Field(
         sa_column=Column(DateTime(timezone=True), nullable=True)
     )
@@ -295,7 +375,9 @@ class CourseSubmission(SQLModel, table=True):
     status: SubmissionStatus = Field(default=SubmissionStatus.PENDING, index=True)
     requester_id: int = Field(foreign_key="users.id", index=True)
     reviewer_id: Optional[int] = Field(default=None, foreign_key="users.id")
-    review_note: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    review_note: Optional[str] = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
     created_course_id: Optional[int] = Field(default=None, foreign_key="courses.id")
     created_at: datetime = Field(
         sa_column=Column(
@@ -311,6 +393,23 @@ class CourseSubmission(SQLModel, table=True):
 
 class ArchiveSubmission(SQLModel, table=True):
     __tablename__ = "archive_submissions"
+    __table_args__ = (
+        UniqueConstraint(
+            "created_archive_id",
+            name="uq_archive_submissions_created_archive_id",
+        ),
+        CheckConstraint(
+            "previous_status IS NULL OR CAST(previous_status AS TEXT) <> 'DELETED'",
+            name="ck_archive_submissions_previous_status_not_deleted",
+        ),
+        CheckConstraint(
+            "deleted_at IS NOT NULL "
+            "OR CAST(status AS TEXT) = 'DELETED' "
+            "OR previous_status IS NULL",
+            name="ck_archive_submissions_active_previous_status_null",
+        ),
+    )
+
     id: Optional[int] = Field(default=None, primary_key=True)
     subject: str = Field(index=True)
     category: str = Field(index=True)
@@ -320,24 +419,56 @@ class ArchiveSubmission(SQLModel, table=True):
     professor: str = Field(index=True)
     has_answers: bool = False
     object_name: str
-    requested_course_name: Optional[str] = Field(default=None, sa_column=Column(String, nullable=True))
-    requested_category_key: Optional[str] = Field(default=None, sa_column=Column(String, nullable=True))
-    requested_category_name: Optional[str] = Field(default=None, sa_column=Column(String, nullable=True))
-    requested_category_label: Optional[str] = Field(default=None, sa_column=Column(String, nullable=True))
-    requested_category_icon: Optional[str] = Field(default=None, sa_column=Column(String, nullable=True))
+    requested_course_name: Optional[str] = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
+    requested_category_key: Optional[str] = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
+    requested_category_name: Optional[str] = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
+    requested_category_label: Optional[str] = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
+    requested_category_icon: Optional[str] = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
     status: SubmissionStatus = Field(default=SubmissionStatus.PENDING, index=True)
+    previous_status: Optional[SubmissionStatus] = Field(default=None)
     requester_id: int = Field(foreign_key="users.id", index=True)
     owner_id: Optional[int] = Field(default=None)
+    owner_self_delete_consumed: bool = Field(
+        default=False,
+        sa_column=Column(
+            Boolean,
+            nullable=False,
+            server_default=text("false"),
+        ),
+    )
     reviewer_id: Optional[int] = Field(default=None, foreign_key="users.id")
-    review_note: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
-    is_admin_upload: bool = Field(default=False)
-    lifecycle_reason: Optional[str] = Field(default=None, sa_column=Column(String, nullable=True))
+    review_note: Optional[str] = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
+    is_admin_upload: bool = Field(
+        default=False,
+        sa_column=Column(
+            Boolean,
+            nullable=False,
+            server_default=text("false"),
+        ),
+    )
+    lifecycle_reason: Optional[str] = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
     created_archive_id: Optional[int] = Field(default=None, foreign_key="archives.id")
     deleted_at: Optional[datetime] = Field(
         sa_column=Column(DateTime(timezone=True), nullable=True)
     )
     deleted_by_id: Optional[int] = Field(default=None)
-    delete_reason: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    delete_reason: Optional[str] = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
     restored_at: Optional[datetime] = Field(
         sa_column=Column(DateTime(timezone=True), nullable=True)
     )
@@ -371,6 +502,13 @@ class ArchiveSubmissionEvent(SQLModel, table=True):
 
 class ArchiveDiscussionMessage(SQLModel, table=True):
     __tablename__ = "archive_discussion_messages"
+    __table_args__ = (
+        Index(
+            "ix_archive_discussion_messages_archive_parent",
+            "archive_id",
+            "parent_id",
+        ),
+    )
     id: Optional[int] = Field(default=None, primary_key=True)
     archive_id: int = Field(foreign_key="archives.id", index=True)
     user_id: int = Field(foreign_key="users.id", index=True)
@@ -535,9 +673,7 @@ class AnnouncementReadReceipt(SQLModel, table=True):
 class PersonalNotification(SQLModel, table=True):
     __tablename__ = "personal_notifications"
     __table_args__ = (
-        UniqueConstraint(
-            "dedupe_key", name="uq_personal_notifications_dedupe_key"
-        ),
+        UniqueConstraint("dedupe_key", name="uq_personal_notifications_dedupe_key"),
         Index(
             "ix_personal_notifications_user_read_created",
             "user_id",
@@ -576,7 +712,12 @@ class PersonalNotification(SQLModel, table=True):
     )
     metadata_json: dict[str, Any] = Field(
         default_factory=dict,
-        sa_column=Column("metadata", JSONB, nullable=False),
+        sa_column=Column(
+            "metadata",
+            JSONB,
+            nullable=False,
+            server_default=text("'{}'::jsonb"),
+        ),
     )
     dedupe_key: str = Field(sa_column=Column(String(160), nullable=False))
     read_at: Optional[datetime] = Field(
@@ -589,6 +730,7 @@ class PersonalNotification(SQLModel, table=True):
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
             index=True,
+            server_default=text("now()"),
         )
     )
 
@@ -614,7 +756,10 @@ class CommentReport(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     reporter_user_id: int = Field(
         sa_column=Column(
-            Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+            Integer,
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
         )
     )
     comment_id: Optional[int] = Field(
@@ -629,27 +774,40 @@ class CommentReport(SQLModel, table=True):
     comment_author_id: Optional[int] = Field(
         default=None,
         sa_column=Column(
-            Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+            Integer,
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
         ),
     )
     archive_id: Optional[int] = Field(
         default=None,
         sa_column=Column(
-            Integer, ForeignKey("archives.id", ondelete="SET NULL"), nullable=True, index=True
+            Integer,
+            ForeignKey("archives.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
         ),
     )
     course_id: Optional[int] = Field(
         default=None,
         sa_column=Column(
-            Integer, ForeignKey("courses.id", ondelete="SET NULL"), nullable=True, index=True
+            Integer,
+            ForeignKey("courses.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
         ),
     )
     thread_id: Optional[int] = Field(default=None, index=True)
     reply_to_message_id: Optional[int] = Field(default=None)
     reason: str = Field(sa_column=Column(String(50), nullable=False, index=True))
-    custom_message: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    custom_message: Optional[str] = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
     comment_content_snapshot: str = Field(sa_column=Column(Text, nullable=False))
-    comment_author_name_snapshot: str = Field(sa_column=Column(String(100), nullable=False))
+    comment_author_name_snapshot: str = Field(
+        sa_column=Column(String(100), nullable=False)
+    )
     comment_created_at_snapshot: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False)
     )
@@ -657,17 +815,28 @@ class CommentReport(SQLModel, table=True):
     course_name_snapshot: str = Field(sa_column=Column(String(200), nullable=False))
     status: str = Field(
         default=CommentReportStatus.PENDING.value,
-        sa_column=Column(String(30), nullable=False, index=True),
+        sa_column=Column(
+            String(30),
+            nullable=False,
+            index=True,
+            server_default=text("'pending'"),
+        ),
     )
-    admin_response: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    admin_response: Optional[str] = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
     reviewed_by: Optional[int] = Field(
         default=None,
         sa_column=Column(
-            Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+            Integer,
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
         ),
     )
     reviewed_at: Optional[datetime] = Field(
-        default=None, sa_column=Column(DateTime(timezone=True), nullable=True, index=True)
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
     )
     comment_deleted: bool = Field(
         default=False,
@@ -679,6 +848,7 @@ class CommentReport(SQLModel, table=True):
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
             index=True,
+            server_default=text("now()"),
         )
     )
     updated_at: datetime = Field(
@@ -686,6 +856,133 @@ class CommentReport(SQLModel, table=True):
             DateTime(timezone=True),
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
+            server_default=text("now()"),
+        )
+    )
+    deleted_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    deleted_by_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+
+
+class ArchiveReport(SQLModel, table=True):
+    __tablename__ = "archive_reports"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'upheld', 'dismissed')",
+            name="ck_archive_reports_status",
+        ),
+        Index(
+            "uq_archive_reports_pending_reporter_archive",
+            "reporter_user_id",
+            "archive_id",
+            unique=True,
+            postgresql_where=text("status = 'pending'"),
+        ),
+        Index("ix_archive_reports_status_created", "status", "created_at"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    reporter_user_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    reporter_name_snapshot: str = Field(sa_column=Column(String(100), nullable=False))
+    archive_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("archives.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    archive_id_snapshot: int = Field(sa_column=Column(Integer, nullable=False))
+    course_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("courses.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    archive_submission_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("archive_submissions.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    reason: str = Field(sa_column=Column(String(60), nullable=False, index=True))
+    supplementary_detail: Optional[str] = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
+    archive_name_snapshot: str = Field(sa_column=Column(String(200), nullable=False))
+    course_name_snapshot: str = Field(sa_column=Column(String(200), nullable=False))
+    academic_year_snapshot: int = Field(sa_column=Column(Integer, nullable=False))
+    archive_type_snapshot: str = Field(sa_column=Column(String(30), nullable=False))
+    professor_snapshot: str = Field(sa_column=Column(String(200), nullable=False))
+    status: str = Field(
+        default=CommentReportStatus.PENDING.value,
+        sa_column=Column(
+            String(30),
+            nullable=False,
+            index=True,
+            server_default=text("'pending'"),
+        ),
+    )
+    admin_response: Optional[str] = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
+    reviewed_by: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    reviewed_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    archive_taken_down: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, server_default=text("false")),
+    )
+    created_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(timezone.utc),
+            nullable=False,
+            index=True,
+            server_default=text("now()"),
+        )
+    )
+    updated_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(timezone.utc),
+            nullable=False,
+            server_default=text("now()"),
         )
     )
     deleted_at: Optional[datetime] = Field(
@@ -708,26 +1005,60 @@ class SystemIssueReport(SQLModel, table=True):
     __table_args__ = (
         Index("ix_system_issue_reports_status_created", "status", "created_at"),
         Index("ix_system_issue_reports_read_at_created", "read_at", "created_at"),
+        Index(
+            "ix_system_issue_reports_github_sync_status",
+            "github_sync_status",
+        ),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     reporter_user_id: Optional[int] = Field(
         default=None,
         sa_column=Column(
-            Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+            Integer,
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
         ),
     )
     report_type: str = Field(sa_column=Column(String(40), nullable=False, index=True))
     title: str = Field(sa_column=Column(String(100), nullable=False))
     description: str = Field(sa_column=Column(Text, nullable=False))
-    contact: Optional[str] = Field(default=None, sa_column=Column(String(200), nullable=True))
+    contact: Optional[str] = Field(
+        default=None, sa_column=Column(String(200), nullable=True)
+    )
     status: str = Field(
         default="local_only",
-        sa_column=Column(String(30), nullable=False, index=True),
+        sa_column=Column(
+            String(30),
+            nullable=False,
+            index=True,
+            server_default=text("'local_only'"),
+        ),
     )
     github_issue_number: Optional[int] = Field(default=None, index=True)
     github_issue_url: Optional[str] = Field(
         default=None, sa_column=Column(String(500), nullable=True)
+    )
+    github_issue_state: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String(20), nullable=True),
+    )
+    github_linked_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    github_sync_status: str = Field(
+        default="pending",
+        sa_column=Column(
+            String(20),
+            nullable=False,
+            server_default=text("'pending'"),
+        ),
+    )
+    github_sync_error: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String(300), nullable=True),
     )
     read_at: Optional[datetime] = Field(
         default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
@@ -742,7 +1073,12 @@ class SystemIssueReport(SQLModel, table=True):
     )
     metadata_json: dict[str, Any] = Field(
         default_factory=dict,
-        sa_column=Column("metadata", JSONB, nullable=False),
+        sa_column=Column(
+            "metadata",
+            JSONB,
+            nullable=False,
+            server_default=text("'{}'::jsonb"),
+        ),
     )
     created_at: datetime = Field(
         sa_column=Column(
@@ -750,6 +1086,7 @@ class SystemIssueReport(SQLModel, table=True):
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
             index=True,
+            server_default=text("now()"),
         )
     )
     updated_at: datetime = Field(
@@ -757,6 +1094,7 @@ class SystemIssueReport(SQLModel, table=True):
             DateTime(timezone=True),
             default=lambda: datetime.now(timezone.utc),
             nullable=False,
+            server_default=text("now()"),
         )
     )
     deleted_at: Optional[datetime] = Field(
@@ -1033,6 +1371,52 @@ class CommentReportListRead(BaseModel):
     offset: int = 0
 
 
+class ArchiveReportCreate(BaseModel):
+    report_reason: ArchiveReportReason
+    supplementary_detail: Optional[str] = Field(default=None, max_length=1000)
+
+
+class ArchiveReportAdminUpdate(BaseModel):
+    status: CommentReportStatus
+    admin_response: Optional[str] = Field(default=None, max_length=1000)
+    take_down_archive: bool = False
+
+
+class ArchiveReportRead(BaseModel):
+    id: int
+    reporter_user_id: Optional[int]
+    reporter_name: str
+    archive_id: Optional[int]
+    archive_id_snapshot: int
+    course_id: Optional[int]
+    archive_submission_id: Optional[int]
+    reason: str
+    supplementary_detail: Optional[str]
+    archive_name: str
+    course_name: str
+    academic_year: int
+    archive_type: str
+    professor: str
+    status: str
+    admin_response: Optional[str]
+    reviewed_by: Optional[int]
+    reviewer_name: Optional[str]
+    reviewed_at: Optional[datetime]
+    archive_taken_down: bool
+    source_exists: bool
+    source_state: str
+    can_take_down: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class ArchiveReportListRead(BaseModel):
+    items: List[ArchiveReportRead] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 20
+    offset: int = 0
+
+
 class SystemIssueReportCreate(BaseModel):
     report_type: str = Field(min_length=1, max_length=40)
     title: str = Field(min_length=1, max_length=100)
@@ -1215,6 +1599,7 @@ class CourseCategoryRead(BaseModel):
 
 class SubmissionDecision(BaseModel):
     note: Optional[str] = None
+    expected_status: Optional[SubmissionStatus] = None
 
 
 class CourseSubmissionRead(BaseModel):
@@ -1265,6 +1650,14 @@ class ArchiveSubmissionRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ArchiveSubmissionAdminRead(ArchiveSubmissionRead):
+    available_actions: List[ArchiveSubmissionAdminAction]
+
+
+class ArchiveSubmissionActionRead(ArchiveSubmissionAdminRead):
+    changed: bool
 
 
 class ArchiveSubmissionComparisonRead(ArchiveSubmissionRead):

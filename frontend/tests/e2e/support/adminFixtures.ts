@@ -159,6 +159,13 @@ export const mockAdminCourseEndpoints = async (
       body: JSON.stringify({ items: [], total: 0 }),
     })
   )
+  await page.route('**/api/reports/admin/archives**', (route) =>
+    route.fulfill({
+      status: 200,
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ items: [], total: 0 }),
+    })
+  )
 
   await page.route('**/api/courses', async (route) => {
     await route.fulfill({
@@ -253,6 +260,41 @@ export const mockAdminUserEndpoints = async (
   const updatePayloads: Array<{ id: number; payload: Record<string, unknown> }> = []
   const deleteIds: number[] = []
   let createdUserId = 1000
+
+  await page.route('**/api/users/admin/online-statistics**', async (route) => {
+    const bucketMinutes = 10
+    const bucketCount = 144
+    const rangeEnd = new Date('2025-10-31T00:00:00Z')
+    const points = Array.from({ length: bucketCount }, (_, index) => {
+      const start = new Date(
+        rangeEnd.getTime() - (bucketCount - index) * bucketMinutes * 60_000
+      )
+      const end = new Date(start.getTime() + bucketMinutes * 60_000)
+      return {
+        start: start.toISOString(),
+        end: end.toISOString(),
+        at: end.toISOString(),
+        count: 0,
+        has_data: true,
+      }
+    })
+
+    await route.fulfill({
+      status: 200,
+      headers: JSON_HEADERS,
+      body: JSON.stringify({
+        range: '24h',
+        bucket_minutes: bucketMinutes,
+        timezone: 'Asia/Taipei',
+        online_timeout_seconds: 300,
+        current_online: 0,
+        peak_online: 0,
+        average_online: 0,
+        history_started_at: points[0]?.start ?? null,
+        points,
+      }),
+    })
+  })
 
   await page.route('**/api/users/admin/users**', async (route) => {
     const request = route.request()

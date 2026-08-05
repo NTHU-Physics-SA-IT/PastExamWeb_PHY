@@ -32,7 +32,6 @@ export default {
 
     setGlobalToast(toast)
     applyFontSizePreference()
-
     provide('sidebarVisible', sidebarVisible)
     provide('toast', toast)
     provide('confirm', confirm)

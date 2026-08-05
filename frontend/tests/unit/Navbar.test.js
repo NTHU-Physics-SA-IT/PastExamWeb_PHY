@@ -208,6 +208,29 @@ describe('Navbar methods', () => {
     expect(ctx.loading).toBe(false)
   })
 
+  it.each([
+    [{ isInvalidCredentials: true, response: { status: 401 } }, '帳號或密碼錯誤'],
+    [{ code: 'ECONNABORTED' }, '伺服器回應逾時，請稍後再試'],
+    [{ response: { status: 500 } }, '伺服器發生錯誤，請稍後再試'],
+    [{ code: 'ERR_NETWORK' }, '無法連線至後端，請確認服務是否正常'],
+  ])('describes local login failures without leaving loading active', async (error, detail) => {
+    const ctx = {
+      username: 'user',
+      password: 'pass',
+      toast: { add: toastAddMock },
+      router: { push: vi.fn() },
+      loginVisible: true,
+      loading: false,
+      checkAuthentication: vi.fn(),
+    }
+
+    localLoginMock.mockRejectedValueOnce(error)
+    await Navbar.methods.handleLocalLogin.call(ctx)
+
+    expect(toastAddMock).toHaveBeenCalledWith(expect.objectContaining({ detail }))
+    expect(ctx.loading).toBe(false)
+  })
+
   it('opens login dialog and tracks dialog event', () => {
     const ctx = {
       loginVisible: false,
