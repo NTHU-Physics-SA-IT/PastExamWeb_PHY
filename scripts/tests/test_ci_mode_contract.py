@@ -286,10 +286,19 @@ def _classify_pr_equivalent(
 def test_classifier_defines_only_three_modes_and_exact_live_allowlists() -> None:
     assert ci.CI_MODES == frozenset({"full", "equivalent-merge", "docs-only"})
     assert ci.LIVE_EQUIVALENT_TARGET_REFS == frozenset(
-        {"refs/heads/fix/submission-status-api-conformance"}
+        {
+            "refs/heads/fix/submission-status-api-conformance",
+            "refs/heads/integration/stage-5bd",
+        }
     )
     assert ci.LIVE_EQUIVALENT_PR_BASE_REFS == frozenset(
-        {"fix/submission-status-api-conformance"}
+        {
+            "fix/submission-status-api-conformance",
+            "integration/stage-5bd",
+        }
+    )
+    assert ci.IMPLEMENTATION_BRANCHES == frozenset(
+        {ci.IMPLEMENTATION_BRANCH, ci.STAGED_IMPLEMENTATION_BRANCH}
     )
     assert all(
         not any(token in ref for token in ("*", "?", "["))
@@ -381,21 +390,26 @@ def test_valid_two_parent_equivalent_merge_is_eligible(tmp_path: Path) -> None:
     assert result.source_tree == fixture["git"].tree_sha(fixture["source"])
 
 
+@pytest.mark.parametrize(
+    "target_branch",
+    (ci.IMPLEMENTATION_BRANCH, ci.STAGED_IMPLEMENTATION_BRANCH),
+)
 def test_live_push_allowlist_accepts_valid_equivalent_fixture(
     tmp_path: Path,
+    target_branch: str,
 ) -> None:
     fixture = _equivalent_repository(tmp_path)
 
     result = ci.classify_ci_mode(
         event=_event(
             fixture,
-            ref="refs/heads/fix/submission-status-api-conformance",
+            ref=f"refs/heads/{target_branch}",
         ),
         git=fixture["git"],
         api=FakeAPI(
             source_sha=fixture["source"],
             target_sha=fixture["merge"],
-            target_ref=ci.IMPLEMENTATION_BRANCH,
+            target_ref=target_branch,
         ),
         now=NOW,
     )
@@ -414,17 +428,29 @@ def test_valid_pr_synthetic_candidate_is_eligible(tmp_path: Path) -> None:
     assert result.source_tree == fixture["git"].tree_sha(fixture["source"])
 
 
-def test_live_pr_allowlist_accepts_valid_candidate(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "target_branch",
+    (ci.IMPLEMENTATION_BRANCH, ci.STAGED_IMPLEMENTATION_BRANCH),
+)
+def test_live_pr_allowlist_accepts_valid_candidate(
+    tmp_path: Path,
+    target_branch: str,
+) -> None:
     fixture = _equivalent_repository(tmp_path)
+    api = FakePRAPI(
+        fixture,
+        ref_overrides={target_branch: fixture["base"]},
+    )
+    api.pull_request_payload["base"]["ref"] = target_branch
 
     result = ci.classify_ci_mode(
-        event=_pr_event(fixture),
+        event=_pr_event(fixture, base_ref=target_branch),
         git=fixture["git"],
-        api=FakePRAPI(fixture),
+        api=api,
         now=NOW,
     )
 
-    assert result.ci_mode == "equivalent-merge"
+    assert result.ci_mode == "equivalent-merge", result.reason
 
 
 def test_live_push_governance_merge_falls_back_to_full(
@@ -999,7 +1025,11 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
     pr_parsed = yaml.load(pr_workflow, Loader=yaml.BaseLoader)
 
     assert parsed["on"]["push"]["branches-ignore"] == ["analytics-assets"]
-    assert parsed["on"]["pull_request"]["branches"] == [ci.IMPLEMENTATION_BRANCH]
+    assert parsed["on"]["pull_request"]["branches"] == [
+        "main",
+        ci.IMPLEMENTATION_BRANCH,
+        ci.STAGED_IMPLEMENTATION_BRANCH,
+    ]
     assert parsed["on"]["pull_request"]["types"] == [
         "opened",
         "reopened",
@@ -1039,6 +1069,7 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
     assert pr_parsed["jobs"]["check-branch"]["permissions"] == {"contents": "read"}
     assert "main" in pr_workflow
     assert ci.IMPLEMENTATION_BRANCH in pr_workflow
+    assert ci.STAGED_IMPLEMENTATION_BRANCH in pr_workflow
     assert "Pull request base branch is allowed." in pr_workflow
     assert "pull_request_target" not in pr_parsed["on"]
     assert "merge_group" not in pr_parsed["on"]
@@ -1049,6 +1080,7 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
     (
         ("main", 0),
         (ci.IMPLEMENTATION_BRANCH, 0),
+        (ci.STAGED_IMPLEMENTATION_BRANCH, 0),
         ("feat/other", 1),
     ),
 )

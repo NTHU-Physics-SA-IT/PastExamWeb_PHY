@@ -86,6 +86,20 @@ backend lint, backend tests, frontend unit coverage, browser E2E, image builds,
 and deployment gates according to the branch and changed paths. CI may
 legitimately run more than the minimum local checks.
 
+Normal implementation pull requests target the active integration branch,
+currently `fix/submission-status-api-conformance`. Equivalent validation is
+available only for exact Repository-approved integration refs and evidence;
+`main` always uses Full CI. Repository logic also recognizes the staged future
+ref `integration/stage-5bd`, but this does not create the branch or transfer
+live protection, allowlist, or integration authority.
+
+An immutable main candidate receives Full CI before its pull request targets
+`main`, and the main pull request itself reaches the same Full-CI workflow.
+After an authorized main merge, semantic-release is callable only from the
+successful exact-main-SHA CI run after `CI Gate`; it remains version authority
+but does not enable or perform production deployment. Branch-authority transfer
+and production governance require separate post-main decisions.
+
 ## Verification budget
 
 Before running checks, record:

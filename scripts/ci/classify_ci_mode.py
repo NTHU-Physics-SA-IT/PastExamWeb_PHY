@@ -20,13 +20,15 @@ from urllib.request import Request, urlopen
 
 
 CI_MODES = frozenset({"full", "equivalent-merge", "docs-only"})
-LIVE_EQUIVALENT_TARGET_REFS: frozenset[str] = frozenset(
-    {"refs/heads/fix/submission-status-api-conformance"}
-)
-LIVE_EQUIVALENT_PR_BASE_REFS: frozenset[str] = frozenset(
-    {"fix/submission-status-api-conformance"}
-)
 IMPLEMENTATION_BRANCH = "fix/submission-status-api-conformance"
+STAGED_IMPLEMENTATION_BRANCH = "integration/stage-5bd"
+IMPLEMENTATION_BRANCHES = frozenset(
+    {IMPLEMENTATION_BRANCH, STAGED_IMPLEMENTATION_BRANCH}
+)
+LIVE_EQUIVALENT_TARGET_REFS: frozenset[str] = frozenset(
+    f"refs/heads/{branch}" for branch in IMPLEMENTATION_BRANCHES
+)
+LIVE_EQUIVALENT_PR_BASE_REFS: frozenset[str] = IMPLEMENTATION_BRANCHES
 SUPPORTED_PR_ACTIONS = frozenset(
     {"opened", "reopened", "synchronize", "ready_for_review"}
 )
@@ -558,7 +560,7 @@ def validate_equivalent_pull_request(
         raise ClassificationFailure("draft pull requests cannot use equivalent mode")
     if event.pr_number < 1:
         raise ClassificationFailure("pull request number is malformed")
-    if event.base_ref != IMPLEMENTATION_BRANCH:
+    if event.base_ref not in IMPLEMENTATION_BRANCHES:
         raise ClassificationFailure("pull request base is not approved")
     if (
         event.head_repository != event.repository
@@ -661,7 +663,7 @@ def classify_ci_mode(
     if event.event_name == "pull_request":
         if event.base_ref == "main":
             return _full("main pull request candidates always run full CI")
-        if event.base_ref != IMPLEMENTATION_BRANCH:
+        if event.base_ref not in IMPLEMENTATION_BRANCHES:
             return _full("unapproved pull request base falls back to full CI")
         try:
             changed_paths = git.changed_paths(event.base_sha, event.head_sha)

@@ -101,9 +101,20 @@ migration milestone.
 
 ## Pull requests
 
-Not every local or exploratory change must become a pull request. When opening
-a formal pull request, target `main`; the `Validate PR base branch` workflow
-rejects other bases, and there is no `dev` integration branch.
+Not every local or exploratory change must become a pull request. Normal
+implementation pull requests target the active integration branch, currently
+`fix/submission-status-api-conformance`. Repository governance is pre-staged to
+recognize `integration/stage-5bd`, but that branch does not become active until
+the post-main checkpoint explicitly creates it and transfers protection and
+allowlist authority. Pre-staging does not retire the current integration branch
+or `feat/exam-report-system`.
+
+Main integration uses a separately authorized immutable candidate based on
+fresh `main`. The final integration SHA is true-merged into that candidate,
+the candidate completes exact-SHA Full CI, and a candidate pull request targets
+`main`. Pull requests targeting `main` always run Full CI and never use
+Equivalent evidence. Merging that pull request is a separate owner-authorized
+operation.
 
 Before merge, the pushed final commit must reach a terminal successful CI
 result for the checks selected by the repository workflows. A pull request
@@ -142,9 +153,13 @@ for generation, review, preflight, upgrade, and recovery boundaries.
 ## Production candidates
 
 Push CI may build images for validation, but image publication is limited to
-`main`. Production candidate preparation also requires its repository gate and
-the protected `production` environment. A prepared candidate is immutable and
-does not activate production or switch traffic automatically.
+`main`. After an exact pushed main SHA completes Full CI and `CI Gate`,
+semantic-release may determine the version and create the Git tag and GitHub
+Release for that same SHA. Semantic-release is not deployment authority.
+
+Production environment governance and production evidence are separate,
+explicitly authorized gates. A prepared candidate or GitHub Release does not
+activate production, enable deployment, or switch traffic automatically.
 
 Candidate evidence must be reviewed before a separately approved activation.
 Follow [production deployment safety](docs/production-deployment.md) for the

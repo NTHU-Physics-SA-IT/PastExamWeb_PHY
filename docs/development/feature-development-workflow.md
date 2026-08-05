@@ -408,6 +408,13 @@ Merge strategy and merge readiness are owned by
 `--no-ff`, its new merge commit needs its own pushed, exact-SHA successful CI
 run; source-branch CI is not a substitute.
 
+Normal implementation work targets the active integration branch. A main
+milestone uses a separately authorized immutable candidate based on fresh
+`main`, a true merge from the final integration SHA, candidate Full CI, and a
+candidate pull request whose base is `main`. Main never uses Equivalent
+validation, and neither staged future branch recognition nor release metadata
+transfers integration, production, or deployment authority.
+
 ## Backend implementation task contract
 
 Before PostgreSQL-backed or runtime-affecting backend implementation, the task

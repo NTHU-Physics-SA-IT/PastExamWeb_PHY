@@ -6,7 +6,9 @@ on:
       - "analytics-assets"
   pull_request:
     branches:
+      - "main"
       - "fix/submission-status-api-conformance"
+      - "integration/stage-5bd"
     types:
       - opened
       - reopened
@@ -302,6 +304,26 @@ jobs:
           --equivalent-result '${{ needs.equivalent_provenance.result }}'
           --docs-result '${{ needs.docs_gate.result }}'
           --full-attestation-result '${{ needs.full_attestation.result }}'
+
+  release:
+    needs: [ci_mode, lint, test, build, ci_gate]
+    if: >-
+      always() &&
+      needs.ci_mode.outputs.ci_mode == 'full' &&
+      needs.lint.result == 'success' &&
+      needs.test.result == 'success' &&
+      needs.build.result == 'success' &&
+      needs.ci_gate.result == 'success' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    uses: ./.github/workflows/release.yml
+    with:
+      release_sha: ${{ github.sha }}
+    secrets: inherit
 
   deploy:
     needs: [ci_mode, lint, test, build, ci_gate]
