@@ -1,7 +1,8 @@
-FROM node:26-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 
-RUN npm i -g pnpm@9.0.0
+RUN corepack enable \
+    && corepack prepare pnpm@10.34.0 --activate
 
 ENV HUSKY=0
 ARG VITE_API_BASE_URL

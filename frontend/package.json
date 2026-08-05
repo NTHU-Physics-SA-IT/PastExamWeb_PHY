@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "pnpm@10.34.0",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -53,7 +54,6 @@
     "vite": "^7.3.2",
     "vite-plugin-compression": "^0.5.1",
     "vite-plugin-eslint": "^1.8.1",
-    "vite-plugin-sitemap": "^0.8.2",
     "vite-plugin-vue-devtools": "^8.1.5",
     "vitest": "^4.1.10"
   },

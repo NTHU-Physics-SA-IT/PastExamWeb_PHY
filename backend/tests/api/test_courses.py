@@ -1191,3 +1191,126 @@ async def test_list_all_courses_direct_returns_courses(
             assert any(item.id == course.id for item in courses)
     finally:
         pass
+
+
+@pytest.mark.asyncio
+async def test_public_course_catalog_does_not_require_auth(
+    client: AsyncClient,
+):
+    app.dependency_overrides.pop(get_current_user, None)
+
+    courses_response = await client.get(
+        "/courses/public"
+    )
+    assert courses_response.status_code == 200
+    assert isinstance(courses_response.json(), dict)
+
+    categories_response = await client.get(
+        "/courses/public/categories"
+    )
+    assert categories_response.status_code == 200
+    assert isinstance(categories_response.json(), list)
+
+
+@pytest.mark.asyncio
+async def test_public_course_archives_expose_safe_metadata_only(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    user = await make_user()
+    course = await _create_course(session_maker)
+    archive = await _create_archive(
+        session_maker,
+        course_id=course.id,
+        uploader_id=user.id,
+    )
+
+    try:
+        app.dependency_overrides.pop(
+            get_current_user,
+            None,
+        )
+
+        response = await client.get(
+            f"/courses/public/{course.id}/archives"
+        )
+
+        assert response.status_code == 200
+
+        rows = response.json()
+        assert len(rows) == 1
+
+        row = rows[0]
+        assert row["id"] == archive.id
+        assert row["name"] == archive.name
+
+        assert "object_name" not in row
+        assert "uploader_id" not in row
+        assert "source_submission_ids" not in row
+        assert "download_count" not in row
+
+        private_response = await client.get(
+            f"/courses/{course.id}/archives"
+        )
+        assert private_response.status_code in {401, 403}
+    finally:
+        async with session_maker() as session:
+            await session.execute(
+                delete(Archive).where(
+                    Archive.course_id == course.id
+                )
+            )
+            await session.execute(
+                delete(Course).where(
+                    Course.id == course.id
+                )
+            )
+            await session.commit()
+
+@pytest.mark.asyncio
+async def test_sitemap_contains_public_routes(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    user = await make_user()
+    course = await _create_course(session_maker)
+    await _create_archive(
+        session_maker,
+        course_id=course.id,
+        uploader_id=user.id,
+    )
+
+    try:
+        response = await client.get(
+            "/seo/sitemap.xml"
+        )
+
+        assert response.status_code == 200
+        assert (
+            response.headers["content-type"]
+            .startswith("application/xml")
+        )
+
+        body = response.text
+        assert "https://physarchive.com/" in body
+        assert (
+            f"https://physarchive.com/courses/{course.id}"
+            in body
+        )
+        assert "/admin" not in body
+        assert "/archive" not in body
+    finally:
+        async with session_maker() as session:
+            await session.execute(
+                delete(Archive).where(
+                    Archive.course_id == course.id
+                )
+            )
+            await session.execute(
+                delete(Course).where(
+                    Course.id == course.id
+                )
+            )
+            await session.commit()

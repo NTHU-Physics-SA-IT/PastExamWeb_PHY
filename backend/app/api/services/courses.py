@@ -67,6 +67,8 @@ from app.core.config import settings
 from app.services.personal_notifications import enqueue_personal_notification
 from app.services.discussions import soft_delete_discussion_message
 
+from pydantic import BaseModel
+
 router = APIRouter()
 
 # In-memory connection registry (single-process broadcast).
@@ -115,6 +117,15 @@ LEGACY_CATEGORY_ALIASES = {
     "interdisciplinary": "math-department",
 }
 
+class PublicArchiveRead(BaseModel):
+    """Only metadata that is safe to expose without authentication."""
+
+    id: int
+    name: str
+    academic_year: int
+    archive_type: ArchiveType
+    professor: str
+    has_answers: bool
 
 class CategorizedCourses(dict):
     def model_dump(self):
@@ -326,19 +337,22 @@ def _discussion_public_display_name(
     return (name or "").strip()
 
 
-@router.get("/categories", response_model=List[CourseCategoryRead])
-async def list_course_categories(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_session),
-):
+async def _list_course_categories_data(
+    db: AsyncSession,
+) -> list[CourseCategoryRead]:
     result = await db.execute(
         select(CourseCategoryConfig)
         .where(CourseCategoryConfig.is_active.is_(True))
-        .order_by(CourseCategoryConfig.order_index, CourseCategoryConfig.id)
+        .order_by(
+            CourseCategoryConfig.order_index,
+            CourseCategoryConfig.id,
+        )
     )
     categories = result.scalars().all()
+
     if categories:
         return categories
+
     return [
         CourseCategoryRead(
             id=index + 1,
@@ -346,43 +360,154 @@ async def list_course_categories(
             name=name,
             label=label,
             icon=icon,
-            badge_color=DEFAULT_CATEGORY_BADGE_COLORS.get(key, DEFAULT_CATEGORY_BADGE_COLOR),
+            badge_color=DEFAULT_CATEGORY_BADGE_COLORS.get(
+                key,
+                DEFAULT_CATEGORY_BADGE_COLOR,
+            ),
             order_index=index,
             is_active=True,
         )
         for index, (key, name, label, icon) in enumerate(DEFAULT_CATEGORIES)
     ]
 
-
-@router.get("", response_model=dict[str, List[CourseInfo]])
-async def get_categorized_courses(
+@router.get("/categories", response_model=List[CourseCategoryRead])
+async def list_course_categories(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
+    return await _list_course_categories_data(db)
+
+@router.get(
+    "/public/categories",
+    response_model=List[CourseCategoryRead],
+)
+async def list_public_course_categories(
+    db: AsyncSession = Depends(get_session),
+):
+    return await _list_course_categories_data(db)
+
+
+async def _get_categorized_courses_data(
+    db: AsyncSession,
+) -> CategorizedCourses:
     """
-    Get all courses grouped by category.
-    Returns courses with their IDs grouped by category.
+    Return all visible courses grouped by category.
+
+    This helper contains no authentication dependency, so it can be
+    reused by both the authenticated and public read-only endpoints.
     """
     query = select(Course).where(Course.deleted_at.is_(None))
     result = await db.execute(query)
-    category_order = await _category_order_map(db)
-    courses = _visible_courses(result.scalars().all(), category_order)
 
-    categorized_courses = CategorizedCourses({category: [] for category in category_order})
+    category_order = await _category_order_map(db)
+    courses = _visible_courses(
+        result.scalars().all(),
+        category_order,
+    )
+
+    categorized_courses = CategorizedCourses(
+        {
+            category: []
+            for category in category_order
+        }
+    )
+
     for course in courses:
         course_info = CourseInfo(
             id=course.id,
             name=format_course_display_name(course.name),
             order_index=course.order_index,
         )
-        categorized_courses.setdefault(_course_category_value(course), []).append(course_info)
 
-    for legacy_key, canonical_key in LEGACY_CATEGORY_ALIASES.items():
+        categorized_courses.setdefault(
+            _course_category_value(course),
+            [],
+        ).append(course_info)
+
+    # 保留既有 legacy aliases，避免影響原本前端邏輯。
+    for legacy_key, canonical_key in (
+        LEGACY_CATEGORY_ALIASES.items()
+    ):
         if canonical_key in categorized_courses:
-            categorized_courses[legacy_key] = categorized_courses[canonical_key]
+            categorized_courses[legacy_key] = (
+                categorized_courses[canonical_key]
+            )
 
     return categorized_courses
 
+
+@router.get(
+    "",
+    response_model=dict[str, List[CourseInfo]],
+)
+async def get_categorized_courses(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    """
+    Authenticated course catalog used by the existing application.
+    """
+    return await _get_categorized_courses_data(db)
+
+
+@router.get(
+    "/public",
+    response_model=dict[str, List[CourseInfo]],
+)
+async def get_public_categorized_courses(
+    db: AsyncSession = Depends(get_session),
+):
+    """
+    Public read-only course catalog.
+
+    Only exposes course IDs, display names, order indexes and category
+    grouping. It does not expose files, submissions or user data.
+    """
+    return await _get_categorized_courses_data(db)
+
+@router.get(
+    "/public/{course_id}/archives",
+    response_model=List[PublicArchiveRead],
+)
+async def get_public_course_archives(
+    course_id: int,
+    db: AsyncSession = Depends(get_session),
+):
+    course_result = await db.execute(
+        select(Course).where(
+            Course.id == course_id,
+            Course.deleted_at.is_(None),
+        )
+    )
+    course = course_result.scalar_one_or_none()
+
+    if course is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Course not found",
+        )
+
+    archive_result = await db.execute(
+        select(Archive)
+        .where(*_public_archive_conditions(course_id=course_id))
+        .order_by(
+            Archive.academic_year.desc(),
+            Archive.id.desc(),
+        )
+    )
+    archives = archive_result.scalars().all()
+
+    return [
+        PublicArchiveRead(
+            id=int(archive.id),
+            name=archive.name,
+            academic_year=archive.academic_year,
+            archive_type=archive.archive_type,
+            professor=archive.professor,
+            has_answers=archive.has_answers,
+        )
+        for archive in archives
+    ]
 
 @router.post("/requests", response_model=CourseSubmissionRead)
 async def create_course_request(

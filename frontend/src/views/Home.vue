@@ -67,6 +67,46 @@
       </div>
     </section>
 
+    <section
+      class="home-seo-summary"
+      aria-labelledby="home-seo-title"
+    >
+      <div class="home-seo-summary-inner">
+        <div class="home-seo-copy">
+          <p class="home-seo-eyebrow">
+            NTHU PHYSICS PAST EXAMS
+          </p>
+
+          <h2 id="home-seo-title">
+            清大物理系歷屆考古題與解答
+          </h2>
+
+          <p>
+            PhysArchive 是由清大物理系系學會資訊組維護的
+            考古題整理平台，收錄普通物理、電磁學、理論力學、
+            量子物理及其他相關課程的歷屆考題、解答、
+            授課教師與學期資訊。
+          </p>
+
+          <p>
+            未登入也能瀏覽公開課程與收錄資訊；
+            登入後可依網站權限預覽或下載完整文件。
+          </p>
+        </div>
+
+        <RouterLink
+          :to="{ name: 'PublicCourses' }"
+          class="home-course-link"
+        >
+          <span>瀏覽公開課程目錄</span>
+          <i
+            class="pi pi-arrow-right"
+            aria-hidden="true"
+          ></i>
+        </RouterLink>
+      </div>
+    </section>
+
     <section ref="statsSection" class="dashboard-strip">
       <article
         v-for="(stat, index) in statistics"
@@ -97,6 +137,7 @@ import { useTheme } from '../utils/useTheme'
 import { statisticsService } from '../api'
 import { renderToString } from 'katex'
 import { useFormulaPhysics } from '../composables/useFormulaPhysics'
+import { SITE_URL, setSeo } from '../utils/seo'
 import 'katex/dist/katex.min.css'
 
 const { isDarkTheme } = useTheme()
@@ -268,7 +309,53 @@ const renderedFormulaCards = computed(() =>
   })
 )
 
+function applyHomeSeo() {
+  setSeo({
+    title:
+      '清大考古題｜清大物理系歷屆考題與解答｜PhysArchive',
+
+    description:
+      '清大物理考古題整理平台，收錄普通物理、電磁學、理論力學、量子物理等課程的歷屆考題、解答與課程資料，由清大物理系系學會資訊組維護。',
+
+    canonicalPath: '/',
+
+    robots: 'index, follow',
+
+    image: '/og-image.png',
+
+    jsonLd: [
+      {
+        '@type': 'WebSite',
+        '@id': `${SITE_URL}/#website`,
+        name: '清大物理考古系統',
+        alternateName: 'PhysArchive',
+        url: `${SITE_URL}/`,
+        description:
+          '清大物理系歷屆考題、解答與課程資料整理平台。',
+        inLanguage: 'zh-TW',
+        publisher: {
+          '@id': `${SITE_URL}/#organization`,
+        },
+      },
+      {
+        '@type': 'Organization',
+        '@id': `${SITE_URL}/#organization`,
+        name: '清大物理系系學會資訊組',
+        url: `${SITE_URL}/`,
+        logo: {
+          '@type': 'ImageObject',
+          url: `${SITE_URL}/physics-symbol.png`,
+        },
+        sameAs: [
+          'https://github.com/NTHU-Physics-SA-IT/PastExamWeb_PHY',
+        ],
+      },
+    ],
+  })
+}
+
 onMounted(async () => {
+  applyHomeSeo()
   await fetchStatistics()
 })
 
@@ -1084,6 +1171,8 @@ h1 {
   color: rgba(137, 108, 43, 0.78);
 }
 
+
+
 @media (min-width: 1181px) {
   .hero-shell {
     width: min(1280px, calc(100% - clamp(3rem, 8vw, 10rem)));
@@ -1881,4 +1970,91 @@ h1 {
     left: 8%;
   }
 }
+
+.home-seo-summary {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  margin: 0 0 2rem;
+  padding: clamp(1.5rem, 4vw, 2.5rem) 0;
+}
+
+.home-seo-summary-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 2rem;
+
+  width: min(1180px, calc(100% - 2rem));
+  margin: 0 auto;
+}
+
+.home-seo-copy {
+  width: min(100%, 44rem);
+  max-width: 44rem;
+}
+
+.home-seo-eyebrow {
+  margin: 0 0 0.95rem;
+  color: #9be0d4;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+
+.home-seo-summary h2 {
+  margin: 0 0 1rem;
+  font-size: clamp(1.55rem, 4vw, 2.35rem);
+  line-height: 1.25;
+}
+
+.home-seo-summary p {
+  margin: 0.65rem 0 0;
+  color: var(--text-secondary);
+  line-height: 1.8;
+}
+
+.home-course-link {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2.75rem;
+  margin-bottom: 0.15rem;
+  padding: 0.7rem 0;
+  color: var(--text-primary);
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.home-course-link:hover {
+  color: var(--primary-color-text);
+  background: var(--primary-color);
+  transform: translateY(-1px);
+}
+
+.home-course-link:focus-visible {
+  outline: 3px solid
+    color-mix(
+      in srgb,
+      var(--primary-color) 35%,
+      transparent
+    );
+  outline-offset: 3px;
+}
+
+@media (max-width: 700px) {
+  .home-seo-summary-inner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1.5rem;
+  }
+
+  .home-course-link {
+    align-self: flex-start;
+    justify-content: flex-start;
+  }
+}
+
 </style>
