@@ -392,6 +392,13 @@ takedown are separate concepts.
 
 ### Intended invariant
 
+- The administrator Trash list projects `canRestore` and
+  `canPermanentDelete` as non-null legal-action authority for every returned
+  entity. The projection uses the same current parent, lifecycle, and
+  dependency conditions enforced by the corresponding mutation.
+- Trash dependency strings are display-only context. Frontends do not parse
+  localized wording to grant an action; missing, malformed, or non-boolean
+  authority fails closed.
 - Course or Archive trash/restore does not notify submitters.
 - Submission trash follows the paired-item rule in
   [Entity relationships](entity-relationships.md).

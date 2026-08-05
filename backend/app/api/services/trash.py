@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import logging
 from typing import List, Optional
@@ -86,6 +87,26 @@ class TrashActionRequest(BaseModel):
     item_id: int
 
 
+@dataclass(frozen=True)
+class TrashActionAuthority:
+    dependencies: tuple[str, ...] = ()
+    can_restore: bool = True
+    can_permanent_delete: bool = True
+
+
+def _build_trash_action_authority(
+    dependencies: list[str],
+    *,
+    restore_blocked: bool = False,
+    permanent_delete_blocked: bool = False,
+) -> TrashActionAuthority:
+    return TrashActionAuthority(
+        dependencies=tuple(item for item in dependencies if item),
+        can_restore=not restore_blocked,
+        can_permanent_delete=not permanent_delete_blocked,
+    )
+
+
 def _to_trash_item(
     *,
     item_type: TrashEntityType,
@@ -115,9 +136,14 @@ def _to_trash_item(
     comment_snapshot: Optional[str] = None,
     archive_name: Optional[str] = None,
     dependencies: Optional[list[str]] = None,
-    can_restore: Optional[bool] = None,
-    can_permanent_delete: Optional[bool] = None,
+    can_restore: bool = True,
+    can_permanent_delete: bool = True,
+    action_authority: Optional[TrashActionAuthority] = None,
 ) -> TrashItem:
+    if action_authority is not None:
+        dependencies = list(action_authority.dependencies)
+        can_restore = action_authority.can_restore
+        can_permanent_delete = action_authority.can_permanent_delete
     return TrashItem(
         item_type=item_type,
         id=item_id,
@@ -227,7 +253,10 @@ async def _count_rows(db: SQLModelAsyncSession, statement) -> int:
     return int(result.scalar() or 0)
 
 
-async def _get_category_dependency_messages(db: SQLModelAsyncSession, category: CourseCategoryConfig) -> list[str]:
+async def _get_category_action_authority(
+    db: SQLModelAsyncSession,
+    category: CourseCategoryConfig,
+) -> TrashActionAuthority:
     active_courses = await _count_rows(
         db,
         select(func.count(Course.id)).where(
@@ -261,14 +290,22 @@ async def _get_category_dependency_messages(db: SQLModelAsyncSession, category: 
         ),
     )
     course_count = active_courses + trashed_courses
-    return [
-        f"阻擋永久刪除：{_dependency_count(course_count, '門')}課程仍屬於此分類，請先永久刪除課程" if course_count else "",
-        f"阻擋永久刪除：{_dependency_count(course_submissions, '筆')}啟用中課程投稿仍屬於此分類" if course_submissions else "",
-        f"阻擋永久刪除：{_dependency_count(active_archive_submissions, '筆')}啟用中投稿仍屬於此分類" if active_archive_submissions else "",
-    ]
+    return _build_trash_action_authority(
+        [
+            f"阻擋永久刪除：{_dependency_count(course_count, '門')}課程仍屬於此分類，請先永久刪除課程" if course_count else "",
+            f"阻擋永久刪除：{_dependency_count(course_submissions, '筆')}啟用中課程投稿仍屬於此分類" if course_submissions else "",
+            f"阻擋永久刪除：{_dependency_count(active_archive_submissions, '筆')}啟用中投稿仍屬於此分類" if active_archive_submissions else "",
+        ],
+        permanent_delete_blocked=bool(
+            course_count or course_submissions or active_archive_submissions
+        ),
+    )
 
 
-async def _get_course_dependency_messages(db: SQLModelAsyncSession, course: Course) -> list[str]:
+async def _get_course_action_authority(
+    db: SQLModelAsyncSession,
+    course: Course,
+) -> TrashActionAuthority:
     category_is_trashed = await _count_rows(
         db,
         select(func.count(CourseCategoryConfig.id)).where(
@@ -296,19 +333,23 @@ async def _get_course_dependency_messages(db: SQLModelAsyncSession, course: Cour
         "阻擋還原：原分類仍在垃圾桶" if category_is_trashed else "",
     ]
 
-    return [
-        *restore_blockers,
-        f"阻擋永久刪除：{_dependency_count(active_archives, '筆')}啟用中考古題仍屬於此課程" if active_archives else "",
-        f"一併永久刪除：{_dependency_count(trashed_archives, '筆')}已刪除考古題屬於此課程" if trashed_archives else "",
-    ]
+    return _build_trash_action_authority(
+        [
+            *restore_blockers,
+            f"阻擋永久刪除：{_dependency_count(active_archives, '筆')}啟用中考古題仍屬於此課程" if active_archives else "",
+            f"一併永久刪除：{_dependency_count(trashed_archives, '筆')}已刪除考古題屬於此課程" if trashed_archives else "",
+        ],
+        restore_blocked=bool(category_is_trashed),
+        permanent_delete_blocked=bool(active_archives),
+    )
 
 
-async def _get_archive_dependency_messages(
+async def _get_archive_action_authority(
     db: SQLModelAsyncSession,
     archive: Archive,
     source_submission: Optional[ArchiveSubmission] = None,
     restore_parent_submission: Optional[ArchiveSubmission] = None,
-) -> list[str]:
+) -> TrashActionAuthority:
     course_is_trashed = await _count_rows(
         db,
         select(func.count(Course.id)).where(
@@ -377,29 +418,36 @@ async def _get_archive_dependency_messages(
         if item is not None
     ]
 
-    return [
-        (
-            "阻擋還原：請先還原原課程"
-            if restore_parent_submission and _is_course_trash_temporary_submission(restore_parent_submission)
-            else "阻擋還原：請先還原上層投稿"
-            if restore_parent_submission
-            else ""
-        ),
-        *restore_blockers,
-        f"一併永久刪除：{_dependency_count(linked_comments, '則')}留言將在考古題永久刪除時一併刪除" if linked_comments else "",
-        f"阻擋永久刪除：{_dependency_count(active_linked_submissions, '筆')}啟用中投稿仍連到此考古題" if active_linked_submissions else "",
-        f"關聯投稿：投稿編號 #{source_submission.id}" if source_submission and source_submission.id else "",
-        (
-            f"關聯投稿：投稿編號 #{temp_submission_ids[0]} 已暫時下架"
-            if len(temp_submission_ids) == 1
-            else f"關聯投稿：{_dependency_count(temporarily_takedown_submissions, '筆')}投稿已暫時下架"
-            if temporarily_takedown_submissions
-            else ""
-        ),
-    ]
+    return _build_trash_action_authority(
+        [
+            (
+                "阻擋還原：請先還原原課程"
+                if restore_parent_submission and _is_course_trash_temporary_submission(restore_parent_submission)
+                else "阻擋還原：請先還原上層投稿"
+                if restore_parent_submission
+                else ""
+            ),
+            *restore_blockers,
+            f"一併永久刪除：{_dependency_count(linked_comments, '則')}留言將在考古題永久刪除時一併刪除" if linked_comments else "",
+            f"阻擋永久刪除：{_dependency_count(active_linked_submissions, '筆')}啟用中投稿仍連到此考古題" if active_linked_submissions else "",
+            f"關聯投稿：投稿編號 #{source_submission.id}" if source_submission and source_submission.id else "",
+            (
+                f"關聯投稿：投稿編號 #{temp_submission_ids[0]} 已暫時下架"
+                if len(temp_submission_ids) == 1
+                else f"關聯投稿：{_dependency_count(temporarily_takedown_submissions, '筆')}投稿已暫時下架"
+                if temporarily_takedown_submissions
+                else ""
+            ),
+        ],
+        restore_blocked=bool(restore_parent_submission or course_is_trashed),
+        permanent_delete_blocked=bool(active_linked_submissions),
+    )
 
 
-async def _get_user_dependency_messages(db: SQLModelAsyncSession, user: User) -> list[str]:
+async def _get_user_action_authority(
+    db: SQLModelAsyncSession,
+    user: User,
+) -> TrashActionAuthority:
     active_archives = await _count_rows(
         db,
         select(func.count(Archive.id)).where(
@@ -439,12 +487,15 @@ async def _get_user_dependency_messages(db: SQLModelAsyncSession, user: User) ->
         ),
     )
 
-    return [
-        f"阻擋永久刪除：{_dependency_count(active_archives, '筆')}啟用中考古題仍屬於此使用者" if active_archives else "",
-        f"一併永久刪除：{_dependency_count(trashed_archives, '筆')}已刪除考古題屬於此使用者" if trashed_archives else "",
-        f"阻擋永久刪除：{_dependency_count(active_submissions, '筆')}啟用中投稿仍屬於此使用者" if active_submissions else "",
-        f"一併永久刪除：{_dependency_count(trashed_submissions, '筆')}已刪除投稿屬於此使用者" if trashed_submissions else "",
-    ]
+    return _build_trash_action_authority(
+        [
+            f"阻擋永久刪除：{_dependency_count(active_archives, '筆')}啟用中考古題仍屬於此使用者" if active_archives else "",
+            f"一併永久刪除：{_dependency_count(trashed_archives, '筆')}已刪除考古題屬於此使用者" if trashed_archives else "",
+            f"阻擋永久刪除：{_dependency_count(active_submissions, '筆')}啟用中投稿仍屬於此使用者" if active_submissions else "",
+            f"一併永久刪除：{_dependency_count(trashed_submissions, '筆')}已刪除投稿屬於此使用者" if trashed_submissions else "",
+        ],
+        permanent_delete_blocked=bool(active_archives or active_submissions),
+    )
 
 
 async def _resolve_submission_linked_archive(
@@ -476,20 +527,30 @@ async def _resolve_submission_linked_archive(
     return (linked_archive, []) if linked_archive else (None, [])
 
 
-async def _get_submission_dependency_messages(db: SQLModelAsyncSession, submission: ArchiveSubmission) -> list[str]:
+async def _get_submission_action_authority(
+    db: SQLModelAsyncSession,
+    submission: ArchiveSubmission,
+) -> TrashActionAuthority:
     if submission.lifecycle_reason == LIFECYCLE_LINKED_ARCHIVE_PERMANENTLY_DELETED:
-        return ["阻擋還原：關聯考古題已永久刪除"]
+        return _build_trash_action_authority(
+            ["阻擋還原：關聯考古題已永久刪除"],
+            restore_blocked=True,
+        )
 
     if _is_course_trash_temporary_submission(submission):
         previous_status = get_course_trash_previous_status(submission.lifecycle_reason)
-        return [
-            "阻擋還原：請先還原原課程",
-            f"隨課程復原：課程復原後回到{_format_submission_status_label(previous_status)}",
-        ]
+        return _build_trash_action_authority(
+            [
+                "阻擋還原：請先還原原課程",
+                f"隨課程復原：課程復原後回到{_format_submission_status_label(previous_status)}",
+            ],
+            restore_blocked=True,
+            permanent_delete_blocked=True,
+        )
 
     linked_archive, fallback_warnings = await _resolve_submission_linked_archive(db, submission)
     if fallback_warnings or not linked_archive:
-        return fallback_warnings
+        return _build_trash_action_authority(fallback_warnings)
 
     linked_course = await db.get(Course, linked_archive.course_id) if linked_archive.course_id is not None else None
     linked_course_blocker = (
@@ -499,10 +560,13 @@ async def _get_submission_dependency_messages(db: SQLModelAsyncSession, submissi
     )
 
     if linked_archive.deleted_at is not None:
-        return [
-            linked_course_blocker,
-            "一併永久刪除：1 筆關聯考古題",
-        ] if linked_course_blocker else ["一併永久刪除：1 筆關聯考古題"]
+        return _build_trash_action_authority(
+            [
+                linked_course_blocker,
+                "一併永久刪除：1 筆關聯考古題",
+            ],
+            restore_blocked=bool(linked_course_blocker),
+        )
 
     linked_comments = await _count_rows(
         db,
@@ -542,13 +606,17 @@ async def _get_submission_dependency_messages(db: SQLModelAsyncSession, submissi
     if linked_archive.deleted_at is None:
         archive_status.append("關聯考古題仍啟用中")
 
-    return [
-        *archive_status,
-        f"一併永久刪除：{_dependency_count(linked_comments, '則')}留言將在關聯考古題永久刪除時一併刪除" if linked_comments else "",
-        f"一併永久刪除：{_dependency_count(trashed_comments, '則')}已刪除留言將一併刪除" if trashed_comments else "",
-        f"阻擋永久刪除：{_dependency_count(linked_other_submissions, '筆')}啟用中投稿仍連到關聯考古題" if linked_other_submissions else "",
-        f"一併永久刪除：{_dependency_count(trashed_submissions, '筆')}已刪除投稿連到關聯考古題" if trashed_submissions else "",
-    ]
+    return _build_trash_action_authority(
+        [
+            *archive_status,
+            f"一併永久刪除：{_dependency_count(linked_comments, '則')}留言將在關聯考古題永久刪除時一併刪除" if linked_comments else "",
+            f"一併永久刪除：{_dependency_count(trashed_comments, '則')}已刪除留言將一併刪除" if trashed_comments else "",
+            f"阻擋永久刪除：{_dependency_count(linked_other_submissions, '筆')}啟用中投稿仍連到關聯考古題" if linked_other_submissions else "",
+            f"一併永久刪除：{_dependency_count(trashed_submissions, '筆')}已刪除投稿連到關聯考古題" if trashed_submissions else "",
+        ],
+        restore_blocked=bool(linked_course_blocker),
+        permanent_delete_blocked=bool(linked_other_submissions),
+    )
 
 
 def _build_trash_error(item_label: str, dependencies: list[str]) -> str:
@@ -1214,7 +1282,7 @@ async def list_trash_items(
                         deleted_by_id=category.deleted_by_id,
                         deleted_by_name=_format_deleted_by(users_by_id, category.deleted_by_id),
                         status="deleted",
-                        dependencies=await _get_category_dependency_messages(db, category),
+                        action_authority=await _get_category_action_authority(db, category),
                     )
                 )
             except Exception as exc:
@@ -1262,7 +1330,7 @@ async def list_trash_items(
                         parent_type="course_category",
                         parent_id=category.id if category else None,
                         parent_name=category.name if category else course.category,
-                        dependencies=await _get_course_dependency_messages(db, course),
+                        action_authority=await _get_course_action_authority(db, course),
                     )
                 )
             except Exception as exc:
@@ -1368,7 +1436,7 @@ async def list_trash_items(
                         course_id=archive.course_id,
                         course_name=course.name if course else None,
                         source_submission_id=source_submission.id if source_submission else None,
-                        dependencies=await _get_archive_dependency_messages(
+                        action_authority=await _get_archive_action_authority(
                             db,
                             archive,
                             source_submission,
@@ -1432,7 +1500,7 @@ async def list_trash_items(
                         deleted_by_id=user.deleted_by_id,
                         deleted_by_name=_format_deleted_by(users_by_id, user.deleted_by_id),
                         status="deleted",
-                        dependencies=await _get_user_dependency_messages(db, user),
+                        action_authority=await _get_user_action_authority(db, user),
                     )
                 )
             except Exception as exc:
@@ -1559,9 +1627,9 @@ async def list_trash_items(
                             if parent_course
                             else linked_course.name if linked_course else submission.requested_course_name
                         ),
-                        can_restore=False if is_course_trash_temporary else None,
-                        can_permanent_delete=False if is_course_trash_temporary else None,
-                        dependencies=await _get_submission_dependency_messages(db, submission),
+                        action_authority=await _get_submission_action_authority(
+                            db, submission
+                        ),
                     )
                 )
             except Exception as exc:

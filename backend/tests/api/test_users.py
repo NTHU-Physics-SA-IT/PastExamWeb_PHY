@@ -639,6 +639,8 @@ async def test_user_trash_records_authenticated_deleter(
         assert target_item["user_email"] == target.email
         assert target_item["deleted_by_id"] == admin_a.id
         assert target_item["deleted_by_name"] == "刪除管理員 A"
+        assert target_item["canRestore"] is True
+        assert target_item["canPermanentDelete"] is True
 
         legacy_item = next(item for item in trashed_users if item["id"] == legacy.id)
         assert legacy_item["deleted_by_id"] is None
