@@ -6,6 +6,11 @@ import yaml
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MAIN_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "main.yml"
 RELEASE_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "release.yml"
+CONTRIBUTING = REPOSITORY_ROOT / "CONTRIBUTING.md"
+VALIDATION = REPOSITORY_ROOT / "docs" / "development" / "validation.md"
+FEATURE_WORKFLOW = (
+    REPOSITORY_ROOT / "docs" / "development" / "feature-development-workflow.md"
+)
 
 
 def _workflow(path: Path) -> tuple[str, dict]:
@@ -96,3 +101,19 @@ def test_main_calls_release_only_after_successful_full_ci_gate() -> None:
         "ci_gate",
     ]
     assert "vars.PRODUCTION_DEPLOY_ENABLED == 'true'" in source
+
+
+def test_governance_documentation_matches_staged_branch_and_release_contract() -> None:
+    contributing = CONTRIBUTING.read_text(encoding="utf-8")
+    validation = VALIDATION.read_text(encoding="utf-8")
+    feature_workflow = FEATURE_WORKFLOW.read_text(encoding="utf-8")
+    combined = "\n".join((contributing, validation, feature_workflow))
+
+    assert "fix/submission-status-api-conformance" in contributing
+    assert "integration/stage-5bd" in contributing
+    assert "does not become active" in contributing
+    assert "does not create the branch" in validation
+    assert "Main never uses Equivalent" in feature_workflow
+    assert "exact-main-SHA CI run after `CI Gate`" in validation
+    assert "Semantic-release is not deployment authority" in contributing
+    assert "hard-code `v1.8.0`" not in combined
