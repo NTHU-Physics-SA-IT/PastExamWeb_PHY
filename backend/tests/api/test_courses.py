@@ -34,7 +34,7 @@ from app.models.models import (
     UserRoles,
 )
 from app.utils.auth import get_current_user
-
+from app.core.config import settings
 
 async def _create_course(
     session_maker,
@@ -1273,9 +1273,17 @@ async def test_sitemap_contains_public_routes(
     client: AsyncClient,
     session_maker,
     make_user,
+    monkeypatch,
 ):
+    monkeypatch.setattr(
+        settings,
+        "FRONTEND_URL",
+        "https://physarchive.com",
+    )
+
     user = await make_user()
     course = await _create_course(session_maker)
+
     await _create_archive(
         session_maker,
         course_id=course.id,
@@ -1288,17 +1296,18 @@ async def test_sitemap_contains_public_routes(
         )
 
         assert response.status_code == 200
-        assert (
-            response.headers["content-type"]
-            .startswith("application/xml")
-        )
+        assert response.headers[
+            "content-type"
+        ].startswith("application/xml")
 
         body = response.text
+
         assert "https://physarchive.com/" in body
         assert (
             f"https://physarchive.com/courses/{course.id}"
             in body
         )
+
         assert "/admin" not in body
         assert "/archive" not in body
     finally:
