@@ -2,16 +2,7 @@ import type { Locator, Page, TestInfo } from '@playwright/test'
 import { adminTest as test, expect } from '../support/adminTest'
 import { mockAdminCourseEndpoints } from '../support/adminFixtures'
 import { JSON_HEADERS } from '../support/constants'
-import { buildJwt } from '../support/jwt'
 import { clickWhenVisible } from '../support/ui'
-
-const ADMIN_TOKEN = buildJwt({
-  uid: 1,
-  email: 'admin@example.com',
-  name: 'Admin',
-  is_admin: true,
-  exp: 4_102_444_800,
-})
 
 const reviewItems = [
   {
@@ -202,13 +193,24 @@ const captureEvidence = async (page: Page, testInfo: TestInfo, name: string) => 
   await page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
 }
 
+const openAdminReviewCenter = async (page: Page) => {
+  await page.goto('/admin', { waitUntil: 'networkidle' })
+
+  await expect(page.getByRole('button', { name: '管理中心', exact: true })).toBeVisible()
+  const reviewTab = page.getByRole('tab', { name: '審核中心', exact: true })
+  await clickWhenVisible(reviewTab)
+  await expect(reviewTab).toHaveAttribute('aria-selected', 'true')
+
+  const reviewPanel = page.getByRole('tabpanel', { name: '審核中心', exact: true })
+  await expect(reviewPanel).toBeVisible()
+  const reviewTable = reviewPanel.locator('.review-request-table--new')
+  await expect(reviewTable).toBeVisible()
+  await expect(reviewTable).toContainText('Pending Core UI')
+  await expect(reviewTable).toContainText('Takedown Core UI')
+}
+
 test.describe('Admin › Trash Core UI', () => {
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript((token) => {
-      window.sessionStorage.setItem('auth-token', token)
-      window.localStorage.setItem('admin-current-tab', '3')
-      window.localStorage.setItem('personal-settings-font-size', 'display-percent:100')
-    }, ADMIN_TOKEN)
     await mockTrashCoreEndpoints(page)
   })
 
@@ -216,7 +218,7 @@ test.describe('Admin › Trash Core UI', () => {
     page,
   }, testInfo) => {
     await page.setViewportSize({ width: 1440, height: 1000 })
-    await page.goto('/admin', { waitUntil: 'networkidle' })
+    await openAdminReviewCenter(page)
 
     const pendingRow = page.locator('.review-request-table--new tbody tr').filter({
       hasText: 'Pending Core UI',
@@ -259,7 +261,7 @@ test.describe('Admin › Trash Core UI', () => {
     page,
   }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 1000 })
-    await page.goto('/admin', { waitUntil: 'networkidle' })
+    await openAdminReviewCenter(page)
 
     const pendingRow = page.locator('.review-request-table--new tbody tr').filter({
       hasText: 'Pending Core UI',
