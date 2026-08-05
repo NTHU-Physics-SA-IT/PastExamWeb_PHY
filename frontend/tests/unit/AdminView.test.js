@@ -143,6 +143,7 @@ const approveSubmissionMock = vi.hoisted(() => vi.fn())
 const rejectSubmissionMock = vi.hoisted(() => vi.fn())
 const takedownSubmissionMock = vi.hoisted(() => vi.fn())
 const republishSubmissionMock = vi.hoisted(() => vi.fn())
+const deleteSubmissionMock = vi.hoisted(() => vi.fn())
 
 const trackEventMock = vi.hoisted(() => vi.fn())
 const isUnauthorizedErrorMock = vi.hoisted(() => vi.fn(() => false))
@@ -216,6 +217,7 @@ vi.mock('@/api', () => ({
     rejectSubmission: rejectSubmissionMock,
     takedownSubmission: takedownSubmissionMock,
     republishSubmission: republishSubmissionMock,
+    deleteSubmission: deleteSubmissionMock,
   },
 }))
 
@@ -258,10 +260,12 @@ describe('AdminView', () => {
     rejectSubmissionMock.mockReset()
     takedownSubmissionMock.mockReset()
     republishSubmissionMock.mockReset()
+    deleteSubmissionMock.mockReset()
     approveSubmissionMock.mockResolvedValue({ data: {} })
     rejectSubmissionMock.mockResolvedValue({ data: {} })
     takedownSubmissionMock.mockResolvedValue({ data: {} })
     republishSubmissionMock.mockResolvedValue({ data: {} })
+    deleteSubmissionMock.mockResolvedValue({ data: { changed: true } })
     getSubmissionStatisticsMock.mockImplementation((range) =>
       Promise.resolve({ data: makeSubmissionStatistics(range, { 0: 2, 1: 1 }) })
     )
@@ -441,6 +445,134 @@ describe('AdminView', () => {
     expect(takedownSubmissionMock).toHaveBeenCalledTimes(1)
     expect(takedownSubmissionMock).toHaveBeenCalledWith(7201, 'approved')
     expect(approveSubmissionMock).not.toHaveBeenCalled()
+  })
+
+  it('intersects the approved review product matrix with backend authority', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    const actionKeys = (item) => wrapper.vm.getReviewRowActions(item).map(({ key }) => key)
+
+    expect(
+      actionKeys({
+        status: 'pending',
+        available_actions: ['approve', 'takedown', 'reject', 'delete'],
+      })
+    ).toEqual(['approve', 'takedown', 'reject', 'delete'])
+    expect(
+      actionKeys({ status: 'pending', available_actions: ['approve', 'reject', 'delete'] })
+    ).toEqual(['approve', 'reject', 'delete'])
+    expect(actionKeys({ status: 'takedown', available_actions: ['republish', 'delete'] })).toEqual([
+      'republish',
+      'delete',
+    ])
+    expect(
+      actionKeys({
+        status: 'approved',
+        available_actions: ['approve', 'takedown', 'reject', 'delete'],
+      })
+    ).toEqual(['takedown', 'reject', 'delete'])
+    expect(
+      actionKeys({ status: 'rejected', available_actions: ['approve', 'takedown', 'delete'] })
+    ).toEqual(['approve', 'delete'])
+    expect(actionKeys({ status: 'deleted', available_actions: ['delete'] })).toEqual([])
+    expect(actionKeys({ status: 'pending' })).toEqual([])
+    expect(actionKeys({ status: 'pending', available_actions: 'approve' })).toEqual([])
+    expect(actionKeys({ status: 'pending', available_actions: ['unknown'] })).toEqual([])
+
+    expect(
+      wrapper.vm.getReviewRowActions({ status: 'pending', available_actions: ['takedown'] }).at(0)
+    ).toMatchObject({
+      label: '下架',
+      icon: 'pi pi-eye-slash',
+      severity: 'secondary',
+      outlined: true,
+    })
+
+    confirmRequireMock.mockClear()
+    wrapper.vm.runReviewRowAction(
+      {
+        id: 7299,
+        subject: '已下架課程',
+        name: '期中考',
+        status: 'takedown',
+        available_actions: ['republish', 'delete'],
+      },
+      'delete'
+    )
+    expect(confirmRequireMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        header: '確認刪除投稿紀錄',
+        accept: expect.any(Function),
+      })
+    )
+  })
+
+  it('uses approved rejected terminology and distinguishes review no-ops', async () => {
+    rejectSubmissionMock
+      .mockResolvedValueOnce({ data: { changed: true } })
+      .mockResolvedValueOnce({ data: { changed: false } })
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    expect(wrapper.vm.getSubmissionLabel('rejected')).toBe('未通過')
+    expect(wrapper.vm.getTrashStatusLabel('rejected')).toBe('未通過')
+
+    await wrapper.vm.reviewArchiveSubmission({ id: 7301, status: 'approved' }, 'reject')
+    expect(toastAddMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ severity: 'success', detail: '投稿已設為未通過。' })
+    )
+
+    await wrapper.vm.reviewArchiveSubmission({ id: 7302, status: 'rejected' }, 'reject')
+    expect(toastAddMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        severity: 'info',
+        detail: '投稿狀態未變更，已重新整理最新資料。',
+      })
+    )
+  })
+
+  it('uses informational feedback for an administrator delete no-op', async () => {
+    deleteSubmissionMock.mockResolvedValueOnce({ data: { changed: false } })
+    listAdminSubmissionsMock.mockResolvedValueOnce({
+      data: Array.from({ length: 25 }, (_, index) => ({
+        id: index + 1,
+        status: 'pending',
+        subject: `Physics ${index + 1}`,
+        requested_course_name: 'Physics',
+        available_actions: [],
+      })),
+    })
+    const wrapper = createWrapper()
+    await flushPromises()
+    wrapper.vm.reviewSearchQuery = 'Physics'
+    await wrapper.vm.$nextTick()
+    wrapper.vm.newSubmissionFirst = 10
+    wrapper.vm.newSubmissionRows = 10
+
+    await wrapper.vm.deleteArchiveSubmissionAction({ id: 7401 })
+    await wrapper.vm.$nextTick()
+
+    expect(toastAddMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        severity: 'info',
+        detail: '此投稿已在垃圾桶中，未重複刪除。',
+      })
+    )
+    expect(listAdminSubmissionsMock).toHaveBeenCalled()
+    expect(wrapper.vm.reviewSearchQuery).toBe('Physics')
+    expect(wrapper.vm.newSubmissionFirst).toBe(10)
+    expect(wrapper.vm.newSubmissionRows).toBe(10)
+  })
+
+  it('keeps the shared mobile action row breakpoint-agnostic for five actions', () => {
+    expect(adminViewSource).not.toMatch(/@media\s*\(max-width:\s*337px\)/)
+    expect(adminViewSource).toContain('grid-template-columns: repeat(5, minmax(2.5rem, 1fr))')
+    expect(adminViewSource).toMatch(
+      /@media \(max-width: 640px\)[\s\S]*?review-card-actions[\s\S]*?flex-wrap: nowrap/
+    )
+    expect(adminViewSource).toMatch(
+      /review-card-actions \.p-button[\s\S]*?flex: 1 1 0[\s\S]*?min-width: 0/
+    )
   })
 
   it('keeps desktop actor-time columns while restoring compact mobile metadata', async () => {
