@@ -109,10 +109,9 @@ def test_governance_documentation_matches_staged_branch_and_release_contract() -
     feature_workflow = FEATURE_WORKFLOW.read_text(encoding="utf-8")
     combined = "\n".join((contributing, validation, feature_workflow))
 
-    assert "fix/submission-status-api-conformance" in contributing
     assert "integration/stage-5bd" in contributing
-    assert "does not become active" in contributing
-    assert "does not create the branch" in validation
+    assert "Legacy authority references" in contributing
+    assert "Equivalent validation is available only for exact" in validation
     assert "Main never uses Equivalent" in feature_workflow
     assert "exact-main-SHA CI run after `CI Gate`" in validation
     assert "Semantic-release is not deployment authority" in contributing

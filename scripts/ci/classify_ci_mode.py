@@ -20,7 +20,7 @@ from urllib.request import Request, urlopen
 
 
 CI_MODES = frozenset({"full", "equivalent-merge", "docs-only"})
-IMPLEMENTATION_BRANCH = "fix/submission-status-api-conformance"
+IMPLEMENTATION_BRANCH = "integration/stage-5bd"
 STAGED_IMPLEMENTATION_BRANCH = "integration/stage-5bd"
 IMPLEMENTATION_BRANCHES = frozenset(
     {IMPLEMENTATION_BRANCH, STAGED_IMPLEMENTATION_BRANCH}
@@ -54,7 +54,7 @@ REQUIRED_SOURCE_JOBS = frozenset(
     }
 )
 
-FINAL_FULL_REFS = frozenset({"refs/heads/feat/exam-report-system"})
+FINAL_FULL_REFS = frozenset()
 FINAL_FULL_PREFIXES = (
     "refs/heads/release/",
     "refs/heads/production/",

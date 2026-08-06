@@ -102,12 +102,10 @@ migration milestone.
 ## Pull requests
 
 Not every local or exploratory change must become a pull request. Normal
-implementation pull requests target the active integration branch, currently
-`fix/submission-status-api-conformance`. Repository governance is pre-staged to
-recognize `integration/stage-5bd`, but that branch does not become active until
-the post-main checkpoint explicitly creates it and transfers protection and
-allowlist authority. Pre-staging does not retire the current integration branch
-or `feat/exam-report-system`.
+implementation pull requests target the active integration branch,
+`integration/stage-5bd`. Legacy authority references to
+`fix/submission-status-api-conformance` and `feat/exam-report-system` are now
+removed from live branch governance allowlists.
 
 Main integration uses a separately authorized immutable candidate based on
 fresh `main`. The final integration SHA is true-merged into that candidate,
