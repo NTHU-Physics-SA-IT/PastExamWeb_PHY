@@ -18,7 +18,7 @@ jobs:
           set -euo pipefail
 
           case "$BASE_BRANCH" in
-            main|fix/submission-status-api-conformance|integration/stage-5bd)
+            main|integration/stage-5bd)
               ;;
             *)
               echo \

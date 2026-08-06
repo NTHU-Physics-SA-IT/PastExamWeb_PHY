@@ -286,16 +286,10 @@ def _classify_pr_equivalent(
 def test_classifier_defines_only_three_modes_and_exact_live_allowlists() -> None:
     assert ci.CI_MODES == frozenset({"full", "equivalent-merge", "docs-only"})
     assert ci.LIVE_EQUIVALENT_TARGET_REFS == frozenset(
-        {
-            "refs/heads/fix/submission-status-api-conformance",
-            "refs/heads/integration/stage-5bd",
-        }
+        {"refs/heads/integration/stage-5bd"}
     )
     assert ci.LIVE_EQUIVALENT_PR_BASE_REFS == frozenset(
-        {
-            "fix/submission-status-api-conformance",
-            "integration/stage-5bd",
-        }
+        {"integration/stage-5bd"}
     )
     assert ci.IMPLEMENTATION_BRANCHES == frozenset(
         {ci.IMPLEMENTATION_BRANCH, ci.STAGED_IMPLEMENTATION_BRANCH}
@@ -316,7 +310,7 @@ def test_classifier_defines_only_three_modes_and_exact_live_allowlists() -> None
         ("refs/heads/topic", ("docs/guide.md", "README.md"), "docs-only"),
         ("refs/heads/main", ("docs/guide.md",), "full"),
         ("refs/heads/main", ("backend/app/main.py",), "full"),
-        ("refs/heads/feat/exam-report-system", ("docs/guide.md",), "full"),
+        ("refs/heads/integration/stage-5bd", ("docs/guide.md",), "full"),
         ("refs/heads/release/v1", ("docs/guide.md",), "full"),
         ("refs/heads/production/stable", ("docs/guide.md",), "full"),
         ("refs/heads/hotfix/production/db", ("docs/guide.md",), "full"),
@@ -470,7 +464,7 @@ def test_live_push_governance_merge_falls_back_to_full(
     result = ci.classify_ci_mode(
         event=_event(
             fixture,
-            ref="refs/heads/fix/submission-status-api-conformance",
+            ref="refs/heads/integration/stage-5bd",
         ),
         git=git,
         api=api,
@@ -1026,6 +1020,10 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
 
     assert parsed["on"]["push"]["branches-ignore"] == ["analytics-assets"]
     assert parsed["on"]["pull_request"]["branches"] == [
+        "main",
+        ci.IMPLEMENTATION_BRANCH,
+        ci.STAGED_IMPLEMENTATION_BRANCH,
+    ][:2] if ci.IMPLEMENTATION_BRANCH == ci.STAGED_IMPLEMENTATION_BRANCH else [
         "main",
         ci.IMPLEMENTATION_BRANCH,
         ci.STAGED_IMPLEMENTATION_BRANCH,

@@ -7,7 +7,6 @@ on:
   pull_request:
     branches:
       - "main"
-      - "fix/submission-status-api-conformance"
       - "integration/stage-5bd"
     types:
       - opened
