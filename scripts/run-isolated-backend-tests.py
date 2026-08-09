@@ -24,10 +24,14 @@ from urllib.parse import quote
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
-BACKEND_PYTHON = BACKEND_ROOT / ".venv" / "bin" / "python"
+BACKEND_PYTHON = (
+    BACKEND_ROOT / ".venv" / "Scripts" / "python.exe"
+    if os.name == "nt"
+    else BACKEND_ROOT / ".venv" / "bin" / "python"
+)
 DEV_COMPOSE = REPOSITORY_ROOT / "scripts" / "dev-compose.sh"
 POSTGRES_IMAGE = "postgres:15.14-alpine3.22"
-EXPECTED_ALEMBIC_HEAD = "6f3a9c2d8e41"
+EXPECTED_ALEMBIC_HEAD = "9f1c2a7e4b63"
 NAME_PREFIX = "pastexam-test-postgres-s5a-"
 ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SAFE_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
@@ -552,7 +556,10 @@ class IsolatedPostgresRunner:
         def handler(signum, _frame):
             raise RunnerInterrupted(signum)
 
-        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        supported_signals = (signal.SIGINT, signal.SIGTERM)
+        if hasattr(signal, "SIGHUP"):
+            supported_signals += (signal.SIGHUP,)
+        for signum in supported_signals:
             previous[signum] = signal.getsignal(signum)
             signal.signal(signum, handler)
         return previous
@@ -690,9 +697,7 @@ class IsolatedPostgresRunner:
             )
             self.container_started = True
             wait_ready(self.executor, self.container_name, bootstrap_user)
-            image_id, host_port = inspect_ephemeral(
-                self.executor, self.container_name
-            )
+            image_id, host_port = inspect_ephemeral(self.executor, self.container_name)
             self.evidence.image_identity = image_id
             self.evidence.allocated_port = host_port
 

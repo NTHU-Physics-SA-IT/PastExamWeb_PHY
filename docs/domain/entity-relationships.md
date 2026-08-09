@@ -35,6 +35,26 @@ current implementation separately from the intended product relation.
 | `PersonalNotification` | Required recipient; optional actor/source fields; unique `dedupe_key`; source message FK uses `SET NULL` | Durable, recipient-owned event record retained when its source is permanently deleted; source availability and actions follow source lifecycle | Confirmed by code; unavailable-source presentation and source resolution differ by Domain |
 | MinIO object | Referenced by `Archive.object_name` and `ArchiveSubmission.object_name`; no dedicated database entity | One stored object belongs to one independent PDF lifecycle; deletion result must be reconciled with DB state | No cross-system transaction; current cleanup can partially succeed |
 
+## NTHU authentication identity
+
+`User.oauth_provider` and `User.oauth_sub` form the provider identity. For the
+NTHU integration the only valid mapping is `oauth_provider="nthu"` and
+`oauth_sub=<NTHU uuid>`. `userid`, email, and name are profile attributes and
+must never substitute for a missing, blank, or malformed `uuid`.
+
+The named PostgreSQL unique constraint `uq_users_oauth_provider_sub` is the
+concurrency arbiter for provider identity. Both columns remain nullable so
+local users may keep `(NULL, NULL)`; application-created NTHU users require
+both values. Identity lookup is always by the provider/sub pair. Email is not
+an account-linking key, and a collision with any existing User fails closed
+with `oauth_account_link_required` rather than linking or revealing that User.
+
+On first login, provider email and name initialize `email`, `name`, and
+`nickname`. Repeat login may synchronize email and name only when neither
+conflicts with another User. A later login never overwrites the user-managed
+nickname. A matching soft-deleted NTHU User remains the same identity but is
+denied; OAuth does not restore it or change its lifecycle metadata.
+
 ## Independent approved files
 
 ### Intended invariant

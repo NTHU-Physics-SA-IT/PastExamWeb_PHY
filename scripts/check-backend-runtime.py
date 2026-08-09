@@ -19,7 +19,7 @@ from typing import Any, Sequence
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 DEV_COMPOSE = REPOSITORY_ROOT / "scripts" / "dev-compose.sh"
-EXPECTED_ALEMBIC_HEAD = "6f3a9c2d8e41"
+EXPECTED_ALEMBIC_HEAD = "9f1c2a7e4b63"
 ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 EXIT_CODES = {
     "healthy": 0,
@@ -38,9 +38,7 @@ TOKEN_PATTERN = re.compile(
     r"(?i)\b(?:token|secret|password|authorization|cookie)\b"
     r"\s*[:=]\s*[^\s,;]+"
 )
-URL_USERINFO_PATTERN = re.compile(
-    r"(?i)([a-z][a-z0-9+.-]*://)[^\s/@:]+(?::[^\s/@]*)?@"
-)
+URL_USERINFO_PATTERN = re.compile(r"(?i)([a-z][a-z0-9+.-]*://)[^\s/@:]+(?::[^\s/@]*)?@")
 
 
 class CheckerFailure(RuntimeError):
@@ -254,7 +252,8 @@ def http_probe(
     output = (result.stdout or result.stderr).strip()
     status_match = re.search(r"STATUS=(\d{3})", output)
     return {
-        "ok": result.returncode == 0 and status_match is not None
+        "ok": result.returncode == 0
+        and status_match is not None
         and 200 <= int(status_match.group(1)) < 300,
         "exit_code": result.returncode,
         "status": int(status_match.group(1)) if status_match else None,
@@ -416,9 +415,7 @@ def gather(args: argparse.Namespace, executor: CommandExecutor) -> Report:
         "clean": not status,
     }
 
-    backend_item, backend = inspect_container(
-        executor, args.backend_container_id
-    )
+    backend_item, backend = inspect_container(executor, args.backend_container_id)
     _, postgres = inspect_container(executor, args.postgres_container_id)
     mounts = backend_item.get("Mounts") or []
     bind = next(
@@ -436,8 +433,7 @@ def gather(args: argparse.Namespace, executor: CommandExecutor) -> Report:
         "bind_source": bind.get("Source") if bind else None,
         "bind_target": bind.get("Destination") if bind else None,
         "bind_matches_repository": bool(
-            bind
-            and Path(str(bind.get("Source"))).resolve() == BACKEND_ROOT.resolve()
+            bind and Path(str(bind.get("Source"))).resolve() == BACKEND_ROOT.resolve()
         ),
         "files": source_records,
         "all_match": source_match
@@ -496,9 +492,7 @@ def gather(args: argparse.Namespace, executor: CommandExecutor) -> Report:
         ),
         timeout=20,
     )
-    logs = sanitized(
-        (logs_result.stdout + "\n" + logs_result.stderr)[-30000:], report
-    )
+    logs = sanitized((logs_result.stdout + "\n" + logs_result.stderr)[-30000:], report)
     backend.update(
         {
             "healthcheck": (backend_item.get("Config") or {}).get("Healthcheck"),
@@ -597,9 +591,7 @@ def render_text(report: Report) -> str:
         f"Summary: {report.summary}",
     ]
     for finding in report.findings:
-        lines.append(
-            f"[{finding.layer}] {finding.code}: {finding.message}"
-        )
+        lines.append(f"[{finding.layer}] {finding.code}: {finding.message}")
     for error in report.errors:
         lines.append(f"ERROR: {error}")
     return "\n".join(lines)

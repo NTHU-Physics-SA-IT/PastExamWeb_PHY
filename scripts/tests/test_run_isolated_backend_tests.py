@@ -28,7 +28,7 @@ def schema_status(*, checksum: str = "state-checksum") -> str:
         (
             "audit=archive-submission-self-delete-eligibility@3",
             "status=complete",
-            "expected_ledger=6f3a9c2d8e41",
+            "expected_ledger=9f1c2a7e4b63",
             "explicit_rollback=true",
             "aggregates=total:30,active:26,deleted:4,"
             "created_archive_id_non_null:19,created_archive_id_null:11,"
@@ -61,9 +61,7 @@ def inspect_payload(container_id: str, *, volume: bool = False) -> str:
                 ),
                 "NetworkSettings": {
                     "Ports": {
-                        "5432/tcp": [
-                            {"HostIp": "127.0.0.1", "HostPort": "49152"}
-                        ]
+                        "5432/tcp": [{"HostIp": "127.0.0.1", "HostPort": "49152"}]
                     }
                 },
             }
@@ -118,9 +116,7 @@ class FakeExecutor:
             return runner_module.CommandResult(0, inspect_payload(command[-1]))
         if command[-1:] == ("schema-status",):
             self.schema_calls += 1
-            checksum = (
-                self.post_checksum if self.schema_calls > 1 else "state-checksum"
-            )
+            checksum = self.post_checksum if self.schema_calls > 1 else "state-checksum"
             return runner_module.CommandResult(0, schema_status(checksum=checksum))
         if command[:3] == ("docker", "image", "inspect"):
             return runner_module.CommandResult(self.image_exit, "sha256:image\n")
@@ -147,7 +143,7 @@ class FakeExecutor:
         if command[:2] == ("docker", "exec") and "psql" in command:
             sql = input_text or ""
             if "SELECT version_num FROM alembic_version" in sql:
-                return runner_module.CommandResult(0, "6f3a9c2d8e41\n")
+                return runner_module.CommandResult(0, "9f1c2a7e4b63\n")
             if "CREATE ROLE" in sql:
                 return runner_module.CommandResult(self.bootstrap_exit, "")
             database = next(
@@ -160,9 +156,7 @@ class FakeExecutor:
                 for item in command
                 if item.startswith("test_role=")
             )
-            return runner_module.CommandResult(
-                0, f"{database}|{role}|t|f|f|f|f|f|1\n"
-            )
+            return runner_module.CommandResult(0, f"{database}|{role}|t|f|f|f|f|f|1\n")
         if command[:2] == ("docker", "rm"):
             self.removed = self.cleanup_exit == 0
             return runner_module.CommandResult(self.cleanup_exit, "")
@@ -179,9 +173,7 @@ class FakeExecutor:
             return runner_module.CommandResult(
                 self.pytest_exit,
                 "tests complete",
-                (env or {}).get("TEST_DATABASE_URL", "")
-                if self.pytest_exit
-                else "",
+                (env or {}).get("TEST_DATABASE_URL", "") if self.pytest_exit else "",
             )
         raise AssertionError(f"unexpected command: {command}")
 
@@ -192,16 +184,13 @@ def args(*pytest_args: str) -> argparse.Namespace:
         backend_container_id=BACKEND_ID,
         output="json",
         pytest_args=list(
-            pytest_args
-            or ("backend/tests/unit/test_submission_decision.py", "-q")
+            pytest_args or ("backend/tests/unit/test_submission_decision.py", "-q")
         ),
     )
 
 
 def run(fake: FakeExecutor, *pytest_args: str):
-    runner = runner_module.IsolatedPostgresRunner(
-        args(*pytest_args), executor=fake
-    )
+    runner = runner_module.IsolatedPostgresRunner(args(*pytest_args), executor=fake)
     runner.execute()
     return runner
 
@@ -209,7 +198,7 @@ def run(fake: FakeExecutor, *pytest_args: str):
 def test_invalid_invocation_rejects_empty_pytest_arguments() -> None:
     process = subprocess.run(
         [
-            "python3",
+            sys.executable,
             str(SCRIPT),
             "--postgres-container-id",
             POSTGRES_ID,
@@ -229,7 +218,7 @@ def test_success_has_stable_json_and_complete_cleanup() -> None:
     payload = json.loads(json.dumps(runner_module.asdict(runner.evidence)))
     assert runner.evidence.exit_code == 0
     assert payload["schema_version"] == 1
-    assert payload["migration_head"] == "6f3a9c2d8e41"
+    assert payload["migration_head"] == "9f1c2a7e4b63"
     assert all(payload["cleanup"].values())
 
 
@@ -252,6 +241,28 @@ def test_failure_and_cleanup_exit_codes(fake: FakeExecutor, exit_code: int) -> N
 def test_signal_exit_codes_are_stable() -> None:
     assert runner_module.RunnerInterrupted(signal.SIGINT).exit_code == 130
     assert runner_module.RunnerInterrupted(signal.SIGTERM).exit_code == 143
+
+
+def test_signal_handlers_use_only_signals_supported_by_the_platform() -> None:
+    runner = runner_module.IsolatedPostgresRunner(args(), executor=FakeExecutor())
+
+    previous = runner.install_signal_handlers()
+    try:
+        expected = {signal.SIGINT, signal.SIGTERM}
+        if hasattr(signal, "SIGHUP"):
+            expected.add(signal.SIGHUP)
+        assert set(previous) == expected
+    finally:
+        runner.restore_signal_handlers(previous)
+
+
+def test_backend_python_path_matches_the_platform_virtualenv_layout() -> None:
+    expected = (
+        REPOSITORY_ROOT / "backend" / ".venv" / "Scripts" / "python.exe"
+        if sys.platform == "win32"
+        else REPOSITORY_ROOT / "backend" / ".venv" / "bin" / "python"
+    )
+    assert runner_module.BACKEND_PYTHON == expected
 
 
 def test_cleanup_targets_only_exact_generated_resource() -> None:
@@ -323,9 +334,7 @@ def test_pytest_arguments_are_direct_argument_vector() -> None:
         "literal;not-a-shell",
     )
     assert run(fake, *supplied).evidence.exit_code == 0
-    command = next(
-        item for item in fake.commands if "-m" in item and "pytest" in item
-    )
+    command = next(item for item in fake.commands if "-m" in item and "pytest" in item)
     assert command[-len(supplied) :] == supplied
 
 

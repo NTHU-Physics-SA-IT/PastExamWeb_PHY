@@ -32,8 +32,18 @@
 <script>
 import { useTheme } from '../utils/useTheme'
 import { getFieldBgSvg } from '../utils/svgBg'
-import { STORAGE_KEYS, removeSessionItem, setSessionItem } from '../utils/storage'
-import { api } from '../api/services/client'
+import { authService } from '../api'
+import { setToken } from '../utils/auth'
+import { STORAGE_KEYS, removeSessionItem } from '../utils/storage'
+
+const PROVIDER_ERROR_MESSAGES = {
+  oauth_not_in_school: '目前僅限在校生登入。',
+  oauth_account_link_required: '此帳號需要管理員協助連結後才能登入。',
+  oauth_account_deleted: '此帳號目前無法登入，請聯絡管理員。',
+  oauth_profile_conflict: '帳號資料需要管理員協助處理後才能登入。',
+  oauth_identity_conflict: '帳號資料需要管理員協助處理後才能登入。',
+  oauth_state_invalid: '登入驗證已失效，請重新登入。',
+}
 
 export default {
   data() {
@@ -60,20 +70,33 @@ export default {
   },
   async mounted() {
     this.setBg()
-    try {
-      const urlParams = new URLSearchParams(window.location.search)
-      const token = urlParams.get('token')
+    const urlParams = new URLSearchParams(window.location.search)
+    const code = urlParams.get('code')
+    const providerError = urlParams.get('error')
 
-      if (!token) {
-        throw new Error('No authentication token received')
+    // Remove the one-time code before making any network request.
+    window.history.replaceState({}, document.title, window.location.pathname)
+
+    if (providerError) {
+      this.errorMessage =
+        PROVIDER_ERROR_MESSAGES[providerError] || '驗證失敗，請重新登入或聯絡管理員。'
+      return
+    }
+
+    try {
+      if (!code) {
+        this.errorMessage = '登入驗證已失效，請重新登入。'
+        return
       }
 
+      const response = await authService.exchangeNthuCode(code)
+      if (typeof response?.access_token !== 'string' || !response.access_token) {
+        throw new Error('Invalid login exchange response')
+      }
       removeSessionItem(STORAGE_KEYS.session.NOTIFICATION_LOGIN_CHECKED)
-      setSessionItem(STORAGE_KEYS.session.AUTH_TOKEN, token)
-      await api.post('/auth/record-login')
+      setToken(response.access_token)
       this.$router.replace('/archive')
-    } catch (error) {
-      console.error('Login callback error:', error)
+    } catch {
       this.errorMessage = '驗證失敗，請重試或聯絡管理員。'
     }
   },

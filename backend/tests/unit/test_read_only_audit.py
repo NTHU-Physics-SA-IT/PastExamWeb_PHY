@@ -141,6 +141,7 @@ def test_one_to_one_audit_is_revision_bounded_and_aggregate_only() -> None:
         {
             "d8f2a6c1b4e7",
             "6f3a9c2d8e41",
+            "9f1c2a7e4b63",
         }
     )
     for label in (

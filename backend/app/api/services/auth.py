@@ -1,14 +1,31 @@
 from datetime import datetime, timezone
+import hmac
+import secrets
+from urllib.parse import urlencode
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
 from app.db.session import get_session
 from app.models.models import User
+from app.services.login_handoff import (
+    consume_login_handoff,
+    create_login_handoff,
+)
+from app.services.nthu_oauth import (
+    NthuOAuthBusinessError,
+    NthuOAuthProviderError,
+    build_nthu_authorize_url,
+    fetch_nthu_profile,
+    resolve_nthu_user,
+)
 from app.api.services.presence import (
     HEARTBEAT_INTERVAL_SECONDS,
     end_presence_session,
@@ -18,6 +35,11 @@ from app.utils.auth import authenticate_user, blacklist_token, get_current_user
 from app.utils.jwt import jwt
 
 router = APIRouter()
+NTHU_OAUTH_STATE_SESSION_KEY = "nthu_oauth_state"
+
+
+class NthuExchangeRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=256)
 
 
 def _ensure_timezone_aware(dt: datetime | None) -> datetime | None:
@@ -26,6 +48,34 @@ def _ensure_timezone_aware(dt: datetime | None) -> datetime | None:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+def _issue_access_token(user: User, *, now: datetime) -> str:
+    payload = {
+        "uid": user.id,
+        "email": user.email,
+        "name": user.name,
+        "is_admin": user.is_admin,
+        "jti": uuid.uuid4().hex,
+        "exp": int(now.timestamp() + settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60),
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+
+def _frontend_callback_url(**query: str) -> str:
+    base_url = settings.FRONTEND_URL.rstrip("/")
+    return f"{base_url}/login/callback?{urlencode(query)}"
+
+
+def _no_store_redirect(url: str) -> RedirectResponse:
+    return RedirectResponse(
+        url=url,
+        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+    )
+
+
+def _frontend_oauth_error(code: str) -> RedirectResponse:
+    return _no_store_redirect(_frontend_callback_url(error=code))
 
 
 @router.post("/login")
@@ -49,21 +99,101 @@ async def login(
     user.last_login = now_utc
     user.last_seen_at = now_utc
 
-    payload = {
-        "uid": user.id,
-        "email": user.email,
-        "name": user.name,
-        "is_admin": user.is_admin,
-        "jti": uuid.uuid4().hex,
-        "exp": int(
-            datetime.now(timezone.utc).timestamp()
-            + settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-        ),
-    }
-    token = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    token = _issue_access_token(user, now=now_utc)
     await touch_presence_session(db, user_id=user.id, token=token, now=now_utc)
     await db.commit()
 
+    return {"access_token": token, "token_type": "bearer"}
+
+
+@router.get("/nthu/login")
+async def nthu_login(request: Request):
+    state_value = secrets.token_urlsafe(32)
+    try:
+        authorize_url = build_nthu_authorize_url(state_value)
+    except NthuOAuthProviderError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="oauth_provider_unavailable",
+        ) from error
+    request.session[NTHU_OAUTH_STATE_SESSION_KEY] = state_value
+    return _no_store_redirect(authorize_url)
+
+
+@router.get("/nthu/callback")
+async def nthu_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    db: AsyncSession = Depends(get_session),
+):
+    stored_state = request.session.pop(NTHU_OAUTH_STATE_SESSION_KEY, None)
+    if (
+        not state
+        or not isinstance(stored_state, str)
+        or not hmac.compare_digest(state, stored_state)
+    ):
+        return _frontend_oauth_error("oauth_state_invalid")
+    if not code:
+        return _frontend_oauth_error("oauth_login_failed")
+
+    try:
+        profile = await fetch_nthu_profile(code)
+        user = await resolve_nthu_user(db, profile)
+        await db.commit()
+    except NthuOAuthBusinessError as error:
+        await db.rollback()
+        return _frontend_oauth_error(error.code)
+    except NthuOAuthProviderError:
+        await db.rollback()
+        return _frontend_oauth_error("oauth_login_failed")
+    except IntegrityError:
+        await db.rollback()
+        return _frontend_oauth_error("oauth_identity_conflict")
+
+    try:
+        handoff_code = create_login_handoff(user.id)
+    except Exception:
+        return _frontend_oauth_error("oauth_login_failed")
+    return _no_store_redirect(_frontend_callback_url(code=handoff_code))
+
+
+@router.post("/nthu/exchange")
+async def exchange_nthu_login(
+    payload: NthuExchangeRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_session),
+):
+    try:
+        user_id = consume_login_handoff(payload.code)
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="oauth_exchange_unavailable",
+        ) from error
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="oauth_exchange_invalid",
+        )
+
+    user = await db.scalar(
+        select(User).where(User.id == user_id, User.deleted_at.is_(None))
+    )
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="oauth_exchange_invalid",
+        )
+
+    now_utc = datetime.now(timezone.utc)
+    token = _issue_access_token(user, now=now_utc)
+    user.last_login = now_utc
+    user.last_seen_at = now_utc
+    await touch_presence_session(db, user_id=user.id, token=token, now=now_utc)
+    await db.commit()
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
     return {"access_token": token, "token_type": "bearer"}
 
 

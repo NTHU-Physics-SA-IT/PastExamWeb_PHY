@@ -9,6 +9,14 @@ REPOSITORY_ROOT = Path(__file__).parents[2]
 SCRIPT = REPOSITORY_ROOT / "scripts" / "dev-compose.sh"
 
 
+def _script_command(action: str) -> list[str]:
+    if os.name == "nt":
+        bash = Path(os.environ["ProgramFiles"]) / "Git" / "bin" / "bash.exe"
+        assert bash.is_file()
+        return [str(bash), str(SCRIPT), action]
+    return [str(SCRIPT), action]
+
+
 def _environment(tmp_path: Path, *, audit_exit: int = 0) -> dict[str, str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -24,7 +32,7 @@ printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
 if [[ "$1 $2" == "context show" ]]; then
   printf 'default\n'
 elif [[ "$1" == "ps" ]]; then
-  printf '%s/docker\n' "$FAKE_REPO_ROOT"
+  printf '%s\n' "${FAKE_DOCKER_WORKDIR:-$FAKE_REPO_ROOT/docker}"
 elif [[ "$1" == "inspect" ]]; then
   name="${@: -1}"
   if [[ "$name" == "pastexam-dev-postgres" ]]; then
@@ -77,7 +85,7 @@ fi
     environment = os.environ.copy()
     environment.update(
         {
-            "PATH": f"{bin_dir}:{environment['PATH']}",
+            "PATH": f"{bin_dir}{os.pathsep}{environment['PATH']}",
             "FAKE_DOCKER_LOG": str(log),
             "FAKE_BACKEND_STATE": str(state),
             "FAKE_REPO_ROOT": str(REPOSITORY_ROOT),
@@ -94,8 +102,9 @@ def test_schema_status_uses_sealed_audit_without_compose_mutation(
 ) -> None:
     environment = _environment(tmp_path)
     process = subprocess.run(
-        [str(SCRIPT), "schema-status"],
+        _script_command("schema-status"),
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=False,
         env=environment,
@@ -109,12 +118,34 @@ def test_schema_status_uses_sealed_audit_without_compose_mutation(
     assert " up " not in log
 
 
+def test_preflight_accepts_equivalent_backslash_checkout_path(
+    tmp_path: Path,
+) -> None:
+    environment = _environment(tmp_path)
+    environment["FAKE_DOCKER_WORKDIR"] = str(REPOSITORY_ROOT / "docker").replace(
+        "/", "\\"
+    )
+
+    process = subprocess.run(
+        _script_command("preflight"),
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+        env=environment,
+    )
+
+    assert process.returncode == 0
+    assert "project=pastexam-dev" in process.stdout
+
+
 def test_backend_resume_refuses_when_schema_audit_fails(tmp_path: Path) -> None:
     environment = _environment(tmp_path, audit_exit=2)
     Path(environment["FAKE_BACKEND_STATE"]).write_text("exited", encoding="utf-8")
     process = subprocess.run(
-        [str(SCRIPT), "backend-resume"],
+        _script_command("backend-resume"),
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=False,
         env=environment,
@@ -131,15 +162,17 @@ def test_backend_pause_and_guarded_resume_use_existing_service(
     environment = _environment(tmp_path)
 
     pause = subprocess.run(
-        [str(SCRIPT), "backend-pause"],
+        _script_command("backend-pause"),
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=False,
         env=environment,
     )
     resume = subprocess.run(
-        [str(SCRIPT), "backend-resume"],
+        _script_command("backend-resume"),
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=False,
         env=environment,
