@@ -9,9 +9,8 @@ from app.db.migration_safety import _normalize_predicate, alembic_config
 
 def test_alembic_config_is_independent_of_process_working_directory(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(Path(__file__).resolve().parent)
 
     config = alembic_config("postgresql://example.invalid/pastexam_test_config")
 
