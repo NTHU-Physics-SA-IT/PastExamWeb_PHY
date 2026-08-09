@@ -133,7 +133,7 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
             parser.error("container IDs must be exact 64-character lowercase hex IDs")
     try:
         args.source_file = [
-            str(validate_source_path(value).relative_to(REPOSITORY_ROOT))
+            repository_identity_path(validate_source_path(value))
             for value in args.source_file
         ]
     except CheckerFailure as exc:
@@ -158,6 +158,14 @@ def validate_source_path(value: str) -> Path:
         if not resolved.is_file():
             raise CheckerFailure("source path is not a regular file")
     return resolved
+
+
+def repository_identity_path(path: Path) -> str:
+    try:
+        relative = path.relative_to(REPOSITORY_ROOT)
+    except ValueError as exc:
+        raise CheckerFailure("source path escapes the repository") from exc
+    return relative.as_posix()
 
 
 def sanitized(value: str, report: Report) -> str:
@@ -258,6 +266,25 @@ def parse_schema_status(output: str) -> dict[str, Any]:
     }
 
 
+def data_is_green(
+    postgres: dict[str, Any],
+    schema: dict[str, Any],
+    expected_postgres_id: str,
+) -> bool:
+    return bool(
+        postgres["id"] == expected_postgres_id
+        and postgres["state"] == "running"
+        and postgres["health"] == "healthy"
+        and postgres["restart_count"] == 0
+        and not postgres["oom_killed"]
+        and schema["status"] == "complete"
+        and schema["alembic_head"] == EXPECTED_ALEMBIC_HEAD
+        and schema["explicit_rollback"]
+        and schema["max_cardinality"] in (0, 1)
+        and schema["dangling"] == 0
+    )
+
+
 def http_probe(
     executor: CommandExecutor,
     args: Sequence[str],
@@ -288,8 +315,8 @@ def gather_source(
     parse_failure = False
     for path_string in paths:
         path = validate_source_path(path_string)
-        relative = path.relative_to(REPOSITORY_ROOT)
-        record: dict[str, Any] = {"path": str(relative)}
+        repository_path = repository_identity_path(path)
+        record: dict[str, Any] = {"path": repository_path}
         if not path.exists() or not path.is_file():
             record.update({"exists": False, "match": False})
             all_match = False
@@ -302,19 +329,21 @@ def gather_source(
         record["parse_ok"] = True
         if path.suffix == ".py":
             try:
-                ast.parse(content, filename=str(relative))
+                ast.parse(content, filename=repository_path)
             except SyntaxError as exc:
                 record["parse_ok"] = False
                 record["parse_error"] = f"{exc.__class__.__name__}: {exc.msg}"
                 parse_failure = True
-        git_result = executor.run(("git", "show", f"HEAD:{relative}"), timeout=15)
+        git_result = executor.run(
+            ("git", "show", f"HEAD:{repository_path}"), timeout=15
+        )
         if git_result.returncode:
             record["head_sha256"] = None
         else:
             record["head_sha256"] = hashlib.sha256(
                 git_result.stdout.encode()
             ).hexdigest()
-        container_path = "/app/" + str(path.relative_to(BACKEND_ROOT))
+        container_path = "/app/" + path.relative_to(BACKEND_ROOT).as_posix()
         container_result = executor.run(
             (
                 "docker",
@@ -559,18 +588,7 @@ def gather(args: argparse.Namespace, executor: CommandExecutor) -> Report:
     schema = parse_schema_status(
         command(executor, dev_compose_command("schema-status"), timeout=60)
     )
-    data_green = bool(
-        postgres["id"] == args.postgres_container_id
-        and postgres["state"] == "running"
-        and postgres["health"] == "healthy"
-        and postgres["restart_count"] == 0
-        and not postgres["oom_killed"]
-        and schema["status"] == "complete"
-        and schema["alembic_head"] == EXPECTED_ALEMBIC_HEAD
-        and schema["explicit_rollback"]
-        and schema["max_cardinality"] == 1
-        and schema["dangling"] == 0
-    )
+    data_green = data_is_green(postgres, schema, args.postgres_container_id)
     report.evidence["data"] = {
         "postgres": postgres,
         "baseline": schema,

@@ -19,6 +19,37 @@ sys.modules[SPEC.name] = checker
 SPEC.loader.exec_module(checker)
 
 
+class SourceExecutor:
+    def __init__(
+        self,
+        content: bytes,
+        *,
+        mismatch: bool = False,
+        missing_hash: str | None = None,
+    ) -> None:
+        self.content = content
+        self.mismatch = mismatch
+        self.missing_hash = missing_hash
+        self.commands: list[tuple[str, ...]] = []
+
+    def run(self, args, *, cwd=REPOSITORY_ROOT, timeout=30):
+        del cwd, timeout
+        command = tuple(args)
+        self.commands.append(command)
+        if command[:2] == ("git", "show"):
+            if self.missing_hash == "head":
+                return checker.CommandResult(1)
+            return checker.CommandResult(0, self.content.decode("utf-8"))
+        if command[:2] == ("docker", "exec"):
+            if self.missing_hash == "container":
+                return checker.CommandResult(1)
+            digest = checker.hashlib.sha256(self.content).hexdigest()
+            if self.mismatch:
+                digest = "0" * 64
+            return checker.CommandResult(0, f"{len(self.content)}\n{digest}\n")
+        raise AssertionError(f"unexpected command: {command[:2]}")
+
+
 def test_dev_compose_command_matches_the_platform_execution_boundary() -> None:
     command = checker.dev_compose_command("schema-status")
 
@@ -28,6 +59,143 @@ def test_dev_compose_command_matches_the_platform_execution_boundary() -> None:
         assert Path(command[1]) == checker.DEV_COMPOSE
     else:
         assert command == (str(checker.DEV_COMPOSE), "schema-status")
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "backend/app/main.py",
+        "backend/alembic/versions/9f1c2a7e4b63_add_nthu_oauth_identity_unique.py",
+    ),
+)
+def test_backend_python_sources_use_lf_checkout_policy(path: str) -> None:
+    result = subprocess.run(
+        [
+            "git",
+            "-c",
+            f"safe.directory={REPOSITORY_ROOT.as_posix()}",
+            "check-attr",
+            "eol",
+            "--",
+            path,
+        ],
+        cwd=REPOSITORY_ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == f"{path}: eol: lf"
+
+
+def test_posix_source_identity_is_unchanged() -> None:
+    source = checker.validate_source_path("backend/app/main.py")
+
+    assert checker.repository_identity_path(source) == "backend/app/main.py"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows path normalization regression")
+def test_windows_source_input_uses_posix_git_and_container_paths() -> None:
+    args = checker.parse_args(
+        [
+            "--backend-container-id",
+            "a" * 64,
+            "--postgres-container-id",
+            "b" * 64,
+            "--source-file",
+            r"backend\app\main.py",
+        ]
+    )
+    assert args.source_file == ["backend/app/main.py"]
+
+    content = (checker.REPOSITORY_ROOT / "backend/app/main.py").read_bytes()
+    executor = SourceExecutor(content)
+    records, all_match, parse_failure = checker.gather_source(
+        executor,
+        "c" * 64,
+        args.source_file,
+    )
+
+    assert all_match is True
+    assert parse_failure is False
+    assert records[0]["head_sha256"] is not None
+    assert records[0]["container_sha256"] is not None
+    assert ("git", "show", "HEAD:backend/app/main.py") in executor.commands
+    container_command = next(
+        command for command in executor.commands if command[:2] == ("docker", "exec")
+    )
+    assert container_command[-1] == "/app/app/main.py"
+    assert "\\" not in container_command[-1]
+
+
+def test_genuine_source_mismatch_remains_a_failure() -> None:
+    content = (checker.REPOSITORY_ROOT / "backend/app/main.py").read_bytes()
+    executor = SourceExecutor(content, mismatch=True)
+
+    records, all_match, parse_failure = checker.gather_source(
+        executor,
+        "c" * 64,
+        ["backend/app/main.py"],
+    )
+
+    assert all_match is False
+    assert parse_failure is False
+    assert records[0]["head_sha256"] is not None
+    assert records[0]["container_sha256"] is not None
+    assert records[0]["head_sha256"] != records[0]["container_sha256"]
+    assert checker.classify(report(source=all_match)) == "source_mismatch"
+
+
+@pytest.mark.parametrize("missing_hash", ("head", "container"))
+def test_missing_source_hash_remains_a_failure(missing_hash: str) -> None:
+    content = (checker.REPOSITORY_ROOT / "backend/app/main.py").read_bytes()
+    executor = SourceExecutor(content, missing_hash=missing_hash)
+
+    records, all_match, parse_failure = checker.gather_source(
+        executor,
+        "c" * 64,
+        ["backend/app/main.py"],
+    )
+
+    assert all_match is False
+    assert parse_failure is False
+    assert records[0][f"{missing_hash}_sha256"] is None
+    assert checker.classify(report(source=all_match)) == "source_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("max_cardinality", "dangling", "expected"),
+    (
+        (0, 0, True),
+        (1, 0, True),
+        (2, 0, False),
+        (-1, 0, False),
+        (1, 1, False),
+    ),
+)
+def test_data_green_cardinality_boundaries(
+    max_cardinality: int,
+    dangling: int,
+    expected: bool,
+) -> None:
+    postgres_id = "d" * 64
+    postgres = {
+        "id": postgres_id,
+        "state": "running",
+        "health": "healthy",
+        "restart_count": 0,
+        "oom_killed": False,
+    }
+    schema = {
+        "status": "complete",
+        "alembic_head": checker.EXPECTED_ALEMBIC_HEAD,
+        "explicit_rollback": True,
+        "max_cardinality": max_cardinality,
+        "dangling": dangling,
+    }
+
+    assert checker.data_is_green(postgres, schema, postgres_id) is expected
 
 
 def report(
