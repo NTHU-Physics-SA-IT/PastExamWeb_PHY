@@ -6,6 +6,7 @@ import json
 import re
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote, quote_plus
 
@@ -101,7 +102,8 @@ def database_url() -> URL:
 
 
 def alembic_config(url: URL | str | None = None) -> Config:
-    config = Config("alembic.ini")
+    backend_root = Path(__file__).resolve().parents[2]
+    config = Config(str(backend_root / "alembic.ini"))
     configured_url = url or database_url()
     if isinstance(configured_url, str):
         rendered_url = configured_url
