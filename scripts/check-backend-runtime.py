@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -70,6 +71,21 @@ class CommandExecutor:
             shell=False,
         )
         return CommandResult(process.returncode, process.stdout, process.stderr)
+
+
+def dev_compose_command(action: str) -> tuple[str, ...]:
+    if os.name != "nt":
+        return (str(DEV_COMPOSE), action)
+
+    git_bash = (
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+        / "Git"
+        / "bin"
+        / "bash.exe"
+    )
+    if not git_bash.is_file():
+        raise CheckerFailure("Git Bash is required on Windows")
+    return (str(git_bash), str(DEV_COMPOSE), action)
 
 
 @dataclass
@@ -541,7 +557,7 @@ def gather(args: argparse.Namespace, executor: CommandExecutor) -> Report:
     report.evidence["service"] = {"internal": internal, "proxy": proxy}
 
     schema = parse_schema_status(
-        command(executor, (str(DEV_COMPOSE), "schema-status"), timeout=60)
+        command(executor, dev_compose_command("schema-status"), timeout=60)
     )
     data_green = bool(
         postgres["id"] == args.postgres_container_id

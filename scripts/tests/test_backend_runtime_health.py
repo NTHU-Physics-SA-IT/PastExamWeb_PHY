@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -16,6 +17,17 @@ assert SPEC is not None and SPEC.loader is not None
 checker = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = checker
 SPEC.loader.exec_module(checker)
+
+
+def test_dev_compose_command_matches_the_platform_execution_boundary() -> None:
+    command = checker.dev_compose_command("schema-status")
+
+    assert command[-1] == "schema-status"
+    if os.name == "nt":
+        assert Path(command[0]).name == "bash.exe"
+        assert Path(command[1]) == checker.DEV_COMPOSE
+    else:
+        assert command == (str(checker.DEV_COMPOSE), "schema-status")
 
 
 def report(
@@ -131,7 +143,10 @@ def test_source_path_rejections(path: str) -> None:
 def test_symlink_escape_is_rejected(tmp_path: Path) -> None:
     link = checker.BACKEND_ROOT / "runtime-checker-test-link"
     try:
-        link.symlink_to(tmp_path / "outside.py")
+        try:
+            link.symlink_to(tmp_path / "outside.py")
+        except OSError as exc:
+            pytest.skip(f"symlink creation unavailable: {exc.__class__.__name__}")
         with pytest.raises(checker.CheckerFailure):
             checker.validate_source_path("backend/runtime-checker-test-link")
     finally:
@@ -167,7 +182,7 @@ def test_json_schema_and_text_projection_are_stable() -> None:
 
 def test_invalid_invocation_uses_exit_two() -> None:
     process = subprocess.run(
-        ["python3", str(SCRIPT), "--backend-container-id", "short"],
+        [sys.executable, str(SCRIPT), "--backend-container-id", "short"],
         text=True,
         capture_output=True,
         check=False,
@@ -177,7 +192,7 @@ def test_invalid_invocation_uses_exit_two() -> None:
 
 def test_unpushed_branch_upstream_is_a_nullable_evidence_field() -> None:
     source = SCRIPT.read_text(encoding="utf-8")
-    assert 'upstream_result.returncode == 0 else None' in source
+    assert "upstream_result.returncode == 0 else None" in source
 
 
 def test_source_contains_only_read_only_docker_operations() -> None:
