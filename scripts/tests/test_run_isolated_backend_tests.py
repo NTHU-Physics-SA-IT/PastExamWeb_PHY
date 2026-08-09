@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
 import signal
 import subprocess
@@ -263,6 +264,17 @@ def test_backend_python_path_matches_the_platform_virtualenv_layout() -> None:
         else REPOSITORY_ROOT / "backend" / ".venv" / "bin" / "python"
     )
     assert runner_module.BACKEND_PYTHON == expected
+
+
+def test_dev_compose_command_matches_the_platform_execution_boundary() -> None:
+    command = runner_module.dev_compose_command("schema-status")
+
+    assert command[-1] == "schema-status"
+    if os.name == "nt":
+        assert Path(command[0]).name == "bash.exe"
+        assert Path(command[1]) == runner_module.DEV_COMPOSE
+    else:
+        assert command == (str(runner_module.DEV_COMPOSE), "schema-status")
 
 
 def test_cleanup_targets_only_exact_generated_resource() -> None:

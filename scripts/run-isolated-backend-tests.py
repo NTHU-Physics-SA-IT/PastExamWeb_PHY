@@ -84,6 +84,21 @@ class CommandExecutor:
         return CommandResult(process.returncode, process.stdout, process.stderr)
 
 
+def dev_compose_command(action: str) -> tuple[str, ...]:
+    if os.name != "nt":
+        return (str(DEV_COMPOSE), action)
+
+    git_bash = (
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+        / "Git"
+        / "bin"
+        / "bash.exe"
+    )
+    if not git_bash.is_file():
+        raise RunnerFailure("Git Bash is required on Windows", 20)
+    return (str(git_bash), str(DEV_COMPOSE), action)
+
+
 @dataclass(frozen=True)
 class CanonicalSnapshot:
     postgres_id: str
@@ -242,7 +257,7 @@ def canonical_snapshot(
         raise RunnerFailure("canonical runtime preflight is not Green", 20)
     schema = parse_schema_status(
         require(
-            executor.run((str(DEV_COMPOSE), "schema-status"), timeout=60),
+            executor.run(dev_compose_command("schema-status"), timeout=60),
             "sealed schema-status failed",
             20,
         )
