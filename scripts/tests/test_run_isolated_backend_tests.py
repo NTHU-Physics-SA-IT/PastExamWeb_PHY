@@ -79,6 +79,7 @@ class FakeExecutor:
         bootstrap_exit: int = 0,
         image_exit: int = 0,
         cleanup_exit: int = 0,
+        docker_run_timeout: bool = False,
         post_checksum: str = "state-checksum",
         volume_mount: bool = False,
     ) -> None:
@@ -87,6 +88,7 @@ class FakeExecutor:
         self.bootstrap_exit = bootstrap_exit
         self.image_exit = image_exit
         self.cleanup_exit = cleanup_exit
+        self.docker_run_timeout = docker_run_timeout
         self.post_checksum = post_checksum
         self.volume_mount = volume_mount
         self.commands: list[tuple[str, ...]] = []
@@ -129,6 +131,8 @@ class FakeExecutor:
             return runner_module.CommandResult(0, "")
         if command[:2] == ("docker", "run"):
             self.created = True
+            if self.docker_run_timeout:
+                raise subprocess.TimeoutExpired(command, timeout)
             return runner_module.CommandResult(0, "ephemeral-id\n")
         if command[:2] == ("docker", "inspect"):
             return runner_module.CommandResult(
@@ -287,6 +291,19 @@ def test_cleanup_targets_only_exact_generated_resource() -> None:
     assert not any("*" in " ".join(command) for command in fake.commands)
 
 
+def test_docker_run_timeout_cleans_exact_created_resource() -> None:
+    fake = FakeExecutor(docker_run_timeout=True)
+    runner = run(fake)
+    resource = runner.evidence.generated_resource_name
+
+    assert runner.evidence.exit_code == 21
+    assert resource
+    assert ("docker", "rm", "-f", resource) in fake.commands
+    assert fake.removed is True
+    assert runner.evidence.cleanup["container_removed"] is True
+    assert runner.evidence.cleanup["container_absent"] is True
+
+
 def test_docker_run_is_loopback_tmpfs_pull_never_without_volume() -> None:
     fake = FakeExecutor()
     run(fake)
@@ -345,9 +362,15 @@ def test_pytest_arguments_are_direct_argument_vector() -> None:
         "-k",
         "literal;not-a-shell",
     )
-    assert run(fake, *supplied).evidence.exit_code == 0
+    runner = run(fake, *supplied)
+    assert runner.evidence.exit_code == 0
     command = next(item for item in fake.commands if "-m" in item and "pytest" in item)
-    assert command[-len(supplied) :] == supplied
+    assert command[3 : 3 + len(supplied)] == supplied
+    if os.name == "nt":
+        assert command[-2] == "--basetemp"
+        assert Path(command[-1]).parent == runner.temp_dir
+    else:
+        assert command[-len(supplied) :] == supplied
 
 
 def test_temporary_credentials_are_removed() -> None:

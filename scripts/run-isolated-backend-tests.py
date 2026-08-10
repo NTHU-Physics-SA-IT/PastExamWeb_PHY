@@ -560,7 +560,6 @@ class IsolatedPostgresRunner:
         self.executor = executor or CommandExecutor()
         self.evidence = Evidence(pytest_arguments=list(args.pytest_args))
         self.container_name: str | None = None
-        self.container_started = False
         self.temp_dir: Path | None = None
         self.pre_snapshot: CanonicalSnapshot | None = None
         self.secrets_to_mask: list[str] = []
@@ -586,7 +585,9 @@ class IsolatedPostgresRunner:
 
     def cleanup(self) -> bool:
         cleanup_ok = True
-        if self.container_started and self.container_name:
+        if self.container_name and not container_absent(
+            self.executor, self.container_name
+        ):
             removed = (
                 self.executor.run(
                     ("docker", "rm", "-f", self.container_name), timeout=30
@@ -710,7 +711,6 @@ class IsolatedPostgresRunner:
                 "failed to start isolated PostgreSQL",
                 21,
             )
-            self.container_started = True
             wait_ready(self.executor, self.container_name, bootstrap_user)
             image_id, host_port = inspect_ephemeral(self.executor, self.container_name)
             self.evidence.image_identity = image_id
@@ -786,8 +786,12 @@ class IsolatedPostgresRunner:
                     ),
                 }
             )
+            pytest_arguments = list(self.args.pytest_args)
+            if os.name == "nt":
+                pytest_arguments.extend(("--basetemp", str(self.temp_dir / "pytest")))
+            self.evidence.pytest_arguments = pytest_arguments
             tests = self.executor.run(
-                (str(BACKEND_PYTHON), "-m", "pytest", *self.args.pytest_args),
+                (str(BACKEND_PYTHON), "-m", "pytest", *pytest_arguments),
                 cwd=REPOSITORY_ROOT,
                 env=test_env,
                 timeout=1800,
