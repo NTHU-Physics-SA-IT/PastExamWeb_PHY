@@ -19,10 +19,12 @@ class Settings(BaseSettings):
 
     OAUTH_CLIENT_ID: str = ""
     OAUTH_CLIENT_SECRET: str = ""
-    OAUTH_AUTHORIZE_URL: str = ""
-    OAUTH_TOKEN_URL: str = ""
-    OAUTH_REDIRECT_URI: str = ""
-    OAUTH_USERINFO_URL: str = ""
+    OAUTH_AUTHORIZE_URL: str = "https://oauth.ccxp.nthu.edu.tw/v1.1/authorize.php"
+    OAUTH_TOKEN_URL: str = "https://oauth.ccxp.nthu.edu.tw/v1.1/token.php"
+    OAUTH_RESOURCE_URL: str = "https://oauth.ccxp.nthu.edu.tw/v1.1/resource.php"
+    OAUTH_REDIRECT_URI: str = "https://physarchive.com/api/auth/nthu/callback"
+    OAUTH_HTTP_TIMEOUT_SECONDS: float = 10.0
+    OAUTH_HANDOFF_TTL_SECONDS: int = 90
     FRONTEND_URL: str
     PRODUCT_TIMEZONE: str = "Asia/Taipei"
 

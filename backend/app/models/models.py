@@ -112,6 +112,13 @@ class ArchiveSubmissionAdminAction(str, PyEnum):
 
 class User(SQLModel, table=True):
     __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint(
+            "oauth_provider",
+            "oauth_sub",
+            name="uq_users_oauth_provider_sub",
+        ),
+    )
     id: Optional[int] = Field(default=None, primary_key=True)
     oauth_provider: Optional[str] = Field(default=None)
     oauth_sub: Optional[str] = Field(default=None)

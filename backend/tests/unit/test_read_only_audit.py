@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from subprocess import CompletedProcess, TimeoutExpired
+import sys
 
 import pytest
 
@@ -141,6 +142,7 @@ def test_one_to_one_audit_is_revision_bounded_and_aggregate_only() -> None:
         {
             "d8f2a6c1b4e7",
             "6f3a9c2d8e41",
+            "9f1c2a7e4b63",
         }
     )
     for label in (
@@ -361,18 +363,20 @@ def test_production_mode_refuses_without_attempting_a_connection(
 
 def test_fake_transport_receives_one_complete_stdin_stream(tmp_path: Path) -> None:
     capture = tmp_path / "stdin.sql"
-    fake_psql = tmp_path / "fake-psql"
+    fake_psql = tmp_path / "fake_psql.py"
     fake_psql.write_text(
-        f"#!/bin/sh\ncat > {capture}\nprintf '%s\\n' '{completed_output()}'\n",
+        "from pathlib import Path\n"
+        "import sys\n"
+        f"Path({str(capture)!r}).write_text(sys.stdin.read(), encoding='utf-8')\n"
+        f"print({completed_output()!r})\n",
         encoding="utf-8",
     )
-    fake_psql.chmod(0o700)
 
     adapter = get_audit_adapter(ELIGIBILITY_AUDIT_ID, 1)
     sql = build_transaction_sql(request(), adapter)
     result = audit.run_with_command_for_test(
         request(),
-        command=[str(fake_psql)],
+        command=[sys.executable, str(fake_psql)],
         sql=sql,
     )
 

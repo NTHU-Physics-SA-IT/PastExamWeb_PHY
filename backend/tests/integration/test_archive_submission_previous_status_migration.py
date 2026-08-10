@@ -35,6 +35,7 @@ from app.models.models import (
 
 PREVIOUS_REVISION = "f5e1d8c3a7b2"
 NEW_REVISION = "d8f2a6c1b4e7"
+NEXT_REVISION = "6f3a9c2d8e41"
 COLUMN_NAME = "previous_status"
 NOT_DELETED_CONSTRAINT = "ck_archive_submissions_previous_status_not_deleted"
 ACTIVE_NULL_CONSTRAINT = "ck_archive_submissions_active_previous_status_null"
@@ -278,7 +279,7 @@ def test_model_manifest_and_response_boundary_define_previous_status() -> None:
         "DELETED",
         "TAKEDOWN",
     }
-    assert HEAD_SCHEMA_REVISION == "6f3a9c2d8e41"
+    assert HEAD_SCHEMA_REVISION == "9f1c2a7e4b63"
 
     source_metadata = metadata_for_revision(PREVIOUS_REVISION)
     head_metadata = metadata_for_revision(NEW_REVISION)
@@ -295,12 +296,12 @@ def test_model_manifest_and_response_boundary_define_previous_status() -> None:
         assert COLUMN_NAME not in schema.model_fields
 
 
-def test_new_revision_is_the_single_child_of_f5() -> None:
+def test_new_revision_remains_between_f5_and_its_successor() -> None:
     script, heads = revision_graph()
 
     assert heads == [HEAD_SCHEMA_REVISION]
     assert script.get_revision(NEW_REVISION).down_revision == PREVIOUS_REVISION
-    assert script.get_revision(HEAD_SCHEMA_REVISION).down_revision == NEW_REVISION
+    assert script.get_revision(NEXT_REVISION).down_revision == NEW_REVISION
 
 
 def test_fresh_upgrade_adds_nullable_typed_column_without_index(

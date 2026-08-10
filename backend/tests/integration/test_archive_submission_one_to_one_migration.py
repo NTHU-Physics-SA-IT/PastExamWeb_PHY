@@ -27,6 +27,7 @@ from app.models.models import ArchiveSubmission
 
 PREVIOUS_REVISION = "d8f2a6c1b4e7"
 NEW_REVISION = "6f3a9c2d8e41"
+NEXT_REVISION = "9f1c2a7e4b63"
 CONSTRAINT_NAME = "uq_archive_submissions_created_archive_id"
 NOW = datetime(2026, 8, 3, 12, 0, tzinfo=timezone.utc)
 
@@ -240,7 +241,7 @@ def test_model_and_manifest_define_named_nullable_unique_constraint() -> None:
 
     assert column.nullable is True
     assert constraints[CONSTRAINT_NAME] == ("created_archive_id",)
-    assert HEAD_SCHEMA_REVISION == NEW_REVISION
+    assert HEAD_SCHEMA_REVISION == NEXT_REVISION
 
     source_metadata = metadata_for_revision(PREVIOUS_REVISION)
     head_metadata = metadata_for_revision(NEW_REVISION)
@@ -258,11 +259,12 @@ def test_model_and_manifest_define_named_nullable_unique_constraint() -> None:
     )
 
 
-def test_new_revision_is_the_single_child_of_d8() -> None:
+def test_new_revision_remains_between_d8_and_the_current_head() -> None:
     script, heads = revision_graph()
 
-    assert heads == [NEW_REVISION]
+    assert heads == [HEAD_SCHEMA_REVISION]
     assert script.get_revision(NEW_REVISION).down_revision == PREVIOUS_REVISION
+    assert script.get_revision(NEXT_REVISION).down_revision == NEW_REVISION
 
 
 def test_d8_allows_duplicate_created_archive_links(
@@ -432,6 +434,63 @@ def test_duplicate_source_fails_closed_without_partial_schema(
     assert _link_snapshot(migration_engine) == before
 
 
+def test_dangling_source_fails_closed_without_partial_schema(
+    migration_engine: Engine,
+) -> None:
+    requester_id = _insert_user(migration_engine, suffix="dangling")
+    archive_id = _insert_archive(migration_engine, suffix="dangling")
+    _insert_submission(
+        migration_engine,
+        suffix="dangling",
+        requester_id=requester_id,
+        created_archive_id=archive_id,
+    )
+
+    with migration_engine.connect() as connection:
+        foreign_key = next(
+            item
+            for item in sa_inspect(connection).get_foreign_keys(
+                "archive_submissions",
+                schema="public",
+            )
+            if tuple(item.get("constrained_columns") or ()) == ("created_archive_id",)
+        )
+    foreign_key_name = str(foreign_key["name"])
+    quoted_foreign_key = migration_engine.dialect.identifier_preparer.quote(
+        foreign_key_name
+    )
+    with migration_engine.begin() as connection:
+        connection.execute(
+            text(
+                f"ALTER TABLE archive_submissions DROP CONSTRAINT {quoted_foreign_key}"
+            )
+        )
+        connection.execute(
+            text("DELETE FROM archives WHERE id = :archive_id"),
+            {"archive_id": archive_id},
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE archive_submissions "
+                f"ADD CONSTRAINT {quoted_foreign_key} "
+                "FOREIGN KEY (created_archive_id) REFERENCES archives (id) "
+                "NOT VALID"
+            )
+        )
+    before = _link_snapshot(migration_engine)
+
+    with pytest.raises(
+        RuntimeError,
+        match="dangling created_archive_id relationships: dangling_links=1",
+    ) as exc_info:
+        command.upgrade(alembic_config(), NEW_REVISION)
+
+    assert "created_archive_id=" not in str(exc_info.value)
+    assert _current_revision(migration_engine) == PREVIOUS_REVISION
+    assert CONSTRAINT_NAME not in _constraint_names(migration_engine)
+    assert _link_snapshot(migration_engine) == before
+
+
 def test_new_constraint_allows_nulls_and_rejects_duplicate_non_null(
     migration_engine: Engine,
 ) -> None:
@@ -508,7 +567,7 @@ def test_downgrade_and_reupgrade_only_toggle_unique_constraint(
             f"ALTER TABLE archive_submissions DROP CONSTRAINT {CONSTRAINT_NAME}",
             {
                 "archive_submissions.unique_constraints",
-                "archive_submissions.named_one_to_one_constraint",
+                "archive_submissions.named_critical_unique_constraints",
             },
         ),
         (
@@ -517,7 +576,7 @@ def test_downgrade_and_reupgrade_only_toggle_unique_constraint(
             "ALTER TABLE archive_submissions "
             "ADD CONSTRAINT uq_archive_submissions_wrong_name "
             "UNIQUE (created_archive_id)",
-            {"archive_submissions.named_one_to_one_constraint"},
+            {"archive_submissions.named_critical_unique_constraints"},
         ),
         (
             "ALTER TABLE archive_submissions "
@@ -527,7 +586,7 @@ def test_downgrade_and_reupgrade_only_toggle_unique_constraint(
             "WHERE created_archive_id IS NOT NULL",
             {
                 "archive_submissions.unique_constraints",
-                "archive_submissions.named_one_to_one_constraint",
+                "archive_submissions.named_critical_unique_constraints",
                 "archive_submissions.indexes",
             },
         ),
@@ -538,7 +597,7 @@ def test_downgrade_and_reupgrade_only_toggle_unique_constraint(
             "ON archive_submissions (created_archive_id)",
             {
                 "archive_submissions.unique_constraints",
-                "archive_submissions.named_one_to_one_constraint",
+                "archive_submissions.named_critical_unique_constraints",
                 "archive_submissions.indexes",
             },
         ),

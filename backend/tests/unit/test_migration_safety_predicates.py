@@ -1,8 +1,26 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from app.db.migration_safety import _normalize_predicate
+from app.db.migration_safety import _normalize_predicate, alembic_config
+
+
+def test_alembic_config_is_independent_of_process_working_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(Path(__file__).resolve().parent)
+
+    config = alembic_config("postgresql://example.invalid/pastexam_test_config")
+
+    backend_root = Path(__file__).resolve().parents[2]
+    assert Path(config.config_file_name or "").resolve() == (
+        backend_root / "alembic.ini"
+    )
+    assert Path(config.get_main_option("script_location")).resolve() == (
+        backend_root / "alembic"
+    )
 
 
 @pytest.mark.parametrize(

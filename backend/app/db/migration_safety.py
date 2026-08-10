@@ -6,6 +6,7 @@ import json
 import re
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote, quote_plus
 
@@ -43,6 +44,7 @@ ARCHIVE_SUBMISSION_PREVIOUS_STATUS_CHECKS = {
     "ck_archive_submissions_active_previous_status_null",
 }
 ARCHIVE_SUBMISSION_CREATED_ARCHIVE_UNIQUE = "uq_archive_submissions_created_archive_id"
+USER_OAUTH_IDENTITY_UNIQUE = "uq_users_oauth_provider_sub"
 IDENTIFIER_TEXT_CAST = re.compile(
     r"\bcast\(\s*(?P<identifier>[a-z_]\w*(?:\.[a-z_]\w*)?)"
     r"\s+as\s+text\s*\)"
@@ -100,7 +102,8 @@ def database_url() -> URL:
 
 
 def alembic_config(url: URL | str | None = None) -> Config:
-    config = Config("alembic.ini")
+    backend_root = Path(__file__).resolve().parents[2]
+    config = Config(str(backend_root / "alembic.ini"))
     configured_url = url or database_url()
     if isinstance(configured_url, str):
         rendered_url = configured_url
@@ -225,6 +228,7 @@ def _metadata_for_variant(variant: str) -> MetaData:
     if variant == "head":
         return metadata
     if variant not in {
+        "pre_user_oauth_identity_unique",
         "pre_archive_submission_one_to_one",
         "pre_archive_submission_previous_status",
         "pre_owner_self_delete_eligibility",
@@ -233,6 +237,16 @@ def _metadata_for_variant(variant: str) -> MetaData:
         "pre_category_canonicalization",
     }:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
+
+    users = metadata.tables["users"]
+    for constraint in list(users.constraints):
+        if (
+            isinstance(constraint, UniqueConstraint)
+            and constraint.name == "uq_users_oauth_provider_sub"
+        ):
+            users.constraints.remove(constraint)
+    if variant == "pre_user_oauth_identity_unique":
+        return metadata
 
     archive_submissions = metadata.tables["archive_submissions"]
     for constraint in list(archive_submissions.constraints):
@@ -694,17 +708,22 @@ def compare_head_schema(
                 f"{table_name}.unique_constraints", expected_unique, actual_unique
             )
         )
-        expected_named_one_to_one = {
+        expected_named_critical = {
             (
                 constraint.name,
                 tuple(constraint.columns.keys()),
             )
             for constraint in table.constraints
             if isinstance(constraint, UniqueConstraint)
-            and constraint.name == ARCHIVE_SUBMISSION_CREATED_ARCHIVE_UNIQUE
+            and constraint.name
+            in {
+                ARCHIVE_SUBMISSION_CREATED_ARCHIVE_UNIQUE,
+                USER_OAUTH_IDENTITY_UNIQUE,
+            }
         }
-        if expected_named_one_to_one:
-            actual_named_one_to_one = {
+        if expected_named_critical:
+            critical_names = {name for name, _ in expected_named_critical}
+            actual_named_critical = {
                 (
                     item.get("name"),
                     tuple(item.get("column_names") or []),
@@ -713,13 +732,13 @@ def compare_head_schema(
                     table_name,
                     schema="public",
                 )
-                if item.get("name") == ARCHIVE_SUBMISSION_CREATED_ARCHIVE_UNIQUE
+                if item.get("name") in critical_names
             }
             checks.append(
                 _set_check(
-                    f"{table_name}.named_one_to_one_constraint",
-                    expected_named_one_to_one,
-                    actual_named_one_to_one,
+                    f"{table_name}.named_critical_unique_constraints",
+                    expected_named_critical,
+                    actual_named_critical,
                 )
             )
 
