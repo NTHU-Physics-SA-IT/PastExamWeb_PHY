@@ -311,6 +311,31 @@ integration.
 | WebSocket discussion update | Database commit precedes broadcast | Durable write succeeds even if live delivery fails |
 | Redis | Used primarily for authentication token blacklist/state | Not part of archive lifecycle atomicity |
 
+## NTHU OAuth and login handoff
+
+The provider callback owns NTHU profile validation and one PostgreSQL User
+transaction. A denied, malformed, conflicting, or soft-deleted identity rolls
+back that transaction. A successful resolution commits the User before
+creating a Redis handoff; Redis failure returns a generic login failure and
+does not issue an application token. The committed identity remains safe for a
+fresh OAuth retry.
+
+The handoff is a cryptographically random opaque code. Redis stores only its
+SHA-256-derived key and the local User ID, with a 90-second TTL. The exchange
+uses atomic `GETDEL`; unknown, expired, malformed, or replayed codes fail
+closed. The callback URL contains only this one-time code. It never contains
+the NTHU access token or the application JWT. The repository Nginx and Uvicorn
+access-log paths omit the callback query string. The frontend removes the code
+from browser history before the exchange request. Logs owned by an external
+edge/CDN remain an environment-level verification responsibility.
+
+Only a successful exchange issues the normal application bearer JWT in JSON,
+updates `last_login` and `last_seen_at`, creates/touches presence state, and
+commits those database effects together. Local login, logout, heartbeat, and
+their existing token owner remain unchanged. OAuth state is stored in the
+existing signed session and removed before validation, making success,
+mismatch, missing-state, and replay paths one-time.
+
 ### Intended invariant
 
 Every business operation has a visible database transaction owner. Helpers do

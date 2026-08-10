@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { courseService } from '@/api/services/courses.js'
 import { archiveService } from '@/api/services/archives.js'
 import { notificationService } from '@/api/services/notifications.js'
-import { authService } from '@/api/services/auth.js'
+import { authService, buildNthuLoginUrl } from '@/api/services/auth.js'
 import { memeService } from '@/api/services/meme.js'
 import { statisticsService } from '@/api/services/statistics.js'
 import { discussionService } from '@/api/services/discussion.js'
@@ -27,6 +27,7 @@ vi.mock('@/api/services/client', () => ({
     patch: patchMock,
     put: putMock,
     interceptors,
+    defaults: { baseURL: '/api' },
   },
   bindUnauthorizedWebSocket: (ws) => ws,
   buildWebSocketUrl: (path) => `ws://localhost${path}`,
@@ -179,6 +180,15 @@ describe('API service wrappers', () => {
     const data = await authService.localLogin('user', 'pass')
     expect(postMock).toHaveBeenCalledWith('/auth/login', expect.any(FormData))
     expect(data).toEqual({ token: 'abc' })
+
+    postMock.mockResolvedValueOnce({ data: { access_token: 'application-jwt' } })
+    await expect(authService.exchangeNthuCode('one-time-code')).resolves.toEqual({
+      access_token: 'application-jwt',
+    })
+    expect(postMock).toHaveBeenCalledWith('/auth/nthu/exchange', {
+      code: 'one-time-code',
+    })
+    expect(buildNthuLoginUrl()).toBe('/api/auth/nthu/login')
 
     authService.logout()
     expect(postMock).toHaveBeenCalledWith('/auth/logout')

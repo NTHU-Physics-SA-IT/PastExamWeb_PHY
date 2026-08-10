@@ -23,6 +23,21 @@
 6. For PostgreSQL-backed backend work, establish Test Environment Readiness and
    the exact isolated runner invocation before tests.
 
+## Development base selection
+
+- Fetch current remote refs before choosing a task base. Normal independent
+  work starts from fresh `main` unless the current task, milestone, or project
+  instruction explicitly declares coordination.
+- When coordination is declared, resolve the optional coordination branch from
+  canonical project governance through
+  `python3 scripts/ci/project_governance.py coordination-branch`. Do not infer
+  its identity from historical prose or from a visible branch name.
+- Before merge readiness, refresh the intended target and integrate its latest
+  baseline safely. Never silently rebase, reset, or retarget shared or external
+  work.
+- External contributor, bot, analytics, backup, and recovery branches are
+  no-touch unless the current task explicitly places them in scope.
+
 ## Feature and behavior workflow
 
 - Before adding a feature or changing product behavior, follow the canonical

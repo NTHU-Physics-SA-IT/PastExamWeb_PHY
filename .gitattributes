@@ -1,0 +1,3 @@
+/docker/postgres/init-isolated-roles.sh text eol=lf
+/scripts/dev-compose.sh text eol=lf
+/backend/**/*.py text eol=lf

@@ -10,22 +10,61 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout immutable pull request base
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          path: trusted-base
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+
       - name: Require an approved pull request base
         shell: bash
         env:
           BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TRUSTED_ROOT: trusted-base
         run: |
           set -euo pipefail
 
-          case "$BASE_BRANCH" in
-            main|integration/stage-5bd)
-              ;;
-            *)
-              echo \
-                "Pull requests must target an approved base; received: $BASE_BRANCH" \
-                >&2
-              exit 1
-              ;;
-          esac
+          config="$TRUSTED_ROOT/.github/project-governance.json"
+          resolver="$TRUSTED_ROOT/scripts/ci/project_governance.py"
 
-          echo "Pull request base branch is allowed."
+          if [[ -f "$config" && -f "$resolver" ]]; then
+            python3 "$resolver" \
+              --repository-root "$TRUSTED_ROOT" \
+              validate-pr-base \
+              --base "$BASE_BRANCH"
+            exit 0
+          fi
+
+          if [[ -e "$config" || -e "$resolver" ]]; then
+            echo "Trusted project governance is incomplete." >&2
+            exit 2
+          fi
+
+          if [[ "$BASE_BRANCH" == "main" ]]; then
+            echo "Pull request base branch is allowed during governance bootstrap."
+            exit 0
+          fi
+
+          if [[ "$BASE_BRANCH" != integration/* ]]; then
+            echo "Pull request base is not approved: $BASE_BRANCH" >&2
+            exit 1
+          fi
+
+          mapfile -t protected_coordination_branches < <(
+            gh api --paginate "repos/$REPOSITORY/branches" \
+              --jq '.[] | select(.protected == true) | .name | select(startswith("integration/"))'
+          )
+
+          if [[ "${#protected_coordination_branches[@]}" -ne 1 || \
+                "$BASE_BRANCH" != "${protected_coordination_branches[0]:-}" ]]; then
+            echo \
+              "Bootstrap requires the unique protected integration branch; received: $BASE_BRANCH" \
+              >&2
+            exit 1
+          fi
+
+          echo "Pull request base branch is allowed during governance bootstrap."

@@ -18,17 +18,14 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
+from project_governance import (
+    GovernanceConfigError,
+    ProjectGovernance,
+    load_project_governance,
+)
+
 
 CI_MODES = frozenset({"full", "equivalent-merge", "docs-only"})
-IMPLEMENTATION_BRANCH = "integration/stage-5bd"
-STAGED_IMPLEMENTATION_BRANCH = "integration/stage-5bd"
-IMPLEMENTATION_BRANCHES = frozenset(
-    {IMPLEMENTATION_BRANCH, STAGED_IMPLEMENTATION_BRANCH}
-)
-LIVE_EQUIVALENT_TARGET_REFS: frozenset[str] = frozenset(
-    f"refs/heads/{branch}" for branch in IMPLEMENTATION_BRANCHES
-)
-LIVE_EQUIVALENT_PR_BASE_REFS: frozenset[str] = IMPLEMENTATION_BRANCHES
 SUPPORTED_PR_ACTIONS = frozenset(
     {"opened", "reopened", "synchronize", "ready_for_review"}
 )
@@ -63,6 +60,7 @@ FINAL_FULL_PREFIXES = (
 
 GOVERNANCE_EXACT_PATHS = frozenset(
     {
+        ".github/project-governance.json",
         "scripts/validate-compose-safety.sh",
         "scripts/package-production-candidate.sh",
         "scripts/prepare-production-candidate.sh",
@@ -548,6 +546,7 @@ def validate_equivalent_pull_request(
     event: CIEvent,
     git: GitRepository,
     api: ActionsEvidence,
+    coordination_branch: str,
     now: datetime,
 ) -> Classification:
     if event.event_name != "pull_request":
@@ -560,7 +559,7 @@ def validate_equivalent_pull_request(
         raise ClassificationFailure("draft pull requests cannot use equivalent mode")
     if event.pr_number < 1:
         raise ClassificationFailure("pull request number is malformed")
-    if event.base_ref not in IMPLEMENTATION_BRANCHES:
+    if event.base_ref != coordination_branch:
         raise ClassificationFailure("pull request base is not approved")
     if (
         event.head_repository != event.repository
@@ -652,18 +651,38 @@ def classify_ci_mode(
     event: CIEvent,
     git: GitRepository,
     api: ActionsEvidence | None = None,
-    equivalent_allowlist: frozenset[str] = LIVE_EQUIVALENT_TARGET_REFS,
-    pr_equivalent_allowlist: frozenset[str] = LIVE_EQUIVALENT_PR_BASE_REFS,
+    governance: ProjectGovernance | None = None,
+    equivalent_allowlist: frozenset[str] | None = None,
+    pr_equivalent_allowlist: frozenset[str] | None = None,
     now: datetime | None = None,
 ) -> Classification:
     if event.ref == "refs/heads/main":
         return _full("main always runs full CI")
     if event.ref in FINAL_FULL_REFS or event.ref.startswith(FINAL_FULL_PREFIXES):
         return _full("final, release, or production branch always runs full CI")
+    if event.event_name == "pull_request" and event.base_ref == "main":
+        return _full("main pull request candidates always run full CI")
+
+    if governance is None:
+        try:
+            governance = load_project_governance()
+        except GovernanceConfigError as error:
+            return _full(f"project governance failed closed: {error}")
+    coordination_branch = governance.coordination_branch
+    coordination_branches = (
+        frozenset({coordination_branch})
+        if coordination_branch is not None
+        else frozenset()
+    )
+    if equivalent_allowlist is None:
+        equivalent_allowlist = frozenset(
+            f"refs/heads/{branch}" for branch in coordination_branches
+        )
+    if pr_equivalent_allowlist is None:
+        pr_equivalent_allowlist = coordination_branches
+
     if event.event_name == "pull_request":
-        if event.base_ref == "main":
-            return _full("main pull request candidates always run full CI")
-        if event.base_ref not in IMPLEMENTATION_BRANCHES:
+        if event.base_ref not in coordination_branches:
             return _full("unapproved pull request base falls back to full CI")
         try:
             changed_paths = git.changed_paths(event.base_sha, event.head_sha)
@@ -689,10 +708,12 @@ def classify_ci_mode(
         if api is None:
             return _full("pull request equivalent evidence API is unavailable")
         try:
+            assert coordination_branch is not None
             return validate_equivalent_pull_request(
                 event=event,
                 git=git,
                 api=api,
+                coordination_branch=coordination_branch,
                 now=(now or datetime.now(timezone.utc)),
             )
         except (
@@ -829,20 +850,31 @@ def main(argv: list[str] | None = None) -> int:
         head_repository_id=arguments.head_repository_id,
     )
     git = GitRepository(arguments.repository_root)
-    api: GitHubActionsAPI | None = None
-    if (
-        event.ref in LIVE_EQUIVALENT_TARGET_REFS
-        or event.base_ref in LIVE_EQUIVALENT_PR_BASE_REFS
-    ):
-        try:
-            api = GitHubActionsAPI(
-                api_url=arguments.api_url,
-                repository=event.repository,
-                token=os.environ.get("GITHUB_TOKEN", ""),
-            )
-        except ClassificationFailure:
-            api = None
-    classification = classify_ci_mode(event=event, git=git, api=api)
+    try:
+        governance = load_project_governance(arguments.repository_root)
+    except GovernanceConfigError as error:
+        classification = _full(f"project governance failed closed: {error}")
+    else:
+        coordination_branch = governance.coordination_branch
+        coordination_ref = governance.coordination_ref
+        api: GitHubActionsAPI | None = None
+        if coordination_ref is not None and (
+            event.ref == coordination_ref or event.base_ref == coordination_branch
+        ):
+            try:
+                api = GitHubActionsAPI(
+                    api_url=arguments.api_url,
+                    repository=event.repository,
+                    token=os.environ.get("GITHUB_TOKEN", ""),
+                )
+            except ClassificationFailure:
+                api = None
+        classification = classify_ci_mode(
+            event=event,
+            git=git,
+            api=api,
+            governance=governance,
+        )
     if arguments.github_output:
         _write_outputs(classification, arguments.github_output)
     print(f"ci_mode={classification.ci_mode}")

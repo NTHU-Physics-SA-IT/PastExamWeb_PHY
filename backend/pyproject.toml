@@ -20,6 +20,7 @@ dependencies = [
     "pyyaml>=6.0.2",
     "redis[hiredis]>=8.0.1",
     "sqlmodel>=0.0.39",
+    "tzdata>=2025.2; sys_platform == 'win32'",
     "uvicorn[standard]>=0.51.0",
 ]
 

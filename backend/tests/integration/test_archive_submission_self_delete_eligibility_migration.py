@@ -34,6 +34,7 @@ from app.models.models import (
 PREVIOUS_REVISION = "a7c3e9f1b5d2"
 PRODUCTION_BASE_REVISION = "a4c7e9d2f6b1"
 NEW_REVISION = "f5e1d8c3a7b2"
+NEXT_REVISION = "d8f2a6c1b4e7"
 COLUMN_NAME = "owner_self_delete_consumed"
 NOW = datetime(2026, 7, 30, 12, 0, tzinfo=timezone.utc)
 
@@ -111,7 +112,7 @@ def migration_engine(monkeypatch: pytest.MonkeyPatch) -> Engine:
 
 def test_model_and_manifest_define_the_new_head_contract() -> None:
     assert COLUMN_NAME in ArchiveSubmission.__table__.c
-    assert HEAD_SCHEMA_REVISION == "6f3a9c2d8e41"
+    assert HEAD_SCHEMA_REVISION == "9f1c2a7e4b63"
 
     source_metadata = metadata_for_revision(PREVIOUS_REVISION)
     head_metadata = metadata_for_revision(NEW_REVISION)
@@ -137,12 +138,12 @@ def test_model_instance_default_is_false() -> None:
     assert COLUMN_NAME not in ArchiveSubmissionRead.model_fields
 
 
-def test_new_revision_is_the_single_child_of_a7() -> None:
+def test_new_revision_remains_between_a7_and_its_successor() -> None:
     script, heads = revision_graph()
 
     assert heads == [HEAD_SCHEMA_REVISION]
     assert script.get_revision(NEW_REVISION).down_revision == PREVIOUS_REVISION
-    assert script.get_revision(HEAD_SCHEMA_REVISION).down_revision == "d8f2a6c1b4e7"
+    assert script.get_revision(NEXT_REVISION).down_revision == NEW_REVISION
 
 
 def _insert_user(

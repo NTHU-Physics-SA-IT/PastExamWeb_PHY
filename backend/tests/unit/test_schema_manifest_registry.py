@@ -12,11 +12,11 @@ from app.db.schema_manifests import (
     reviewed_manifest_revisions,
 )
 from app.db.migration_safety import metadata_for_revision
-from app.models.models import ArchiveSubmission
+from app.models.models import ArchiveSubmission, User
 
 
 def test_reviewed_manifest_registry_has_required_revisions() -> None:
-    assert HEAD_SCHEMA_REVISION == "6f3a9c2d8e41"
+    assert HEAD_SCHEMA_REVISION == "9f1c2a7e4b63"
     assert reviewed_manifest_revisions() == (
         "c4d8e2f1a6b9",
         "a4c7e9d2f6b1",
@@ -26,6 +26,7 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
         "f5e1d8c3a7b2",
         "d8f2a6c1b4e7",
         "6f3a9c2d8e41",
+        "9f1c2a7e4b63",
     )
 
 
@@ -44,7 +45,8 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     column_name = "owner_self_delete_consumed"
     previous_status_column = "previous_status"
     constraint_name = "uq_archive_submissions_created_archive_id"
-    head = metadata_for_revision("6f3a9c2d8e41")
+    head = metadata_for_revision("9f1c2a7e4b63")
+    previous_head = metadata_for_revision("6f3a9c2d8e41")
     d8 = metadata_for_revision("d8f2a6c1b4e7")
     f5 = metadata_for_revision("f5e1d8c3a7b2")
     a7 = metadata_for_revision("a7c3e9f1b5d2")
@@ -53,6 +55,7 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     a4 = metadata_for_revision("a4c7e9d2f6b1")
 
     assert head is not None
+    assert previous_head is not None
     assert d8 is not None
     assert f5 is not None
     assert a7 is not None
@@ -68,6 +71,16 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
         and constraint.name == constraint_name
         and tuple(constraint.columns.keys()) == ("created_archive_id",)
         for constraint in head.tables["archive_submissions"].constraints
+    )
+    assert any(
+        isinstance(constraint, UniqueConstraint)
+        and constraint.name == "uq_users_oauth_provider_sub"
+        and tuple(constraint.columns.keys()) == ("oauth_provider", "oauth_sub")
+        for constraint in head.tables["users"].constraints
+    )
+    assert all(
+        constraint.name != "uq_users_oauth_provider_sub"
+        for constraint in previous_head.tables["users"].constraints
     )
 
     assert column_name in d8.tables["archive_submissions"].c
@@ -121,7 +134,7 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     )
 
     # Building older variants must never mutate current SQLModel metadata.
-    rebuilt_head = metadata_for_revision("6f3a9c2d8e41")
+    rebuilt_head = metadata_for_revision("9f1c2a7e4b63")
     assert rebuilt_head is not None
     assert column_name in rebuilt_head.tables["archive_submissions"].c
     assert previous_status_column in rebuilt_head.tables["archive_submissions"].c
@@ -130,6 +143,13 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
         constraint.name == constraint_name
         for constraint in rebuilt_head.tables["archive_submissions"].constraints
     )
+
+
+def test_nthu_identity_constraint_compiles_for_nullable_local_accounts() -> None:
+    statement = str(CreateTable(User.__table__).compile(dialect=sqlite_dialect()))
+
+    assert "CONSTRAINT uq_users_oauth_provider_sub" in statement
+    assert "UNIQUE (oauth_provider, oauth_sub)" in statement
 
 
 def test_one_to_one_constraint_compiles_for_sqlite_metadata_neighbors() -> None:

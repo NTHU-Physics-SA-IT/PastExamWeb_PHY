@@ -610,6 +610,34 @@ behavior, request trash, or the later lifecycle of the resolved Course.
 
 ## Authorization
 
+### NTHU login policy
+
+NTHU OAuth starts from an anonymous browser session and succeeds only through
+all of these gates:
+
+1. the one-time session-bound OAuth state matches;
+2. token and resource responses satisfy the NTHU contract;
+3. the resource has `success=true` and a required valid `uuid`, `userid`,
+   `name`, `email`, and boolean `inschool`;
+4. `inschool` is exactly `true`;
+5. the matching provider identity is active, or a new identity has no email or
+   name collision; and
+6. the browser atomically consumes the short-lived login handoff.
+
+`inschool=false` returns `oauth_not_in_school` and mutates no User. A matching
+soft-deleted identity returns `oauth_account_deleted` and is never restored by
+login. A new UUID whose email is already owned returns
+`oauth_account_link_required`; this milestone has no implicit or interactive
+account-linking transition. Profile synchronization collisions return
+`oauth_profile_conflict`. Duplicate provider identity or a database uniqueness
+race fails closed as `oauth_identity_conflict`. These are stable,
+non-sensitive business errors and never expose provider payloads or the
+colliding User.
+
+The in-school decision is an authentication Domain policy independent of
+identity mapping. A future policy change may permit another population without
+changing `oauth_provider="nthu"` or the UUID subject.
+
 | Operation | Anonymous | Authenticated user | Owner | Administrator | System |
 | --- | --- | --- | --- | --- | --- |
 | View public effective archive | Denied | Allowed | Allowed | Allowed | Allowed |

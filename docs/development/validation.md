@@ -86,9 +86,17 @@ backend lint, backend tests, frontend unit coverage, browser E2E, image builds,
 and deployment gates according to the branch and changed paths. CI may
 legitimately run more than the minimum local checks.
 
-Normal implementation pull requests target the active integration branch,
-`integration/stage-5bd`. Equivalent validation is available only for exact
-Repository-approved integration refs and evidence; `main` always uses Full CI.
+Normal independent development starts from fresh `main`; coordination is used
+only when the task or milestone explicitly requires the optional coordination
+branch defined by canonical project governance. `main` pull requests and main
+pushes always use Full CI. For the exact configured coordination branch,
+ordinary eligible pull requests and merges may use Equivalent only with the
+existing exact Full-source provenance and topology evidence. Governance-path
+pull requests and merges retain their existing fail-closed Full fallback.
+
+The stable `integration/**` workflow family only starts workflow evaluation. It
+does not approve a base or grant Equivalent eligibility; the classifier and PR
+base policy resolve the exact configured coordination branch at runtime.
 
 An immutable main candidate receives Full CI before its pull request targets
 `main`, and the main pull request itself reaches the same Full-CI workflow.

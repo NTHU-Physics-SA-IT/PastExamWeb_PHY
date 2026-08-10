@@ -139,7 +139,7 @@ services:
       dockerfile: Dockerfile.dev
     restart: unless-stopped
     env_file:
-      - ../backend/.env
+      - ${DEVELOPMENT_BACKEND_ENV_FILE:-../backend/.env}
     environment: *runtime-environment
     volumes:
       - /app/.venv
@@ -171,7 +171,7 @@ services:
       dockerfile: Dockerfile.dev
     restart: unless-stopped
     env_file:
-      - ../frontend/.env
+      - ${DEVELOPMENT_FRONTEND_ENV_FILE:-../frontend/.env}
     environment:
       VITE_API_BASE_URL: /api
       VITE_SITE_HOSTNAME: http://localhost:${DEV_HTTP_PORT:-8080}

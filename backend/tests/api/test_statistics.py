@@ -117,7 +117,9 @@ async def statistics_records(session_maker, statistics_now):
     finally:
         async with session_maker() as session:
             if archive_ids:
-                await session.execute(delete(Archive).where(Archive.id.in_(archive_ids)))
+                await session.execute(
+                    delete(Archive).where(Archive.id.in_(archive_ids))
+                )
             if presence_session_ids:
                 await session.execute(
                     delete(UserPresenceSession).where(
@@ -155,14 +157,15 @@ async def test_statistics_endpoint_handles_errors(monkeypatch, client):
     async def failing_execute(self, *args, **kwargs):
         raise RuntimeError("db error")
 
-    monkeypatch.setattr(
-        AsyncSession,
-        "execute",
-        failing_execute,
-        raising=False,
-    )
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            AsyncSession,
+            "execute",
+            failing_execute,
+            raising=False,
+        )
+        response = await client.get("/statistics")
 
-    response = await client.get("/statistics")
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is False
