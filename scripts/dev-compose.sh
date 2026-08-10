@@ -80,6 +80,15 @@ compose() {
     "$@"
 }
 
+normalize_checkout_path() {
+  local path="$1"
+  if command -v cygpath >/dev/null 2>&1; then
+    path="$(cygpath -am "${path}")"
+  fi
+  path="${path//\\//}"
+  printf '%s\n' "${path%/}"
+}
+
 container_state() {
   local container_name="$1"
   docker inspect \
@@ -153,18 +162,21 @@ preflight() {
   load_identity
   compose config --quiet
 
-  local compose_dir project_workdirs other_workdirs
-  compose_dir="$(dirname "${compose_file}")"
+  local compose_dir project_workdirs other_workdirs project_workdir
+  compose_dir="$(normalize_checkout_path "$(dirname "${compose_file}")")"
   project_workdirs="$(
     docker ps -a \
       --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME}" \
       --format '{{.Label "com.docker.compose.project.working_dir"}}'
   )" || fail "cannot inspect the local Docker project"
-  other_workdirs="$(
-    printf '%s\n' "${project_workdirs}" |
-      sort -u |
-      grep -Fvx "${compose_dir}" || true
-  )"
+  other_workdirs=""
+  while IFS= read -r project_workdir; do
+    [[ -z "${project_workdir}" ]] && continue
+    if [[ "$(normalize_checkout_path "${project_workdir}")" != "${compose_dir}" ]]; then
+      other_workdirs+="${project_workdir}"$'\n'
+    fi
+  done < <(printf '%s\n' "${project_workdirs}" | sort -u)
+  other_workdirs="${other_workdirs%$'\n'}"
   [[ -z "${other_workdirs}" ]] \
     || fail "project ${COMPOSE_PROJECT_NAME} belongs to another checkout: ${other_workdirs}"
 

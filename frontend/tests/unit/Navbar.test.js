@@ -7,6 +7,7 @@ import navbarSource from '@/components/Navbar.vue?raw'
 const localLoginMock = vi.hoisted(() => vi.fn())
 const logoutMock = vi.hoisted(() => vi.fn())
 const loginRedirectMock = vi.hoisted(() => vi.fn())
+const nthuLoginMock = vi.hoisted(() => vi.fn())
 const createSystemIssueMock = vi.hoisted(() => vi.fn())
 const trackEventMock = vi.hoisted(() => vi.fn())
 const setTokenMock = vi.hoisted(() => vi.fn())
@@ -38,6 +39,7 @@ vi.mock('@/api', () => ({
     localLogin: localLoginMock,
     logout: logoutMock,
     login: loginRedirectMock,
+    nthuLogin: nthuLoginMock,
   },
   reportService: {
     createSystemIssue: createSystemIssueMock,
@@ -118,6 +120,7 @@ describe('Navbar methods', () => {
     localLoginMock.mockReset()
     logoutMock.mockReset()
     loginRedirectMock.mockReset()
+    nthuLoginMock.mockReset()
     createSystemIssueMock.mockReset()
     createSystemIssueMock.mockResolvedValue({ data: { id: 1 } })
     toastAddMock.mockReset()
@@ -240,6 +243,18 @@ describe('Navbar methods', () => {
 
     expect(ctx.loginVisible).toBe(true)
     expect(trackEventMock).toHaveBeenCalledWith('login', { type: 'dialog-open' })
+  })
+
+  it('starts NTHU login from the existing login dialog', () => {
+    const ctx = {
+      loginVisible: true,
+    }
+
+    Navbar.methods.handleNthuLogin.call(ctx)
+
+    expect(ctx.loginVisible).toBe(false)
+    expect(nthuLoginMock).toHaveBeenCalledOnce()
+    expect(trackEventMock).toHaveBeenCalledWith('login', { type: 'nthu' })
   })
 
   it('handles logout flow and cleans storage', async () => {

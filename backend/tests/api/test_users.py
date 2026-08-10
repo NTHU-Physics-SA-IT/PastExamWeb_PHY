@@ -128,9 +128,10 @@ async def test_non_admin_cannot_access_admin_user_routes(client):
 
 
 @pytest.mark.asyncio
-async def test_admin_can_list_users(client):
+async def test_admin_can_list_users(client, make_user):
+    admin = await make_user(is_admin=True)
     app.dependency_overrides[get_current_user] = lambda: UserRoles(
-        user_id=1,
+        user_id=admin.id,
         is_admin=True,
     )
 
@@ -139,7 +140,7 @@ async def test_admin_can_list_users(client):
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
-        assert data, "Expected at least one user in seed data"
+        assert any(user["id"] == admin.id for user in data)
     finally:
         app.dependency_overrides.pop(get_current_user, None)
 

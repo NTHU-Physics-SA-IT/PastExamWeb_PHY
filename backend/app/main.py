@@ -1,10 +1,15 @@
 from fastapi import FastAPI
+
 # from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.core.config import settings
 from app.api.api import api_router
 from app.db.init_db import init_db
+from app.utils.access_log import install_oauth_access_log_filter
+
+
+install_oauth_access_log_filter()
 
 app = FastAPI(title="Past Exam API", docs_url=None, redoc_url=None)
 
@@ -16,11 +21,7 @@ app = FastAPI(title="Past Exam API", docs_url=None, redoc_url=None)
 #     allow_headers=["*"],
 # )
 
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=settings.SECRET_KEY,
-    max_age=3600
-)
+app.add_middleware(SessionMiddleware, secret_key=settings.SECRET_KEY, max_age=3600)
 
 app.include_router(api_router)
 

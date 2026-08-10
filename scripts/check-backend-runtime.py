@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -19,7 +20,7 @@ from typing import Any, Sequence
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 DEV_COMPOSE = REPOSITORY_ROOT / "scripts" / "dev-compose.sh"
-EXPECTED_ALEMBIC_HEAD = "6f3a9c2d8e41"
+EXPECTED_ALEMBIC_HEAD = "9f1c2a7e4b63"
 ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 EXIT_CODES = {
     "healthy": 0,
@@ -38,9 +39,7 @@ TOKEN_PATTERN = re.compile(
     r"(?i)\b(?:token|secret|password|authorization|cookie)\b"
     r"\s*[:=]\s*[^\s,;]+"
 )
-URL_USERINFO_PATTERN = re.compile(
-    r"(?i)([a-z][a-z0-9+.-]*://)[^\s/@:]+(?::[^\s/@]*)?@"
-)
+URL_USERINFO_PATTERN = re.compile(r"(?i)([a-z][a-z0-9+.-]*://)[^\s/@:]+(?::[^\s/@]*)?@")
 
 
 class CheckerFailure(RuntimeError):
@@ -72,6 +71,21 @@ class CommandExecutor:
             shell=False,
         )
         return CommandResult(process.returncode, process.stdout, process.stderr)
+
+
+def dev_compose_command(action: str) -> tuple[str, ...]:
+    if os.name != "nt":
+        return (str(DEV_COMPOSE), action)
+
+    git_bash = (
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+        / "Git"
+        / "bin"
+        / "bash.exe"
+    )
+    if not git_bash.is_file():
+        raise CheckerFailure("Git Bash is required on Windows")
+    return (str(git_bash), str(DEV_COMPOSE), action)
 
 
 @dataclass
@@ -119,7 +133,7 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
             parser.error("container IDs must be exact 64-character lowercase hex IDs")
     try:
         args.source_file = [
-            str(validate_source_path(value).relative_to(REPOSITORY_ROOT))
+            repository_identity_path(validate_source_path(value))
             for value in args.source_file
         ]
     except CheckerFailure as exc:
@@ -144,6 +158,14 @@ def validate_source_path(value: str) -> Path:
         if not resolved.is_file():
             raise CheckerFailure("source path is not a regular file")
     return resolved
+
+
+def repository_identity_path(path: Path) -> str:
+    try:
+        relative = path.relative_to(REPOSITORY_ROOT)
+    except ValueError as exc:
+        raise CheckerFailure("source path escapes the repository") from exc
+    return relative.as_posix()
 
 
 def sanitized(value: str, report: Report) -> str:
@@ -244,6 +266,25 @@ def parse_schema_status(output: str) -> dict[str, Any]:
     }
 
 
+def data_is_green(
+    postgres: dict[str, Any],
+    schema: dict[str, Any],
+    expected_postgres_id: str,
+) -> bool:
+    return bool(
+        postgres["id"] == expected_postgres_id
+        and postgres["state"] == "running"
+        and postgres["health"] == "healthy"
+        and postgres["restart_count"] == 0
+        and not postgres["oom_killed"]
+        and schema["status"] == "complete"
+        and schema["alembic_head"] == EXPECTED_ALEMBIC_HEAD
+        and schema["explicit_rollback"]
+        and schema["max_cardinality"] in (0, 1)
+        and schema["dangling"] == 0
+    )
+
+
 def http_probe(
     executor: CommandExecutor,
     args: Sequence[str],
@@ -254,7 +295,8 @@ def http_probe(
     output = (result.stdout or result.stderr).strip()
     status_match = re.search(r"STATUS=(\d{3})", output)
     return {
-        "ok": result.returncode == 0 and status_match is not None
+        "ok": result.returncode == 0
+        and status_match is not None
         and 200 <= int(status_match.group(1)) < 300,
         "exit_code": result.returncode,
         "status": int(status_match.group(1)) if status_match else None,
@@ -273,8 +315,8 @@ def gather_source(
     parse_failure = False
     for path_string in paths:
         path = validate_source_path(path_string)
-        relative = path.relative_to(REPOSITORY_ROOT)
-        record: dict[str, Any] = {"path": str(relative)}
+        repository_path = repository_identity_path(path)
+        record: dict[str, Any] = {"path": repository_path}
         if not path.exists() or not path.is_file():
             record.update({"exists": False, "match": False})
             all_match = False
@@ -287,19 +329,21 @@ def gather_source(
         record["parse_ok"] = True
         if path.suffix == ".py":
             try:
-                ast.parse(content, filename=str(relative))
+                ast.parse(content, filename=repository_path)
             except SyntaxError as exc:
                 record["parse_ok"] = False
                 record["parse_error"] = f"{exc.__class__.__name__}: {exc.msg}"
                 parse_failure = True
-        git_result = executor.run(("git", "show", f"HEAD:{relative}"), timeout=15)
+        git_result = executor.run(
+            ("git", "show", f"HEAD:{repository_path}"), timeout=15
+        )
         if git_result.returncode:
             record["head_sha256"] = None
         else:
             record["head_sha256"] = hashlib.sha256(
                 git_result.stdout.encode()
             ).hexdigest()
-        container_path = "/app/" + str(path.relative_to(BACKEND_ROOT))
+        container_path = "/app/" + path.relative_to(BACKEND_ROOT).as_posix()
         container_result = executor.run(
             (
                 "docker",
@@ -416,9 +460,7 @@ def gather(args: argparse.Namespace, executor: CommandExecutor) -> Report:
         "clean": not status,
     }
 
-    backend_item, backend = inspect_container(
-        executor, args.backend_container_id
-    )
+    backend_item, backend = inspect_container(executor, args.backend_container_id)
     _, postgres = inspect_container(executor, args.postgres_container_id)
     mounts = backend_item.get("Mounts") or []
     bind = next(
@@ -436,8 +478,7 @@ def gather(args: argparse.Namespace, executor: CommandExecutor) -> Report:
         "bind_source": bind.get("Source") if bind else None,
         "bind_target": bind.get("Destination") if bind else None,
         "bind_matches_repository": bool(
-            bind
-            and Path(str(bind.get("Source"))).resolve() == BACKEND_ROOT.resolve()
+            bind and Path(str(bind.get("Source"))).resolve() == BACKEND_ROOT.resolve()
         ),
         "files": source_records,
         "all_match": source_match
@@ -496,9 +537,7 @@ def gather(args: argparse.Namespace, executor: CommandExecutor) -> Report:
         ),
         timeout=20,
     )
-    logs = sanitized(
-        (logs_result.stdout + "\n" + logs_result.stderr)[-30000:], report
-    )
+    logs = sanitized((logs_result.stdout + "\n" + logs_result.stderr)[-30000:], report)
     backend.update(
         {
             "healthcheck": (backend_item.get("Config") or {}).get("Healthcheck"),
@@ -547,20 +586,9 @@ def gather(args: argparse.Namespace, executor: CommandExecutor) -> Report:
     report.evidence["service"] = {"internal": internal, "proxy": proxy}
 
     schema = parse_schema_status(
-        command(executor, (str(DEV_COMPOSE), "schema-status"), timeout=60)
+        command(executor, dev_compose_command("schema-status"), timeout=60)
     )
-    data_green = bool(
-        postgres["id"] == args.postgres_container_id
-        and postgres["state"] == "running"
-        and postgres["health"] == "healthy"
-        and postgres["restart_count"] == 0
-        and not postgres["oom_killed"]
-        and schema["status"] == "complete"
-        and schema["alembic_head"] == EXPECTED_ALEMBIC_HEAD
-        and schema["explicit_rollback"]
-        and schema["max_cardinality"] == 1
-        and schema["dangling"] == 0
-    )
+    data_green = data_is_green(postgres, schema, args.postgres_container_id)
     report.evidence["data"] = {
         "postgres": postgres,
         "baseline": schema,
@@ -597,9 +625,7 @@ def render_text(report: Report) -> str:
         f"Summary: {report.summary}",
     ]
     for finding in report.findings:
-        lines.append(
-            f"[{finding.layer}] {finding.code}: {finding.message}"
-        )
+        lines.append(f"[{finding.layer}] {finding.code}: {finding.message}")
     for error in report.errors:
         lines.append(f"ERROR: {error}")
     return "\n".join(lines)

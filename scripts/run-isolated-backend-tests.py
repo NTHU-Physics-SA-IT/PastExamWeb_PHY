@@ -24,10 +24,14 @@ from urllib.parse import quote
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
-BACKEND_PYTHON = BACKEND_ROOT / ".venv" / "bin" / "python"
+BACKEND_PYTHON = (
+    BACKEND_ROOT / ".venv" / "Scripts" / "python.exe"
+    if os.name == "nt"
+    else BACKEND_ROOT / ".venv" / "bin" / "python"
+)
 DEV_COMPOSE = REPOSITORY_ROOT / "scripts" / "dev-compose.sh"
 POSTGRES_IMAGE = "postgres:15.14-alpine3.22"
-EXPECTED_ALEMBIC_HEAD = "6f3a9c2d8e41"
+EXPECTED_ALEMBIC_HEAD = "9f1c2a7e4b63"
 NAME_PREFIX = "pastexam-test-postgres-s5a-"
 ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SAFE_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
@@ -78,6 +82,21 @@ class CommandExecutor:
             shell=False,
         )
         return CommandResult(process.returncode, process.stdout, process.stderr)
+
+
+def dev_compose_command(action: str) -> tuple[str, ...]:
+    if os.name != "nt":
+        return (str(DEV_COMPOSE), action)
+
+    git_bash = (
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+        / "Git"
+        / "bin"
+        / "bash.exe"
+    )
+    if not git_bash.is_file():
+        raise RunnerFailure("Git Bash is required on Windows", 20)
+    return (str(git_bash), str(DEV_COMPOSE), action)
 
 
 @dataclass(frozen=True)
@@ -238,7 +257,7 @@ def canonical_snapshot(
         raise RunnerFailure("canonical runtime preflight is not Green", 20)
     schema = parse_schema_status(
         require(
-            executor.run((str(DEV_COMPOSE), "schema-status"), timeout=60),
+            executor.run(dev_compose_command("schema-status"), timeout=60),
             "sealed schema-status failed",
             20,
         )
@@ -541,7 +560,6 @@ class IsolatedPostgresRunner:
         self.executor = executor or CommandExecutor()
         self.evidence = Evidence(pytest_arguments=list(args.pytest_args))
         self.container_name: str | None = None
-        self.container_started = False
         self.temp_dir: Path | None = None
         self.pre_snapshot: CanonicalSnapshot | None = None
         self.secrets_to_mask: list[str] = []
@@ -552,7 +570,10 @@ class IsolatedPostgresRunner:
         def handler(signum, _frame):
             raise RunnerInterrupted(signum)
 
-        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        supported_signals = (signal.SIGINT, signal.SIGTERM)
+        if hasattr(signal, "SIGHUP"):
+            supported_signals += (signal.SIGHUP,)
+        for signum in supported_signals:
             previous[signum] = signal.getsignal(signum)
             signal.signal(signum, handler)
         return previous
@@ -564,7 +585,9 @@ class IsolatedPostgresRunner:
 
     def cleanup(self) -> bool:
         cleanup_ok = True
-        if self.container_started and self.container_name:
+        if self.container_name and not container_absent(
+            self.executor, self.container_name
+        ):
             removed = (
                 self.executor.run(
                     ("docker", "rm", "-f", self.container_name), timeout=30
@@ -688,11 +711,8 @@ class IsolatedPostgresRunner:
                 "failed to start isolated PostgreSQL",
                 21,
             )
-            self.container_started = True
             wait_ready(self.executor, self.container_name, bootstrap_user)
-            image_id, host_port = inspect_ephemeral(
-                self.executor, self.container_name
-            )
+            image_id, host_port = inspect_ephemeral(self.executor, self.container_name)
             self.evidence.image_identity = image_id
             self.evidence.allocated_port = host_port
 
@@ -766,8 +786,12 @@ class IsolatedPostgresRunner:
                     ),
                 }
             )
+            pytest_arguments = list(self.args.pytest_args)
+            if os.name == "nt":
+                pytest_arguments.extend(("--basetemp", str(self.temp_dir / "pytest")))
+            self.evidence.pytest_arguments = pytest_arguments
             tests = self.executor.run(
-                (str(BACKEND_PYTHON), "-m", "pytest", *self.args.pytest_args),
+                (str(BACKEND_PYTHON), "-m", "pytest", *pytest_arguments),
                 cwd=REPOSITORY_ROOT,
                 env=test_env,
                 timeout=1800,

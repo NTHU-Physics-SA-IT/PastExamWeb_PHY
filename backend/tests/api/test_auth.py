@@ -1,17 +1,20 @@
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
+import uuid
 
 import pytest
+from sqlmodel import select
 
 from fastapi import HTTPException
 
 from app.main import app
-from app.models.models import User, UserRoles
+from app.models.models import User, UserPresenceSession, UserRoles
+from app.core.config import settings
+from app.services.nthu_oauth import NthuProfile
 from app.utils.auth import get_current_user
 from app.api.services import auth as auth_service
 
-LEGACY_BCRYPT_HASH = (
-    "$2b$04$abcdefghijklmnopqrstuOFeWHo6yW/rrUEe9j8D8ueOhu.9wpWwO"
-)
+LEGACY_BCRYPT_HASH = "$2b$04$abcdefghijklmnopqrstuOFeWHo6yW/rrUEe9j8D8ueOhu.9wpWwO"
 
 
 @pytest.mark.asyncio
@@ -96,19 +99,187 @@ async def test_local_login_upgrades_legacy_bcrypt_hash(
 
 
 @pytest.mark.asyncio
-async def test_oauth_endpoints_are_not_available(client):
+async def test_nthu_oauth_login_redirect_and_state_validation(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "OAUTH_CLIENT_ID", "nthu-client")
+    monkeypatch.setattr(settings, "OAUTH_CLIENT_SECRET", "nthu-secret")
+    monkeypatch.setattr(
+        settings,
+        "OAUTH_AUTHORIZE_URL",
+        "https://oauth.ccxp.nthu.edu.tw/v1.1/authorize.php",
+    )
+    monkeypatch.setattr(
+        settings,
+        "OAUTH_REDIRECT_URI",
+        "https://physarchive.com/api/auth/nthu/callback",
+    )
+
     login_response = await client.get(
-        "/auth/oauth/login",
+        "/auth/nthu/login",
         follow_redirects=False,
     )
-    assert login_response.status_code == 404
+    assert login_response.status_code in {302, 307}
+    location = login_response.headers["location"]
+    parsed = urlparse(location)
+    query = parse_qs(parsed.query)
+    assert (
+        f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        == settings.OAUTH_AUTHORIZE_URL
+    )
+    assert query["response_type"] == ["code"]
+    assert query["redirect_uri"] == [settings.OAUTH_REDIRECT_URI]
+    assert query["scope"] == ["uuid inschool userid name email"]
+    assert query["state"][0]
+
+    for params in (
+        {"code": "provider-code"},
+        {"code": "provider-code", "state": "mismatch"},
+    ):
+        callback_response = await client.get(
+            "/auth/nthu/callback",
+            params=params,
+            follow_redirects=False,
+        )
+        assert callback_response.status_code in {302, 307}
+        assert parse_qs(urlparse(callback_response.headers["location"]).query) == {
+            "error": ["oauth_state_invalid"]
+        }
+
+
+@pytest.mark.asyncio
+async def test_nthu_callback_creates_user_and_state_is_single_use(
+    client,
+    monkeypatch,
+    session_maker,
+):
+    suffix = uuid.uuid4().hex[:8]
+    profile = NthuProfile(
+        uuid=f"nthu-uuid-{suffix}",
+        userid=f"student-{suffix}",
+        name=f"NTHU User {suffix}",
+        email=f"nthu-{suffix}@example.com",
+        inschool=True,
+    )
+    monkeypatch.setattr(settings, "OAUTH_CLIENT_ID", "nthu-client")
+    monkeypatch.setattr(settings, "OAUTH_CLIENT_SECRET", "nthu-secret")
+    monkeypatch.setattr(
+        settings,
+        "OAUTH_AUTHORIZE_URL",
+        "https://oauth.ccxp.nthu.edu.tw/v1.1/authorize.php",
+    )
+    monkeypatch.setattr(
+        settings,
+        "OAUTH_REDIRECT_URI",
+        "https://physarchive.com/api/auth/nthu/callback",
+    )
+    monkeypatch.setattr(settings, "FRONTEND_URL", "https://physarchive.com")
+
+    async def fake_fetch_profile(code):
+        assert code == "provider-code"
+        return profile
+
+    monkeypatch.setattr(auth_service, "fetch_nthu_profile", fake_fetch_profile)
+    monkeypatch.setattr(
+        auth_service,
+        "create_login_handoff",
+        lambda user_id: "one-time-exchange-code",
+    )
+
+    login_response = await client.get("/auth/nthu/login", follow_redirects=False)
+    state = parse_qs(urlparse(login_response.headers["location"]).query)["state"][0]
 
     callback_response = await client.get(
-        "/auth/oauth/callback",
-        params={"code": "dummy-code", "state": "dummy-state"},
+        "/auth/nthu/callback",
+        params={"code": "provider-code", "state": state},
         follow_redirects=False,
     )
-    assert callback_response.status_code == 404
+    assert callback_response.status_code in {302, 307}
+    assert parse_qs(urlparse(callback_response.headers["location"]).query) == {
+        "code": ["one-time-exchange-code"]
+    }
+
+    replay_response = await client.get(
+        "/auth/nthu/callback",
+        params={"code": "provider-code", "state": state},
+        follow_redirects=False,
+    )
+    assert parse_qs(urlparse(replay_response.headers["location"]).query) == {
+        "error": ["oauth_state_invalid"]
+    }
+
+    async with session_maker() as session:
+        user = (
+            await session.execute(
+                select(User).where(
+                    User.oauth_provider == "nthu",
+                    User.oauth_sub == profile.uuid,
+                )
+            )
+        ).scalar_one()
+        assert user.last_login is None
+        await session.delete(user)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_nthu_exchange_is_single_use_and_records_login_presence(
+    client,
+    make_user,
+    session_maker,
+    monkeypatch,
+):
+    user = await make_user(is_local=False, password_hash=None)
+    consumed = [user.id, None]
+    monkeypatch.setattr(
+        auth_service,
+        "consume_login_handoff",
+        lambda code: consumed.pop(0),
+    )
+    monkeypatch.setattr(
+        "app.api.services.auth.jwt.encode",
+        lambda payload, key, algorithm: "application-token",
+    )
+
+    response = await client.post(
+        "/auth/nthu/exchange",
+        json={"code": "one-time-code"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "access_token": "application-token",
+        "token_type": "bearer",
+    }
+
+    replay = await client.post(
+        "/auth/nthu/exchange",
+        json={"code": "one-time-code"},
+    )
+    assert replay.status_code == 400
+    assert replay.json()["detail"] == "oauth_exchange_invalid"
+
+    async with session_maker() as session:
+        stored = await session.get(User, user.id)
+        assert stored.last_login is not None
+        assert stored.last_seen_at is not None
+        presence = (
+            await session.execute(
+                select(UserPresenceSession).where(
+                    UserPresenceSession.user_id == user.id
+                )
+            )
+        ).scalar_one()
+        assert presence.last_seen_at is not None
+
+
+@pytest.mark.asyncio
+async def test_nthu_exchange_rejects_malformed_and_unknown_codes(client, monkeypatch):
+    monkeypatch.setattr(auth_service, "consume_login_handoff", lambda code: None)
+
+    for payload in ({}, {"code": ""}, {"code": "unknown-code"}):
+        response = await client.post("/auth/nthu/exchange", json=payload)
+        assert response.status_code in {400, 422}
 
 
 @pytest.mark.asyncio

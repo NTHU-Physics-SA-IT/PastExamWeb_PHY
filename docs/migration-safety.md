@@ -55,7 +55,9 @@ Reviewed manifests currently cover:
   status;
 - `d8f2a6c1b4e7`: the reviewed schema before the ArchiveSubmission/Archive
   one-to-one constraint; and
-- `6f3a9c2d8e41`: the current repository head and SQLModel metadata contract.
+- `6f3a9c2d8e41`: the reviewed schema before NTHU OAuth provider-identity
+  uniqueness; and
+- `9f1c2a7e4b63`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,
@@ -146,6 +148,17 @@ submission, clears or reassigns a link, duplicates an Archive, or rewrites
 application rows. Multiple null links remain valid. Downgrade removes only
 the named unique constraint and preserves the existing foreign key, rows,
 links, primary keys, and sequences.
+
+The NTHU OAuth identity migration adds the named standard nullable unique
+constraint `uq_users_oauth_provider_sub` on
+`users(oauth_provider, oauth_sub)`. Before DDL it verifies the exact reviewed
+source revision and column shape, locks `users` in
+`SHARE ROW EXCLUSIVE` mode, and performs one aggregate-only duplicate check
+over non-null provider/sub pairs. Any duplicate aborts with counts only; the
+migration does not expose identity values, select a winner, link accounts, or
+rewrite rows. Multiple local `(NULL, NULL)` identities remain valid. Downgrade
+removes only the named constraint and preserves every User row and identity
+value.
 
 On the first bootstrap, one missing canonical key or any extra custom category
 is evidence that the database is not the expected clean initialized target,

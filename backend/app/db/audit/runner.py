@@ -113,6 +113,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         "f5e1d8c3a7b2",
         "d8f2a6c1b4e7",
         "6f3a9c2d8e41",
+        "9f1c2a7e4b63",
     }
     owner_delete_column_condition = (
         """
@@ -142,6 +143,7 @@ def _continuity_cte(request: AuditRequest) -> str:
     expects_previous_status_column = request.expected_ledger in {
         "d8f2a6c1b4e7",
         "6f3a9c2d8e41",
+        "9f1c2a7e4b63",
     }
     previous_status_column_condition = (
         """
