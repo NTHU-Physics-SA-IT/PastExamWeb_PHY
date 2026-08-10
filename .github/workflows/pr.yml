@@ -10,6 +10,13 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout immutable pull request base
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
+
       - name: Require an approved pull request base
         shell: bash
         env:
@@ -17,15 +24,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          case "$BASE_BRANCH" in
-            main|integration/stage-5bd)
-              ;;
-            *)
-              echo \
-                "Pull requests must target an approved base; received: $BASE_BRANCH" \
-                >&2
-              exit 1
-              ;;
-          esac
-
-          echo "Pull request base branch is allowed."
+          python3 scripts/ci/project_governance.py \
+            validate-pr-base \
+            --base "$BASE_BRANCH"

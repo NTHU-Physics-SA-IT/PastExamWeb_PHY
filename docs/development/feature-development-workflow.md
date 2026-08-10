@@ -408,12 +408,15 @@ Merge strategy and merge readiness are owned by
 `--no-ff`, its new merge commit needs its own pushed, exact-SHA successful CI
 run; source-branch CI is not a substitute.
 
-Normal implementation work targets the active integration branch. A main
-milestone uses a separately authorized immutable candidate based on fresh
-`main`, a true merge from the final integration SHA, candidate Full CI, and a
-candidate pull request whose base is `main`. Main never uses Equivalent
-validation, and neither staged future branch recognition nor release metadata
-transfers integration, production, or deployment authority.
+Normal independent implementation starts from fresh `main`. A task or milestone
+uses the optional coordination branch only when its authority explicitly
+requires coordinated work; resolve that branch from canonical project
+governance. Returning a coordinated milestone to main uses a separately
+authorized immutable candidate based on fresh `main`, a true merge from the
+final coordination SHA, candidate Full CI, and a candidate pull request whose
+base is `main`. Main never uses Equivalent validation, and neither workflow
+family recognition nor release metadata transfers coordination, production, or
+deployment authority.
 
 ## Backend implementation task contract
 

@@ -7,7 +7,7 @@ on:
   pull_request:
     branches:
       - "main"
-      - "integration/stage-5bd"
+      - "integration/**"
     types:
       - opened
       - reopened
