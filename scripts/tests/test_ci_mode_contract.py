@@ -1075,10 +1075,17 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
     )
     assert checkout["with"] == {
         "fetch-depth": "1",
+        "path": "trusted-base",
         "persist-credentials": "false",
         "ref": "${{ github.event.pull_request.base.sha }}",
     }
     assert "scripts/ci/project_governance.py" in pr_workflow
+    assert 'gh api --paginate "repos/$REPOSITORY/branches"' in pr_workflow
+    assert ".protected == true" in pr_workflow
+    assert '"${#protected_coordination_branches[@]}" -ne 1' in pr_workflow
+    assert '"$BASE_BRANCH" != "${protected_coordination_branches[0]:-}"' in (
+        pr_workflow
+    )
     assert COORDINATION_BRANCH not in pr_workflow
     assert "pull_request_target" not in pr_parsed["on"]
     assert "merge_group" not in pr_parsed["on"]
@@ -1105,7 +1112,12 @@ def test_check_branch_accepts_only_approved_bases(
     )
     process = subprocess.run(
         ["bash", "-c", run],
-        env={"BASE_BRANCH": base_branch},
+        env={
+            "BASE_BRANCH": base_branch,
+            "GH_TOKEN": "test-only",
+            "REPOSITORY": "NTHU-Physics-SA-IT/PastExamWeb_PHY",
+            "TRUSTED_ROOT": str(REPOSITORY_ROOT),
+        },
         text=True,
         capture_output=True,
         check=False,
@@ -1113,3 +1125,44 @@ def test_check_branch_accepts_only_approved_bases(
     )
 
     assert process.returncode == expected_returncode
+
+
+def test_check_branch_bootstrap_accepts_main_and_rejects_incomplete_authority(
+    tmp_path: Path,
+) -> None:
+    parsed = yaml.load(PR_WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    run = next(
+        step["run"]
+        for step in parsed["jobs"]["check-branch"]["steps"]
+        if step["name"] == "Require an approved pull request base"
+    )
+    environment = {
+        "BASE_BRANCH": "main",
+        "GH_TOKEN": "test-only",
+        "REPOSITORY": "NTHU-Physics-SA-IT/PastExamWeb_PHY",
+        "TRUSTED_ROOT": str(tmp_path),
+    }
+
+    bootstrap = subprocess.run(
+        ["bash", "-c", run],
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+        cwd=REPOSITORY_ROOT,
+    )
+    assert bootstrap.returncode == 0
+
+    config = tmp_path / ".github" / "project-governance.json"
+    config.parent.mkdir(parents=True)
+    config.write_text("{}", encoding="utf-8")
+    incomplete = subprocess.run(
+        ["bash", "-c", run],
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+        cwd=REPOSITORY_ROOT,
+    )
+    assert incomplete.returncode == 2
+    assert "incomplete" in incomplete.stderr.lower()
