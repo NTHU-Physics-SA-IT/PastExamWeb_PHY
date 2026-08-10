@@ -26,6 +26,8 @@ env -i \
 env -i \
   HOME="$HOME" \
   PATH="$PATH" \
+  DEVELOPMENT_BACKEND_ENV_FILE="../backend/.env.example" \
+  DEVELOPMENT_FRONTEND_ENV_FILE="../frontend/.env.example" \
   docker compose \
   --env-file "$repository_root/docker/.env.example" \
   --file "$repository_root/docker/docker-compose.dev.yml" \

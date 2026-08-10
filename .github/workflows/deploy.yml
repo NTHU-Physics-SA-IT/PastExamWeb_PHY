@@ -95,6 +95,7 @@ jobs:
             >>"$GITHUB_OUTPUT"
 
       - name: Configure strict SSH host verification
+        id: ssh_setup
         shell: bash
         env:
           SSH_PRIVATE_KEY: ${{ secrets.DO_SSH_PRIVATE_KEY }}
@@ -163,7 +164,7 @@ jobs:
             <scripts/prepare-production-candidate.sh
 
       - name: Clean up run-specific remote files
-        if: always()
+        if: ${{ always() && steps.ssh_setup.outcome == 'success' }}
         shell: bash
         env:
           DO_HOST: ${{ secrets.DO_HOST }}
