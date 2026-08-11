@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { getCurrentUser, isAuthenticated } from '../utils/auth.js'
-import { applyRouteSeo } from '../utils/seo'
+import { applyRouteSeo, DEFAULT_DESCRIPTION } from '../utils/seo'
 
 const routes = [
   {
@@ -11,7 +11,7 @@ const routes = [
       requiresGuest: true,
       seo: {
         title: '清大物理考古題與歷屆考題｜PhysArchive',
-        description: '清大物理考古系統整理清華大學物理相關課程的歷屆考題、解答與課程資訊。',
+        description: DEFAULT_DESCRIPTION,
         canonicalPath: '/',
         robots: 'index, follow',
       },

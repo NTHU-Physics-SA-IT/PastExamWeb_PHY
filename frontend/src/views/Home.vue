@@ -104,7 +104,7 @@ import { useTheme } from '../utils/useTheme'
 import { statisticsService } from '../api'
 import { renderToString } from 'katex'
 import { useFormulaPhysics } from '../composables/useFormulaPhysics'
-import { SITE_URL, setSeo } from '../utils/seo'
+import { DEFAULT_DESCRIPTION, SITE_URL, setSeo } from '../utils/seo'
 import 'katex/dist/katex.min.css'
 
 const { isDarkTheme } = useTheme()
@@ -296,8 +296,7 @@ function openCatalog() {
 function applyHomeSeo() {
   setSeo({
     title: '清大物理考古題與歷屆考題｜PhysArchive',
-    description:
-      '清大物理考古系統整理清華大學物理相關課程的歷屆考題、解答與課程資訊，由清大物理系系學會資訊組維護。',
+    description: DEFAULT_DESCRIPTION,
     canonicalPath: '/',
     robots: 'index, follow',
     jsonLd: [

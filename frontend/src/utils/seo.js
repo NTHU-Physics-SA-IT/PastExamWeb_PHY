@@ -18,7 +18,7 @@ function resolveSiteUrl() {
 export const SITE_URL = resolveSiteUrl().replace(/\/+$/, '')
 export const DEFAULT_TITLE = '清大物理考古題與歷屆考題｜PhysArchive'
 export const DEFAULT_DESCRIPTION =
-  '清大物理考古系統整理清華大學物理相關課程的歷屆考題、解答與課程資訊。'
+  '整理清華大學物理系歷年考試題目、解答、課程資料與討論，讓找清大考古題、準備考試與複習課程變得更簡單。'
 
 function absoluteUrl(value = '/') {
   if (/^https?:\/\//i.test(value)) return value

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { setSeo } from '@/utils/seo'
+import { DEFAULT_DESCRIPTION, setSeo } from '@/utils/seo'
 
 function meta(selector) {
   return document.head.querySelector(selector)?.getAttribute('content')
@@ -35,6 +35,17 @@ describe('SEO metadata helper', () => {
     )
     expect(graph['@context']).toBe('https://schema.org')
     expect(graph['@graph'][0]['@type']).toBe('CollectionPage')
+  })
+
+  it('uses the canonical site description across default social metadata', () => {
+    setSeo()
+
+    expect(DEFAULT_DESCRIPTION).toBe(
+      '整理清華大學物理系歷年考試題目、解答、課程資料與討論，讓找清大考古題、準備考試與複習課程變得更簡單。'
+    )
+    expect(meta('meta[name="description"]')).toBe(DEFAULT_DESCRIPTION)
+    expect(meta('meta[property="og:description"]')).toBe(DEFAULT_DESCRIPTION)
+    expect(meta('meta[name="twitter:description"]')).toBe(DEFAULT_DESCRIPTION)
   })
 
   it('removes stale structured data and applies protected-route defaults', () => {
