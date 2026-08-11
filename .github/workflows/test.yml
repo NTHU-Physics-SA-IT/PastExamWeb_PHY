@@ -121,12 +121,20 @@ jobs:
             --confcutdir=../scripts/tests
 
   backend:
+    name: backend-shard-${{ matrix.shard }}
     if: ${{ inputs.run_checks }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [a, b]
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Validate backend shard manifest
+        run: python3 scripts/ci/backend_test_shards.py validate
 
       - name: Prepare backend env
         run: |
@@ -199,24 +207,46 @@ jobs:
             backend uv run python app/scripts/seed_db.py \
               --confirm-database-name pastexam_test_local
 
-      - name: Run backend tests with coverage
+      - name: Run backend shard with coverage
+        env:
+          BACKEND_TEST_SHARD: ${{ matrix.shard }}
         run: |
+          set -euo pipefail
+
+          mapfile -t test_paths < <(
+            python3 scripts/ci/backend_test_shards.py \
+              paths \
+              --shard "$BACKEND_TEST_SHARD"
+          )
+          if [[ "${#test_paths[@]}" -eq 0 ]]; then
+            echo "Backend test shard resolved to no files." >&2
+            exit 1
+          fi
+          printf 'Backend shard %s selected files:\n' "$BACKEND_TEST_SHARD"
+          printf '  %s\n' "${test_paths[@]}"
+
           docker compose \
             --env-file docker/.env \
             -f docker/docker-compose.dev.yml \
             run --rm \
             -e TEST_DATABASE_URL=postgresql+asyncpg://pastexam_test_local:local-test-only@db:5432/pastexam_test_local \
             -e PASTEXAM_TEST_DATABASE_ISOLATED=true \
+            -e COVERAGE_FILE="/app/.coverage.${BACKEND_TEST_SHARD}" \
             backend \
-            uv run pytest --cov=app --cov-report=term-missing --cov-report=html
+            uv run pytest \
+              --cov=app \
+              --cov-config=.coveragerc \
+              --cov-report= \
+              "${test_paths[@]}"
 
-      - name: Upload backend coverage report
+      - name: Upload raw backend coverage
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: backend-coverage
-          path: backend/htmlcov
-          if-no-files-found: warn
+          name: backend-coverage-raw-${{ matrix.shard }}
+          path: backend/.coverage.${{ matrix.shard }}
+          if-no-files-found: error
+          include-hidden-files: true
 
       - name: Tear down
         if: always()
@@ -225,6 +255,56 @@ jobs:
           --env-file docker/.env
           -f docker/docker-compose.dev.yml
           down --volumes --remove-orphans
+
+  backend-coverage:
+    name: backend-coverage
+    if: ${{ inputs.run_checks }}
+    needs: [backend]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install backend coverage tooling
+        working-directory: backend
+        run: uv sync --locked --only-group dev --no-install-project
+
+      - name: Download shard A coverage
+        uses: actions/download-artifact@v8
+        with:
+          name: backend-coverage-raw-a
+          path: backend/coverage-raw/a
+
+      - name: Download shard B coverage
+        uses: actions/download-artifact@v8
+        with:
+          name: backend-coverage-raw-b
+          path: backend/coverage-raw/b
+
+      - name: Combine backend coverage
+        working-directory: backend
+        run: |
+          set -euo pipefail
+
+          test -f coverage-raw/a/.coverage.a
+          test -f coverage-raw/b/.coverage.b
+          uv run --no-sync coverage combine coverage-raw/a coverage-raw/b
+          uv run --no-sync coverage report --show-missing
+          uv run --no-sync coverage html
+
+      - name: Upload backend coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-coverage
+          path: backend/htmlcov
+          if-no-files-found: error
 
   frontend-unit:
     if: ${{ inputs.run_checks }}

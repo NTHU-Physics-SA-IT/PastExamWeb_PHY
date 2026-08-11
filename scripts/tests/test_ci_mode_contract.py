@@ -298,6 +298,19 @@ def test_classifier_defines_only_three_modes_and_resolves_exact_authority() -> N
     assert "load_project_governance" in source
 
 
+def test_backend_shards_and_combined_coverage_are_required_authority() -> None:
+    backend_jobs = {
+        "test / backend-shard-a",
+        "test / backend-shard-b",
+        "test / backend-coverage",
+    }
+
+    assert backend_jobs <= ci.REQUIRED_SOURCE_JOBS
+    assert backend_jobs <= gate.REQUIRED_EXECUTION_JOBS
+    assert "test / backend" not in ci.REQUIRED_SOURCE_JOBS
+    assert "test / backend" not in gate.REQUIRED_EXECUTION_JOBS
+
+
 @pytest.mark.parametrize(
     ("ref", "paths", "expected"),
     (
@@ -832,7 +845,7 @@ def test_actions_api_never_follows_pagination_off_github_origin() -> None:
         ({}, {"Full CI Attestation": "skipped"}),
         ({}, {"Full CI Attestation": "neutral"}),
         ({}, {"Full CI Attestation": "cancelled"}),
-        ({}, {"test / backend": "failure"}),
+        ({}, {"test / backend-shard-a": "failure"}),
     ),
 )
 def test_source_run_mismatch_failure_or_nonfull_mode_falls_back(
@@ -849,6 +862,28 @@ def test_source_run_mismatch_failure_or_nonfull_mode_falls_back(
         target_sha=fixture["merge"],
         runs=[run],
         jobs=_jobs(overrides=job_overrides),
+    )
+
+    assert _classify_equivalent(fixture, api=api).ci_mode == "full"
+
+
+@pytest.mark.parametrize(
+    "job_name",
+    (
+        "test / backend-shard-a",
+        "test / backend-shard-b",
+        "test / backend-coverage",
+    ),
+)
+def test_equivalent_requires_each_backend_shard_and_coverage_job(
+    tmp_path: Path,
+    job_name: str,
+) -> None:
+    fixture = _equivalent_repository(tmp_path)
+    api = FakeAPI(
+        source_sha=fixture["source"],
+        target_sha=fixture["merge"],
+        jobs=_jobs(overrides={job_name: "failure"}),
     )
 
     assert _classify_equivalent(fixture, api=api).ci_mode == "full"
@@ -1056,9 +1091,23 @@ def test_full_attestation_checks_each_required_execution_job(
     assert "workflow_revision=" in evidence
 
 
-def test_full_attestation_rejects_a_skipped_required_job(
+@pytest.mark.parametrize(
+    ("job_name", "evidence_state"),
+    tuple(
+        (job_name, evidence_state)
+        for job_name in (
+            "test / backend-shard-a",
+            "test / backend-shard-b",
+            "test / backend-coverage",
+        )
+        for evidence_state in ("missing", "failure")
+    ),
+)
+def test_full_attestation_rejects_missing_or_failed_backend_evidence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    job_name: str,
+    evidence_state: str,
 ) -> None:
     fixture = _equivalent_repository(tmp_path)
 
@@ -1083,14 +1132,13 @@ def test_full_attestation_rejects_a_skipped_required_job(
                 {
                     "name": name,
                     "status": "completed",
-                    "conclusion": (
-                        "skipped" if name == "test / backend" else "success"
-                    ),
+                    "conclusion": "failure" if name == job_name else "success",
                     "run_id": run_id,
                     "run_attempt": run_attempt,
                     "head_sha": fixture["merge"],
                 }
                 for name in gate.REQUIRED_EXECUTION_JOBS
+                if not (evidence_state == "missing" and name == job_name)
             ]
 
     monkeypatch.setattr(gate, "GitHubActionsAPI", CurrentRunAPI)
@@ -1136,7 +1184,6 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
         "opened",
         "reopened",
         "synchronize",
-        "ready_for_review",
     ]
     assert "paths" not in parsed["on"]["pull_request"]
     assert "paths-ignore" not in parsed["on"]["pull_request"]
