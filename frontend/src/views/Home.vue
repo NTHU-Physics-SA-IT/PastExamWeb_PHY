@@ -295,7 +295,7 @@ function openCatalog() {
 
 function applyHomeSeo() {
   setSeo({
-    title: '清大物理考古題與歷屆考題｜PhysArchive',
+    title: '清大物理考古系統',
     description: DEFAULT_DESCRIPTION,
     canonicalPath: '/',
     robots: 'index, follow',

@@ -49,7 +49,12 @@ describe('PublicCourses', () => {
 
     expect(wrapper.text()).toContain('目前尚未有可公開瀏覽的課程')
     expect(wrapper.findAll('.course-card')).toHaveLength(0)
-    expect(setSeoMock).toHaveBeenCalledWith(expect.objectContaining({ canonicalPath: '/courses' }))
+    expect(setSeoMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: '清大物理考古題課程目錄',
+        canonicalPath: '/courses',
+      })
+    )
     wrapper.unmount()
   })
 
