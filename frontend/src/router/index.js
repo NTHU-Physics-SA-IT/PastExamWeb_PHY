@@ -38,7 +38,7 @@ const routes = [
       seo: {
         title: '清大物理課程考古題｜PhysArchive',
         description: '查看課程的公開考古題學年度、授課教師、考試類型與解答資訊。',
-        robots: 'index, follow',
+        robots: 'noindex, follow',
       },
     },
   },

@@ -218,20 +218,15 @@ def _public_archive_conditions(course_id: int | None = None, archive_id: int | N
     return conditions
 
 
-def _public_course_conditions() -> list:
+def _public_catalog_course_conditions() -> list:
     active_category_exists = exists().where(
         CourseCategoryConfig.key == Course.category,
         CourseCategoryConfig.is_active.is_(True),
         CourseCategoryConfig.deleted_at.is_(None),
     )
-    public_archive_exists = exists().where(
-        Archive.course_id == Course.id,
-        *_public_archive_conditions(),
-    )
     return [
         Course.deleted_at.is_(None),
         active_category_exists,
-        public_archive_exists,
     ]
 
 
@@ -390,21 +385,25 @@ async def _get_categorized_courses_data(
 ) -> CategorizedCourses:
     query = select(Course)
     if public_only:
-        query = query.where(*_public_course_conditions())
+        query = query.where(*_public_catalog_course_conditions())
     else:
         query = query.where(Course.deleted_at.is_(None))
     result = await db.execute(query)
     category_order = await _category_order_map(db)
     courses = _visible_courses(result.scalars().all(), category_order)
 
-    categorized_courses = CategorizedCourses({category: [] for category in category_order})
+    categorized_courses = CategorizedCourses(
+        {category: [] for category in category_order}
+    )
     for course in courses:
         course_info = CourseInfo(
             id=course.id,
             name=format_course_display_name(course.name),
             order_index=course.order_index,
         )
-        categorized_courses.setdefault(_course_category_value(course), []).append(course_info)
+        categorized_courses.setdefault(_course_category_value(course), []).append(
+            course_info
+        )
 
     if not public_only:
         for legacy_key, canonical_key in LEGACY_CATEGORY_ALIASES.items():
@@ -425,7 +424,7 @@ async def get_categorized_courses(
 
 @router.get("/public", response_model=dict[str, List[CourseInfo]])
 async def get_public_categorized_courses(db: AsyncSession = Depends(get_session)):
-    """Return courses that currently contain effective public archives."""
+    """Return canonical active courses for anonymous human discovery."""
     return await _get_categorized_courses_data(db, public_only=True)
 
 
@@ -438,7 +437,7 @@ async def get_public_course_archives(
         await db.execute(
             select(Course).where(
                 Course.id == course_id,
-                *_public_course_conditions(),
+                *_public_catalog_course_conditions(),
             )
         )
     ).scalar_one_or_none()

@@ -1,11 +1,19 @@
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import delete
 
 from app.core.config import settings
-from app.models.models import Archive, ArchiveType, Course, CourseCategory
+from app.models.models import (
+    Archive,
+    ArchiveSubmission,
+    ArchiveType,
+    Course,
+    CourseCategory,
+    SubmissionStatus,
+)
 
 
 @pytest.mark.asyncio
@@ -28,7 +36,28 @@ async def test_sitemap_contains_only_courses_with_public_archives(
             name=f"Sitemap empty {suffix}",
             category=CourseCategory.FRESHMAN.value,
         )
-        session.add_all([public_course, empty_course])
+        takedown_course = Course(
+            name=f"Sitemap takedown {suffix}",
+            category=CourseCategory.FRESHMAN.value,
+        )
+        deleted_archive_course = Course(
+            name=f"Sitemap deleted archive {suffix}",
+            category=CourseCategory.FRESHMAN.value,
+        )
+        deleted_course = Course(
+            name=f"Sitemap deleted course {suffix}",
+            category=CourseCategory.FRESHMAN.value,
+            deleted_at=datetime.now(timezone.utc),
+        )
+        session.add_all(
+            [
+                public_course,
+                empty_course,
+                takedown_course,
+                deleted_archive_course,
+                deleted_course,
+            ]
+        )
         await session.flush()
         archive = Archive(
             name=f"Sitemap archive {suffix}",
@@ -40,7 +69,55 @@ async def test_sitemap_contains_only_courses_with_public_archives(
             course_id=public_course.id,
             uploader_id=uploader.id,
         )
-        session.add(archive)
+        takedown_archive = Archive(
+            name=f"Sitemap takedown archive {suffix}",
+            academic_year=20261,
+            archive_type=ArchiveType.MIDTERM,
+            professor="Professor Sitemap",
+            has_answers=False,
+            object_name=f"private/takedown-{suffix}.pdf",
+            course_id=takedown_course.id,
+            uploader_id=uploader.id,
+        )
+        deleted_archive = Archive(
+            name=f"Sitemap deleted archive {suffix}",
+            academic_year=20261,
+            archive_type=ArchiveType.MIDTERM,
+            professor="Professor Sitemap",
+            has_answers=False,
+            object_name=f"private/deleted-{suffix}.pdf",
+            course_id=deleted_archive_course.id,
+            uploader_id=uploader.id,
+            deleted_at=datetime.now(timezone.utc),
+        )
+        deleted_course_archive = Archive(
+            name=f"Sitemap deleted course archive {suffix}",
+            academic_year=20261,
+            archive_type=ArchiveType.MIDTERM,
+            professor="Professor Sitemap",
+            has_answers=False,
+            object_name=f"private/deleted-course-{suffix}.pdf",
+            course_id=deleted_course.id,
+            uploader_id=uploader.id,
+        )
+        session.add_all(
+            [archive, takedown_archive, deleted_archive, deleted_course_archive]
+        )
+        await session.flush()
+        takedown_submission = ArchiveSubmission(
+            subject=takedown_course.name,
+            category=CourseCategory.FRESHMAN.value,
+            name=takedown_archive.name,
+            academic_year=takedown_archive.academic_year,
+            archive_type=takedown_archive.archive_type,
+            professor=takedown_archive.professor,
+            has_answers=takedown_archive.has_answers,
+            object_name=f"submissions/{suffix}.pdf",
+            status=SubmissionStatus.TAKEDOWN,
+            requester_id=uploader.id,
+            created_archive_id=takedown_archive.id,
+        )
+        session.add(takedown_submission)
         await session.commit()
         await session.refresh(public_course)
         await session.refresh(empty_course)
@@ -55,13 +132,49 @@ async def test_sitemap_contains_only_courses_with_public_archives(
         assert "https://physarchive.com/courses" in response.text
         assert f"https://physarchive.com/courses/{public_course.id}" in response.text
         assert f"https://physarchive.com/courses/{empty_course.id}" not in response.text
+        assert (
+            f"https://physarchive.com/courses/{takedown_course.id}" not in response.text
+        )
+        assert (
+            f"https://physarchive.com/courses/{deleted_archive_course.id}"
+            not in response.text
+        )
+        assert (
+            f"https://physarchive.com/courses/{deleted_course.id}" not in response.text
+        )
         assert "/archive" not in response.text
         assert "/admin" not in response.text
     finally:
         async with session_maker() as session:
-            await session.execute(delete(Archive).where(Archive.id == archive.id))
             await session.execute(
-                delete(Course).where(Course.id.in_([public_course.id, empty_course.id]))
+                delete(ArchiveSubmission).where(
+                    ArchiveSubmission.id == takedown_submission.id
+                )
+            )
+            await session.execute(
+                delete(Archive).where(
+                    Archive.id.in_(
+                        [
+                            archive.id,
+                            takedown_archive.id,
+                            deleted_archive.id,
+                            deleted_course_archive.id,
+                        ]
+                    )
+                )
+            )
+            await session.execute(
+                delete(Course).where(
+                    Course.id.in_(
+                        [
+                            public_course.id,
+                            empty_course.id,
+                            takedown_course.id,
+                            deleted_archive_course.id,
+                            deleted_course.id,
+                        ]
+                    )
+                )
             )
             await session.commit()
 

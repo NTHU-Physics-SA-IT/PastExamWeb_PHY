@@ -371,17 +371,20 @@ a conflict.
   the system. Authentication is required for Archive browsing, list-carried
   detail data, preview metadata, preview-file streaming, and
   download/download-URL access.
-- An anonymous read-only catalog may expose only active, non-deleted Courses
-  and Categories that contain at least one effective public Archive. Its
-  Archive projection is limited to `id`, `name`, `professor`, `archive_type`,
-  `has_answers`, and `academic_year`.
+- An anonymous read-only catalog may expose active, non-deleted Courses in
+  active, non-deleted canonical Categories whether or not a Course currently
+  has an effective public Archive. Its Archive projection is limited to `id`,
+  `name`, `professor`, `archive_type`, `has_answers`, and `academic_year`.
 - The anonymous catalog must not expose PDF bytes, preview data, object-storage
   keys or paths, signed URLs, uploader or submission identity, user data, or
   internal storage metadata. Backend queries enforce this boundary; frontend
   control visibility is not authorization.
-- A Course without an effective public Archive is not anonymously
-  discoverable, does not have an indexable public detail page, and is omitted
-  from the sitemap. Empty catalog responses remain valid.
+- A Course without an effective public Archive remains anonymously
+  discoverable and human-browsable, and its Archive endpoint returns an empty
+  list. Its detail page is `noindex, follow` and is omitted from the sitemap.
+  A Course becomes `index, follow` and sitemap-eligible only when at least one
+  Archive satisfies the effective-public conditions. Empty catalog responses
+  remain valid only when no canonical active Course is available.
 - There is no independent Archive detail `GET` route in the current API;
   Archive detail data is carried by the authenticated list response.
 - Authentication must reject access before object storage is read. Existing

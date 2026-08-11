@@ -17,9 +17,11 @@ from app.models.models import (
 from app.utils.auth import get_current_user
 
 
-async def _create_course(session_maker, *, name: str) -> Course:
+async def _create_course(session_maker, *, name: str, deleted: bool = False) -> Course:
     async with session_maker() as session:
         course = Course(name=name, category=CourseCategory.FRESHMAN.value)
+        if deleted:
+            course.deleted_at = datetime.now(timezone.utc)
         session.add(course)
         await session.commit()
         await session.refresh(course)
@@ -80,7 +82,7 @@ async def _link_submission(
 
 
 @pytest.mark.asyncio
-async def test_anonymous_public_catalog_exposes_only_safe_effective_metadata(
+async def test_anonymous_public_catalog_separates_course_discovery_from_archive_visibility(
     client: AsyncClient,
     session_maker,
     make_user,
@@ -102,6 +104,11 @@ async def test_anonymous_public_catalog_exposes_only_safe_effective_metadata(
     deleted_archive_course = await _create_course(
         session_maker,
         name=f"Deleted archive SEO course {suffix}",
+    )
+    deleted_course = await _create_course(
+        session_maker,
+        name=f"Deleted SEO course {suffix}",
+        deleted=True,
     )
 
     public_archive = await _create_archive(
@@ -144,9 +151,10 @@ async def test_anonymous_public_catalog_exposes_only_safe_effective_metadata(
         ]
         catalog_ids = {item["id"] for item in catalog_rows}
         assert public_course.id in catalog_ids
-        assert empty_course.id not in catalog_ids
-        assert hidden_course.id not in catalog_ids
-        assert deleted_archive_course.id not in catalog_ids
+        assert empty_course.id in catalog_ids
+        assert hidden_course.id in catalog_ids
+        assert deleted_archive_course.id in catalog_ids
+        assert deleted_course.id not in catalog_ids
 
         rows = detail_response.json()
         assert len(rows) == 1
@@ -168,6 +176,11 @@ async def test_anonymous_public_catalog_exposes_only_safe_effective_metadata(
             hidden_course.id,
             deleted_archive_course.id,
         ):
+            response = await client.get(f"/courses/public/{course_id}/archives")
+            assert response.status_code == 200
+            assert response.json() == []
+
+        for course_id in (deleted_course.id, 2_000_000_000):
             response = await client.get(f"/courses/public/{course_id}/archives")
             assert response.status_code == 404
     finally:
@@ -197,6 +210,7 @@ async def test_anonymous_public_catalog_exposes_only_safe_effective_metadata(
                             empty_course.id,
                             hidden_course.id,
                             deleted_archive_course.id,
+                            deleted_course.id,
                         ]
                     )
                 )

@@ -86,6 +86,38 @@ describe('PublicCourse', () => {
     wrapper.unmount()
   })
 
+  it('renders an active course with no public archives and keeps it out of the index', async () => {
+    courseServiceMock.listPublicCategories.mockResolvedValue({
+      data: [{ key: 'fundamental', name: '基礎課程', label: '基礎' }],
+    })
+    courseServiceMock.listPublicCourses.mockResolvedValue({
+      data: {
+        fundamental: [{ id: 42, name: '普通物理(一)', order_index: 0 }],
+      },
+    })
+    courseServiceMock.getPublicCourseArchives.mockResolvedValue({ data: [] })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('普通物理(一)考古題')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.get('.empty-state').text()).toContain('目前尚未有可公開瀏覽的考古題')
+    expect(wrapper.find('.archive-card').exists()).toBe(false)
+    expect(setSeoMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        canonicalPath: '/courses/42',
+        robots: 'noindex, follow',
+      })
+    )
+    const zeroArchiveSeo = setSeoMock.mock.calls.at(-1)[0]
+    expect(zeroArchiveSeo.jsonLd.map((item) => item['@type'])).toEqual([
+      'CollectionPage',
+      'BreadcrumbList',
+    ])
+    wrapper.unmount()
+  })
+
   it('rejects an invalid course id without issuing API requests', async () => {
     routeMock.params.courseId = 'invalid'
     routeMock.path = '/courses/invalid'
@@ -112,7 +144,7 @@ describe('PublicCourse', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.get('[role="alert"]').text()).toContain('不存在或沒有公開考古題')
+    expect(wrapper.get('[role="alert"]').text()).toContain('不存在或目前無法載入')
     expect(setSeoMock).toHaveBeenCalledWith(
       expect.objectContaining({ robots: 'noindex, nofollow' })
     )

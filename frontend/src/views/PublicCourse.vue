@@ -33,7 +33,12 @@
         </div>
       </header>
 
-      <section class="archive-groups" aria-label="公開考古題中繼資料">
+      <section v-if="archives.length === 0" class="empty-state">
+        <h2>目前尚未有可公開瀏覽的考古題</h2>
+        <p>這門課程目前尚未收錄可公開顯示的考古題中繼資料。</p>
+      </section>
+
+      <section v-else class="archive-groups" aria-label="公開考古題中繼資料">
         <section v-for="group in groupedArchives" :key="group.year" class="archive-group">
           <header class="group-header">
             <h2>{{ formatAcademicYear(group.year) }}</h2>
@@ -63,7 +68,7 @@
         </section>
       </section>
 
-      <aside class="login-notice">
+      <aside v-if="archives.length > 0" class="login-notice">
         <h2>預覽或下載完整文件</h2>
         <p>公開頁面不提供 PDF、物件位置或下載網址；請回到首頁登入後使用文件功能。</p>
         <RouterLink to="/">前往登入</RouterLink>
@@ -137,7 +142,10 @@ function applyMissingSeo() {
 
 function applyCourseSeo() {
   const courseUrl = `${SITE_URL}/courses/${course.value.id}`
-  const description = `清大物理相關課程 ${course.value.name} 的公開考古題資訊，共收錄 ${archives.value.length} 份。`
+  const hasPublicArchives = archives.value.length > 0
+  const description = hasPublicArchives
+    ? `清大物理相關課程 ${course.value.name} 的公開考古題資訊，共收錄 ${archives.value.length} 份。`
+    : `清大物理相關課程 ${course.value.name} 的課程資訊，目前尚未有可公開瀏覽的考古題。`
   const archiveItems = archives.value.map((archive, index) => ({
     '@type': 'ListItem',
     position: index + 1,
@@ -150,21 +158,34 @@ function applyCourseSeo() {
       .join(' '),
   }))
 
-  setSeo({
-    title: `${course.value.name}考古題｜清大物理｜PhysArchive`,
+  const collectionPage = {
+    '@type': 'CollectionPage',
+    '@id': `${courseUrl}#page`,
+    name: `${course.value.name}考古題`,
+    url: courseUrl,
     description,
-    canonicalPath: `/courses/${course.value.id}`,
-    robots: 'index, follow',
-    jsonLd: [
+    isPartOf: { '@id': `${SITE_URL}/#website` },
+  }
+  const breadcrumbList = {
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: '首頁', item: `${SITE_URL}/` },
       {
-        '@type': 'CollectionPage',
-        '@id': `${courseUrl}#page`,
-        name: `${course.value.name}考古題`,
-        url: courseUrl,
-        description,
-        isPartOf: { '@id': `${SITE_URL}/#website` },
-        mainEntity: { '@id': `${courseUrl}#course` },
+        '@type': 'ListItem',
+        position: 2,
+        name: '公開課程目錄',
+        item: `${SITE_URL}/courses`,
       },
+      { '@type': 'ListItem', position: 3, name: course.value.name, item: courseUrl },
+    ],
+  }
+  const jsonLd = [collectionPage, breadcrumbList]
+
+  if (hasPublicArchives) {
+    collectionPage.mainEntity = { '@id': `${courseUrl}#course` }
+    jsonLd.splice(
+      1,
+      0,
       {
         '@type': 'Course',
         '@id': `${courseUrl}#course`,
@@ -173,25 +194,20 @@ function applyCourseSeo() {
         provider: { '@id': `${SITE_URL}/#organization` },
       },
       {
-        '@type': 'BreadcrumbList',
-        itemListElement: [
-          { '@type': 'ListItem', position: 1, name: '首頁', item: `${SITE_URL}/` },
-          {
-            '@type': 'ListItem',
-            position: 2,
-            name: '公開課程目錄',
-            item: `${SITE_URL}/courses`,
-          },
-          { '@type': 'ListItem', position: 3, name: course.value.name, item: courseUrl },
-        ],
-      },
-      {
         '@type': 'ItemList',
         name: `${course.value.name}公開考古題中繼資料`,
         numberOfItems: archiveItems.length,
         itemListElement: archiveItems,
-      },
-    ],
+      }
+    )
+  }
+
+  setSeo({
+    title: `${course.value.name}考古題｜清大物理｜PhysArchive`,
+    description,
+    canonicalPath: `/courses/${course.value.id}`,
+    robots: hasPublicArchives ? 'index, follow' : 'noindex, follow',
+    jsonLd,
   })
 }
 
@@ -221,7 +237,7 @@ async function loadCourse() {
       coursesResponse.data && typeof coursesResponse.data === 'object' ? coursesResponse.data : {}
     const matched = findCourse(courseId, categories, coursesByCategory)
     const publicArchives = Array.isArray(archivesResponse.data) ? archivesResponse.data : []
-    if (!matched.course || publicArchives.length === 0) throw new Error('Course not public')
+    if (!matched.course) throw new Error('Course not public')
 
     course.value = matched.course
     category.value = matched.category
@@ -229,7 +245,7 @@ async function loadCourse() {
     applyCourseSeo()
   } catch (error) {
     console.error('Failed to load public course:', error)
-    errorMessage.value = '這門課程不存在或沒有公開考古題。'
+    errorMessage.value = '這門課程不存在或目前無法載入。'
     applyMissingSeo()
   } finally {
     loading.value = false
@@ -322,6 +338,7 @@ watch(() => route.params.courseId, loadCourse)
 }
 
 .archive-card,
+.empty-state,
 .login-notice,
 .error-message {
   padding: 1.25rem;
@@ -374,6 +391,7 @@ watch(() => route.params.courseId, loadCourse)
 }
 
 .login-notice h2,
+.empty-state h2,
 .error-message h1 {
   margin-top: 0;
 }
@@ -381,6 +399,12 @@ watch(() => route.params.courseId, loadCourse)
 .status-message {
   padding: 3rem 1rem;
   text-align: center;
+}
+
+.empty-state p {
+  margin-bottom: 0;
+  color: var(--text-secondary);
+  line-height: 1.75;
 }
 
 .breadcrumbs a:focus-visible,

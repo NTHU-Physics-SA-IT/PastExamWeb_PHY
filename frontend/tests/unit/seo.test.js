@@ -49,4 +49,15 @@ describe('SEO metadata helper', () => {
     expect(meta('meta[name="robots"]')).toBe('noindex, nofollow')
     expect(document.getElementById('seo-jsonld')).toBeNull()
   })
+
+  it('keeps a self-canonical public detail page followable while excluding it from indexing', () => {
+    setSeo({
+      title: '普通物理(一)｜PhysArchive',
+      canonicalPath: '/courses/42',
+      robots: 'noindex, follow',
+    })
+
+    expect(meta('meta[name="robots"]')).toBe('noindex, follow')
+    expect(document.head.querySelector('link[rel="canonical"]')?.href).toMatch(/\/courses\/42$/)
+  })
 })
