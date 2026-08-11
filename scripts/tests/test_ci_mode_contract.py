@@ -942,10 +942,21 @@ def test_full_attestation_checks_each_required_execution_job(
         def __init__(self, **arguments: Any) -> None:
             pass
 
-        def run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        def run_attempt_jobs(
+            self,
+            run_id: int,
+            run_attempt: int,
+        ) -> list[dict[str, Any]]:
             assert run_id == 77
+            assert run_attempt == 2
             return [
-                {"name": name, "conclusion": "success"}
+                {
+                    "name": name,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "run_attempt": 2,
+                    "head_sha": fixture["merge"],
+                }
                 for name in gate.REQUIRED_EXECUTION_JOBS
             ]
 
@@ -963,6 +974,7 @@ def test_full_attestation_checks_each_required_execution_job(
             "api_url": "https://api.github.invalid",
             "repository": REPOSITORY,
             "run_id": 77,
+            "run_attempt": 2,
             "sha": fixture["merge"],
             "repository_root": fixture["root"],
             "github_output": output,
@@ -987,13 +999,20 @@ def test_full_attestation_rejects_a_skipped_required_job(
         def __init__(self, **arguments: Any) -> None:
             pass
 
-        def run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        def run_attempt_jobs(
+            self,
+            run_id: int,
+            run_attempt: int,
+        ) -> list[dict[str, Any]]:
             return [
                 {
                     "name": name,
+                    "status": "completed",
                     "conclusion": (
                         "skipped" if name == "test / backend" else "success"
                     ),
+                    "run_attempt": run_attempt,
+                    "head_sha": fixture["merge"],
                 }
                 for name in gate.REQUIRED_EXECUTION_JOBS
             ]
@@ -1011,6 +1030,7 @@ def test_full_attestation_rejects_a_skipped_required_job(
             "api_url": "https://api.github.invalid",
             "repository": REPOSITORY,
             "run_id": 77,
+            "run_attempt": 2,
             "sha": fixture["merge"],
             "repository_root": fixture["root"],
             "github_output": None,
@@ -1055,6 +1075,7 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
         "pull-requests": "read",
     }
     assert parsed["jobs"]["full_attestation"]["name"] == "Full CI Attestation"
+    assert "--run-attempt '${{ github.run_attempt }}'" in workflow
     assert parsed["jobs"]["ci_gate"]["name"] == "CI Gate"
     assert parsed["jobs"]["ci_gate"]["if"] == "${{ always() }}"
     assert "needs.ci_mode.outputs.ci_mode == 'full'" in workflow

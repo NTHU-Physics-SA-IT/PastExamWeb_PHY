@@ -271,6 +271,7 @@ jobs:
           --api-url '${{ github.api_url }}'
           --repository '${{ github.repository }}'
           --run-id '${{ github.run_id }}'
+          --run-attempt '${{ github.run_attempt }}'
           --sha '${{ github.sha }}'
           --github-output "$GITHUB_OUTPUT"
 

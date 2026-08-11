@@ -4,15 +4,18 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import os
 from pathlib import Path
 import sys
+import time
 from typing import Any
 
 from classify_ci_mode import (
     APPROVED_WORKFLOW_PATH,
     GitHubActionsAPI,
     GitRepository,
+    SHA_PATTERN,
 )
 
 
@@ -29,6 +32,9 @@ REQUIRED_EXECUTION_JOBS = frozenset(
         "build / frontend",
     }
 )
+
+FULL_ATTESTATION_MAX_OBSERVATIONS = 5
+FULL_ATTESTATION_POLL_INTERVAL_SECONDS = 2.0
 
 CI_GATE_RESULT_LABELS = {
     "classifier_result": "classifier",
@@ -76,18 +82,118 @@ def _require_result(actual: str, expected: str, label: str) -> None:
         raise RuntimeError(f"{label} result is {actual!r}; expected {expected!r}")
 
 
-def _require_unique_successes(
+def _inspect_required_job_snapshot(
     jobs: list[dict[str, Any]],
     required_names: frozenset[str],
-) -> None:
-    conclusions: dict[str, list[Any]] = {}
+    *,
+    run_attempt: int,
+    sha: str,
+    observation: int,
+    max_observations: int,
+) -> tuple[str, ...]:
+    matching_jobs: dict[str, list[dict[str, Any]]] = {}
     for job in jobs:
         name = job.get("name")
-        if isinstance(name, str):
-            conclusions.setdefault(name, []).append(job.get("conclusion"))
-    for name in required_names:
-        if conclusions.get(name) != ["success"]:
-            raise RuntimeError(f"required full-CI job is not successful: {name}")
+        if isinstance(name, str) and name in required_names:
+            matching_jobs.setdefault(name, []).append(job)
+
+    incomplete: list[str] = []
+    for name in sorted(required_names):
+        matches = matching_jobs.get(name, [])
+        if not matches:
+            incomplete.append(f"{name}: missing")
+            continue
+        if len(matches) != 1:
+            raise RuntimeError(
+                "required full-CI job identity is ambiguous at "
+                f"observation {observation}/{max_observations}: "
+                f"{name}: observed {len(matches)} entries"
+            )
+
+        job = matches[0]
+        observed_attempt = job.get("run_attempt")
+        if observed_attempt != run_attempt:
+            raise RuntimeError(
+                "required full-CI job attempt mismatch at "
+                f"observation {observation}/{max_observations}: "
+                f"{name}: observed {observed_attempt!r}, expected {run_attempt}"
+            )
+        observed_sha = job.get("head_sha")
+        if observed_sha != sha:
+            raise RuntimeError(
+                "required full-CI job SHA mismatch at "
+                f"observation {observation}/{max_observations}: "
+                f"{name}: observed {observed_sha!r}, expected {sha!r}"
+            )
+
+        status = job.get("status")
+        conclusion = job.get("conclusion")
+        if conclusion not in (None, "success"):
+            raise RuntimeError(
+                "required full-CI job terminal non-success at "
+                f"observation {observation}/{max_observations}: "
+                f"{name}: status={status!r}, conclusion={conclusion!r}"
+            )
+        if status == "completed" and conclusion == "success":
+            continue
+        if status == "completed":
+            incomplete.append(
+                f"{name}: conclusion unavailable "
+                f"(status={status!r}, conclusion={conclusion!r})"
+            )
+        else:
+            incomplete.append(
+                f"{name}: nonterminal (status={status!r}, conclusion={conclusion!r})"
+            )
+    return tuple(incomplete)
+
+
+def _require_unique_successes(
+    *,
+    load_jobs: Callable[[], list[dict[str, Any]]],
+    required_names: frozenset[str],
+    run_attempt: int,
+    sha: str,
+    max_observations: int = FULL_ATTESTATION_MAX_OBSERVATIONS,
+    poll_interval_seconds: float = FULL_ATTESTATION_POLL_INTERVAL_SECONDS,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> None:
+    if isinstance(run_attempt, bool) or not isinstance(run_attempt, int):
+        raise RuntimeError("workflow run attempt is malformed")
+    if run_attempt < 1:
+        raise RuntimeError("workflow run attempt must be positive")
+    if not isinstance(sha, str) or not SHA_PATTERN.fullmatch(sha):
+        raise RuntimeError("workflow run SHA is malformed")
+    if max_observations < 1:
+        raise ValueError("full-CI observation bound must be positive")
+    if poll_interval_seconds < 0:
+        raise ValueError("full-CI polling interval cannot be negative")
+
+    for observation in range(1, max_observations + 1):
+        incomplete = _inspect_required_job_snapshot(
+            load_jobs(),
+            required_names,
+            run_attempt=run_attempt,
+            sha=sha,
+            observation=observation,
+            max_observations=max_observations,
+        )
+        if not incomplete:
+            return
+
+        diagnostic = "; ".join(incomplete)
+        if observation == max_observations:
+            raise RuntimeError(
+                "required full-CI evidence incomplete at "
+                f"observation {observation}/{max_observations}: {diagnostic}"
+            )
+        print(
+            "Full CI evidence incomplete at "
+            f"observation {observation}/{max_observations}: {diagnostic}; "
+            f"retrying in {poll_interval_seconds:g} seconds.",
+            file=sys.stderr,
+        )
+        sleeper(poll_interval_seconds)
 
 
 def attest_full_ci(arguments: argparse.Namespace) -> None:
@@ -103,8 +209,13 @@ def attest_full_ci(arguments: argparse.Namespace) -> None:
         token=os.environ.get("GITHUB_TOKEN", ""),
     )
     _require_unique_successes(
-        api.run_jobs(arguments.run_id),
-        REQUIRED_EXECUTION_JOBS,
+        load_jobs=lambda: api.run_attempt_jobs(
+            arguments.run_id,
+            arguments.run_attempt,
+        ),
+        required_names=REQUIRED_EXECUTION_JOBS,
+        run_attempt=arguments.run_attempt,
+        sha=arguments.sha,
     )
 
     git = GitRepository(arguments.repository_root)
@@ -152,6 +263,7 @@ def _parser() -> argparse.ArgumentParser:
     attestation.add_argument("--api-url", required=True)
     attestation.add_argument("--repository", required=True)
     attestation.add_argument("--run-id", type=int, required=True)
+    attestation.add_argument("--run-attempt", type=int, required=True)
     attestation.add_argument("--sha", required=True)
     attestation.add_argument("--repository-root", type=Path, default=Path.cwd())
     attestation.add_argument("--github-output", type=Path)

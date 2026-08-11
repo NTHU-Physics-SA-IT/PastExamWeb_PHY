@@ -334,6 +334,29 @@ class GitHubActionsAPI:
             parameters={"filter": "latest", "per_page": "100"},
         )
 
+    def run_attempt_jobs(
+        self,
+        run_id: int,
+        run_attempt: int,
+    ) -> list[dict[str, Any]]:
+        if (
+            isinstance(run_id, bool)
+            or not isinstance(run_id, int)
+            or run_id < 1
+            or isinstance(run_attempt, bool)
+            or not isinstance(run_attempt, int)
+            or run_attempt < 1
+        ):
+            raise ClassificationFailure("workflow run attempt identity is malformed")
+        repository = quote(self.repository, safe="/")
+        return self._paged_list(
+            path=(
+                f"/repos/{repository}/actions/runs/{run_id}/attempts/{run_attempt}/jobs"
+            ),
+            key="jobs",
+            parameters={"per_page": "100"},
+        )
+
     def ref_sha(self, ref_name: str) -> str:
         repository = quote(self.repository, safe="/")
         encoded_ref = quote(ref_name, safe="")
