@@ -19,6 +19,12 @@ CI_SCRIPTS = REPOSITORY_ROOT / "scripts" / "ci"
 sys.path.insert(0, str(CI_SCRIPTS))
 ci = importlib.import_module("classify_ci_mode")
 gate = importlib.import_module("validate_ci_gate")
+project_governance = importlib.import_module("project_governance")
+
+PROJECT_GOVERNANCE = project_governance.load_project_governance(REPOSITORY_ROOT)
+assert PROJECT_GOVERNANCE.coordination_branch is not None
+COORDINATION_BRANCH = PROJECT_GOVERNANCE.coordination_branch
+COORDINATION_REF = PROJECT_GOVERNANCE.coordination_ref
 
 NOW = datetime(2026, 8, 4, 12, tzinfo=UTC)
 REPOSITORY_ID = 12345
@@ -145,7 +151,7 @@ class FakePRAPI(FakeAPI):
             error=error,
         )
         self.refs = {
-            ci.IMPLEMENTATION_BRANCH: fixture["base"],
+            COORDINATION_BRANCH: fixture["base"],
             "source": fixture["source"],
         }
         self.refs.update(ref_overrides or {})
@@ -156,7 +162,7 @@ class FakePRAPI(FakeAPI):
             "mergeable": True,
             "merge_commit_sha": fixture["merge"],
             "base": {
-                "ref": ci.IMPLEMENTATION_BRANCH,
+                "ref": COORDINATION_BRANCH,
                 "sha": fixture["base"],
                 "repo": {
                     "id": REPOSITORY_ID,
@@ -256,7 +262,7 @@ def _pr_event(fixture: dict[str, Any], **changes: Any) -> Any:
         "action": "synchronize",
         "pr_number": 17,
         "draft": False,
-        "base_ref": ci.IMPLEMENTATION_BRANCH,
+        "base_ref": COORDINATION_BRANCH,
         "base_sha": fixture["base"],
         "head_ref": "source",
         "head_sha": fixture["source"],
@@ -278,35 +284,18 @@ def _classify_pr_equivalent(
         event=_pr_event(fixture, **(event_changes or {})),
         git=git or fixture["git"],
         api=api or FakePRAPI(fixture),
-        pr_equivalent_allowlist=frozenset({ci.IMPLEMENTATION_BRANCH}),
+        pr_equivalent_allowlist=frozenset({COORDINATION_BRANCH}),
         now=NOW,
     )
 
 
-def test_classifier_defines_only_three_modes_and_exact_live_allowlists() -> None:
+def test_classifier_defines_only_three_modes_and_resolves_exact_authority() -> None:
     assert ci.CI_MODES == frozenset({"full", "equivalent-merge", "docs-only"})
-    assert ci.LIVE_EQUIVALENT_TARGET_REFS == frozenset(
-        {
-            "refs/heads/fix/submission-status-api-conformance",
-            "refs/heads/integration/stage-5bd",
-        }
-    )
-    assert ci.LIVE_EQUIVALENT_PR_BASE_REFS == frozenset(
-        {
-            "fix/submission-status-api-conformance",
-            "integration/stage-5bd",
-        }
-    )
-    assert ci.IMPLEMENTATION_BRANCHES == frozenset(
-        {ci.IMPLEMENTATION_BRANCH, ci.STAGED_IMPLEMENTATION_BRANCH}
-    )
-    assert all(
-        not any(token in ref for token in ("*", "?", "["))
-        for ref in (
-            *ci.LIVE_EQUIVALENT_TARGET_REFS,
-            *ci.LIVE_EQUIVALENT_PR_BASE_REFS,
-        )
-    )
+    assert COORDINATION_REF == f"refs/heads/{COORDINATION_BRANCH}"
+    assert all(token not in COORDINATION_BRANCH for token in ("*", "?", "["))
+    source = (CI_SCRIPTS / "classify_ci_mode.py").read_text(encoding="utf-8")
+    assert COORDINATION_BRANCH not in source
+    assert "load_project_governance" in source
 
 
 @pytest.mark.parametrize(
@@ -316,11 +305,12 @@ def test_classifier_defines_only_three_modes_and_exact_live_allowlists() -> None
         ("refs/heads/topic", ("docs/guide.md", "README.md"), "docs-only"),
         ("refs/heads/main", ("docs/guide.md",), "full"),
         ("refs/heads/main", ("backend/app/main.py",), "full"),
-        ("refs/heads/feat/exam-report-system", ("docs/guide.md",), "full"),
+        (COORDINATION_REF, ("docs/guide.md",), "full"),
         ("refs/heads/release/v1", ("docs/guide.md",), "full"),
         ("refs/heads/production/stable", ("docs/guide.md",), "full"),
         ("refs/heads/hotfix/production/db", ("docs/guide.md",), "full"),
         ("refs/heads/topic", (".github/workflows/main.yml",), "full"),
+        ("refs/heads/topic", (".github/project-governance.json",), "full"),
         ("refs/heads/topic", ("scripts/ci/helper.py",), "full"),
         ("refs/heads/topic", ("backend/Dockerfile",), "full"),
         ("refs/heads/topic", ("frontend/pnpm-lock.yaml",), "full"),
@@ -379,6 +369,29 @@ def test_comparison_ref_refresh_failure_falls_back_to_full() -> None:
     assert result.ci_mode == "full"
 
 
+def test_project_governance_resolution_failure_falls_back_to_full(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_closed() -> None:
+        raise project_governance.GovernanceConfigError("missing canonical config")
+
+    monkeypatch.setattr(ci, "load_project_governance", fail_closed)
+    event = ci.CIEvent(
+        event_name="push",
+        before_sha="1" * 40,
+        current_sha="2" * 40,
+        ref="refs/heads/topic",
+        forced=False,
+        repository=REPOSITORY,
+        repository_id=REPOSITORY_ID,
+    )
+
+    result = ci.classify_ci_mode(event=event, git=ScopeGit(("docs/guide.md",)))
+
+    assert result.ci_mode == "full"
+    assert result.reason.startswith("project governance failed closed:")
+
+
 def test_valid_two_parent_equivalent_merge_is_eligible(tmp_path: Path) -> None:
     fixture = _equivalent_repository(tmp_path)
 
@@ -390,26 +403,21 @@ def test_valid_two_parent_equivalent_merge_is_eligible(tmp_path: Path) -> None:
     assert result.source_tree == fixture["git"].tree_sha(fixture["source"])
 
 
-@pytest.mark.parametrize(
-    "target_branch",
-    (ci.IMPLEMENTATION_BRANCH, ci.STAGED_IMPLEMENTATION_BRANCH),
-)
 def test_live_push_allowlist_accepts_valid_equivalent_fixture(
     tmp_path: Path,
-    target_branch: str,
 ) -> None:
     fixture = _equivalent_repository(tmp_path)
 
     result = ci.classify_ci_mode(
         event=_event(
             fixture,
-            ref=f"refs/heads/{target_branch}",
+            ref=COORDINATION_REF,
         ),
         git=fixture["git"],
         api=FakeAPI(
             source_sha=fixture["source"],
             target_sha=fixture["merge"],
-            target_ref=target_branch,
+            target_ref=COORDINATION_BRANCH,
         ),
         now=NOW,
     )
@@ -428,23 +436,18 @@ def test_valid_pr_synthetic_candidate_is_eligible(tmp_path: Path) -> None:
     assert result.source_tree == fixture["git"].tree_sha(fixture["source"])
 
 
-@pytest.mark.parametrize(
-    "target_branch",
-    (ci.IMPLEMENTATION_BRANCH, ci.STAGED_IMPLEMENTATION_BRANCH),
-)
 def test_live_pr_allowlist_accepts_valid_candidate(
     tmp_path: Path,
-    target_branch: str,
 ) -> None:
     fixture = _equivalent_repository(tmp_path)
     api = FakePRAPI(
         fixture,
-        ref_overrides={target_branch: fixture["base"]},
+        ref_overrides={COORDINATION_BRANCH: fixture["base"]},
     )
-    api.pull_request_payload["base"]["ref"] = target_branch
+    api.pull_request_payload["base"]["ref"] = COORDINATION_BRANCH
 
     result = ci.classify_ci_mode(
-        event=_pr_event(fixture, base_ref=target_branch),
+        event=_pr_event(fixture, base_ref=COORDINATION_BRANCH),
         git=fixture["git"],
         api=api,
         now=NOW,
@@ -464,13 +467,13 @@ def test_live_push_governance_merge_falls_back_to_full(
     api = FakeAPI(
         source_sha=fixture["source"],
         target_sha=fixture["merge"],
-        target_ref=ci.IMPLEMENTATION_BRANCH,
+        target_ref=COORDINATION_BRANCH,
     )
 
     result = ci.classify_ci_mode(
         event=_event(
             fixture,
-            ref="refs/heads/fix/submission-status-api-conformance",
+            ref=COORDINATION_REF,
         ),
         git=git,
         api=api,
@@ -496,7 +499,7 @@ def test_pr_governance_change_requires_full_before_allowlist(
         event=_pr_event(fixture),
         git=git,
         api=FakePRAPI(fixture),
-        pr_equivalent_allowlist=frozenset({ci.IMPLEMENTATION_BRANCH}),
+        pr_equivalent_allowlist=frozenset({COORDINATION_BRANCH}),
         now=NOW,
     )
 
@@ -597,7 +600,7 @@ def test_pr_base_or_head_advance_falls_back(tmp_path: Path) -> None:
     fixture = _equivalent_repository(tmp_path)
     base_advanced = FakePRAPI(
         fixture,
-        ref_overrides={ci.IMPLEMENTATION_BRANCH: "f" * 40},
+        ref_overrides={COORDINATION_BRANCH: "f" * 40},
     )
     head_advanced = FakePRAPI(
         fixture,
@@ -939,10 +942,31 @@ def test_full_attestation_checks_each_required_execution_job(
         def __init__(self, **arguments: Any) -> None:
             pass
 
-        def run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        def workflow_run(self, run_id: int) -> dict[str, Any]:
             assert run_id == 77
+            return {
+                "id": 77,
+                "run_attempt": 2,
+                "event": "push",
+                "head_sha": fixture["merge"],
+            }
+
+        def run_attempt_jobs(
+            self,
+            run_id: int,
+            run_attempt: int,
+        ) -> list[dict[str, Any]]:
+            assert run_id == 77
+            assert run_attempt == 2
             return [
-                {"name": name, "conclusion": "success"}
+                {
+                    "name": name,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "run_id": 77,
+                    "run_attempt": 2,
+                    "head_sha": fixture["merge"],
+                }
                 for name in gate.REQUIRED_EXECUTION_JOBS
             ]
 
@@ -960,7 +984,12 @@ def test_full_attestation_checks_each_required_execution_job(
             "api_url": "https://api.github.invalid",
             "repository": REPOSITORY,
             "run_id": 77,
-            "sha": fixture["merge"],
+            "run_attempt": 2,
+            "event_name": "push",
+            "attested_sha": fixture["merge"],
+            "execution_head_sha": fixture["merge"],
+            "pr_number": 0,
+            "base_sha": "",
             "repository_root": fixture["root"],
             "github_output": output,
         },
@@ -984,13 +1013,29 @@ def test_full_attestation_rejects_a_skipped_required_job(
         def __init__(self, **arguments: Any) -> None:
             pass
 
-        def run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        def workflow_run(self, run_id: int) -> dict[str, Any]:
+            return {
+                "id": run_id,
+                "run_attempt": 2,
+                "event": "push",
+                "head_sha": fixture["merge"],
+            }
+
+        def run_attempt_jobs(
+            self,
+            run_id: int,
+            run_attempt: int,
+        ) -> list[dict[str, Any]]:
             return [
                 {
                     "name": name,
+                    "status": "completed",
                     "conclusion": (
                         "skipped" if name == "test / backend" else "success"
                     ),
+                    "run_id": run_id,
+                    "run_attempt": run_attempt,
+                    "head_sha": fixture["merge"],
                 }
                 for name in gate.REQUIRED_EXECUTION_JOBS
             ]
@@ -1008,7 +1053,12 @@ def test_full_attestation_rejects_a_skipped_required_job(
             "api_url": "https://api.github.invalid",
             "repository": REPOSITORY,
             "run_id": 77,
-            "sha": fixture["merge"],
+            "run_attempt": 2,
+            "event_name": "push",
+            "attested_sha": fixture["merge"],
+            "execution_head_sha": fixture["merge"],
+            "pr_number": 0,
+            "base_sha": "",
             "repository_root": fixture["root"],
             "github_output": None,
         },
@@ -1027,8 +1077,7 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
     assert parsed["on"]["push"]["branches-ignore"] == ["analytics-assets"]
     assert parsed["on"]["pull_request"]["branches"] == [
         "main",
-        ci.IMPLEMENTATION_BRANCH,
-        ci.STAGED_IMPLEMENTATION_BRANCH,
+        "integration/**",
     ]
     assert parsed["on"]["pull_request"]["types"] == [
         "opened",
@@ -1053,6 +1102,18 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
         "pull-requests": "read",
     }
     assert parsed["jobs"]["full_attestation"]["name"] == "Full CI Attestation"
+    assert parsed["jobs"]["full_attestation"]["permissions"] == {
+        "contents": "read",
+        "actions": "read",
+        "pull-requests": "read",
+    }
+    assert "--run-attempt '${{ github.run_attempt }}'" in workflow
+    assert '--event-name "$EVENT_NAME"' in workflow
+    assert '--attested-sha "$ATTESTED_SHA"' in workflow
+    assert '--execution-head-sha "$EXECUTION_HEAD_SHA"' in workflow
+    assert '--pr-number "$EVENT_PR_NUMBER"' in workflow
+    assert '--base-sha "$EVENT_BASE_SHA"' in workflow
+    assert "${{ github.event.pull_request.head.sha || github.sha }}" in workflow
     assert parsed["jobs"]["ci_gate"]["name"] == "CI Gate"
     assert parsed["jobs"]["ci_gate"]["if"] == "${{ always() }}"
     assert "needs.ci_mode.outputs.ci_mode == 'full'" in workflow
@@ -1067,10 +1128,24 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
     assert pr_parsed["name"] == "Validate PR base branch"
     assert set(pr_parsed["jobs"]) == {"check-branch"}
     assert pr_parsed["jobs"]["check-branch"]["permissions"] == {"contents": "read"}
-    assert "main" in pr_workflow
-    assert ci.IMPLEMENTATION_BRANCH in pr_workflow
-    assert ci.STAGED_IMPLEMENTATION_BRANCH in pr_workflow
-    assert "Pull request base branch is allowed." in pr_workflow
+    steps = pr_parsed["jobs"]["check-branch"]["steps"]
+    checkout = next(
+        step for step in steps if step["name"] == "Checkout immutable pull request base"
+    )
+    assert checkout["with"] == {
+        "fetch-depth": "1",
+        "path": "trusted-base",
+        "persist-credentials": "false",
+        "ref": "${{ github.event.pull_request.base.sha }}",
+    }
+    assert "scripts/ci/project_governance.py" in pr_workflow
+    assert 'gh api --paginate "repos/$REPOSITORY/branches"' in pr_workflow
+    assert ".protected == true" in pr_workflow
+    assert '"${#protected_coordination_branches[@]}" -ne 1' in pr_workflow
+    assert '"$BASE_BRANCH" != "${protected_coordination_branches[0]:-}"' in (
+        pr_workflow
+    )
+    assert COORDINATION_BRANCH not in pr_workflow
     assert "pull_request_target" not in pr_parsed["on"]
     assert "merge_group" not in pr_parsed["on"]
 
@@ -1079,8 +1154,8 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
     ("base_branch", "expected_returncode"),
     (
         ("main", 0),
-        (ci.IMPLEMENTATION_BRANCH, 0),
-        (ci.STAGED_IMPLEMENTATION_BRANCH, 0),
+        (COORDINATION_BRANCH, 0),
+        (f"{COORDINATION_BRANCH}-near-match", 1),
         ("feat/other", 1),
     ),
 )
@@ -1089,13 +1164,64 @@ def test_check_branch_accepts_only_approved_bases(
     expected_returncode: int,
 ) -> None:
     parsed = yaml.load(PR_WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
-    run = parsed["jobs"]["check-branch"]["steps"][0]["run"]
+    run = next(
+        step["run"]
+        for step in parsed["jobs"]["check-branch"]["steps"]
+        if step["name"] == "Require an approved pull request base"
+    )
     process = subprocess.run(
         ["bash", "-c", run],
-        env={"BASE_BRANCH": base_branch},
+        env={
+            "BASE_BRANCH": base_branch,
+            "GH_TOKEN": "test-only",
+            "REPOSITORY": "NTHU-Physics-SA-IT/PastExamWeb_PHY",
+            "TRUSTED_ROOT": str(REPOSITORY_ROOT),
+        },
         text=True,
         capture_output=True,
         check=False,
+        cwd=REPOSITORY_ROOT,
     )
 
     assert process.returncode == expected_returncode
+
+
+def test_check_branch_bootstrap_accepts_main_and_rejects_incomplete_authority(
+    tmp_path: Path,
+) -> None:
+    parsed = yaml.load(PR_WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    run = next(
+        step["run"]
+        for step in parsed["jobs"]["check-branch"]["steps"]
+        if step["name"] == "Require an approved pull request base"
+    )
+    environment = {
+        "BASE_BRANCH": "main",
+        "GH_TOKEN": "test-only",
+        "REPOSITORY": "NTHU-Physics-SA-IT/PastExamWeb_PHY",
+        "TRUSTED_ROOT": str(tmp_path),
+    }
+
+    bootstrap = subprocess.run(
+        ["bash", "-c", run],
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+        cwd=REPOSITORY_ROOT,
+    )
+    assert bootstrap.returncode == 0
+
+    config = tmp_path / ".github" / "project-governance.json"
+    config.parent.mkdir(parents=True)
+    config.write_text("{}", encoding="utf-8")
+    incomplete = subprocess.run(
+        ["bash", "-c", run],
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+        cwd=REPOSITORY_ROOT,
+    )
+    assert incomplete.returncode == 2
+    assert "incomplete" in incomplete.stderr.lower()
