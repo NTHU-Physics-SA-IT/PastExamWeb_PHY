@@ -10,7 +10,7 @@ const routes = [
     meta: {
       requiresGuest: true,
       seo: {
-        title: '清大物理考古題與歷屆考題｜PhysArchive',
+        title: '清大物理考古系統',
         description: DEFAULT_DESCRIPTION,
         canonicalPath: '/',
         robots: 'index, follow',
@@ -23,7 +23,7 @@ const routes = [
     component: () => import(/* webpackChunkName: "public-courses" */ '../views/PublicCourses.vue'),
     meta: {
       seo: {
-        title: '清大物理考古題課程目錄｜PhysArchive',
+        title: '清大物理考古題課程目錄',
         description: '瀏覽清大物理相關課程已公開收錄的歷屆考題資訊。',
         canonicalPath: '/courses',
         robots: 'index, follow',
@@ -36,7 +36,7 @@ const routes = [
     component: () => import(/* webpackChunkName: "public-course" */ '../views/PublicCourse.vue'),
     meta: {
       seo: {
-        title: '清大物理課程考古題｜PhysArchive',
+        title: '清大物理課程考古題',
         description: '查看課程的公開考古題學年度、授課教師、考試類型與解答資訊。',
         robots: 'noindex, follow',
       },
@@ -49,7 +49,7 @@ const routes = [
     meta: {
       requiresAuth: true,
       seo: {
-        title: '考古題資料庫｜PhysArchive',
+        title: '考古題資料庫',
         canonicalPath: '/archive',
         robots: 'noindex, nofollow',
       },
@@ -63,7 +63,7 @@ const routes = [
       requiresAuth: true,
       requiresAdmin: true,
       seo: {
-        title: '管理後台｜PhysArchive',
+        title: '管理後台',
         canonicalPath: '/admin',
         robots: 'noindex, nofollow',
       },
@@ -77,7 +77,7 @@ const routes = [
     meta: {
       requiresAuth: true,
       seo: {
-        title: '個人化設定｜PhysArchive',
+        title: '個人化設定',
         canonicalPath: '/personal-settings',
         robots: 'noindex, nofollow',
       },
@@ -90,7 +90,7 @@ const routes = [
     meta: {
       requiresGuest: true,
       seo: {
-        title: '登入處理中｜PhysArchive',
+        title: '登入處理中',
         canonicalPath: '/login/callback',
         robots: 'noindex, nofollow',
       },
@@ -102,13 +102,29 @@ const routes = [
     component: () => import(/* webpackChunkName: "not-found" */ '../views/NotFound.vue'),
     meta: {
       seo: {
-        title: '找不到頁面｜PhysArchive',
+        title: '找不到頁面',
         description: '此頁面不存在或已被移除。',
         robots: 'noindex, nofollow',
       },
     },
   },
 ]
+
+if (import.meta.env.DEV && import.meta.env.VITE_NTHU_DEV_MOCK_ENABLED === 'true') {
+  routes.splice(routes.length - 1, 0, {
+    path: '/dev/nthu-login',
+    name: 'NthuDevLogin',
+    component: () => import('../views/NthuDevLogin.vue'),
+    meta: {
+      requiresGuest: true,
+      seo: {
+        title: 'NTHU OAuth Local QA',
+        canonicalPath: '/dev/nthu-login',
+        robots: 'noindex, nofollow',
+      },
+    },
+  })
+}
 
 const router = createRouter({
   history: createWebHistory(),

@@ -157,6 +157,26 @@ describe('PersonalSettings account visibility', () => {
     wrapper.unmount()
   })
 
+  it('treats an external staff account exactly like every other external account', async () => {
+    userServiceMock.getMe.mockResolvedValue({
+      data: {
+        is_local: false,
+        name: '[DEV] 清大教職員測試帳號',
+        nickname: 'Staff',
+        email: 'dev-nthu-staff-allowed@example.invalid',
+      },
+    })
+
+    const wrapper = mountSettings()
+    await flushPromises()
+
+    expect(wrapper.find('#account-settings').exists()).toBe(false)
+    expect(wrapper.find('#profile-setting').exists()).toBe(false)
+    expect(wrapper.find('#password-setting').exists()).toBe(false)
+    expect(wrapper.findAll('.settings-nav-item')).toHaveLength(3)
+    wrapper.unmount()
+  })
+
   it('does not flash account settings while the account type is loading', async () => {
     const request = deferred()
     userServiceMock.getMe.mockReturnValue(request.promise)

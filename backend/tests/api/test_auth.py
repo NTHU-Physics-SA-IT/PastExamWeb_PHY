@@ -301,6 +301,34 @@ async def test_nthu_callback_denial_creates_no_user_or_handoff(
 
 
 @pytest.mark.asyncio
+async def test_disabled_dev_code_never_calls_real_provider(client, monkeypatch):
+    monkeypatch.setattr(settings, "APP_ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "NTHU_DEV_MOCK_ENABLED", False)
+    monkeypatch.setattr(settings, "OAUTH_CLIENT_ID", "nthu-client")
+    monkeypatch.setattr(settings, "OAUTH_CLIENT_SECRET", "nthu-secret")
+    provider_calls = []
+
+    async def forbidden_provider_call(code):
+        provider_calls.append(code)
+        raise AssertionError("dev code must not reach the real provider")
+
+    monkeypatch.setattr(auth_service, "fetch_nthu_profile", forbidden_provider_call)
+    login_response = await client.get("/auth/nthu/login", follow_redirects=False)
+    state = parse_qs(urlparse(login_response.headers["location"]).query)["state"][0]
+
+    response = await client.get(
+        "/auth/nthu/callback",
+        params={"code": "dev_" + "a" * 43, "state": state},
+        follow_redirects=False,
+    )
+
+    assert parse_qs(urlparse(response.headers["location"]).query) == {
+        "error": ["oauth_login_failed"]
+    }
+    assert provider_calls == []
+
+
+@pytest.mark.asyncio
 async def test_nthu_exchange_is_single_use_and_records_login_presence(
     client,
     make_user,
