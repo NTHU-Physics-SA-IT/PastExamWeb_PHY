@@ -49,6 +49,25 @@ do
   fi
 done
 
+verify_external_file() {
+  local external_file mode owner_uid
+  external_file="$1"
+  if [ ! -f "$external_file" ]; then
+    echo "Required external TLS file is missing." >&2
+    exit 2
+  fi
+  mode="$(stat -c '%a' "$external_file")"
+  if [ "$mode" != "600" ]; then
+    echo "External TLS files must have mode 0600." >&2
+    exit 2
+  fi
+  owner_uid="$(stat -c '%u' "$external_file")"
+  if [ "$owner_uid" != "0" ]; then
+    echo "External TLS files must be root-owned." >&2
+    exit 2
+  fi
+}
+
 if [ "$RELEASE_MANIFEST" != "$RELEASE_DIRECTORY/release-manifest.env" ]; then
   echo "Release manifest must use the canonical immutable release path." >&2
   exit 2
@@ -116,12 +135,24 @@ MINIO_CONTAINER="${production_contract[3]}"
 MINIO_BUCKET_NAME="${production_contract[4]}"
 NGINX_CONTAINER="${production_contract[5]}"
 
+mount_values="$(
+  python3 "$contract_helper" mount-values \
+    --compose-json "$rendered_compose"
+)"
+mapfile -t nginx_mount_contract <<<"$mount_values"
+if [ "${#nginx_mount_contract[@]}" -ne 4 ]; then
+  echo "Rendered production nginx mount contract is incomplete." >&2
+  exit 2
+fi
+verify_external_file "${nginx_mount_contract[2]}"
+verify_external_file "${nginx_mount_contract[3]}"
+
 docker inspect --format '{{json .NetworkSettings.Ports}}' \
   "$NGINX_CONTAINER" >"$current_nginx_ports"
 python3 "$contract_helper" verify-ingress \
   --compose-json "$rendered_compose" \
   --current-ports-json "$current_nginx_ports" \
-  --nginx-config "$RELEASE_DIRECTORY/proxy/nginx.conf"
+  --release-directory "$RELEASE_DIRECTORY"
 
 cleanup_contract
 trap - EXIT HUP INT TERM

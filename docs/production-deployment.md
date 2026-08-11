@@ -28,13 +28,19 @@ release checkout:
 
 - `/etc/pastexam/compose.prod.env` for Compose interpolation;
 - `/etc/pastexam/docker-compose.edge.yml` for the reviewed host-specific nginx
-  host-port bindings;
+  host-port and certificate bind mounts;
 - `/opt/pastexam-config/backend.env` for the restricted runtime role; and
 - `/opt/pastexam-config/migrator.env` for the one-shot migration role.
 
 All four files must be root-owned deployment inputs with mode `0600`.
 Secrets are neither copied into an immutable release nor printed. Runtime and
 migrator credentials must be different.
+
+The Compose environment names the host-managed Cloudflare Origin certificate
+and private-key paths with `PRODUCTION_TLS_CERT_FILE` and
+`PRODUCTION_TLS_KEY_FILE`. Both files must exist before activation and must be
+root-owned with mode `0600`. Certificate and key contents remain outside Git
+and outside every immutable release.
 
 `docker/.env.production.example` documents the non-secret Compose variable
 contract. A release is rendered explicitly with the production definition and
@@ -48,21 +54,30 @@ docker compose \
   config
 ```
 
-The base production definition deliberately exposes nginx port `8080` only to
-the Compose network and does not publish a host port. The external edge
-override is the reviewed authority for every host binding. The tracked
-`docker/docker-compose.prod-edge.example.yml` demonstrates a loopback-only
-`127.0.0.1:8080:8080` topology for a separately managed host edge proxy; it is
-not authority for a production host and must not be copied over an existing
-contract without reconciling current ingress.
+The supported DigitalOcean edge terminates Cloudflare Origin TLS inside
+`pastexam-nginx` and has this explicit topology:
 
-The repository nginx configuration is HTTP-only and listens on container port
-`8080`. TLS/HTTPS must terminate in a separately managed host proxy or load
-balancer before traffic reaches that listener. If a host instead terminates
-TLS inside `pastexam-nginx`, the current repository contract is insufficient:
-activation must remain blocked until the required listeners, certificates,
-and mappings are represented in a reviewed repository change. Do not infer
-`80`, `443`, or `8443` from a container snapshot.
+- host `80` to nginx `8080` (HTTP);
+- host `8080` to nginx `8080` (HTTP); and
+- host `443` to nginx `8443` (TLS).
+
+Ownership is deliberately split. `proxy/nginx.conf` owns repository-reviewed
+application routing, headers, OAuth callback log suppression, and SEO routes.
+`proxy/nginx.production-listeners.conf` owns the repository-reviewed `8080`
+and `8443 ssl` listener directives and the container certificate paths.
+`docker/docker-compose.prod.yml` mounts both immutable files. The external
+`/etc/pastexam/docker-compose.edge.yml` owns host-specific published ports and
+binds the host-managed certificate material to those exact container paths.
+The tracked `docker/docker-compose.prod-edge.example.yml` represents this
+topology; its former loopback-only example is not appropriate for this host.
+
+Ordinary development continues to use the same application routing through
+`proxy/nginx.development-listeners.conf`, which listens only on `8080` and
+does not require production certificates. An edge override must not replace
+either repository nginx configuration mount. Activation derives the actual
+mounted sources from rendered Compose and requires them to be the immutable
+release files, so the configuration checked is exactly the configuration
+started by Docker.
 
 Before backup, activation renders the combined Compose configuration without
 printing it and derives the PostgreSQL container, database and role plus the
@@ -101,24 +116,29 @@ It then acquires a host deployment lock and performs:
 1. immutable `release_sha` agreement across `release-manifest.env`,
    `.release-source-sha`, and the release directory name;
 2. combined base/edge Compose rendering and backup-identity extraction;
-3. nginx ingress preservation preflight against the currently published
-   `pastexam-nginx` bindings, plus Compose-target/listener consistency;
-4. logical PostgreSQL custom-format backup plus validation;
-5. read-only MinIO manifest;
-6. migration preflight;
-7. one-shot safe migration and postflight;
-8. backend/frontend/nginx start;
-9. internal and external health checks;
-10. an activation marker written only after success.
+3. rendered nginx config, listener, certificate, and private-key mount
+   extraction, followed by external TLS file ownership/mode checks;
+4. nginx ingress preservation preflight against the currently published
+   `pastexam-nginx` bindings, exact immutable config-mount verification,
+   required TLS directives, and Compose-target/listener consistency;
+5. logical PostgreSQL custom-format backup plus validation;
+6. read-only MinIO manifest;
+7. migration preflight;
+8. one-shot safe migration and postflight;
+9. backend/frontend/nginx start;
+10. internal and external health checks;
+11. an activation marker written only after success.
 
 There is no automatic database rollback. Any failure stops the sequence and
 does not mark the release activated. Missing or malformed external files,
 release-identity disagreement, missing rendered backup inputs, a missing
-current nginx container, a target listener mismatch, or any target edge
-contract that would drop a current published binding fails before backup,
-migration, service recreation, or traffic switching. An intentional ingress
-change therefore requires a separately reviewed edge-topology change; it
-cannot be smuggled through ordinary activation.
+current nginx container, an absent or unsafe TLS file, a missing certificate
+mount, an unexpected nginx config mount, an incomplete TLS listener, a target
+listener mismatch, or any target edge contract that would drop a current
+published binding fails before backup, migration, service recreation, or
+traffic switching. An intentional ingress change therefore requires a
+separately reviewed edge-topology change; it cannot be smuggled through
+ordinary activation.
 
 The workflow file exposing this skeleton is manual-only, uses the protected
 `production` environment, and also requires a repository-variable gate. It

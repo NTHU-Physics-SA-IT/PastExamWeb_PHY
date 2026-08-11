@@ -59,7 +59,41 @@ def _write_executable(path: Path, source: str) -> None:
     path.chmod(0o700)
 
 
-def _compose_contract(*, published: int = 8080, target: int = 8080) -> dict:
+def _bind(source: Path, target: str) -> dict[str, object]:
+    return {
+        "type": "bind",
+        "source": str(source.resolve()),
+        "target": target,
+        "read_only": True,
+    }
+
+
+def _compose_contract(
+    release: Path,
+    certificate: Path,
+    certificate_key: Path,
+    *,
+    ports: list[tuple[int, int]] | None = None,
+    nginx_config: Path | None = None,
+    listener_config: Path | None = None,
+    include_certificate_mounts: bool = True,
+) -> dict:
+    nginx_volumes = [
+        _bind(
+            nginx_config or release / "proxy" / "nginx.conf", "/etc/nginx/nginx.conf"
+        ),
+        _bind(
+            listener_config or release / "proxy" / "nginx.production-listeners.conf",
+            "/etc/nginx/pastexam-listeners.conf",
+        ),
+    ]
+    if include_certificate_mounts:
+        nginx_volumes.extend(
+            [
+                _bind(certificate, "/etc/nginx/certs/origin.pem"),
+                _bind(certificate_key, "/etc/nginx/certs/origin-key.pem"),
+            ]
+        )
     return {
         "services": {
             "backend": {"environment": {"MINIO_BUCKET_NAME": "exam-archive"}},
@@ -80,7 +114,11 @@ def _compose_contract(*, published: int = 8080, target: int = 8080) -> dict:
                         "protocol": "tcp",
                         "target": target,
                     }
+                    for published, target in (
+                        ports or [(80, 8080), (8080, 8080), (443, 8443)]
+                    )
                 ],
+                "volumes": nginx_volumes,
             },
         }
     }
@@ -95,6 +133,8 @@ def _activation_environment(
     source_sha: str = RELEASE_SHA,
     edge_mode: str = "600",
     config_owner: str = "0",
+    tls_mode: str = "600",
+    tls_owner: str = "0",
 ) -> tuple[dict[str, str], Path, Path]:
     release = tmp_path / RELEASE_SHA
     scripts = release / "scripts"
@@ -104,6 +144,11 @@ def _activation_environment(
     proxy.mkdir()
     docker_dir.mkdir()
 
+    certificate = tmp_path / "origin.pem"
+    certificate_key = tmp_path / "origin-key.pem"
+    certificate.write_text("contract-test-certificate\n", encoding="utf-8")
+    certificate_key.write_text("contract-test-private-key\n", encoding="utf-8")
+
     (release / ".release-source-sha").write_text(f"{source_sha}\n", encoding="utf-8")
     manifest = release / "release-manifest.env"
     manifest.write_text(f"release_sha={RELEASE_SHA}\n", encoding="utf-8")
@@ -112,7 +157,15 @@ def _activation_environment(
         encoding="utf-8",
     )
     (proxy / "nginx.conf").write_text(
-        "events {}\nhttp { server { listen 8080; } }\n", encoding="utf-8"
+        "events {}\nhttp { server { include /etc/nginx/pastexam-listeners.conf; } }\n",
+        encoding="utf-8",
+    )
+    (proxy / "nginx.production-listeners.conf").write_text(
+        "listen 8080;\n"
+        "listen 8443 ssl;\n"
+        "ssl_certificate /etc/nginx/certs/origin.pem;\n"
+        "ssl_certificate_key /etc/nginx/certs/origin-key.pem;\n",
+        encoding="utf-8",
     )
     if CONTRACT_HELPER.exists():
         shutil.copy2(CONTRACT_HELPER, scripts / CONTRACT_HELPER.name)
@@ -138,12 +191,22 @@ def _activation_environment(
 
     compose_json = tmp_path / "compose.json"
     compose_json.write_text(
-        json.dumps(compose_contract or _compose_contract()), encoding="utf-8"
+        json.dumps(
+            compose_contract or _compose_contract(release, certificate, certificate_key)
+        ),
+        encoding="utf-8",
     )
     ports_json = tmp_path / "current-ports.json"
     ports_json.write_text(
         json.dumps(
-            current_ports or {"8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8080"}]}
+            current_ports
+            or {
+                "8080/tcp": [
+                    {"HostIp": "0.0.0.0", "HostPort": "80"},
+                    {"HostIp": "0.0.0.0", "HostPort": "8080"},
+                ],
+                "8443/tcp": [{"HostIp": "0.0.0.0", "HostPort": "443"}],
+            }
         ),
         encoding="utf-8",
     )
@@ -178,9 +241,15 @@ def _activation_environment(
     bash_env.write_text(
         "stat() {\n"
         '  if [[ "$*" == *"%u"* ]]; then\n'
-        "    printf '%s\\n' \"$FAKE_CONFIG_OWNER\"\n"
+        '    if [[ "${@: -1}" == *"origin"* ]]; then\n'
+        "      printf '%s\\n' \"$FAKE_TLS_OWNER\"\n"
+        "    else\n"
+        "      printf '%s\\n' \"$FAKE_CONFIG_OWNER\"\n"
+        "    fi\n"
         '  elif [[ "${@: -1}" == "$FAKE_EDGE_FILE" ]]; then\n'
         "    printf '%s\\n' \"$FAKE_EDGE_MODE\"\n"
+        '  elif [[ "${@: -1}" == *"origin"* ]]; then\n'
+        "    printf '%s\\n' \"$FAKE_TLS_MODE\"\n"
         "  else\n"
         "    printf '600\\n'\n"
         "  fi\n"
@@ -231,6 +300,8 @@ def _activation_environment(
             "FAKE_EDGE_FILE": _bash_path(edge_file),
             "FAKE_EDGE_MODE": edge_mode,
             "FAKE_CONFIG_OWNER": config_owner,
+            "FAKE_TLS_MODE": tls_mode,
+            "FAKE_TLS_OWNER": tls_owner,
         }
     )
     for inherited in (
@@ -323,6 +394,37 @@ def test_external_production_contracts_must_remain_root_owned(
     assert not docker_log.exists()
 
 
+@pytest.mark.parametrize(
+    ("tls_mode", "tls_owner", "message"),
+    [("644", "0", "0600"), ("600", "1000", "root-owned")],
+)
+def test_external_tls_files_are_permission_checked_before_backup(
+    tmp_path: Path, tls_mode: str, tls_owner: str, message: str
+) -> None:
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path, tls_mode=tls_mode, tls_owner=tls_owner
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert message in process.stderr
+    assert not backup_log.exists()
+    assert " inspect " not in docker_log.read_text(encoding="utf-8")
+
+
+def test_missing_external_tls_file_fails_before_backup(tmp_path: Path) -> None:
+    environment, backup_log, docker_log = _activation_environment(tmp_path)
+    (tmp_path / "origin-key.pem").unlink()
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "missing" in process.stderr.lower()
+    assert not backup_log.exists()
+    assert " inspect " not in docker_log.read_text(encoding="utf-8")
+
+
 def test_backup_failure_stops_before_migration_or_compose_up(tmp_path: Path) -> None:
     environment, _, docker_log = _activation_environment(tmp_path, postgres_exit=9)
 
@@ -335,11 +437,23 @@ def test_backup_failure_stops_before_migration_or_compose_up(tmp_path: Path) -> 
 
 
 def test_target_ports_cannot_drop_current_production_ingress(tmp_path: Path) -> None:
+    release = tmp_path / RELEASE_SHA
+    certificate = tmp_path / "origin.pem"
+    certificate_key = tmp_path / "origin-key.pem"
     environment, backup_log, docker_log = _activation_environment(
         tmp_path,
+        compose_contract=_compose_contract(
+            release,
+            certificate,
+            certificate_key,
+            ports=[(80, 8080), (8080, 8080)],
+        ),
         current_ports={
-            "8080/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8080"}],
-            "8443/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8443"}],
+            "8080/tcp": [
+                {"HostIp": "0.0.0.0", "HostPort": "80"},
+                {"HostIp": "0.0.0.0", "HostPort": "8080"},
+            ],
+            "8443/tcp": [{"HostIp": "0.0.0.0", "HostPort": "443"}],
         },
     )
 
@@ -352,9 +466,17 @@ def test_target_ports_cannot_drop_current_production_ingress(tmp_path: Path) -> 
 
 
 def test_compose_targets_must_match_nginx_listeners(tmp_path: Path) -> None:
+    release = tmp_path / RELEASE_SHA
+    certificate = tmp_path / "origin.pem"
+    certificate_key = tmp_path / "origin-key.pem"
     environment, backup_log, docker_log = _activation_environment(
         tmp_path,
-        compose_contract=_compose_contract(published=8081, target=8081),
+        compose_contract=_compose_contract(
+            release,
+            certificate,
+            certificate_key,
+            ports=[(8081, 8081)],
+        ),
         current_ports={"8081/tcp": [{"HostIp": "0.0.0.0", "HostPort": "8081"}]},
     )
 
@@ -362,6 +484,68 @@ def test_compose_targets_must_match_nginx_listeners(tmp_path: Path) -> None:
 
     assert process.returncode != 0
     assert "listener" in process.stderr.lower()
+    assert not backup_log.exists()
+    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+
+
+def test_missing_8443_tls_listener_fails_before_backup(tmp_path: Path) -> None:
+    environment, backup_log, docker_log = _activation_environment(tmp_path)
+    release = tmp_path / RELEASE_SHA
+    (release / "proxy" / "nginx.production-listeners.conf").write_text(
+        "listen 8080;\n", encoding="utf-8"
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "listener" in process.stderr.lower() or "tls" in process.stderr.lower()
+    assert not backup_log.exists()
+    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+
+
+def test_missing_certificate_mounts_fail_before_backup(tmp_path: Path) -> None:
+    release = tmp_path / RELEASE_SHA
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path,
+        compose_contract=_compose_contract(
+            release,
+            tmp_path / "origin.pem",
+            tmp_path / "origin-key.pem",
+            include_certificate_mounts=False,
+        ),
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "certificate" in process.stderr.lower() or "mount" in process.stderr.lower()
+    assert not backup_log.exists()
+    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+
+
+def test_compose_cannot_mount_a_different_nginx_config_than_is_validated(
+    tmp_path: Path,
+) -> None:
+    release = tmp_path / RELEASE_SHA
+    alternate_config = tmp_path / "alternate-nginx.conf"
+    alternate_config.write_text(
+        "events {}\nhttp { server { include /etc/nginx/pastexam-listeners.conf; } }\n",
+        encoding="utf-8",
+    )
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path,
+        compose_contract=_compose_contract(
+            release,
+            tmp_path / "origin.pem",
+            tmp_path / "origin-key.pem",
+            nginx_config=alternate_config,
+        ),
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "nginx" in process.stderr.lower()
     assert not backup_log.exists()
     assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
 
