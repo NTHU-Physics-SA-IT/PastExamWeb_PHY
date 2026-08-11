@@ -14,7 +14,7 @@
           />
           <button class="brand-lockup clickable-title" type="button" @click="handleTitleClick">
             <span class="brand-mark-frame">
-              <img src="/physics-symbol.png" alt="清大物理考古系統" class="brand-mark" />
+              <img :src="'/physics-symbol.png'" alt="清大物理考古系統" class="brand-mark" />
             </span>
             <span class="brand-wordmark">
               <span class="brand-title-main">清大物理考古系統</span>
@@ -203,21 +203,6 @@
             class="p-button-primary w-full"
             @click="handleLocalLogin"
             :loading="loading"
-          />
-        </div>
-        <div class="flex align-items-center gap-3 my-3" aria-hidden="true">
-          <div class="flex-1 border-top-1 surface-border"></div>
-          <span class="text-sm text-color-secondary">或</span>
-          <div class="flex-1 border-top-1 surface-border"></div>
-        </div>
-        <div class="field">
-          <Button
-            label="清華校務系統登入"
-            icon="pi pi-building-columns"
-            type="button"
-            severity="secondary"
-            class="w-full"
-            @click="handleNthuLogin"
           />
         </div>
       </div>
@@ -431,6 +416,12 @@ export default {
         },
         configurable: true,
       })
+      Object.defineProperty(namespace, 'startNthuLogin', {
+        value: () => {
+          this.handleNthuLogin()
+        },
+        configurable: true,
+      })
     }
   },
 
@@ -442,6 +433,7 @@ export default {
 
     if (typeof window !== 'undefined' && window.__pastexam) {
       delete window.__pastexam.openLoginModal
+      delete window.__pastexam.startNthuLogin
     }
   },
 

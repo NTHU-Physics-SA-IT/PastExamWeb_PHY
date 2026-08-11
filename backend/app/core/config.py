@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     DEFAULT_ADMIN_PASSWORD: str
     DEFAULT_ADMIN_EMAIL: str
     ALLOW_DATABASE_BOOTSTRAP: bool = False
+    BOOTSTRAP_LOCAL_PROJECT: str = ""
 
     class Config:
         # Resolve independently of the caller's current working directory.
