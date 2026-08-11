@@ -68,6 +68,8 @@ describe('PublicCourses', () => {
 
     expect(wrapper.text()).toContain('普通物理(一)考古題')
     expect(wrapper.text()).toContain('1 門課程')
+    expect(wrapper.text()).toContain('瀏覽清大物理相關課程')
+    expect(wrapper.text()).not.toContain('瀏覽目前已有公開考古題中繼資料的課程')
     expect(wrapper.text()).not.toContain('目前尚未有可公開瀏覽的課程')
     const actionableLabels = wrapper.findAll('a, button').map((item) => item.text())
     expect(actionableLabels.some((label) => label.includes('下載'))).toBe(false)
