@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import yaml
@@ -8,6 +9,11 @@ MAIN_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "main.yml"
 RELEASE_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "release.yml"
 CONTRIBUTING = REPOSITORY_ROOT / "CONTRIBUTING.md"
 VALIDATION = REPOSITORY_ROOT / "docs" / "development" / "validation.md"
+AGENTS = REPOSITORY_ROOT / "AGENTS.md"
+PROJECT_GOVERNANCE = REPOSITORY_ROOT / ".github" / "project-governance.json"
+PR_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "pr.yml"
+CLASSIFIER = REPOSITORY_ROOT / "scripts" / "ci" / "classify_ci_mode.py"
+GOVERNANCE_RESOLVER = REPOSITORY_ROOT / "scripts" / "ci" / "project_governance.py"
 FEATURE_WORKFLOW = (
     REPOSITORY_ROOT / "docs" / "development" / "feature-development-workflow.md"
 )
@@ -103,16 +109,35 @@ def test_main_calls_release_only_after_successful_full_ci_gate() -> None:
     assert "vars.PRODUCTION_DEPLOY_ENABLED == 'true'" in source
 
 
-def test_governance_documentation_matches_staged_branch_and_release_contract() -> None:
+def test_governance_documentation_is_main_first_and_branch_decoupled() -> None:
     contributing = CONTRIBUTING.read_text(encoding="utf-8")
     validation = VALIDATION.read_text(encoding="utf-8")
     feature_workflow = FEATURE_WORKFLOW.read_text(encoding="utf-8")
-    combined = "\n".join((contributing, validation, feature_workflow))
+    agents = AGENTS.read_text(encoding="utf-8")
+    combined = "\n".join((contributing, validation, feature_workflow, agents))
+    config_source = PROJECT_GOVERNANCE.read_text(encoding="utf-8")
+    config = json.loads(config_source)
+    coordination_branch = config["coordination_branch"]
 
-    assert "fix/submission-status-api-conformance" in contributing
-    assert "integration/stage-5bd" in contributing
-    assert "does not become active" in contributing
-    assert "does not create the branch" in validation
+    assert config["default_development_base"] == "main"
+    assert isinstance(coordination_branch, str)
+    assert config_source.count(coordination_branch) == 1
+    for authority_path in (
+        CONTRIBUTING,
+        VALIDATION,
+        FEATURE_WORKFLOW,
+        AGENTS,
+        MAIN_WORKFLOW,
+        PR_WORKFLOW,
+        CLASSIFIER,
+        GOVERNANCE_RESOLVER,
+    ):
+        assert coordination_branch not in authority_path.read_text(encoding="utf-8")
+
+    assert "Normal independent work starts from fresh `main`" in contributing
+    assert "coordination branch" in combined
+    assert "governance-path" in validation.lower()
+    assert "integration/**" in MAIN_WORKFLOW.read_text(encoding="utf-8")
     assert "Main never uses Equivalent" in feature_workflow
     assert "exact-main-SHA CI run after `CI Gate`" in validation
     assert "Semantic-release is not deployment authority" in contributing

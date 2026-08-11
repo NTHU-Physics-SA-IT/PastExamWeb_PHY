@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "default_development_base": "main",
+  "coordination_branch": "integration/stage-5bd"
+}
