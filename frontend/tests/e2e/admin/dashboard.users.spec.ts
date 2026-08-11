@@ -49,7 +49,7 @@ test.describe('Admin Dashboard › Users', () => {
     const nameInput = createDialog.getByPlaceholder('輸入使用者名稱')
     const emailInput = createDialog.getByPlaceholder('輸入電子郵件')
     const passwordInput = createDialog.getByPlaceholder('輸入密碼')
-    await nameInput.pressSequentially('新用戶')
+    await nameInput.fill('新用戶')
     await emailInput.fill('newuser@example.com')
     await passwordInput.fill('Passw0rd!')
     await expect(nameInput).toHaveValue('新用戶')

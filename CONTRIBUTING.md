@@ -30,10 +30,21 @@ this document.
 
 ## Branches and commits
 
-- Develop features and fixes on a branch other than `main`.
+- Fetch current remote refs before choosing a development base.
+- Normal independent work starts from fresh `main` unless the task or milestone
+  explicitly declares coordinated work.
+- Coordinated work starts from the optional coordination branch resolved by
+  `python3 scripts/ci/project_governance.py coordination-branch`; its existence
+  does not make it the universal development base.
+- Keep task branches developer-owned; a visible branch name does not grant
+  project authority or make an external, bot, analytics, backup, or recovery
+  branch a valid target.
 - Keep each commit focused on one purpose and avoid unrelated changes.
 - Use a concise Conventional Commit message that describes the outcome.
 - Preserve existing work and inspect the exact staged diff before committing.
+- Before merge readiness, fetch current refs and integrate the latest intended
+  target baseline safely. Do not silently rebase, reset, or retarget shared or
+  external work.
 
 ## Merge strategy
 
@@ -102,15 +113,19 @@ migration milestone.
 ## Pull requests
 
 Not every local or exploratory change must become a pull request. Normal
-implementation pull requests target the active integration branch, currently
-`fix/submission-status-api-conformance`. Repository governance is pre-staged to
-recognize `integration/stage-5bd`, but that branch does not become active until
-the post-main checkpoint explicitly creates it and transfers protection and
-allowlist authority. Pre-staging does not retire the current integration branch
-or `feat/exam-report-system`.
+independent pull requests may target `main`. A task or milestone that explicitly
+requires coordination targets the configured coordination branch instead;
+resolve its exact name from canonical project governance rather than historical
+prose or visible remote branches.
 
-Main integration uses a separately authorized immutable candidate based on
-fresh `main`. The final integration SHA is true-merged into that candidate,
+Before opening or updating a pull request, refresh the intended base and
+incorporate it safely. Pull requests to `main` always use Full CI. For the
+configured coordination branch, the Repository classifier applies its existing
+exact-ref, provenance, governance-path, and fail-closed rules.
+
+Returning a coordinated milestone to main uses a separately authorized
+immutable candidate based on fresh `main`. The final coordination SHA is
+true-merged into that candidate,
 the candidate completes exact-SHA Full CI, and a candidate pull request targets
 `main`. Pull requests targeting `main` always run Full CI and never use
 Equivalent evidence. Merging that pull request is a separate owner-authorized
