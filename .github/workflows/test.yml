@@ -117,8 +117,14 @@ jobs:
             --output json
           uv run python -m pytest -q \
             ../scripts/tests/test_dev_compose_schema_controls.py \
+            ../scripts/tests/test_nginx_oauth_access_logging.py \
             ../scripts/tests/test_postgres_test_bootstrap_contract.py \
+            ../scripts/tests/test_production_activation_contract.py \
+            ../scripts/tests/test_release_workflow_contract.py \
             --confcutdir=../scripts/tests
+
+      - name: Validate Compose safety contract
+        run: ./scripts/validate-compose-safety.sh
 
   backend:
     if: ${{ inputs.run_checks }}

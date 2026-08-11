@@ -21,6 +21,7 @@ env -i \
   docker compose \
   --env-file "$repository_root/docker/.env.production.example" \
   --file "$repository_root/docker/docker-compose.prod.yml" \
+  --file "$repository_root/docker/docker-compose.prod-edge.example.yml" \
   config --format json >"$production_json"
 
 env -i \
@@ -36,16 +37,19 @@ env -i \
 
 python3 - \
   "$production_json" \
-  "$development_json" <<'PY'
+  "$development_json" \
+  "$repository_root/proxy/nginx.conf" <<'PY'
 import json
+import re
 import sys
 from pathlib import Path
 
 
 production, development = (
     json.loads(Path(path).read_text(encoding="utf-8"))
-    for path in sys.argv[1:]
+    for path in sys.argv[1:3]
 )
+nginx_config = Path(sys.argv[3]).read_text(encoding="utf-8")
 
 for compose in (production, development):
     migrate = compose["services"]["migrate"]
@@ -64,6 +68,14 @@ for service in production["services"].values():
     )
     assert "seed_db" not in command
     assert "bootstrap" not in command.lower()
+
+nginx_listeners = {
+    int(port)
+    for port in re.findall(r"\blisten\s+(?:[^\s;:]+:)?([0-9]{1,5})(?=[\s;])", nginx_config)
+}
+production_nginx_ports = production["services"]["nginx"]["ports"]
+assert production_nginx_ports
+assert {int(binding["target"]) for binding in production_nginx_ports} <= nginx_listeners
 
 assert (
     production["services"]["backend"]["depends_on"]["migrate"]["condition"]

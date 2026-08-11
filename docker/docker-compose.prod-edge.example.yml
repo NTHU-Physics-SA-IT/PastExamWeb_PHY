@@ -1,0 +1,8 @@
+# Example only. Install a reviewed host-specific copy at
+# /etc/pastexam/docker-compose.edge.yml with root ownership and mode 0600.
+# This loopback mapping assumes TLS/HTTPS terminates in a separately managed
+# host edge proxy. It is not authority for an existing production host's ports.
+services:
+  nginx:
+    ports:
+      - "127.0.0.1:8080:8080"

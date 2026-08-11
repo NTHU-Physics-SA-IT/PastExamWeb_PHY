@@ -23,14 +23,16 @@ until candidate evidence has been reviewed. Candidate preparation never runs
 
 ## Production configuration boundary
 
-The production Compose contract reads secret-bearing configuration outside
-the release checkout:
+The production Compose contract reads host-specific configuration outside the
+release checkout:
 
 - `/etc/pastexam/compose.prod.env` for Compose interpolation;
+- `/etc/pastexam/docker-compose.edge.yml` for the reviewed host-specific nginx
+  host-port bindings;
 - `/opt/pastexam-config/backend.env` for the restricted runtime role; and
 - `/opt/pastexam-config/migrator.env` for the one-shot migration role.
 
-All three files must be root-owned deployment inputs with mode `0600`.
+All four files must be root-owned deployment inputs with mode `0600`.
 Secrets are neither copied into an immutable release nor printed. Runtime and
 migrator credentials must be different.
 
@@ -42,8 +44,32 @@ the external environment file:
 docker compose \
   --env-file /etc/pastexam/compose.prod.env \
   --file docker/docker-compose.prod.yml \
+  --file /etc/pastexam/docker-compose.edge.yml \
   config
 ```
+
+The base production definition deliberately exposes nginx port `8080` only to
+the Compose network and does not publish a host port. The external edge
+override is the reviewed authority for every host binding. The tracked
+`docker/docker-compose.prod-edge.example.yml` demonstrates a loopback-only
+`127.0.0.1:8080:8080` topology for a separately managed host edge proxy; it is
+not authority for a production host and must not be copied over an existing
+contract without reconciling current ingress.
+
+The repository nginx configuration is HTTP-only and listens on container port
+`8080`. TLS/HTTPS must terminate in a separately managed host proxy or load
+balancer before traffic reaches that listener. If a host instead terminates
+TLS inside `pastexam-nginx`, the current repository contract is insufficient:
+activation must remain blocked until the required listeners, certificates,
+and mappings are represented in a reviewed repository change. Do not infer
+`80`, `443`, or `8443` from a container snapshot.
+
+Before backup, activation renders the combined Compose configuration without
+printing it and derives the PostgreSQL container, database and role plus the
+MinIO container and bucket from that rendered contract. These values are
+passed to the backup tools through isolated explicit environments. Arbitrary
+inherited shell values are not backup authority, and runtime/migrator
+credential files remain separate.
 
 ## Migration and activation order
 
@@ -72,16 +98,27 @@ are supplied outside Git:
 
 It then acquires a host deployment lock and performs:
 
-1. logical PostgreSQL custom-format backup plus validation;
-2. read-only MinIO manifest;
-3. migration preflight;
-4. one-shot safe migration and postflight;
-5. backend/frontend/nginx start;
-6. internal and external health checks;
-7. an activation marker written only after success.
+1. immutable `release_sha` agreement across `release-manifest.env`,
+   `.release-source-sha`, and the release directory name;
+2. combined base/edge Compose rendering and backup-identity extraction;
+3. nginx ingress preservation preflight against the currently published
+   `pastexam-nginx` bindings, plus Compose-target/listener consistency;
+4. logical PostgreSQL custom-format backup plus validation;
+5. read-only MinIO manifest;
+6. migration preflight;
+7. one-shot safe migration and postflight;
+8. backend/frontend/nginx start;
+9. internal and external health checks;
+10. an activation marker written only after success.
 
 There is no automatic database rollback. Any failure stops the sequence and
-does not mark the release activated.
+does not mark the release activated. Missing or malformed external files,
+release-identity disagreement, missing rendered backup inputs, a missing
+current nginx container, a target listener mismatch, or any target edge
+contract that would drop a current published binding fails before backup,
+migration, service recreation, or traffic switching. An intentional ingress
+change therefore requires a separately reviewed edge-topology change; it
+cannot be smuggled through ordinary activation.
 
 The workflow file exposing this skeleton is manual-only, uses the protected
 `production` environment, and also requires a repository-variable gate. It
@@ -130,9 +167,11 @@ the deployed-release comparison.
 
 `scripts/postgres-logical-backup.sh` produces a custom-format `pg_dump`,
 metadata, and SHA-256 file in an absolute directory outside the repository.
-It records the database identity, PostgreSQL version, application commit,
-repository head, and the single Alembic revision, and validates the archive
-with `pg_restore --list`.
+It records the database identity, PostgreSQL version, explicit immutable
+application release SHA, and the single Alembic revision, and validates the
+archive with `pg_restore --list`. The release SHA is verified from candidate
+metadata by activation and passed explicitly; backup never requires or
+reconstructs a `.git` directory inside a git-archive candidate.
 
 `scripts/postgres-logical-restore.sh` restores only to a previously absent
 database named `pastexam_restore_*`. It preserves a failed target for

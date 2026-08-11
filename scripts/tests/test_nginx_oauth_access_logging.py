@@ -64,3 +64,14 @@ def test_frontend_callback_keeps_the_existing_spa_fallback() -> None:
     assert "proxy_pass http://frontend/;" in body
     assert "proxy_intercept_errors on;" in body
     assert "error_page 404 = /index.html;" in body
+
+
+def test_public_seo_routes_and_spa_robots_policy_remain_at_the_proxy() -> None:
+    config = _config()
+
+    assert "location = /sitemap.xml" in config
+    assert "proxy_pass http://backend:8000/seo/sitemap.xml;" in config
+    assert "location = /robots.txt" in config
+    assert "proxy_pass http://backend:8000/seo/robots.txt;" in config
+    assert "map $uri $spa_robots_tag" in config
+    assert "add_header X-Robots-Tag $spa_robots_tag always;" in config
