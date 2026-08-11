@@ -120,7 +120,14 @@ fi
 
 mv "$temporary_dump" "$dump_path"
 trap - EXIT HUP INT TERM
-checksum="$(shasum -a 256 "$dump_path" | awk '{print $1}')"
+if command -v shasum >/dev/null 2>&1; then
+  checksum="$(shasum -a 256 "$dump_path" | awk '{print $1}')"
+elif command -v sha256sum >/dev/null 2>&1; then
+  checksum="$(sha256sum "$dump_path" | awk '{print $1}')"
+else
+  echo "Neither shasum nor sha256sum is available." >&2
+  exit 2
+fi
 printf '%s  %s\n' "$checksum" "$(basename "$dump_path")" >"$checksum_path"
 
 cat >"$metadata_path" <<EOF
