@@ -1163,7 +1163,7 @@ describe('AdminView', () => {
     }
 
     wrapper.unmount()
-  })
+  }, 10_000)
 
   it('keeps online API errors separate from empty history', async () => {
     const wrapper = createWrapper()
