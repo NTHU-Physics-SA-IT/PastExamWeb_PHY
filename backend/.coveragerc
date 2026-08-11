@@ -1,4 +1,7 @@
 [run]
+relative_files = True
+source =
+    app
 omit =
     app/main.py
     app/**/__init__.py
