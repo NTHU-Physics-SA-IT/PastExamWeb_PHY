@@ -363,6 +363,14 @@ Submission or deleting its stored object. The Archive transition, Report
 decision, and result notification commit atomically; a finalized retry remains
 a conflict.
 
+## NTHU login authorization
+
+NTHU UUID remains the canonical external identity. Provider `userid` is a synchronized affiliation attribute and never an identity key. An `inschool=false` profile is always denied before any allow path.
+
+`all_nthu` preserves the existing eligible-member behavior and ignores department and staff lists. `selected_departments` authorizes when either the parsed student department is selected or the exact provider `userid` appears in the administrator-maintained staff allowlist. Staff userids are trimmed at configuration input but remain case-sensitive; the system never guesses staff status or organizational unit from userid format.
+
+Authorization runs after the provider profile is established and before local User creation or profile synchronization. A denial produces no User mutation, login handoff, exchange success, or application JWT. Existing users remain persisted and unchanged when a later policy denies a login.
+
 ## Public visibility
 
 ### Intended invariant

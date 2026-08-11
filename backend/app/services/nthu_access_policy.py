@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
+import unicodedata
 from typing import Any, TYPE_CHECKING
 
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
@@ -20,11 +21,17 @@ if TYPE_CHECKING:
 
 
 NTHU_ACCESS_POLICY_SETTING_KEY = "nthu_access_policy"
+NTHU_STAFF_USERID_MAX_LENGTH = 255
 
 
 class NthuAccessMode(str, Enum):
     ALL_NTHU = "all_nthu"
     SELECTED_DEPARTMENTS = "selected_departments"
+
+
+class NthuStaffAccess(str, Enum):
+    NONE = "none"
+    ALLOWLIST = "allowlist"
 
 
 class NthuAccessPolicyValidationError(ValueError):
@@ -35,11 +42,15 @@ class NthuAccessPolicyValidationError(ValueError):
 class NthuAccessPolicy:
     mode: NthuAccessMode
     allowed_department_codes: tuple[str, ...] = ()
+    staff_access: NthuStaffAccess = NthuStaffAccess.NONE
+    allowed_staff_userids: tuple[str, ...] = ()
 
     def as_storage_value(self) -> dict[str, Any]:
         return {
             "mode": self.mode.value,
             "allowed_department_codes": list(self.allowed_department_codes),
+            "staff_access": self.staff_access.value,
+            "allowed_staff_userids": list(self.allowed_staff_userids),
         }
 
 
@@ -49,7 +60,11 @@ DEFAULT_NTHU_ACCESS_POLICY = NthuAccessPolicy(mode=NthuAccessMode.ALL_NTHU)
 def normalize_nthu_access_policy(value: object) -> NthuAccessPolicy:
     if not isinstance(value, dict):
         raise NthuAccessPolicyValidationError("登入範圍格式不正確")
-    if set(value) != {"mode", "allowed_department_codes"}:
+    required_keys = {"mode", "allowed_department_codes"}
+    optional_keys = {"staff_access", "allowed_staff_userids"}
+    if not required_keys.issubset(value) or not set(value).issubset(
+        required_keys | optional_keys
+    ):
         raise NthuAccessPolicyValidationError("登入範圍欄位不正確")
 
     try:
@@ -66,12 +81,52 @@ def normalize_nthu_access_policy(value: object) -> NthuAccessPolicy:
     codes = tuple(sorted(set(raw_codes)))
     if any(department_by_code(code) is None for code in codes):
         raise NthuAccessPolicyValidationError("登入範圍包含未知系所")
-    if mode is NthuAccessMode.SELECTED_DEPARTMENTS and not codes:
-        raise NthuAccessPolicyValidationError("指定系所模式至少需要選擇一個系所")
+
+    try:
+        staff_access = NthuStaffAccess(value.get("staff_access", "none"))
+    except (TypeError, ValueError) as error:
+        raise NthuAccessPolicyValidationError("教職員開放方式無效") from error
+
+    raw_staff_userids = value.get("allowed_staff_userids", [])
+    if not isinstance(raw_staff_userids, list) or any(
+        not isinstance(userid, str) for userid in raw_staff_userids
+    ):
+        raise NthuAccessPolicyValidationError("員工編號清單格式無效")
+
+    staff_userids: list[str] = []
+    for raw_userid in raw_staff_userids:
+        userid = raw_userid.strip()
+        if (
+            not userid
+            or len(userid) > NTHU_STAFF_USERID_MAX_LENGTH
+            or any(
+                unicodedata.category(character).startswith("C") for character in userid
+            )
+            or any(character.isspace() for character in userid)
+        ):
+            raise NthuAccessPolicyValidationError("員工編號格式無效")
+        if userid in staff_userids:
+            raise NthuAccessPolicyValidationError("員工編號不可重複")
+        staff_userids.append(userid)
+
     if mode is NthuAccessMode.ALL_NTHU:
         codes = ()
+        staff_access = NthuStaffAccess.NONE
+        staff_userids = []
+    else:
+        if staff_access is NthuStaffAccess.NONE and staff_userids:
+            raise NthuAccessPolicyValidationError("未啟用教職員清單時不可包含員工編號")
+        if staff_access is NthuStaffAccess.ALLOWLIST and not staff_userids:
+            raise NthuAccessPolicyValidationError("教職員個別允許至少需要一個員工編號")
+        if not codes and not staff_userids:
+            raise NthuAccessPolicyValidationError("自訂範圍至少需要一個系所或員工編號")
 
-    return NthuAccessPolicy(mode=mode, allowed_department_codes=codes)
+    return NthuAccessPolicy(
+        mode=mode,
+        allowed_department_codes=codes,
+        staff_access=staff_access,
+        allowed_staff_userids=tuple(staff_userids),
+    )
 
 
 async def load_nthu_access_policy(db: AsyncSession) -> NthuAccessPolicy:
@@ -125,6 +180,13 @@ def ensure_profile_matches_access_policy(
     if profile.inschool is not True:
         raise NthuOAuthBusinessError("oauth_not_in_school")
     if policy.mode is NthuAccessMode.ALL_NTHU:
+        return
+
+    if (
+        policy.staff_access is NthuStaffAccess.ALLOWLIST
+        and profile.userid is not None
+        and profile.userid in policy.allowed_staff_userids
+    ):
         return
 
     affiliation = parse_nthu_student_affiliation(profile.userid)

@@ -28,6 +28,8 @@ async def test_admin_reads_default_and_persists_selected_departments(
         default_body = default_response.json()
         assert default_body["mode"] == "all_nthu"
         assert default_body["allowed_department_codes"] == []
+        assert default_body["staff_access"] == "none"
+        assert default_body["allowed_staff_userids"] == []
         physics = next(
             item for item in default_body["departments"] if item["code"] == "022"
         )
@@ -39,15 +41,20 @@ async def test_admin_reads_default_and_persists_selected_departments(
             json={
                 "mode": "selected_departments",
                 "allowed_department_codes": ["025", "022", "022"],
+                "staff_access": "allowlist",
+                "allowed_staff_userids": [" W90001 "],
             },
         )
         assert update_response.status_code == 200
         assert update_response.json()["allowed_department_codes"] == ["022", "025"]
+        assert update_response.json()["allowed_staff_userids"] == ["W90001"]
 
         reload_response = await client.get(PATH)
         assert reload_response.status_code == 200
         assert reload_response.json()["mode"] == "selected_departments"
         assert reload_response.json()["allowed_department_codes"] == ["022", "025"]
+        assert reload_response.json()["staff_access"] == "allowlist"
+        assert reload_response.json()["allowed_staff_userids"] == ["W90001"]
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:

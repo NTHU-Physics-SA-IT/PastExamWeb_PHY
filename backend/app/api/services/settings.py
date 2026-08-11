@@ -59,6 +59,8 @@ class NthuDepartmentRead(BaseModel):
 class NthuAccessPolicyRead(BaseModel):
     mode: str
     allowed_department_codes: list[str]
+    staff_access: str
+    allowed_staff_userids: list[str]
     departments: list[NthuDepartmentRead]
 
 
@@ -74,6 +76,8 @@ def _nthu_access_policy_response(policy: NthuAccessPolicy) -> NthuAccessPolicyRe
     return NthuAccessPolicyRead(
         mode=policy.mode.value,
         allowed_department_codes=list(policy.allowed_department_codes),
+        staff_access=policy.staff_access.value,
+        allowed_staff_userids=list(policy.allowed_staff_userids),
         departments=[
             NthuDepartmentRead(**department.__dict__) for department in NTHU_DEPARTMENTS
         ],

@@ -498,11 +498,7 @@
                     icon="pi pi-save"
                     size="small"
                     :loading="nthuAccessPolicySaving"
-                    :disabled="
-                      nthuAccessPolicyLoading ||
-                      (nthuAccessPolicyForm.mode === NTHU_ACCESS_MODES.SELECTED_DEPARTMENTS &&
-                        nthuAccessPolicyForm.allowed_department_codes.length === 0)
-                    "
+                    :disabled="nthuAccessPolicyLoading || !isNthuAccessPolicyValid"
                     @click="saveNthuAccessPolicy"
                   />
                 </div>
@@ -535,7 +531,7 @@
                         :value="NTHU_ACCESS_MODES.ALL_NTHU"
                       />
                       <span>
-                        <strong>全校開放</strong>
+                        <strong>全校成員</strong>
                         <small>所有符合現有在校資格的清大使用者皆可登入。</small>
                       </span>
                     </label>
@@ -547,8 +543,8 @@
                         :value="NTHU_ACCESS_MODES.SELECTED_DEPARTMENTS"
                       />
                       <span>
-                        <strong>指定系所</strong>
-                        <small>只允許所選系所；特殊或無法解析的學號會被拒絕。</small>
+                        <strong>自訂範圍</strong>
+                        <small>允許指定系所學生與個別列入清單的教職員登入。</small>
                       </span>
                     </label>
                   </div>
@@ -586,11 +582,87 @@
                         </span>
                       </template>
                     </MultiSelect>
+                    <div class="nthu-access-policy__staff">
+                      <span class="nthu-access-policy__section-label">教職員</span>
+                      <p>
+                        目前清大 OAuth
+                        不提供可供本系統可靠判斷教職員任職系所的欄位，因此自訂範圍中的教職員需以校務系統員工編號個別允許。
+                      </p>
+                      <div
+                        class="nthu-access-policy__staff-modes"
+                        role="radiogroup"
+                        aria-label="教職員開放方式"
+                      >
+                        <label for="nthu-staff-none">
+                          <RadioButton
+                            v-model="nthuAccessPolicyForm.staff_access"
+                            inputId="nthu-staff-none"
+                            name="nthu-staff-access"
+                            :value="NTHU_STAFF_ACCESS.NONE"
+                          />
+                          不開放
+                        </label>
+                        <label for="nthu-staff-allowlist">
+                          <RadioButton
+                            v-model="nthuAccessPolicyForm.staff_access"
+                            inputId="nthu-staff-allowlist"
+                            name="nthu-staff-access"
+                            :value="NTHU_STAFF_ACCESS.ALLOWLIST"
+                          />
+                          個別允許教職員
+                        </label>
+                      </div>
+                      <div
+                        v-if="nthuAccessPolicyForm.staff_access === NTHU_STAFF_ACCESS.ALLOWLIST"
+                        class="nthu-access-policy__staff-editor"
+                      >
+                        <label for="nthu-staff-userid">校務系統員工編號</label>
+                        <div class="nthu-access-policy__staff-input">
+                          <InputText
+                            id="nthu-staff-userid"
+                            v-model="nthuStaffUseridDraft"
+                            maxlength="255"
+                            placeholder="W90001"
+                            @keyup.enter="addNthuStaffUserid"
+                          />
+                          <Button
+                            label="加入"
+                            icon="pi pi-plus"
+                            outlined
+                            @click="addNthuStaffUserid"
+                          />
+                        </div>
+                        <small
+                          v-if="nthuStaffUseridError"
+                          class="nthu-access-policy__validation"
+                          role="alert"
+                        >
+                          {{ nthuStaffUseridError }}
+                        </small>
+                        <div class="nthu-access-policy__staff-list" aria-label="已允許的員工編號">
+                          <span
+                            v-for="userid in nthuAccessPolicyForm.allowed_staff_userids"
+                            :key="userid"
+                            class="nthu-access-policy__staff-chip"
+                          >
+                            {{ userid }}
+                            <button
+                              type="button"
+                              :aria-label="`移除 ${userid}`"
+                              @click="removeNthuStaffUserid(userid)"
+                            >
+                              <i class="pi pi-times" aria-hidden="true"></i>
+                            </button>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                     <small
-                      v-if="nthuAccessPolicyForm.allowed_department_codes.length === 0"
+                      v-if="!isNthuAccessPolicyValid"
                       class="nthu-access-policy__validation"
+                      role="alert"
                     >
-                      指定系所模式至少需要選擇一個系所。
+                      自訂範圍至少需要選擇一個系所，或加入一個允許的員工編號。
                     </small>
                   </div>
                 </div>
@@ -985,7 +1057,7 @@
                 </Column>
                 <Column
                   field="student_id"
-                  header="學號"
+                  header="學號 / 員工編號"
                   sortable
                   style="width: 9rem; min-width: 9rem"
                 >
@@ -1145,7 +1217,7 @@
                       }}</span>
                     </div>
                     <div class="admin-tablet-metadata-item">
-                      <span class="admin-tablet-metadata-label">學號</span>
+                      <span class="admin-tablet-metadata-label">學號 / 員工編號</span>
                       <span class="admin-tablet-metadata-value">{{ user.student_id || '—' }}</span>
                     </div>
                     <div class="admin-tablet-metadata-item admin-tablet-metadata-item--wide">
@@ -4415,6 +4487,10 @@ const NTHU_ACCESS_MODES = Object.freeze({
   ALL_NTHU: 'all_nthu',
   SELECTED_DEPARTMENTS: 'selected_departments',
 })
+const NTHU_STAFF_ACCESS = Object.freeze({
+  NONE: 'none',
+  ALLOWLIST: 'allowlist',
+})
 const nthuAccessPolicyLoading = ref(false)
 const nthuAccessPolicySaving = ref(false)
 const nthuAccessPolicyError = ref('')
@@ -4422,6 +4498,24 @@ const nthuDepartments = ref([])
 const nthuAccessPolicyForm = ref({
   mode: NTHU_ACCESS_MODES.ALL_NTHU,
   allowed_department_codes: [],
+  staff_access: NTHU_STAFF_ACCESS.NONE,
+  allowed_staff_userids: [],
+})
+const nthuStaffUseridDraft = ref('')
+const nthuStaffUseridError = ref('')
+const isNthuAccessPolicyValid = computed(() => {
+  if (nthuAccessPolicyForm.value.mode === NTHU_ACCESS_MODES.ALL_NTHU) return true
+  if (
+    nthuAccessPolicyForm.value.staff_access === NTHU_STAFF_ACCESS.ALLOWLIST &&
+    nthuAccessPolicyForm.value.allowed_staff_userids.length === 0
+  ) {
+    return false
+  }
+  return (
+    nthuAccessPolicyForm.value.allowed_department_codes.length > 0 ||
+    (nthuAccessPolicyForm.value.staff_access === NTHU_STAFF_ACCESS.ALLOWLIST &&
+      nthuAccessPolicyForm.value.allowed_staff_userids.length > 0)
+  )
 })
 const nthuDepartmentGroups = computed(() => {
   const groups = new Map()
@@ -6411,6 +6505,10 @@ const loadCourses = async () => {
 const applyNthuAccessPolicyResponse = (data) => {
   const validMode = Object.values(NTHU_ACCESS_MODES).includes(data?.mode)
   const validCodes = Array.isArray(data?.allowed_department_codes)
+  const validStaffAccess = Object.values(NTHU_STAFF_ACCESS).includes(data?.staff_access)
+  const validStaffUserids =
+    Array.isArray(data?.allowed_staff_userids) &&
+    data.allowed_staff_userids.every((userid) => typeof userid === 'string')
   const validDepartments =
     Array.isArray(data?.departments) &&
     data.departments.every(
@@ -6420,7 +6518,7 @@ const applyNthuAccessPolicyResponse = (data) => {
         typeof department?.college_code === 'string' &&
         typeof department?.college_name === 'string'
     )
-  if (!validMode || !validCodes || !validDepartments) {
+  if (!validMode || !validCodes || !validStaffAccess || !validStaffUserids || !validDepartments) {
     throw new TypeError('Invalid NTHU access policy response')
   }
 
@@ -6428,7 +6526,32 @@ const applyNthuAccessPolicyResponse = (data) => {
   nthuAccessPolicyForm.value = {
     mode: data.mode,
     allowed_department_codes: [...data.allowed_department_codes],
+    staff_access: data.staff_access,
+    allowed_staff_userids: [...data.allowed_staff_userids],
   }
+  nthuStaffUseridDraft.value = ''
+  nthuStaffUseridError.value = ''
+}
+
+const addNthuStaffUserid = () => {
+  const userid = nthuStaffUseridDraft.value.trim()
+  if (!userid || /\s/u.test(userid) || /\p{C}/u.test(userid)) {
+    nthuStaffUseridError.value = '請輸入有效的校務系統員工編號。'
+    return
+  }
+  if (nthuAccessPolicyForm.value.allowed_staff_userids.includes(userid)) {
+    nthuStaffUseridError.value = '此員工編號已在清單中。'
+    return
+  }
+  nthuAccessPolicyForm.value.allowed_staff_userids.push(userid)
+  nthuStaffUseridDraft.value = ''
+  nthuStaffUseridError.value = ''
+}
+
+const removeNthuStaffUserid = (userid) => {
+  nthuAccessPolicyForm.value.allowed_staff_userids =
+    nthuAccessPolicyForm.value.allowed_staff_userids.filter((item) => item !== userid)
+  nthuStaffUseridError.value = ''
 }
 
 const loadNthuAccessPolicy = async () => {
@@ -6448,10 +6571,7 @@ const loadNthuAccessPolicy = async () => {
 }
 
 const saveNthuAccessPolicy = async () => {
-  if (
-    nthuAccessPolicyForm.value.mode === NTHU_ACCESS_MODES.SELECTED_DEPARTMENTS &&
-    nthuAccessPolicyForm.value.allowed_department_codes.length === 0
-  ) {
+  if (!isNthuAccessPolicyValid.value) {
     return
   }
 
@@ -6463,6 +6583,15 @@ const saveNthuAccessPolicy = async () => {
         nthuAccessPolicyForm.value.mode === NTHU_ACCESS_MODES.ALL_NTHU
           ? []
           : [...nthuAccessPolicyForm.value.allowed_department_codes],
+      staff_access:
+        nthuAccessPolicyForm.value.mode === NTHU_ACCESS_MODES.ALL_NTHU
+          ? NTHU_STAFF_ACCESS.NONE
+          : nthuAccessPolicyForm.value.staff_access,
+      allowed_staff_userids:
+        nthuAccessPolicyForm.value.mode === NTHU_ACCESS_MODES.ALL_NTHU ||
+        nthuAccessPolicyForm.value.staff_access === NTHU_STAFF_ACCESS.NONE
+          ? []
+          : [...nthuAccessPolicyForm.value.allowed_staff_userids],
     }
     const { data } = await updateNthuAccessPolicy(payload)
     applyNthuAccessPolicyResponse(data)
@@ -8702,6 +8831,70 @@ onBeforeUnmount(() => {
 
 .nthu-access-policy__departments > label {
   font-weight: 650;
+}
+
+.nthu-access-policy__staff {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+  margin-top: 0.5rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.nthu-access-policy__section-label,
+.nthu-access-policy__staff-editor > label {
+  font-weight: 650;
+}
+
+.nthu-access-policy__staff p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.nthu-access-policy__staff-modes,
+.nthu-access-policy__staff-modes label,
+.nthu-access-policy__staff-input,
+.nthu-access-policy__staff-list,
+.nthu-access-policy__staff-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.nthu-access-policy__staff-modes,
+.nthu-access-policy__staff-list {
+  flex-wrap: wrap;
+}
+
+.nthu-access-policy__staff-editor {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.nthu-access-policy__staff-input :deep(.p-inputtext) {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+
+.nthu-access-policy__staff-chip {
+  max-width: 100%;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  overflow-wrap: anywhere;
+  background: var(--bg-secondary);
+}
+
+.nthu-access-policy__staff-chip button {
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
 }
 
 .nthu-access-policy__multiselect {

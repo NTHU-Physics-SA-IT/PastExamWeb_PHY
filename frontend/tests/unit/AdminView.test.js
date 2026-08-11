@@ -44,6 +44,8 @@ const sampleUsers = [
 const sampleNthuAccessPolicy = {
   mode: 'all_nthu',
   allowed_department_codes: [],
+  staff_access: 'none',
+  allowed_staff_userids: [],
   departments: [
     { code: '022', name: '物理學系', college_code: '02', college_name: '理學院' },
     { code: '025', name: '天文研究所', college_code: '02', college_name: '理學院' },
@@ -458,6 +460,8 @@ describe('AdminView', () => {
     expect(updateNthuAccessPolicyMock).toHaveBeenCalledWith({
       mode: 'selected_departments',
       allowed_department_codes: ['022', '025'],
+      staff_access: 'none',
+      allowed_staff_userids: [],
     })
     expect(toastAddMock).toHaveBeenLastCalledWith(
       expect.objectContaining({ severity: 'success', detail: 'NTHU 登入範圍已更新。' })
@@ -468,6 +472,34 @@ describe('AdminView', () => {
     expect(adminTemplateSource).toContain("user.department_name || '—'")
     expect(adminTemplateSource).toContain('filterPlaceholder="搜尋中文系所名稱或代碼"')
 
+    wrapper.unmount()
+  })
+
+  it('supports staff-only allowlists and rejects duplicate employee IDs', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    wrapper.vm.nthuAccessPolicyForm.mode = 'selected_departments'
+    wrapper.vm.nthuAccessPolicyForm.allowed_department_codes = []
+    wrapper.vm.nthuAccessPolicyForm.staff_access = 'allowlist'
+    wrapper.vm.nthuStaffUseridDraft = ' W90001 '
+    wrapper.vm.addNthuStaffUserid()
+    expect(wrapper.vm.nthuAccessPolicyForm.allowed_staff_userids).toEqual(['W90001'])
+
+    wrapper.vm.nthuStaffUseridDraft = 'W90001'
+    wrapper.vm.addNthuStaffUserid()
+    expect(wrapper.vm.nthuStaffUseridError).toContain('已在清單')
+
+    await wrapper.vm.saveNthuAccessPolicy()
+    expect(updateNthuAccessPolicyMock).toHaveBeenCalledWith({
+      mode: 'selected_departments',
+      allowed_department_codes: [],
+      staff_access: 'allowlist',
+      allowed_staff_userids: ['W90001'],
+    })
+
+    wrapper.vm.removeNthuStaffUserid('W90001')
+    expect(wrapper.vm.isNthuAccessPolicyValid).toBe(false)
     wrapper.unmount()
   })
 
