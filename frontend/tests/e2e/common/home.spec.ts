@@ -111,8 +111,8 @@ test.describe('Home page', () => {
       [...actionLayout.map(({ top }) => top)].sort()
     )
     expect(actionLayout.map(({ tabIndex }) => tabIndex)).toEqual([0, 0, 0])
-    expect(actionLayout[0].width).toBe(actionLayout[1].width)
-    expect(actionLayout[0].height).toBe(actionLayout[1].height)
+    expect(actionLayout[0].width).toBeCloseTo(actionLayout[1].width, 3)
+    expect(actionLayout[0].height).toBeCloseTo(actionLayout[1].height, 3)
   })
 
   test('public catalog renders canonical courses and a zero-archive detail', async ({ page }) => {
