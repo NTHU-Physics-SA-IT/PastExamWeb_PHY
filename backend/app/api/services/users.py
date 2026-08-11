@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.db.session import get_session
 from app.models.models import (
     ArchiveSubmission,
+    AdminUserRead,
     SubmissionStatus,
     User,
     UserCreate,
@@ -36,6 +37,11 @@ from app.api.services.presence import (
     merge_presence_intervals,
 )
 from app.utils.auth import get_current_user, get_password_hash
+from app.services.nthu_affiliation import (
+    department_by_code,
+    parse_nthu_student_affiliation,
+)
+
 router = APIRouter()
 
 NICKNAME_MAX_LENGTH = 15
@@ -86,7 +92,22 @@ def _to_user_read(
     )
 
 
-@router.get("/admin/users", response_model=List[UserRead])
+def _to_admin_user_read(
+    user: User, contributor_experience: int = 0, is_online: bool = False
+) -> AdminUserRead:
+    base = _to_user_read(user, contributor_experience, is_online)
+    affiliation = parse_nthu_student_affiliation(user.student_id)
+    department = department_by_code(affiliation.department_code)
+    return AdminUserRead(
+        **base.model_dump(),
+        student_id=user.student_id,
+        department_code=affiliation.department_code,
+        department_name=department.name if department else None,
+        affiliation_status=affiliation.status.value,
+    )
+
+
+@router.get("/admin/users", response_model=List[AdminUserRead])
 async def get_users(
     current_user: UserRoles = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
@@ -121,7 +142,7 @@ async def get_users(
     )
     online_user_ids = distinct_online_user_ids(active_sessions, now_utc)
     return [
-        _to_user_read(
+        _to_admin_user_read(
             user,
             experience_by_user.get(user.id, 0),
             user.id in online_user_ids,
@@ -474,8 +495,6 @@ async def reset_user_password(
     await db.commit()
 
     return {"message": "密碼已重設"}
-
-
 
 @router.post("/admin/users", response_model=UserRead)
 async def create_user(

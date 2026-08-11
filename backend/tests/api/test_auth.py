@@ -8,7 +8,7 @@ from sqlmodel import select
 from fastapi import HTTPException
 
 from app.main import app
-from app.models.models import User, UserPresenceSession, UserRoles
+from app.models.models import SystemSetting, User, UserPresenceSession, UserRoles
 from app.core.config import settings
 from app.services.nthu_oauth import NthuProfile
 from app.utils.auth import get_current_user
@@ -219,8 +219,83 @@ async def test_nthu_callback_creates_user_and_state_is_single_use(
             )
         ).scalar_one()
         assert user.last_login is None
+        assert user.student_id == profile.userid
         await session.delete(user)
         await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_nthu_callback_denial_creates_no_user_or_handoff(
+    client,
+    monkeypatch,
+    session_maker,
+):
+    suffix = uuid.uuid4().hex[:8]
+    profile = NthuProfile(
+        uuid=f"nthu-denied-{suffix}",
+        userid="112023123",
+        name=f"Denied NTHU User {suffix}",
+        email=f"denied-{suffix}@example.com",
+        inschool=True,
+    )
+    monkeypatch.setattr(settings, "OAUTH_CLIENT_ID", "nthu-client")
+    monkeypatch.setattr(settings, "OAUTH_CLIENT_SECRET", "nthu-secret")
+    monkeypatch.setattr(
+        settings,
+        "OAUTH_AUTHORIZE_URL",
+        "https://oauth.ccxp.nthu.edu.tw/v1.1/authorize.php",
+    )
+    monkeypatch.setattr(settings, "FRONTEND_URL", "https://physarchive.com")
+
+    async def fake_fetch_profile(code):
+        assert code == "provider-code"
+        return profile
+
+    handoff_calls: list[int] = []
+    monkeypatch.setattr(auth_service, "fetch_nthu_profile", fake_fetch_profile)
+    monkeypatch.setattr(
+        auth_service,
+        "create_login_handoff",
+        lambda user_id: handoff_calls.append(user_id),
+    )
+    async with session_maker() as session:
+        session.add(
+            SystemSetting(
+                key="nthu_access_policy",
+                value={
+                    "mode": "selected_departments",
+                    "allowed_department_codes": ["022"],
+                },
+            )
+        )
+        await session.commit()
+
+    try:
+        login_response = await client.get("/auth/nthu/login", follow_redirects=False)
+        state = parse_qs(urlparse(login_response.headers["location"]).query)["state"][0]
+        response = await client.get(
+            "/auth/nthu/callback",
+            params={"code": "provider-code", "state": state},
+            follow_redirects=False,
+        )
+
+        assert parse_qs(urlparse(response.headers["location"]).query) == {
+            "error": ["oauth_department_not_allowed"]
+        }
+        assert handoff_calls == []
+        async with session_maker() as session:
+            assert (
+                await session.scalar(select(User).where(User.oauth_sub == profile.uuid))
+                is None
+            )
+    finally:
+        async with session_maker() as session:
+            setting = await session.scalar(
+                select(SystemSetting).where(SystemSetting.key == "nthu_access_policy")
+            )
+            if setting is not None:
+                await session.delete(setting)
+                await session.commit()
 
 
 @pytest.mark.asyncio

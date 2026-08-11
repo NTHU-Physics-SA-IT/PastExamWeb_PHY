@@ -313,9 +313,11 @@ integration.
 
 ## NTHU OAuth and login handoff
 
-The provider callback owns NTHU profile validation and one PostgreSQL User
-transaction. A denied, malformed, conflicting, or soft-deleted identity rolls
-back that transaction. A successful resolution commits the User before
+The provider callback owns NTHU profile validation, persisted access-policy
+authorization, affiliation synchronization, and one PostgreSQL User
+transaction. Policy denial occurs before identity lookup or User mutation. A
+denied, malformed, conflicting, or soft-deleted identity rolls back that
+transaction. A successful resolution commits the User before
 creating a Redis handoff; Redis failure returns a generic login failure and
 does not issue an application token. The committed identity remains safe for a
 fresh OAuth retry.

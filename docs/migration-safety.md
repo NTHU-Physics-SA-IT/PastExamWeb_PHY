@@ -56,8 +56,9 @@ Reviewed manifests currently cover:
 - `d8f2a6c1b4e7`: the reviewed schema before the ArchiveSubmission/Archive
   one-to-one constraint; and
 - `6f3a9c2d8e41`: the reviewed schema before NTHU OAuth provider-identity
-  uniqueness; and
-- `9f1c2a7e4b63`: the current repository head and SQLModel metadata contract.
+  uniqueness;
+- `9f1c2a7e4b63`: the reviewed schema before persisted NTHU student ID; and
+- `b7e3d9a1c5f2`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,
@@ -162,6 +163,14 @@ migration does not expose identity values, select a winner, link accounts, or
 rewrite rows. Multiple local `(NULL, NULL)` identities remain valid. Downgrade
 removes only the named constraint and preserves every User row and identity
 value.
+
+The NTHU student-ID migration adds only nullable `users.student_id` as
+`VARCHAR(255)`, with no default, index, uniqueness rule, or backfill. Existing
+and local User rows therefore remain null, and NTHU UUID provider identity is
+unchanged. Upgrade verifies the exact reviewed source revision and source
+columns before DDL, then validates the new type and nullability. Downgrade
+removes only this attribute column and preserves all User rows and provider
+identity values.
 
 On the first bootstrap, one missing canonical key or any extra custom category
 is evidence that the database is not the expected clean initialized target,

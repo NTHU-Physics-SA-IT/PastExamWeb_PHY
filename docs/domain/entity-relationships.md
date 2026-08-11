@@ -42,6 +42,19 @@ NTHU integration the only valid mapping is `oauth_provider="nthu"` and
 `oauth_sub=<NTHU uuid>`. `userid`, email, and name are profile attributes and
 must never substitute for a missing, blank, or malformed `uuid`.
 
+`User.student_id` is the single nullable persisted copy of the NTHU resource
+`userid`. It is an affiliation attribute, not an identity or account-linking
+key. Local accounts keep it null. A successful NTHU login synchronizes it from
+the current provider profile; a denied login does not mutate it.
+
+The backend owns one parser and one Registrar-derived department catalog. A
+standard nine-digit value is split into admission year `[0:3]`, college code
+`[3:5]`, department code `[3:6]`, and program code `[3:7]`. The parser does not
+infer bachelor, master, or doctoral status from one digit. Missing, malformed,
+or special values remain explicit `unknown_special` affiliations. Full student
+IDs and derived affiliation fields are projected only by the administrator
+user-management API, not by general user responses.
+
 The named PostgreSQL unique constraint `uq_users_oauth_provider_sub` is the
 concurrency arbiter for provider identity. Both columns remain nullable so
 local users may keep `(NULL, NULL)`; application-created NTHU users require

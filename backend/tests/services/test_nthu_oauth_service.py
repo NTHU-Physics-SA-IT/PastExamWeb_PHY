@@ -6,10 +6,12 @@ import uuid
 
 import httpx
 import pytest
-from sqlalchemy import select
+import pytest_asyncio
+from sqlalchemy import delete, select
 
 from app.core.config import settings
-from app.models.models import User
+from app.models.models import SystemSetting, User
+from app.services.nthu_access_policy import NTHU_ACCESS_POLICY_SETTING_KEY
 from app.services.nthu_oauth import (
     NTHU_APPROVED_SCOPES,
     NthuOAuthBusinessError,
@@ -31,6 +33,25 @@ def _profile(**overrides) -> NthuProfile:
     }
     values.update(overrides)
     return NthuProfile(**values)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _clear_nthu_access_policy(session_maker):
+    async with session_maker() as session:
+        await session.execute(
+            delete(SystemSetting).where(
+                SystemSetting.key == NTHU_ACCESS_POLICY_SETTING_KEY
+            )
+        )
+        await session.commit()
+    yield
+    async with session_maker() as session:
+        await session.execute(
+            delete(SystemSetting).where(
+                SystemSetting.key == NTHU_ACCESS_POLICY_SETTING_KEY
+            )
+        )
+        await session.commit()
 
 
 def _configure_provider(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -278,6 +299,7 @@ async def test_first_and_repeat_login_use_nthu_uuid_and_preserve_nickname(
 
     assert user.oauth_provider == "nthu"
     assert user.oauth_sub == first.uuid
+    assert user.student_id == first.userid
     assert user.email == first.email
     assert user.name == first.name
     assert user.nickname == first.name
@@ -301,6 +323,51 @@ async def test_first_and_repeat_login_use_nthu_uuid_and_preserve_nickname(
     assert repeated.name == updated.name
     assert repeated.email == updated.email
     assert repeated.nickname == "自訂暱稱"
+    assert repeated.student_id == updated.userid
+
+
+@pytest.mark.asyncio
+async def test_selected_department_denies_before_user_mutation(session_maker):
+    profile = _profile(userid="112023123")
+    async with session_maker() as session:
+        session.add(
+            SystemSetting(
+                key=NTHU_ACCESS_POLICY_SETTING_KEY,
+                value={
+                    "mode": "selected_departments",
+                    "allowed_department_codes": ["022"],
+                },
+            )
+        )
+        await session.commit()
+
+        with pytest.raises(NthuOAuthBusinessError) as exc_info:
+            await resolve_nthu_user(session, profile)
+
+        assert exc_info.value.code == "oauth_department_not_allowed"
+        assert (await session.execute(select(User))).scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_selected_department_allows_and_persists_physics_student(session_maker):
+    profile = _profile(userid="112022123")
+    async with session_maker() as session:
+        session.add(
+            SystemSetting(
+                key=NTHU_ACCESS_POLICY_SETTING_KEY,
+                value={
+                    "mode": "selected_departments",
+                    "allowed_department_codes": ["022"],
+                },
+            )
+        )
+        await session.commit()
+
+        user = await resolve_nthu_user(session, profile)
+        await session.commit()
+
+        assert user.student_id == "112022123"
+        assert user.oauth_sub == profile.uuid
 
 
 @pytest.mark.asyncio

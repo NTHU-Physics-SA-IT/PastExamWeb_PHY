@@ -634,9 +634,10 @@ all of these gates:
 3. the resource has `success=true` and a required valid `uuid`, `userid`,
    `name`, `email`, and boolean `inschool`;
 4. `inschool` is exactly `true`;
-5. the matching provider identity is active, or a new identity has no email or
+5. the server-persisted NTHU access policy permits the affiliation;
+6. the matching provider identity is active, or a new identity has no email or
    name collision; and
-6. the browser atomically consumes the short-lived login handoff.
+7. the browser atomically consumes the short-lived login handoff.
 
 `inschool=false` returns `oauth_not_in_school` and mutates no User. A matching
 soft-deleted identity returns `oauth_account_deleted` and is never restored by
@@ -651,6 +652,17 @@ colliding User.
 The in-school decision is an authentication Domain policy independent of
 identity mapping. A future policy change may permit another population without
 changing `oauth_provider="nthu"` or the UUID subject.
+
+The access policy defaults to `all_nthu`, preserving the existing in-school
+eligibility rule. An administrator may persist `selected_departments` with one
+or more canonical three-digit department codes. In that mode, only a parsed
+department in the selected set is eligible. Missing, malformed, special, or
+otherwise unverifiable `userid` values fail closed with the same friendly
+department-scope denial as a non-selected department. The callback enforces
+this after provider-profile validation and before provider-identity lookup,
+profile synchronization, new User creation, PostgreSQL commit, Redis handoff,
+or application JWT issuance. Existing accounts are retained when later denied.
+Local password authentication never reads this policy.
 
 | Operation | Anonymous | Authenticated user | Owner | Administrator | System |
 | --- | --- | --- | --- | --- | --- |

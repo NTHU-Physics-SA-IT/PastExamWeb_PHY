@@ -146,6 +146,47 @@ async def test_admin_can_list_users(client, make_user):
 
 
 @pytest.mark.asyncio
+async def test_admin_user_list_projects_student_affiliation_without_general_api_leak(
+    client,
+    make_user,
+):
+    admin = await make_user(is_admin=True)
+    nthu_user = await make_user(
+        is_local=False,
+        password_hash=None,
+        oauth_provider="nthu",
+        oauth_sub=f"uuid-{uuid.uuid4().hex}",
+        student_id="112022123",
+    )
+    local_user = await make_user()
+    app.dependency_overrides[get_current_user] = lambda: UserRoles(
+        user_id=admin.id,
+        is_admin=True,
+    )
+
+    try:
+        response = await client.get(ADMIN_PATH)
+        assert response.status_code == 200
+        by_id = {user["id"]: user for user in response.json()}
+        assert by_id[nthu_user.id]["student_id"] == "112022123"
+        assert by_id[nthu_user.id]["department_code"] == "022"
+        assert by_id[nthu_user.id]["department_name"] == "物理學系"
+        assert by_id[local_user.id]["student_id"] is None
+        assert by_id[local_user.id]["department_name"] is None
+
+        app.dependency_overrides[get_current_user] = lambda: UserRoles(
+            user_id=nthu_user.id,
+            is_admin=False,
+        )
+        me_response = await client.get("/users/me")
+        assert me_response.status_code == 200
+        assert "student_id" not in me_response.json()
+        assert "department_code" not in me_response.json()
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
 async def test_admin_can_update_user(client, session_maker):
     unique = uuid.uuid4().hex[:8]
     async with session_maker() as session:

@@ -150,6 +150,9 @@ async def nthu_callback(
     except IntegrityError:
         await db.rollback()
         return _frontend_oauth_error("oauth_identity_conflict")
+    except Exception:
+        await db.rollback()
+        return _frontend_oauth_error("oauth_login_failed")
 
     try:
         handoff_code = create_login_handoff(user.id)
