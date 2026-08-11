@@ -117,9 +117,6 @@ importers:
       vite-plugin-eslint:
         specifier: ^1.8.1
         version: 1.8.1(eslint@10.7.0(jiti@2.7.0))(vite@7.3.2(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.0))
-      vite-plugin-sitemap:
-        specifier: ^0.8.2
-        version: 0.8.2
       vite-plugin-vue-devtools:
         specifier: ^8.1.5
         version: 8.1.5(vite@7.3.2(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.0))(vue@3.5.40(typescript@6.0.3))
@@ -2372,9 +2369,6 @@ packages:
     peerDependenciesMeta:
       '@nuxt/kit':
         optional: true
-
-  vite-plugin-sitemap@0.8.2:
-    resolution: {integrity: sha512-bqIw6NVOXg6je81lzX8Lm0vjf8/QSAp8di8fYQzZ3ZdVicOm8+6idBGALJiy1R1FiXNIK8rgORO6HBqXyHW+iQ==}
 
   vite-plugin-vue-devtools@8.1.5:
     resolution: {integrity: sha512-QSVntSN0sbVV08CZntMWOfF8McyPyYyYd19sChLjxYyFCC7Fcpey74ztw1uCCU23wTmR2yWPb92uaxVD4Lw0Fg==}
@@ -4711,8 +4705,6 @@ snapshots:
       unplugin-utils: 0.3.2
       vite: 7.3.2(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.0)
       vite-dev-rpc: 2.0.0(vite@7.3.2(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.0))
-
-  vite-plugin-sitemap@0.8.2: {}
 
   vite-plugin-vue-devtools@8.1.5(vite@7.3.2(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.0))(vue@3.5.40(typescript@6.0.3)):
     dependencies:

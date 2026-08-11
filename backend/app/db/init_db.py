@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 from sqlmodel import func, select
@@ -41,6 +42,8 @@ ALLOWED_BOOTSTRAP_DATABASE_PREFIXES = (
     "archive_db_dev_",
     "pastexam_test_",
 )
+CANONICAL_LOCAL_BOOTSTRAP_PROJECT = "pastexam-dev"
+CANONICAL_LOCAL_BOOTSTRAP_DATABASE = "archive_db"
 
 
 @lru_cache(maxsize=1)
@@ -218,12 +221,18 @@ async def init_db() -> None:
 
 def _is_allowed_bootstrap_database_name(database_name: str) -> bool:
     normalized = database_name.strip().lower()
-    return any(
-        normalized.startswith(prefix)
-        for prefix in ALLOWED_BOOTSTRAP_DATABASE_PREFIXES
-    ) and all(
-        forbidden not in normalized
-        for forbidden in ("production", "prod")
+    prefix_allowed = any(
+        normalized.startswith(prefix) for prefix in ALLOWED_BOOTSTRAP_DATABASE_PREFIXES
+    ) and all(forbidden not in normalized for forbidden in ("production", "prod"))
+    if prefix_allowed:
+        return True
+
+    frontend_host = (urlsplit(settings.FRONTEND_URL).hostname or "").lower()
+    return (
+        normalized == CANONICAL_LOCAL_BOOTSTRAP_DATABASE
+        and settings.BOOTSTRAP_LOCAL_PROJECT == CANONICAL_LOCAL_BOOTSTRAP_PROJECT
+        and settings.DB_HOST == "db"
+        and frontend_host in {"localhost", "127.0.0.1", "::1"}
     )
 
 

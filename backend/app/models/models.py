@@ -1507,6 +1507,20 @@ class ArchiveRead(BaseModel):
         from_attributes = True
 
 
+class PublicArchiveRead(BaseModel):
+    """Archive metadata that is safe to expose without authentication."""
+
+    id: int
+    name: str
+    academic_year: int
+    archive_type: ArchiveType
+    professor: str
+    has_answers: bool
+
+    class Config:
+        from_attributes = True
+
+
 class ArchiveDiscussionMessageRead(BaseModel):
     id: int
     archive_id: int

@@ -43,6 +43,15 @@ describe('API service wrappers', () => {
   })
 
   it('courseService proxies to API client', () => {
+    courseService.listPublicCourses()
+    expect(getMock).toHaveBeenCalledWith('/courses/public')
+
+    courseService.listPublicCategories()
+    expect(getMock).toHaveBeenCalledWith('/courses/public/categories')
+
+    courseService.getPublicCourseArchives('course-1')
+    expect(getMock).toHaveBeenCalledWith('/courses/public/course-1/archives')
+
     courseService.listCourses()
     expect(getMock).toHaveBeenCalledWith('/courses')
 

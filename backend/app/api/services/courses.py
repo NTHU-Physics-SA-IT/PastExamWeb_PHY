@@ -62,6 +62,7 @@ from app.models.models import (
     CourseSubmissionUpdate,
     CourseUpdate,
     PersonalNotificationType,
+    PublicArchiveRead,
     SubmissionDecision,
     SubmissionStatus,
     User,
@@ -217,6 +218,23 @@ def _public_archive_conditions(course_id: int | None = None, archive_id: int | N
     return conditions
 
 
+def _public_course_conditions() -> list:
+    active_category_exists = exists().where(
+        CourseCategoryConfig.key == Course.category,
+        CourseCategoryConfig.is_active.is_(True),
+        CourseCategoryConfig.deleted_at.is_(None),
+    )
+    public_archive_exists = exists().where(
+        Archive.course_id == Course.id,
+        *_public_archive_conditions(),
+    )
+    return [
+        Course.deleted_at.is_(None),
+        active_category_exists,
+        public_archive_exists,
+    ]
+
+
 async def _category_order_map(db: AsyncSession) -> dict[str, int]:
     result = await db.execute(
         select(CourseCategoryConfig)
@@ -327,14 +345,13 @@ def _discussion_public_display_name(
     return (name or "").strip()
 
 
-@router.get("/categories", response_model=List[CourseCategoryRead])
-async def list_course_categories(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_session),
-):
+async def _list_course_categories_data(db: AsyncSession) -> list[CourseCategoryRead]:
     result = await db.execute(
         select(CourseCategoryConfig)
-        .where(CourseCategoryConfig.is_active.is_(True))
+        .where(
+            CourseCategoryConfig.is_active.is_(True),
+            CourseCategoryConfig.deleted_at.is_(None),
+        )
         .order_by(CourseCategoryConfig.order_index, CourseCategoryConfig.id)
     )
     categories = result.scalars().all()
@@ -355,16 +372,27 @@ async def list_course_categories(
     ]
 
 
-@router.get("", response_model=dict[str, List[CourseInfo]])
-async def get_categorized_courses(
+@router.get("/categories", response_model=List[CourseCategoryRead])
+async def list_course_categories(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
-    """
-    Get all courses grouped by category.
-    Returns courses with their IDs grouped by category.
-    """
-    query = select(Course).where(Course.deleted_at.is_(None))
+    return await _list_course_categories_data(db)
+
+
+@router.get("/public/categories", response_model=List[CourseCategoryRead])
+async def list_public_course_categories(db: AsyncSession = Depends(get_session)):
+    return await _list_course_categories_data(db)
+
+
+async def _get_categorized_courses_data(
+    db: AsyncSession, *, public_only: bool
+) -> CategorizedCourses:
+    query = select(Course)
+    if public_only:
+        query = query.where(*_public_course_conditions())
+    else:
+        query = query.where(Course.deleted_at.is_(None))
     result = await db.execute(query)
     category_order = await _category_order_map(db)
     courses = _visible_courses(result.scalars().all(), category_order)
@@ -378,11 +406,64 @@ async def get_categorized_courses(
         )
         categorized_courses.setdefault(_course_category_value(course), []).append(course_info)
 
-    for legacy_key, canonical_key in LEGACY_CATEGORY_ALIASES.items():
-        if canonical_key in categorized_courses:
-            categorized_courses[legacy_key] = categorized_courses[canonical_key]
+    if not public_only:
+        for legacy_key, canonical_key in LEGACY_CATEGORY_ALIASES.items():
+            if canonical_key in categorized_courses:
+                categorized_courses[legacy_key] = categorized_courses[canonical_key]
 
     return categorized_courses
+
+
+@router.get("", response_model=dict[str, List[CourseInfo]])
+async def get_categorized_courses(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    """Return the authenticated application course catalog."""
+    return await _get_categorized_courses_data(db, public_only=False)
+
+
+@router.get("/public", response_model=dict[str, List[CourseInfo]])
+async def get_public_categorized_courses(db: AsyncSession = Depends(get_session)):
+    """Return courses that currently contain effective public archives."""
+    return await _get_categorized_courses_data(db, public_only=True)
+
+
+@router.get("/public/{course_id}/archives", response_model=List[PublicArchiveRead])
+async def get_public_course_archives(
+    course_id: int,
+    db: AsyncSession = Depends(get_session),
+):
+    course = (
+        await db.execute(
+            select(Course).where(
+                Course.id == course_id,
+                *_public_course_conditions(),
+            )
+        )
+    ).scalar_one_or_none()
+    if course is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Course not found",
+        )
+
+    archives = (
+        (
+            await db.execute(
+                select(Archive)
+                .where(*_public_archive_conditions(course_id=course_id))
+                .order_by(
+                    Archive.academic_year.desc(),
+                    Archive.archive_type.asc(),
+                    Archive.id.desc(),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [PublicArchiveRead.model_validate(archive) for archive in archives]
 
 
 @router.post("/requests", response_model=CourseSubmissionRead)

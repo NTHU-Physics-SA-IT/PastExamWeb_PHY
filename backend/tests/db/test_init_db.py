@@ -592,9 +592,23 @@ async def test_bootstrap_rejects_normal_and_production_database_names(
     monkeypatch,
 ):
     monkeypatch.setattr(settings, "ALLOW_DATABASE_BOOTSTRAP", True)
-    for database_name in ("archive_db", "archive_db_production"):
+    for database_name in ("archive", "archive_db_production"):
         monkeypatch.setattr(settings, "DB_NAME", database_name)
         with pytest.raises(RuntimeError, match="dev/test"):
             await init_db.bootstrap_db(
                 confirmed_database_name=database_name,
             )
+
+
+def test_canonical_local_bootstrap_requires_complete_compose_identity(monkeypatch):
+    monkeypatch.setattr(settings, "DB_HOST", "db")
+    monkeypatch.setattr(settings, "FRONTEND_URL", "http://localhost:8080")
+    monkeypatch.setattr(settings, "BOOTSTRAP_LOCAL_PROJECT", "")
+
+    assert not init_db._is_allowed_bootstrap_database_name("archive_db")
+
+    monkeypatch.setattr(settings, "BOOTSTRAP_LOCAL_PROJECT", "pastexam-dev")
+    assert init_db._is_allowed_bootstrap_database_name("archive_db")
+
+    monkeypatch.setattr(settings, "FRONTEND_URL", "https://physarchive.com")
+    assert not init_db._is_allowed_bootstrap_database_name("archive_db")

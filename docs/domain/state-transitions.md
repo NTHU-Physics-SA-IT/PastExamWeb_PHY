@@ -367,10 +367,21 @@ a conflict.
 
 ### Intended invariant
 
-- A public Archive is public only to an authenticated user who may use the
-  system; it is not anonymously accessible on the internet.
-- Authentication is required for Archive browsing, list-carried detail data,
-  preview metadata, preview-file streaming, and download/download-URL access.
+- Full public-Archive data is public only to an authenticated user who may use
+  the system. Authentication is required for Archive browsing, list-carried
+  detail data, preview metadata, preview-file streaming, and
+  download/download-URL access.
+- An anonymous read-only catalog may expose only active, non-deleted Courses
+  and Categories that contain at least one effective public Archive. Its
+  Archive projection is limited to `id`, `name`, `professor`, `archive_type`,
+  `has_answers`, and `academic_year`.
+- The anonymous catalog must not expose PDF bytes, preview data, object-storage
+  keys or paths, signed URLs, uploader or submission identity, user data, or
+  internal storage metadata. Backend queries enforce this boundary; frontend
+  control visibility is not authorization.
+- A Course without an effective public Archive is not anonymously
+  discoverable, does not have an indexable public detail page, and is omitted
+  from the sitemap. Empty catalog responses remain valid.
 - There is no independent Archive detail `GET` route in the current API;
   Archive detail data is carried by the authenticated list response.
 - Authentication must reject access before object storage is read. Existing
@@ -640,6 +651,7 @@ changing `oauth_provider="nthu"` or the UUID subject.
 
 | Operation | Anonymous | Authenticated user | Owner | Administrator | System |
 | --- | --- | --- | --- | --- | --- |
+| View safe public Course/Archive metadata catalog | Allowed | Allowed | Allowed | Allowed | Allowed |
 | View public effective archive | Denied | Allowed | Allowed | Allowed | Allowed |
 | Create archive/comment report | Denied | Allowed | Allowed | Allowed | Allowed when explicitly designed |
 | Submit archive | Denied | Allowed | Allowed | Allowed | Explicit system imports only |
@@ -651,7 +663,9 @@ changing `oauth_provider="nthu"` or the UUID subject.
 ### Current implementation
 
 Authentication dependencies and `is_admin`/owner checks are enforced in the
-backend, often inline in endpoint modules. The Archive list, preview,
+backend, often inline in endpoint modules. Anonymous catalog queries reuse the
+canonical effective-public-Archive conditions and a dedicated safe response
+projection. The authenticated Archive list, preview,
 preview-file, and download routes depend on `get_current_user`; the list route
 has focused anonymous-access test evidence, and
 `test_archive_file_endpoints_require_authentication` confirms that anonymous

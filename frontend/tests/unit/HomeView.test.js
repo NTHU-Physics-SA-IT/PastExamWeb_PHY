@@ -15,8 +15,14 @@ const statisticsServiceMock = vi.hoisted(() => ({
   getSystemStatistics: vi.fn(),
 }))
 
+const routerPushMock = vi.hoisted(() => vi.fn())
+
 vi.mock('@/api', () => ({
   statisticsService: statisticsServiceMock,
+}))
+
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: routerPushMock }),
 }))
 
 const matchMediaMock = vi.fn((query) => ({
@@ -40,6 +46,7 @@ describe('HomeView', () => {
     window.matchMedia = matchMediaMock
     globalThis.ResizeObserver = ResizeObserverMock
     statisticsServiceMock.getSystemStatistics.mockReset()
+    routerPushMock.mockReset()
     statisticsServiceMock.getSystemStatistics.mockResolvedValue({
       data: { data: statisticsPayload },
     })
@@ -82,14 +89,18 @@ describe('HomeView', () => {
     wrapper.unmount()
   })
 
-  it('scrolls the statistics strip into view', async () => {
+  it('routes the secondary hero action to the public course catalog', async () => {
     const scrollIntoView = vi.fn()
     HTMLElement.prototype.scrollIntoView = scrollIntoView
     const wrapper = mount(HomeView)
     await flushPromises()
 
-    await wrapper.get('button[aria-label="查看資料庫狀態"]').trigger('click')
-    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' })
+    await wrapper.get('button[aria-label="瀏覽公開課程目錄"]').trigger('click')
+
+    expect(routerPushMock).toHaveBeenCalledWith({ name: 'PublicCourses' })
+    expect(scrollIntoView).not.toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('清大物理系歷屆考古題與解答')
+    expect(wrapper.text()).not.toContain('NTHU PHYSICS PAST EXAMS')
 
     wrapper.unmount()
   })

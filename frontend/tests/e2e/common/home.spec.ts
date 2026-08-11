@@ -30,11 +30,11 @@ test.describe('Home page', () => {
     const heading = page.getByRole('heading', { name: '清大物理考古系統' })
     const subtitle = page.getByText('書卷沒有，考古這有', { exact: true })
     const loginAction = page.getByRole('button', { name: '登入開始使用', exact: true })
-    const statusAction = page.getByRole('button', { name: '查看資料庫狀態', exact: true })
+    const catalogAction = page.getByRole('button', { name: '瀏覽公開課程目錄', exact: true })
     await expect(heading).toBeVisible()
     await expect(subtitle).toBeVisible()
     await expect(loginAction).toBeVisible()
-    await expect(statusAction).toBeVisible()
+    await expect(catalogAction).toBeVisible()
 
     const textCenter = (locator: typeof heading) =>
       locator.evaluate((element) => {
@@ -46,7 +46,7 @@ test.describe('Home page', () => {
         }
         return textCenter(element)
       })
-    const actionBoxes = await Promise.all([loginAction.boundingBox(), statusAction.boundingBox()])
+    const actionBoxes = await Promise.all([loginAction.boundingBox(), catalogAction.boundingBox()])
     expect(actionBoxes.every(Boolean)).toBe(true)
     const actionLeft = Math.min(...actionBoxes.map((box) => box?.x ?? 0))
     const actionRight = Math.max(...actionBoxes.map((box) => (box?.x ?? 0) + (box?.width ?? 0)))
@@ -58,6 +58,21 @@ test.describe('Home page', () => {
 
     expect(Math.abs(centers.subtitle - centers.title)).toBeLessThanOrEqual(0.5)
     expect(Math.abs(centers.subtitle - centers.actions)).toBeLessThanOrEqual(0.5)
+  })
+
+  test('public catalog action opens the anonymous course route', async ({ page }) => {
+    await page.route('**/api/courses/public/categories', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+    )
+    await page.route('**/api/courses/public', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
+    )
+    await page.goto('/')
+
+    await page.getByRole('button', { name: '瀏覽公開課程目錄', exact: true }).click()
+
+    await expect(page).toHaveURL(/\/courses$/)
+    await expect(page.getByRole('heading', { name: '目前尚未有可公開瀏覽的課程' })).toBeVisible()
   })
 
   test('login button opens the local login dialog', async ({ page }) => {

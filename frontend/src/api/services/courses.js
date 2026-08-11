@@ -1,6 +1,18 @@
 import { api } from './client'
 
 export const courseService = {
+  listPublicCourses() {
+    return api.get('/courses/public')
+  },
+
+  listPublicCategories() {
+    return api.get('/courses/public/categories')
+  },
+
+  getPublicCourseArchives(courseId) {
+    return api.get(`/courses/public/${courseId}/archives`)
+  },
+
   listCourses() {
     return api.get('/courses')
   },

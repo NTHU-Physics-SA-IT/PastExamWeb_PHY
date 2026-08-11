@@ -126,6 +126,7 @@ services:
     environment:
       <<: *runtime-environment
       ALLOW_DATABASE_BOOTSTRAP: "true"
+      BOOTSTRAP_LOCAL_PROJECT: ${COMPOSE_PROJECT_NAME:?Set COMPOSE_PROJECT_NAME}
     depends_on:
       migrate:
         condition: service_completed_successfully

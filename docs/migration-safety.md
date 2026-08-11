@@ -106,8 +106,11 @@ uv run python -m app.scripts.seed_db \
   --confirm-database-name archive_db_dev_example
 ```
 
-The database name must use an approved dev/test prefix, migration and
-postflight must already pass, and the first run permits only the six
+The database name must use an approved dev/test prefix. The canonical local
+Compose exception is the exact `pastexam-dev` project using `archive_db`, the
+internal `db` host, and a loopback frontend URL; production Compose does not
+provide that local-project attestation. Migration and postflight must already
+pass, and the first run permits only the six
 migration-created canonical categories with otherwise empty application
 tables. A durable marker makes later explicit runs idempotent.
 

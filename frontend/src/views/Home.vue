@@ -56,18 +56,18 @@
         <div class="hero-actions">
           <Button icon="pi pi-sign-in" label="登入開始使用" size="large" @click="openLogin" />
           <Button
-            icon="pi pi-search"
-            label="查看資料庫狀態"
+            icon="pi pi-book"
+            label="瀏覽公開課程目錄"
             size="large"
             severity="secondary"
             outlined
-            @click="scrollToStats"
+            @click="openCatalog"
           />
         </div>
       </div>
     </section>
 
-    <section ref="statsSection" class="dashboard-strip">
+    <section class="dashboard-strip">
       <article
         v-for="(stat, index) in statistics"
         :key="stat.key"
@@ -93,14 +93,16 @@ defineOptions({
 })
 
 import { ref, onMounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { useTheme } from '../utils/useTheme'
 import { statisticsService } from '../api'
 import { renderToString } from 'katex'
 import { useFormulaPhysics } from '../composables/useFormulaPhysics'
+import { SITE_URL, setSeo } from '../utils/seo'
 import 'katex/dist/katex.min.css'
 
 const { isDarkTheme } = useTheme()
-const statsSection = ref(null)
+const router = useRouter()
 const formulaCloud = ref(null)
 
 useFormulaPhysics(formulaCloud)
@@ -269,6 +271,7 @@ const renderedFormulaCards = computed(() =>
 )
 
 onMounted(async () => {
+  applyHomeSeo()
   await fetchStatistics()
 })
 
@@ -276,8 +279,40 @@ function openLogin() {
   window.__pastexam?.openLoginModal?.()
 }
 
-function scrollToStats() {
-  statsSection.value?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+function openCatalog() {
+  router.push({ name: 'PublicCourses' })
+}
+
+function applyHomeSeo() {
+  setSeo({
+    title: '清大物理考古題與歷屆考題｜PhysArchive',
+    description:
+      '清大物理考古系統整理清華大學物理相關課程的歷屆考題、解答與課程資訊，由清大物理系系學會資訊組維護。',
+    canonicalPath: '/',
+    robots: 'index, follow',
+    jsonLd: [
+      {
+        '@type': 'WebSite',
+        '@id': `${SITE_URL}/#website`,
+        name: '清大物理考古系統',
+        alternateName: 'PhysArchive',
+        url: `${SITE_URL}/`,
+        inLanguage: 'zh-TW',
+        publisher: { '@id': `${SITE_URL}/#organization` },
+      },
+      {
+        '@type': 'Organization',
+        '@id': `${SITE_URL}/#organization`,
+        name: '清大物理系系學會資訊組',
+        url: `${SITE_URL}/`,
+        logo: {
+          '@type': 'ImageObject',
+          url: `${SITE_URL}/physics-symbol.png`,
+        },
+        sameAs: ['https://github.com/NTHU-Physics-SA-IT/PastExamWeb_PHY'],
+      },
+    ],
+  })
 }
 
 async function fetchStatistics() {
