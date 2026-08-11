@@ -54,7 +54,13 @@
         </div>
         <p class="subtitle">書卷沒有，考古這有</p>
         <div class="hero-actions">
-          <Button icon="pi pi-sign-in" label="登入開始使用" size="large" @click="openLogin" />
+          <Button
+            icon="pi pi-building-columns"
+            label="清華校務系統登入"
+            size="large"
+            @click="startNthuLogin"
+          />
+          <Button icon="pi pi-sign-in" label="本地帳號登入" size="large" @click="openLogin" />
           <Button
             icon="pi pi-book"
             label="瀏覽公開課程目錄"
@@ -277,6 +283,10 @@ onMounted(async () => {
 
 function openLogin() {
   window.__pastexam?.openLoginModal?.()
+}
+
+function startNthuLogin() {
+  window.__pastexam?.startNthuLogin?.()
 }
 
 function openCatalog() {

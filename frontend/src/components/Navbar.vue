@@ -14,7 +14,7 @@
           />
           <button class="brand-lockup clickable-title" type="button" @click="handleTitleClick">
             <span class="brand-mark-frame">
-              <img src="/physics-symbol.png" alt="清大物理考古系統" class="brand-mark" />
+              <img :src="'/physics-symbol.png'" alt="清大物理考古系統" class="brand-mark" />
             </span>
             <span class="brand-wordmark">
               <span class="brand-title-main">清大物理考古系統</span>
@@ -431,6 +431,12 @@ export default {
         },
         configurable: true,
       })
+      Object.defineProperty(namespace, 'startNthuLogin', {
+        value: () => {
+          this.handleNthuLogin()
+        },
+        configurable: true,
+      })
     }
   },
 
@@ -442,6 +448,7 @@ export default {
 
     if (typeof window !== 'undefined' && window.__pastexam) {
       delete window.__pastexam.openLoginModal
+      delete window.__pastexam.startNthuLogin
     }
   },
 

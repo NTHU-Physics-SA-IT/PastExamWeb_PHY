@@ -55,7 +55,7 @@ describe('HomeView', () => {
   afterEach(() => {
     vi.clearAllMocks()
     delete window.__pastexam
-    window.matchMedia = originalMatchMedia
+    window.matchMedia = originalMatchMedia || matchMediaMock
     globalThis.ResizeObserver = originalResizeObserver
     HTMLElement.prototype.scrollIntoView = originalScrollIntoView
   })
@@ -65,6 +65,18 @@ describe('HomeView', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('清大物理')
+    const heroActions = wrapper.findAll('.hero-actions button')
+    expect(heroActions.map((button) => button.text())).toEqual([
+      '清華校務系統登入',
+      '本地帳號登入',
+      '瀏覽公開課程目錄',
+    ])
+    expect(heroActions[0].classes()).toEqual(heroActions[1].classes())
+    expect(heroActions[0].classes()).not.toContain('p-button-secondary')
+    expect(heroActions[0].classes()).not.toContain('p-button-outlined')
+    expect(heroActions[2].classes()).toContain('p-button-secondary')
+    expect(heroActions[2].classes()).toContain('p-button-outlined')
+    expect(wrapper.text()).not.toContain('登入開始使用')
     expect(wrapper.findAll('.theory-card')).toHaveLength(22)
 
     const statCards = wrapper.findAll('.stat-card')
@@ -77,14 +89,29 @@ describe('HomeView', () => {
     wrapper.unmount()
   })
 
-  it('opens the shared login modal from the primary action', async () => {
+  it('opens the shared local login modal from the local account action', async () => {
     const openLoginModal = vi.fn()
     window.__pastexam = { openLoginModal }
     const wrapper = mount(HomeView)
     await flushPromises()
 
-    await wrapper.get('button[aria-label="登入開始使用"]').trigger('click')
+    await wrapper.get('button[aria-label="本地帳號登入"]').trigger('click')
     expect(openLoginModal).toHaveBeenCalledOnce()
+
+    wrapper.unmount()
+  })
+
+  it('starts NTHU login once through the shared Navbar action', async () => {
+    const openLoginModal = vi.fn()
+    const startNthuLogin = vi.fn()
+    window.__pastexam = { openLoginModal, startNthuLogin }
+    const wrapper = mount(HomeView)
+    await flushPromises()
+
+    await wrapper.get('button[aria-label="清華校務系統登入"]').trigger('click')
+
+    expect(startNthuLogin).toHaveBeenCalledOnce()
+    expect(openLoginModal).not.toHaveBeenCalled()
 
     wrapper.unmount()
   })

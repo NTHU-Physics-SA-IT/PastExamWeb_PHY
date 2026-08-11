@@ -148,6 +148,7 @@ describe('Navbar methods', () => {
     if (consoleErrorSpy) {
       consoleErrorSpy.mockRestore()
     }
+    delete window.__pastexam
   })
 
   it('toggles theme and tracks event', () => {
@@ -815,8 +816,17 @@ describe('Navbar methods', () => {
 
     expect(unauthWrapper.find('[data-icon="pi pi-sign-in"]').exists()).toBe(true)
     expect(unauthWrapper.find('[data-icon="pi pi-sign-out"]').exists()).toBe(false)
+    expect(window.__pastexam?.openLoginModal).toBeTypeOf('function')
+    expect(window.__pastexam?.startNthuLogin).toBeTypeOf('function')
+
+    window.__pastexam.startNthuLogin()
+
+    expect(nthuLoginMock).toHaveBeenCalledOnce()
+    expect(trackEventMock).toHaveBeenCalledWith('login', { type: 'nthu' })
 
     unauthWrapper.unmount()
+    expect(window.__pastexam?.openLoginModal).toBeUndefined()
+    expect(window.__pastexam?.startNthuLogin).toBeUndefined()
 
     notificationStoreMock.latestUnseenNotification = { value: { id: 1 } }
     notificationStoreMock.state.modalVisible = true
