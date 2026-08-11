@@ -7,7 +7,6 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 LINT_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "lint.yml"
 TEST_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "test.yml"
 RELEASE_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "release.yml"
-DEV_COMPOSE = REPOSITORY_ROOT / "docker" / "docker-compose.dev.yml"
 
 
 def _yaml(path: Path) -> dict:
@@ -43,53 +42,21 @@ def test_release_cache_remains_root_scoped() -> None:
     assert (REPOSITORY_ROOT / "pnpm-lock.yaml").is_file()
 
 
-def test_backend_dev_image_cache_is_local_and_dedicated() -> None:
+def test_rejected_dev_image_cache_and_prebuild_are_absent() -> None:
     test = _yaml(TEST_WORKFLOW)
-    expected = {
-        "context": "./backend",
-        "file": "./backend/Dockerfile.dev",
-        "push": "false",
-        "load": "true",
-        "tags": "pastexam-backend-dev:latest",
-        "cache-from": "type=gha,scope=backend-dev-ci",
-        "cache-to": "type=gha,scope=backend-dev-ci,mode=max,ignore-error=true",
-    }
+    workflow_text = TEST_WORKFLOW.read_text(encoding="utf-8")
 
     for job in ("backend", "frontend-e2e"):
-        buildx = _step(test, job, "Set up Docker Buildx")
-        build = _step(test, job, "Build and load backend development image")
+        step_names = {step["name"] for step in test["jobs"][job]["steps"]}
+        assert "Set up Docker Buildx" not in step_names
+        assert "Build and load backend development image" not in step_names
 
-        assert buildx["uses"] == "docker/setup-buildx-action@v4"
-        assert build["uses"] == "docker/build-push-action@v7"
-        assert build["with"] == expected
-
-
-def test_compose_consumes_loaded_backend_image_without_rebuilding() -> None:
-    test = _yaml(TEST_WORKFLOW)
-    compose = _yaml(DEV_COMPOSE)
-    backend_image = "${BACKEND_IMAGE:-pastexam-backend-dev:latest}"
-
-    for service in ("migrate", "bootstrap", "backend"):
-        assert compose["services"][service]["image"] == backend_image
-
-    assert compose["services"]["backend"]["volumes"] == [
-        "/app/.venv",
-        "../backend:/app",
-    ]
-
-    for name in (
-        "Run migrations",
-        "Seed database",
-        "Run backend tests with coverage",
-    ):
-        run = _step(test, "backend", name)["run"]
-        assert "run --rm" in run.replace("\\\n", " ")
-        assert "--build" not in run
-
-    frontend_build = _step(test, "frontend-e2e", "Build frontend development image")
+    e2e_step_names = {step["name"] for step in test["jobs"]["frontend-e2e"]["steps"]}
     stack_start = _step(test, "frontend-e2e", "Start application stack")
-    bootstrap = _step(test, "frontend-e2e", "Bootstrap isolated E2E database")
-    assert "build frontend" in frontend_build["run"]
-    assert "up --no-build -d" in stack_start["run"]
-    assert "run --rm bootstrap" in bootstrap["run"]
-    assert "--build" not in bootstrap["run"]
+    normalized_start = " ".join(stack_start["run"].split())
+
+    assert "backend-dev-ci" not in workflow_text
+    assert "docker/build-push-action" not in workflow_text
+    assert "Build frontend development image" not in e2e_step_names
+    assert normalized_start.endswith("up -d")
+    assert "--no-build" not in normalized_start
