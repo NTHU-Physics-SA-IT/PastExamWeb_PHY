@@ -23,6 +23,27 @@
 6. For PostgreSQL-backed backend work, establish Test Environment Readiness and
    the exact isolated runner invocation before tests.
 
+## Decision and collaboration context
+
+- Before changing established behavior or shared infrastructure, read the
+  [Decision Record index](docs/decisions/README.md), identify relevant records
+  by changed path and by affected conceptual or Domain scope, read each
+  relevant `Accepted` record and affected canonical document, and record the
+  applicable invariants for non-trivial work.
+- `Accepted` records are current durable authority within their scope and must
+  be preserved unless the task explicitly authorizes supersession. `Proposed`
+  records are context only, `Superseded` records are historical and defer to
+  their replacements, and `Deprecated` records must not guide new design.
+- Commit history and a clean Git merge do not prove semantic compatibility. If
+  the intended target advanced since the branch merge-base, follow the
+  [collaboration and conflict-resolution runbook](docs/development/collaboration-and-conflict-resolution.md):
+  inspect newly merged relevant PRs and Accepted Decision Records, classify
+  textual, semantic, and authority conflicts, and preserve upstream intent and
+  invariants during reconciliation.
+- Stop and report an unresolved authority conflict. Do not silently choose the
+  newest source or infer that an ordinary feature request supersedes an
+  Accepted Decision Record.
+
 ## Development base selection
 
 - Fetch current remote refs before choosing a task base. Normal independent
@@ -32,6 +53,10 @@
   canonical project governance through
   `python3 scripts/ci/project_governance.py coordination-branch`. Do not infer
   its identity from historical prose or from a visible branch name.
+- Before using that resolved branch as a task base, fetch current `main` and
+  coordination refs and prove that current `main` is its ancestor. A stale
+  coordination branch is not a valid base until a separately scoped refresh
+  completes through the allowed protected-branch workflow.
 - Before merge readiness, refresh the intended target and integrate its latest
   baseline safely. Never silently rebase, reset, or retarget shared or external
   work.
@@ -238,6 +263,8 @@ evidence.
 ## Canonical documents and Skills
 
 - [Documentation index and authority map](docs/README.md)
+- [Decision Record index](docs/decisions/README.md)
+- [Collaboration and conflict resolution](docs/development/collaboration-and-conflict-resolution.md)
 - [Local development environment](docs/development/local-environment.md)
 - [Code organization](docs/development/code-organization.md)
 - [Feature development workflow](docs/development/feature-development-workflow.md)

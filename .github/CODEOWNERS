@@ -1,0 +1,13 @@
+# Governance-sensitive review routing. Canonical rules and branch protection
+# remain authoritative; this file intentionally has no repository-wide catch-all.
+/AGENTS.md @PingScientist
+/CONTRIBUTING.md @PingScientist
+/.github/CODEOWNERS @PingScientist
+/.github/project-governance.json @PingScientist
+/.github/workflows/ @PingScientist
+/scripts/ci/ @PingScientist
+/docs/decisions/ @PingScientist
+/docs/development/collaboration-and-conflict-resolution.md @PingScientist
+/backend/alembic/ @PingScientist
+/docs/migration-safety.md @PingScientist
+/docs/production-deployment.md @PingScientist
