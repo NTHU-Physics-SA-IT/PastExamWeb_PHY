@@ -5,6 +5,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import delete
 
+from app.db.init_db import load_seed_data
 from app.main import app
 from app.models.models import (
     Archive,
@@ -219,11 +220,13 @@ async def test_anonymous_public_catalog_separates_course_discovery_from_archive_
 
 
 @pytest.mark.asyncio
-async def test_anonymous_public_catalog_handles_an_empty_database(
+async def test_anonymous_public_catalog_exposes_fresh_seed_courses_without_archives(
     client: AsyncClient,
 ):
     app.dependency_overrides.pop(get_current_user, None)
     response = await client.get("/courses/public")
 
     assert response.status_code == 200
-    assert all(not courses for courses in response.json().values())
+    catalog_rows = [item for courses in response.json().values() for item in courses]
+    assert len(catalog_rows) == len(load_seed_data()["courses"])
+    assert catalog_rows
