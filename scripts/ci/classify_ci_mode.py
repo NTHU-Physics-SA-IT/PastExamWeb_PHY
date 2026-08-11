@@ -420,6 +420,8 @@ def is_docs_only_path(path: str) -> bool:
         return True
     if path.startswith("docs/"):
         return True
+    if path == ".github/CODEOWNERS":
+        return True
     if path.startswith(".github/ISSUE_TEMPLATE/"):
         return True
     if path == ".github/PULL_REQUEST_TEMPLATE.md":

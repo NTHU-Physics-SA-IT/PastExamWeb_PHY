@@ -303,6 +303,40 @@ def test_classifier_defines_only_three_modes_and_resolves_exact_authority() -> N
     (
         ("refs/heads/topic", ("backend/app/main.py",), "full"),
         ("refs/heads/topic", ("docs/guide.md", "README.md"), "docs-only"),
+        ("refs/heads/topic", (".github/CODEOWNERS",), "docs-only"),
+        (
+            "refs/heads/topic",
+            (".github/CODEOWNERS", "docs/guide.md"),
+            "docs-only",
+        ),
+        (
+            "refs/heads/topic",
+            (".github/CODEOWNERS", "README.md"),
+            "docs-only",
+        ),
+        (
+            "refs/heads/topic",
+            (".github/CODEOWNERS", "backend/app/main.py"),
+            "full",
+        ),
+        (
+            "refs/heads/topic",
+            (".github/CODEOWNERS", ".github/workflows/main.yml"),
+            "full",
+        ),
+        (
+            "refs/heads/topic",
+            (".github/CODEOWNERS", "scripts/ci/helper.py"),
+            "full",
+        ),
+        ("refs/heads/main", (".github/CODEOWNERS",), "full"),
+        ("refs/heads/release/v1", (".github/CODEOWNERS",), "full"),
+        ("refs/heads/production/stable", (".github/CODEOWNERS",), "full"),
+        (
+            "refs/heads/hotfix/production/db",
+            (".github/CODEOWNERS",),
+            "full",
+        ),
         ("refs/heads/main", ("docs/guide.md",), "full"),
         ("refs/heads/main", ("backend/app/main.py",), "full"),
         (COORDINATION_REF, ("docs/guide.md",), "full"),
@@ -516,6 +550,25 @@ def test_main_pr_candidate_always_runs_full(tmp_path: Path) -> None:
             "base_ref": "main",
             "ref": "refs/pull/17/merge",
         },
+    )
+
+    assert result.ci_mode == "full"
+    assert result.reason == "main pull request candidates always run full CI"
+
+
+def test_main_pr_codeowners_only_always_runs_full(tmp_path: Path) -> None:
+    fixture = _equivalent_repository(tmp_path)
+
+    result = _classify_pr_equivalent(
+        fixture,
+        event_changes={
+            "base_ref": "main",
+            "ref": "refs/pull/17/merge",
+        },
+        git=GitOverrides(
+            fixture["git"],
+            changed_paths=(".github/CODEOWNERS",),
+        ),
     )
 
     assert result.ci_mode == "full"
