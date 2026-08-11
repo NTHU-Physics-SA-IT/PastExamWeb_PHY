@@ -118,6 +118,17 @@ def test_new_unassigned_test_file_fails_closed(tmp_path: Path) -> None:
         shards.load_manifest(repository_root=repository, manifest_path=manifest)
 
 
+def test_logging_reset_precedes_logging_sensitive_unit_contracts() -> None:
+    manifest = shards.load_manifest()
+    shard_a_paths = manifest.paths_for_shard("a")
+
+    # Alembic migration tests configure logging with disable_existing_loggers.
+    # Keep the accepted unsharded suite's Uvicorn reset before caplog contracts.
+    assert shard_a_paths.index("tests/integration/test_uvicorn_runtime.py") < (
+        shard_a_paths.index("tests/unit/test_archive_submission_links.py")
+    )
+
+
 def test_workflow_runs_independent_shards_and_parallel_coverage_combine() -> None:
     workflow = yaml.load(
         TEST_WORKFLOW.read_text(encoding="utf-8"),
