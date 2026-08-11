@@ -128,6 +128,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and load backend development image
+        id: build-backend-dev
+        uses: docker/build-push-action@v7
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile.dev
+          push: false
+          load: true
+          tags: pastexam-backend-dev:latest
+          cache-from: type=gha,scope=backend-dev-ci
+          cache-to: type=gha,scope=backend-dev-ci,mode=max,ignore-error=true
+
       - name: Prepare backend env
         run: |
           cp backend/.env.example backend/.env
@@ -244,6 +259,7 @@ jobs:
         with:
           node-version: "20"
           cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Install frontend dependencies
         working-directory: ./frontend
@@ -270,6 +286,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and load backend development image
+        id: build-backend-dev
+        uses: docker/build-push-action@v7
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile.dev
+          push: false
+          load: true
+          tags: pastexam-backend-dev:latest
+          cache-from: type=gha,scope=backend-dev-ci
+          cache-to: type=gha,scope=backend-dev-ci,mode=max,ignore-error=true
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
@@ -280,6 +311,7 @@ jobs:
         with:
           node-version: "20"
           cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Install frontend dependencies
         working-directory: ./frontend
@@ -340,12 +372,19 @@ jobs:
             "s/^POSTGRES_DB=.*/POSTGRES_DB=archive_db_dev_e2e/" \
             docker/.env
 
+      - name: Build frontend development image
+        run: >-
+          docker compose
+          --env-file docker/.env
+          -f docker/docker-compose.dev.yml
+          build frontend
+
       - name: Start application stack
         run: >-
           docker compose
           --env-file docker/.env
           -f docker/docker-compose.dev.yml
-          up -d
+          up --no-build -d
 
       - name: Bootstrap isolated E2E database
         run: >-
