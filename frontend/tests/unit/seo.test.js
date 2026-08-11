@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 
 import { DEFAULT_DESCRIPTION, DEFAULT_TITLE, setSeo } from '@/utils/seo'
 
@@ -38,6 +39,16 @@ describe('SEO metadata helper', () => {
     )
     expect(graph['@context']).toBe('https://schema.org')
     expect(graph['@graph'][0]['@type']).toBe('CollectionPage')
+  })
+
+  it('keeps static fallback and page-title sources free of the PhysArchive suffix', () => {
+    const indexSource = readFileSync('index.html', 'utf8')
+    const routerSource = readFileSync('src/router/index.js', 'utf8')
+    const seoSource = readFileSync('src/utils/seo.js', 'utf8')
+
+    expect(indexSource).toContain('<title>清大物理考古系統</title>')
+    expect(seoSource).toContain("upsertMeta('property', 'og:site_name', 'PhysArchive')")
+    expect(`${indexSource}\n${routerSource}`).not.toMatch(/(?:\|\s*|｜)PhysArchive/)
   })
 
   it('uses the canonical site description across default social metadata', () => {
