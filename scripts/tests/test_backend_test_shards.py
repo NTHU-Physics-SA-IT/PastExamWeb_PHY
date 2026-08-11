@@ -145,7 +145,7 @@ def test_workflow_runs_independent_shards_and_parallel_coverage_combine() -> Non
     )
     backend = workflow["jobs"]["backend"]
     coverage = workflow["jobs"]["backend-coverage"]
-    e2e = workflow["jobs"]["frontend-e2e"]
+    e2e = workflow["jobs"]["frontend-e2e-family"]
 
     assert backend["name"] == "backend-shard-${{ matrix.shard }}"
     assert backend["strategy"] == {

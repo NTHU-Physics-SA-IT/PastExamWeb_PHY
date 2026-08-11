@@ -24,6 +24,7 @@ def test_frontend_jobs_key_pnpm_cache_from_frontend_lockfile() -> None:
     for workflow, job in (
         (lint, "frontend"),
         (test, "frontend-unit"),
+        (test, "frontend-e2e-family"),
         (test, "frontend-e2e"),
     ):
         setup_node = _step(workflow, job, "Setup Node.js")
@@ -46,13 +47,15 @@ def test_rejected_dev_image_cache_and_prebuild_are_absent() -> None:
     test = _yaml(TEST_WORKFLOW)
     workflow_text = TEST_WORKFLOW.read_text(encoding="utf-8")
 
-    for job in ("backend", "frontend-e2e"):
+    for job in ("backend", "frontend-e2e-family"):
         step_names = {step["name"] for step in test["jobs"][job]["steps"]}
         assert "Set up Docker Buildx" not in step_names
         assert "Build and load backend development image" not in step_names
 
-    e2e_step_names = {step["name"] for step in test["jobs"]["frontend-e2e"]["steps"]}
-    stack_start = _step(test, "frontend-e2e", "Start application stack")
+    e2e_step_names = {
+        step["name"] for step in test["jobs"]["frontend-e2e-family"]["steps"]
+    }
+    stack_start = _step(test, "frontend-e2e-family", "Start application stack")
     normalized_start = " ".join(stack_start["run"].split())
 
     assert "backend-dev-ci" not in workflow_text

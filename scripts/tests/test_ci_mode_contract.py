@@ -311,6 +311,18 @@ def test_backend_shards_and_combined_coverage_are_required_authority() -> None:
     assert "test / backend" not in gate.REQUIRED_EXECUTION_JOBS
 
 
+def test_e2e_families_and_aggregate_are_required_authority() -> None:
+    e2e_jobs = {
+        "test / frontend-e2e-chromium",
+        "test / frontend-e2e-firefox",
+        "test / frontend-e2e-webkit",
+        "test / frontend-e2e",
+    }
+
+    assert e2e_jobs <= ci.REQUIRED_SOURCE_JOBS
+    assert e2e_jobs <= gate.REQUIRED_EXECUTION_JOBS
+
+
 @pytest.mark.parametrize(
     ("ref", "paths", "expected"),
     (
@@ -1099,11 +1111,15 @@ def test_full_attestation_checks_each_required_execution_job(
             "test / backend-shard-a",
             "test / backend-shard-b",
             "test / backend-coverage",
+            "test / frontend-e2e-chromium",
+            "test / frontend-e2e-firefox",
+            "test / frontend-e2e-webkit",
+            "test / frontend-e2e",
         )
         for evidence_state in ("missing", "failure")
     ),
 )
-def test_full_attestation_rejects_missing_or_failed_backend_evidence(
+def test_full_attestation_rejects_missing_or_failed_sharded_evidence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     job_name: str,
