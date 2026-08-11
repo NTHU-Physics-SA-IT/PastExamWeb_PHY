@@ -483,6 +483,120 @@
           <TabPanel value="1">
             <div class="p-2 md:p-4">
               <section
+                class="nthu-access-policy admin-insights-card"
+                aria-labelledby="nthu-access-policy-title"
+              >
+                <div class="nthu-access-policy__heading">
+                  <div>
+                    <h3 id="nthu-access-policy-title">登入範圍</h3>
+                    <p>
+                      設定哪些清大學生可以透過 NTHU OAuth 登入網站。此設定不影響本機管理員帳號。
+                    </p>
+                  </div>
+                  <Button
+                    label="儲存登入範圍"
+                    icon="pi pi-save"
+                    size="small"
+                    :loading="nthuAccessPolicySaving"
+                    :disabled="
+                      nthuAccessPolicyLoading ||
+                      (nthuAccessPolicyForm.mode === NTHU_ACCESS_MODES.SELECTED_DEPARTMENTS &&
+                        nthuAccessPolicyForm.allowed_department_codes.length === 0)
+                    "
+                    @click="saveNthuAccessPolicy"
+                  />
+                </div>
+
+                <ProgressSpinner
+                  v-if="nthuAccessPolicyLoading"
+                  class="nthu-access-policy__spinner"
+                  strokeWidth="4"
+                />
+                <Message v-else-if="nthuAccessPolicyError" severity="error" :closable="false">
+                  <div class="flex flex-wrap align-items-center justify-content-between gap-3">
+                    <span>{{ nthuAccessPolicyError }}</span>
+                    <Button
+                      label="重新載入"
+                      icon="pi pi-refresh"
+                      severity="danger"
+                      outlined
+                      size="small"
+                      @click="loadNthuAccessPolicy"
+                    />
+                  </div>
+                </Message>
+                <div v-else class="nthu-access-policy__content">
+                  <div class="nthu-access-policy__modes" role="radiogroup" aria-label="開放範圍">
+                    <label for="nthu-access-all" class="nthu-access-policy__mode">
+                      <RadioButton
+                        v-model="nthuAccessPolicyForm.mode"
+                        inputId="nthu-access-all"
+                        name="nthu-access-mode"
+                        :value="NTHU_ACCESS_MODES.ALL_NTHU"
+                      />
+                      <span>
+                        <strong>全校開放</strong>
+                        <small>所有符合現有在校資格的清大使用者皆可登入。</small>
+                      </span>
+                    </label>
+                    <label for="nthu-access-selected" class="nthu-access-policy__mode">
+                      <RadioButton
+                        v-model="nthuAccessPolicyForm.mode"
+                        inputId="nthu-access-selected"
+                        name="nthu-access-mode"
+                        :value="NTHU_ACCESS_MODES.SELECTED_DEPARTMENTS"
+                      />
+                      <span>
+                        <strong>指定系所</strong>
+                        <small>只允許所選系所；特殊或無法解析的學號會被拒絕。</small>
+                      </span>
+                    </label>
+                  </div>
+
+                  <div
+                    v-if="nthuAccessPolicyForm.mode === NTHU_ACCESS_MODES.SELECTED_DEPARTMENTS"
+                    class="nthu-access-policy__departments"
+                  >
+                    <label for="nthu-department-select">允許登入的系所</label>
+                    <MultiSelect
+                      v-model="nthuAccessPolicyForm.allowed_department_codes"
+                      inputId="nthu-department-select"
+                      :options="nthuDepartmentGroups"
+                      optionGroupLabel="college_name"
+                      optionGroupChildren="departments"
+                      optionLabel="name"
+                      optionValue="code"
+                      filter
+                      :filterFields="['name', 'code']"
+                      filterPlaceholder="搜尋中文系所名稱或代碼"
+                      display="chip"
+                      :maxSelectedLabels="4"
+                      selectedItemsLabel="已選擇 {0} 個系所"
+                      placeholder="搜尋並選擇系所"
+                      class="nthu-access-policy__multiselect"
+                      :invalid="nthuAccessPolicyForm.allowed_department_codes.length === 0"
+                    >
+                      <template #optiongroup="{ option }">
+                        <span class="nthu-department-option-group">{{ option.college_name }}</span>
+                      </template>
+                      <template #option="{ option }">
+                        <span class="nthu-department-option">
+                          <span>{{ option.name }}</span>
+                          <small>{{ option.code }}</small>
+                        </span>
+                      </template>
+                    </MultiSelect>
+                    <small
+                      v-if="nthuAccessPolicyForm.allowed_department_codes.length === 0"
+                      class="nthu-access-policy__validation"
+                    >
+                      指定系所模式至少需要選擇一個系所。
+                    </small>
+                  </div>
+                </div>
+              </section>
+
+              <section
                 class="user-insights admin-insights-card"
                 aria-labelledby="user-insights-title"
               >
@@ -846,7 +960,7 @@
                 :rowsPerPageOptions="ADMIN_PAGE_SIZE_OPTIONS"
                 paginatorTemplate="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown CurrentPageReport"
                 currentPageReportTemplate="第 {currentPage} / {totalPages} 頁，共 {totalRecords} 筆"
-                tableStyle="min-width: 62rem"
+                tableStyle="min-width: 78rem"
                 scrollable
                 scrollHeight="65vh"
                 responsiveLayout="stack"
@@ -866,6 +980,28 @@
                   <template #body="{ data }">
                     <span class="user-table-contributor-level">
                       Lv. {{ data.contributorLevel.level }}
+                    </span>
+                  </template>
+                </Column>
+                <Column
+                  field="student_id"
+                  header="學號"
+                  sortable
+                  style="width: 9rem; min-width: 9rem"
+                >
+                  <template #body="{ data }">
+                    <span class="admin-desktop-cell">{{ data.student_id || '—' }}</span>
+                  </template>
+                </Column>
+                <Column
+                  field="department_name"
+                  header="系所"
+                  sortable
+                  style="width: 12rem; min-width: 12rem"
+                >
+                  <template #body="{ data }">
+                    <span class="admin-desktop-cell user-department-name">
+                      {{ data.department_name || '—' }}
                     </span>
                   </template>
                 </Column>
@@ -1007,6 +1143,16 @@
                       <span class="admin-card-email admin-tablet-metadata-value">{{
                         user.email
                       }}</span>
+                    </div>
+                    <div class="admin-tablet-metadata-item">
+                      <span class="admin-tablet-metadata-label">學號</span>
+                      <span class="admin-tablet-metadata-value">{{ user.student_id || '—' }}</span>
+                    </div>
+                    <div class="admin-tablet-metadata-item admin-tablet-metadata-item--wide">
+                      <span class="admin-tablet-metadata-label">系所</span>
+                      <span class="admin-tablet-metadata-value user-department-name">
+                        {{ user.department_name || '—' }}
+                      </span>
                     </div>
                     <div class="admin-tablet-metadata-item">
                       <span class="admin-tablet-metadata-label">帳號類型</span>
@@ -4179,6 +4325,8 @@ import {
   reorderCourses,
   deleteCourse,
   getUsers,
+  getNthuAccessPolicy,
+  updateNthuAccessPolicy,
   getOnlineStatistics,
   getUserSubmissionStats,
   createUser,
@@ -4263,6 +4411,33 @@ const legacyCategoryBadgeColorMap = {
 const users = ref([])
 const usersLoading = ref(false)
 const userStatsLoadError = ref('')
+const NTHU_ACCESS_MODES = Object.freeze({
+  ALL_NTHU: 'all_nthu',
+  SELECTED_DEPARTMENTS: 'selected_departments',
+})
+const nthuAccessPolicyLoading = ref(false)
+const nthuAccessPolicySaving = ref(false)
+const nthuAccessPolicyError = ref('')
+const nthuDepartments = ref([])
+const nthuAccessPolicyForm = ref({
+  mode: NTHU_ACCESS_MODES.ALL_NTHU,
+  allowed_department_codes: [],
+})
+const nthuDepartmentGroups = computed(() => {
+  const groups = new Map()
+  nthuDepartments.value.forEach((department) => {
+    const key = `${department.college_code}:${department.college_name}`
+    if (!groups.has(key)) {
+      groups.set(key, {
+        college_code: department.college_code,
+        college_name: department.college_name,
+        departments: [],
+      })
+    }
+    groups.get(key).departments.push(department)
+  })
+  return [...groups.values()]
+})
 const userSearchQuery = ref('')
 const filterUserType = ref(null)
 const selectedContributorLevels = ref([])
@@ -6035,9 +6210,13 @@ const filteredUsers = computed(() => {
   let filtered = users.value
 
   if (userSearchQuery.value) {
-    const query = userSearchQuery.value.toLowerCase()
-    filtered = filtered.filter(
-      (user) => user.name.toLowerCase().includes(query) || user.email.toLowerCase().includes(query)
+    const query = userSearchQuery.value.trim().toLowerCase()
+    filtered = filtered.filter((user) =>
+      [user.name, user.nickname, user.email, user.student_id, user.department_name].some((value) =>
+        String(value || '')
+          .toLowerCase()
+          .includes(query)
+      )
     )
   }
 
@@ -6226,6 +6405,84 @@ const loadCourses = async () => {
     })
   } finally {
     coursesLoading.value = false
+  }
+}
+
+const applyNthuAccessPolicyResponse = (data) => {
+  const validMode = Object.values(NTHU_ACCESS_MODES).includes(data?.mode)
+  const validCodes = Array.isArray(data?.allowed_department_codes)
+  const validDepartments =
+    Array.isArray(data?.departments) &&
+    data.departments.every(
+      (department) =>
+        typeof department?.code === 'string' &&
+        typeof department?.name === 'string' &&
+        typeof department?.college_code === 'string' &&
+        typeof department?.college_name === 'string'
+    )
+  if (!validMode || !validCodes || !validDepartments) {
+    throw new TypeError('Invalid NTHU access policy response')
+  }
+
+  nthuDepartments.value = data.departments
+  nthuAccessPolicyForm.value = {
+    mode: data.mode,
+    allowed_department_codes: [...data.allowed_department_codes],
+  }
+}
+
+const loadNthuAccessPolicy = async () => {
+  nthuAccessPolicyLoading.value = true
+  nthuAccessPolicyError.value = ''
+  try {
+    const { data } = await getNthuAccessPolicy()
+    applyNthuAccessPolicyResponse(data)
+  } catch (error) {
+    console.error('載入 NTHU 登入範圍失敗:', error)
+    nthuAccessPolicyError.value = isUnauthorizedError(error)
+      ? '登入階段已過期，請重新登入後再載入設定。'
+      : '登入範圍載入失敗，請稍後再試。'
+  } finally {
+    nthuAccessPolicyLoading.value = false
+  }
+}
+
+const saveNthuAccessPolicy = async () => {
+  if (
+    nthuAccessPolicyForm.value.mode === NTHU_ACCESS_MODES.SELECTED_DEPARTMENTS &&
+    nthuAccessPolicyForm.value.allowed_department_codes.length === 0
+  ) {
+    return
+  }
+
+  nthuAccessPolicySaving.value = true
+  try {
+    const payload = {
+      mode: nthuAccessPolicyForm.value.mode,
+      allowed_department_codes:
+        nthuAccessPolicyForm.value.mode === NTHU_ACCESS_MODES.ALL_NTHU
+          ? []
+          : [...nthuAccessPolicyForm.value.allowed_department_codes],
+    }
+    const { data } = await updateNthuAccessPolicy(payload)
+    applyNthuAccessPolicyResponse(data)
+    toast.add({
+      severity: 'success',
+      summary: '成功',
+      detail: 'NTHU 登入範圍已更新。',
+      life: 3000,
+    })
+  } catch (error) {
+    console.error('儲存 NTHU 登入範圍失敗:', error)
+    if (isUnauthorizedError(error)) return
+    toast.add({
+      severity: 'error',
+      summary: '錯誤',
+      detail: error?.response?.data?.detail || '登入範圍儲存失敗，請稍後再試。',
+      life: 3500,
+    })
+  } finally {
+    nthuAccessPolicySaving.value = false
   }
 }
 
@@ -8094,7 +8351,7 @@ const loadTabData = async (value) => {
   }
 
   if (tab === '1') {
-    await reloadUserStatistics()
+    await Promise.all([reloadUserStatistics(), loadNthuAccessPolicy()])
     return
   }
 
@@ -8369,6 +8626,128 @@ onBeforeUnmount(() => {
   border-radius: 10px;
   background: var(--bg-primary);
   color: var(--text-color);
+}
+
+.nthu-access-policy {
+  min-width: 0;
+  overflow: visible;
+}
+
+.nthu-access-policy__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  min-width: 0;
+}
+
+.nthu-access-policy__heading > div {
+  flex: 1 1 24rem;
+  min-width: 0;
+}
+
+.nthu-access-policy__heading h3,
+.nthu-access-policy__heading p {
+  margin: 0;
+}
+
+.nthu-access-policy__heading p {
+  margin-top: 0.2rem;
+  color: var(--text-secondary);
+}
+
+.nthu-access-policy__spinner {
+  width: 2.25rem;
+  height: 2.25rem;
+  margin: 0.75rem auto;
+}
+
+.nthu-access-policy__content,
+.nthu-access-policy__departments {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.nthu-access-policy__modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.nthu-access-policy__mode {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  cursor: pointer;
+}
+
+.nthu-access-policy__mode > span {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.nthu-access-policy__mode small,
+.nthu-department-option small {
+  color: var(--text-secondary);
+}
+
+.nthu-access-policy__departments > label {
+  font-weight: 650;
+}
+
+.nthu-access-policy__multiselect {
+  width: 100%;
+  min-width: 0;
+}
+
+.nthu-access-policy__multiselect :deep(.p-multiselect-label-container),
+.nthu-access-policy__multiselect :deep(.p-multiselect-label) {
+  min-width: 0;
+}
+
+.nthu-access-policy__multiselect :deep(.p-multiselect-label) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  overflow: hidden;
+}
+
+.nthu-access-policy__validation {
+  color: var(--p-red-500);
+}
+
+.nthu-department-option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.25rem 0.75rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.nthu-department-option > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.nthu-department-option-group {
+  font-weight: 700;
+}
+
+.user-department-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .user-insights.admin-insights-card {
@@ -13659,6 +14038,18 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 640px) {
+  .nthu-access-policy__heading {
+    align-items: stretch;
+  }
+
+  .nthu-access-policy__heading :deep(.p-button) {
+    width: 100%;
+  }
+
+  .nthu-access-policy__modes {
+    grid-template-columns: 1fr;
+  }
+
   .admin-tablet-card-header {
     display: flex;
     flex-wrap: wrap;

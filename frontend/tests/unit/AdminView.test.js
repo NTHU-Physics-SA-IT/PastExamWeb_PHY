@@ -17,9 +17,38 @@ const sampleCourses = [
 ]
 
 const sampleUsers = [
-  { id: 1, name: 'Alice', email: 'alice@example.com', is_admin: true, is_local: true },
-  { id: 2, name: 'Bob', email: 'bob@example.com', is_admin: false, is_local: false },
+  {
+    id: 1,
+    name: 'Alice',
+    nickname: null,
+    email: 'alice@example.com',
+    is_admin: true,
+    is_local: true,
+    student_id: null,
+    department_code: null,
+    department_name: null,
+  },
+  {
+    id: 2,
+    name: 'Bob',
+    nickname: '小波',
+    email: 'bob@example.com',
+    is_admin: false,
+    is_local: false,
+    student_id: '112022123',
+    department_code: '022',
+    department_name: '物理學系',
+  },
 ]
+
+const sampleNthuAccessPolicy = {
+  mode: 'all_nthu',
+  allowed_department_codes: [],
+  departments: [
+    { code: '022', name: '物理學系', college_code: '02', college_name: '理學院' },
+    { code: '025', name: '天文研究所', college_code: '02', college_name: '理學院' },
+  ],
+}
 
 const now = new Date()
 const onlineRangeConfig = {
@@ -131,6 +160,8 @@ const getUserOnlineDurationMock = vi.hoisted(() => vi.fn())
 const createUserMock = vi.hoisted(() => vi.fn())
 const updateUserMock = vi.hoisted(() => vi.fn())
 const deleteUserMock = vi.hoisted(() => vi.fn())
+const getNthuAccessPolicyMock = vi.hoisted(() => vi.fn())
+const updateNthuAccessPolicyMock = vi.hoisted(() => vi.fn())
 
 const notificationGetAllMock = vi.hoisted(() => vi.fn())
 const notificationCreateMock = vi.hoisted(() => vi.fn())
@@ -199,6 +230,8 @@ vi.mock('@/api', () => ({
   createUser: createUserMock,
   updateUser: updateUserMock,
   deleteUser: deleteUserMock,
+  getNthuAccessPolicy: getNthuAccessPolicyMock,
+  updateNthuAccessPolicy: updateNthuAccessPolicyMock,
   notificationService: {
     getAllAdmin: notificationGetAllMock,
     create: notificationCreateMock,
@@ -249,6 +282,15 @@ describe('AdminView', () => {
     createUserMock.mockResolvedValue()
     updateUserMock.mockResolvedValue()
     deleteUserMock.mockResolvedValue()
+    getNthuAccessPolicyMock.mockResolvedValue({ data: sampleNthuAccessPolicy })
+    updateNthuAccessPolicyMock.mockImplementation((policy) =>
+      Promise.resolve({
+        data: {
+          ...sampleNthuAccessPolicy,
+          ...policy,
+        },
+      })
+    )
 
     notificationGetAllMock.mockResolvedValue({ data: sampleNotifications })
     notificationCreateMock.mockResolvedValue()
@@ -384,6 +426,65 @@ describe('AdminView', () => {
     expect(wrapper.vm.isNotificationEffective(sampleNotifications[1])).toBe(false)
     expect(wrapper.vm.formatAdminActorTime('invalid')).toBe('—')
     expect(wrapper.vm.formatAdminActorTime(now.toISOString())).not.toBe('—')
+
+    wrapper.unmount()
+  })
+
+  it('loads, validates, and saves the NTHU department access policy', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    await wrapper.vm.loadNthuAccessPolicy()
+    expect(getNthuAccessPolicyMock).toHaveBeenCalled()
+    expect(wrapper.vm.nthuAccessPolicyForm.mode).toBe('all_nthu')
+    expect(wrapper.vm.nthuDepartmentGroups).toEqual([
+      expect.objectContaining({
+        college_code: '02',
+        college_name: '理學院',
+        departments: expect.arrayContaining([
+          expect.objectContaining({ code: '022', name: '物理學系' }),
+        ]),
+      }),
+    ])
+
+    wrapper.vm.nthuAccessPolicyForm.mode = 'selected_departments'
+    wrapper.vm.nthuAccessPolicyForm.allowed_department_codes = []
+    updateNthuAccessPolicyMock.mockClear()
+    await wrapper.vm.saveNthuAccessPolicy()
+    expect(updateNthuAccessPolicyMock).not.toHaveBeenCalled()
+
+    wrapper.vm.nthuAccessPolicyForm.allowed_department_codes = ['022', '025']
+    await wrapper.vm.saveNthuAccessPolicy()
+    expect(updateNthuAccessPolicyMock).toHaveBeenCalledWith({
+      mode: 'selected_departments',
+      allowed_department_codes: ['022', '025'],
+    })
+    expect(toastAddMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ severity: 'success', detail: 'NTHU 登入範圍已更新。' })
+    )
+
+    expect(adminTemplateSource).toContain('設定哪些清大學生可以透過 NTHU OAuth 登入網站')
+    expect(adminTemplateSource).toContain("user.student_id || '—'")
+    expect(adminTemplateSource).toContain("user.department_name || '—'")
+    expect(adminTemplateSource).toContain('filterPlaceholder="搜尋中文系所名稱或代碼"')
+
+    wrapper.unmount()
+  })
+
+  it('keeps policy load and save failures safe and actionable', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    getNthuAccessPolicyMock.mockRejectedValueOnce(new Error('offline'))
+    await wrapper.vm.loadNthuAccessPolicy()
+    expect(wrapper.vm.nthuAccessPolicyError).toBe('登入範圍載入失敗，請稍後再試。')
+
+    wrapper.vm.nthuAccessPolicyForm.mode = 'all_nthu'
+    updateNthuAccessPolicyMock.mockRejectedValueOnce(new Error('save failed'))
+    await wrapper.vm.saveNthuAccessPolicy()
+    expect(toastAddMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ severity: 'error', detail: '登入範圍儲存失敗，請稍後再試。' })
+    )
 
     wrapper.unmount()
   })
@@ -1264,6 +1365,18 @@ describe('AdminView', () => {
     expect(wrapper.vm.filteredUsers).toEqual([
       expect.objectContaining({ id: sampleUsers[1].id, email: sampleUsers[1].email }),
     ])
+
+    wrapper.vm.userSearchQuery = '112022123'
+    await wrapper.vm.$nextTick()
+    expect(wrapper.vm.filteredUsers).toEqual([expect.objectContaining({ id: sampleUsers[1].id })])
+
+    wrapper.vm.userSearchQuery = '物理學系'
+    await wrapper.vm.$nextTick()
+    expect(wrapper.vm.filteredUsers).toEqual([expect.objectContaining({ id: sampleUsers[1].id })])
+
+    wrapper.vm.userSearchQuery = '小波'
+    await wrapper.vm.$nextTick()
+    expect(wrapper.vm.filteredUsers).toEqual([expect.objectContaining({ id: sampleUsers[1].id })])
 
     wrapper.vm.userSearchQuery = ''
     await wrapper.vm.$nextTick()

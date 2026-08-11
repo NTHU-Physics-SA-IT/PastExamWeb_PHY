@@ -42,6 +42,7 @@ const PROVIDER_ERROR_MESSAGES = {
   oauth_account_deleted: '此帳號目前無法登入，請聯絡管理員。',
   oauth_profile_conflict: '帳號資料需要管理員協助處理後才能登入。',
   oauth_identity_conflict: '帳號資料需要管理員協助處理後才能登入。',
+  oauth_department_not_allowed: '目前網站僅開放指定系所學生登入，無法確認您的系所資格。',
   oauth_state_invalid: '登入驗證已失效，請重新登入。',
 }
 
