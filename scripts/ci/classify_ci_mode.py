@@ -178,6 +178,20 @@ class GitRepository:
             raise ClassificationFailure("commit parent query returned no result")
         return tuple(fields[1:])
 
+    def commit_object_parents(self, commit: str) -> tuple[str, ...]:
+        """Read parent identities from the commit object, even in a shallow clone."""
+        output = self._run("cat-file", "-p", commit).stdout
+        parents: list[str] = []
+        for line in output.splitlines():
+            if not line:
+                break
+            if line.startswith("parent "):
+                parent = line.removeprefix("parent ")
+                if not SHA_PATTERN.fullmatch(parent):
+                    raise ClassificationFailure("commit parent identity is malformed")
+                parents.append(parent)
+        return tuple(parents)
+
     def first_parent_count(self, base: str, head: str) -> int:
         output = self._run(
             "rev-list", "--first-parent", "--count", f"{base}..{head}"
@@ -325,6 +339,15 @@ class GitHubActionsAPI:
                 "per_page": "100",
             },
         )
+
+    def workflow_run(self, run_id: int) -> dict[str, Any]:
+        if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1:
+            raise ClassificationFailure("workflow run identity is malformed")
+        repository = quote(self.repository, safe="/")
+        payload, _ = self._get(self._url(f"/repos/{repository}/actions/runs/{run_id}"))
+        if not isinstance(payload, dict):
+            raise ClassificationFailure("GitHub workflow run response is malformed")
+        return payload
 
     def run_jobs(self, run_id: int) -> list[dict[str, Any]]:
         repository = quote(self.repository, safe="/")
