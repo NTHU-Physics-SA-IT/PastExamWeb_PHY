@@ -136,7 +136,9 @@ def validate_nthu_dev_mock_configuration() -> None:
     if settings.NTHU_DEV_MOCK_ENABLED and not (
         60 <= settings.NTHU_DEV_MOCK_TTL_SECONDS <= 90
     ):
-        raise RuntimeError("NTHU development mock TTL must be between 60 and 90 seconds")
+        raise RuntimeError(
+            "NTHU development mock TTL must be between 60 and 90 seconds"
+        )
 
 
 def _key(code: str) -> str:
