@@ -125,7 +125,7 @@ describe('LoginCallback view', () => {
 
     expect(exchangeNthuCodeMock).not.toHaveBeenCalled()
     expect(sessionStorage.getItem('auth-token')).toBeNull()
-    expect(wrapper.text()).toContain('目前網站僅開放指定系所學生登入，無法確認您的系所資格。')
+    expect(wrapper.text()).toContain('目前網站僅開放指定的清大成員登入，您的身分不在開放範圍內。')
     expect(wrapper.text()).not.toContain('oauth_department_not_allowed')
   })
 
