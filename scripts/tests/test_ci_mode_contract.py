@@ -1184,7 +1184,6 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
         "opened",
         "reopened",
         "synchronize",
-        "ready_for_review",
     ]
     assert "paths" not in parsed["on"]["pull_request"]
     assert "paths-ignore" not in parsed["on"]["pull_request"]
