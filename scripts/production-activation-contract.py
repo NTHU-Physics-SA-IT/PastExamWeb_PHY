@@ -20,6 +20,10 @@ LISTEN_PORT = re.compile(
     r"\blisten\s+(?:\[[^\]]+\]:|[A-Za-z0-9_.-]+:)?"
     r"(?P<port>[0-9]{1,5})(?=[\s;])"
 )
+NGINX_CONFIG_TARGET = "/etc/nginx/nginx.conf"
+NGINX_LISTENER_TARGET = "/etc/nginx/pastexam-listeners.conf"
+TLS_CERTIFICATE_TARGET = "/etc/nginx/certs/origin.pem"
+TLS_KEY_TARGET = "/etc/nginx/certs/origin-key.pem"
 
 
 class ContractError(ValueError):
@@ -96,6 +100,53 @@ def _compose_values(compose_path: Path) -> None:
         if pattern.fullmatch(value) is None:
             raise ContractError("Rendered Compose contains an unsafe contract value.")
         print(value)
+
+
+def _bind_mount_source(service: dict[str, Any], target: str, label: str) -> Path:
+    volumes = service.get("volumes")
+    if not isinstance(volumes, list):
+        raise ContractError(f"Rendered nginx is missing the required {label} mount.")
+    matches = [
+        volume
+        for volume in volumes
+        if isinstance(volume, dict) and volume.get("target") == target
+    ]
+    if len(matches) != 1:
+        raise ContractError(
+            f"Rendered nginx must have exactly one required {label} mount."
+        )
+    mount = matches[0]
+    source = mount.get("source")
+    if (
+        mount.get("type") != "bind"
+        or mount.get("read_only") is not True
+        or not isinstance(source, str)
+        or not source
+        or any(character in source for character in "\r\n")
+    ):
+        raise ContractError(f"Rendered nginx {label} mount is not a read-only bind.")
+    path = Path(source)
+    if not path.is_absolute():
+        raise ContractError(f"Rendered nginx {label} source is not absolute.")
+    return path
+
+
+def _nginx_mount_sources(compose: dict[str, Any]) -> tuple[Path, Path, Path, Path]:
+    nginx = _service(compose, "nginx")
+    return (
+        _bind_mount_source(nginx, NGINX_CONFIG_TARGET, "configuration"),
+        _bind_mount_source(nginx, NGINX_LISTENER_TARGET, "listener configuration"),
+        _bind_mount_source(nginx, TLS_CERTIFICATE_TARGET, "TLS certificate"),
+        _bind_mount_source(nginx, TLS_KEY_TARGET, "TLS private key"),
+    )
+
+
+def _mount_values(compose_path: Path) -> None:
+    compose = _load_json(compose_path)
+    if not isinstance(compose, dict):
+        raise ContractError("Rendered Compose root must be an object.")
+    for source in _nginx_mount_sources(compose):
+        print(source)
 
 
 def _manifest_release_sha(path: Path) -> str:
@@ -227,8 +278,20 @@ def _binding_is_preserved(
     )
 
 
+def _read_nginx_source(path: Path, label: str) -> str:
+    try:
+        source = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise ContractError(f"Cannot read the immutable nginx {label}.") from error
+    return re.sub(r"#.*", "", source)
+
+
+def _same_path(actual: Path, expected: Path) -> bool:
+    return actual.resolve(strict=False) == expected.resolve(strict=False)
+
+
 def _verify_ingress(
-    compose_path: Path, current_ports_path: Path, nginx_config: Path
+    compose_path: Path, current_ports_path: Path, release_directory: Path
 ) -> None:
     compose = _load_json(compose_path)
     current_ports = _load_json(current_ports_path)
@@ -236,15 +299,35 @@ def _verify_ingress(
         raise ContractError("Rendered Compose root must be an object.")
     targets = _target_bindings(compose)
     current = _current_bindings(current_ports)
+    nginx_config, listener_config, _, _ = _nginx_mount_sources(compose)
 
-    try:
-        nginx_source = nginx_config.read_text(encoding="utf-8")
-    except OSError as error:
-        raise ContractError("Cannot read the immutable nginx configuration.") from error
-    nginx_source = re.sub(r"#.*", "", nginx_source)
+    expected_nginx_config = release_directory / "proxy" / "nginx.conf"
+    expected_listener_config = (
+        release_directory / "proxy" / "nginx.production-listeners.conf"
+    )
+    if not _same_path(nginx_config, expected_nginx_config) or not _same_path(
+        listener_config, expected_listener_config
+    ):
+        raise ContractError(
+            "Rendered Compose would mount an unreviewed nginx configuration."
+        )
+
+    nginx_source = _read_nginx_source(nginx_config, "configuration")
+    if (
+        re.search(
+            r"\binclude\s+/etc/nginx/pastexam-listeners\.conf\s*;",
+            nginx_source,
+        )
+        is None
+    ):
+        raise ContractError(
+            "Immutable nginx configuration does not load the mounted listener contract."
+        )
+
+    listener_source = _read_nginx_source(listener_config, "listener configuration")
     listeners = {
         _port(match.group("port"), "nginx listener")
-        for match in LISTEN_PORT.finditer(nginx_source)
+        for match in LISTEN_PORT.finditer(listener_source)
     }
     if not listeners:
         raise ContractError("Immutable nginx configuration has no listener.")
@@ -252,6 +335,19 @@ def _verify_ingress(
     if unmatched_targets:
         raise ContractError(
             "Target Compose ports disagree with immutable nginx listeners."
+        )
+
+    required_tls_directives = (
+        r"\blisten\s+8443\s+ssl\s*;",
+        r"\bssl_certificate\s+/etc/nginx/certs/origin\.pem\s*;",
+        r"\bssl_certificate_key\s+/etc/nginx/certs/origin-key\.pem\s*;",
+    )
+    if any(
+        re.search(directive, listener_source) is None
+        for directive in required_tls_directives
+    ):
+        raise ContractError(
+            "Immutable nginx production TLS configuration is incomplete."
         )
 
     missing = [
@@ -270,6 +366,9 @@ def _parser() -> argparse.ArgumentParser:
     values = subparsers.add_parser("compose-values")
     values.add_argument("--compose-json", type=Path, required=True)
 
+    mounts = subparsers.add_parser("mount-values")
+    mounts.add_argument("--compose-json", type=Path, required=True)
+
     release = subparsers.add_parser("verify-release")
     release.add_argument("--manifest", type=Path, required=True)
     release.add_argument("--source-sha", type=Path, required=True)
@@ -278,7 +377,7 @@ def _parser() -> argparse.ArgumentParser:
     ingress = subparsers.add_parser("verify-ingress")
     ingress.add_argument("--compose-json", type=Path, required=True)
     ingress.add_argument("--current-ports-json", type=Path, required=True)
-    ingress.add_argument("--nginx-config", type=Path, required=True)
+    ingress.add_argument("--release-directory", type=Path, required=True)
     return parser
 
 
@@ -289,11 +388,13 @@ def main() -> int:
     try:
         if args.command == "compose-values":
             _compose_values(args.compose_json)
+        elif args.command == "mount-values":
+            _mount_values(args.compose_json)
         elif args.command == "verify-release":
             _verify_release(args.manifest, args.source_sha, args.release_directory)
         else:
             _verify_ingress(
-                args.compose_json, args.current_ports_json, args.nginx_config
+                args.compose_json, args.current_ports_json, args.release_directory
             )
     except ContractError as error:
         print(f"Production activation contract failed: {error}", file=sys.stderr)

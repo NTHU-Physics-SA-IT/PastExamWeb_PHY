@@ -5,6 +5,8 @@ from urllib.parse import urlsplit
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 NGINX_CONFIG = REPOSITORY_ROOT / "proxy" / "nginx.conf"
+DEVELOPMENT_LISTENERS = REPOSITORY_ROOT / "proxy" / "nginx.development-listeners.conf"
+PRODUCTION_LISTENERS = REPOSITORY_ROOT / "proxy" / "nginx.production-listeners.conf"
 
 
 def _config() -> str:
@@ -75,3 +77,17 @@ def test_public_seo_routes_and_spa_robots_policy_remain_at_the_proxy() -> None:
     assert "proxy_pass http://backend:8000/seo/robots.txt;" in config
     assert "map $uri $spa_robots_tag" in config
     assert "add_header X-Robots-Tag $spa_robots_tag always;" in config
+
+
+def test_development_and_production_listener_contracts_are_separate() -> None:
+    config = _config()
+    development = DEVELOPMENT_LISTENERS.read_text(encoding="utf-8")
+    production = PRODUCTION_LISTENERS.read_text(encoding="utf-8")
+
+    assert "include /etc/nginx/pastexam-listeners.conf;" in config
+    assert development.strip() == "listen 8080;"
+    assert "ssl" not in development
+    assert "listen 8080;" in production
+    assert "listen 8443 ssl;" in production
+    assert "ssl_certificate /etc/nginx/certs/origin.pem;" in production
+    assert "ssl_certificate_key /etc/nginx/certs/origin-key.pem;" in production
