@@ -23,6 +23,12 @@ const webServer = shouldStartServer
 
 const AUTH_FILE = 'playwright/.auth/admin.json'
 const chromiumExecutablePath = env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+const NON_ADMIN_TESTS = /.*[\\/](?:common|user)[\\/].*\.spec\.ts/
+const ADMIN_TESTS = /.*[\\/]admin[\\/].*\.spec\.ts/
+const chromiumUse = {
+  ...devices['Desktop Chrome'],
+  ...(chromiumExecutablePath ? { launchOptions: { executablePath: chromiumExecutablePath } } : {}),
+}
 
 const config: PlaywrightTestConfig = {
   testDir: './tests/e2e',
@@ -45,25 +51,35 @@ const config: PlaywrightTestConfig = {
     },
     {
       name: 'chromium',
+      testMatch: NON_ADMIN_TESTS,
+      use: chromiumUse,
+    },
+    {
+      name: 'chromium-admin',
       dependencies: ['setup'],
-      testMatch: /.*\.spec\.ts/,
-      use: {
-        ...devices['Desktop Chrome'],
-        ...(chromiumExecutablePath
-          ? { launchOptions: { executablePath: chromiumExecutablePath } }
-          : {}),
-      },
+      testMatch: ADMIN_TESTS,
+      use: chromiumUse,
     },
     {
       name: 'firefox',
+      testMatch: NON_ADMIN_TESTS,
+      use: { ...devices['Desktop Firefox'] },
+    },
+    {
+      name: 'firefox-admin',
       dependencies: ['setup'],
-      testMatch: /.*\.spec\.ts/,
+      testMatch: ADMIN_TESTS,
       use: { ...devices['Desktop Firefox'] },
     },
     {
       name: 'webkit',
+      testMatch: NON_ADMIN_TESTS,
+      use: { ...devices['Desktop Safari'] },
+    },
+    {
+      name: 'webkit-admin',
       dependencies: ['setup'],
-      testMatch: /.*\.spec\.ts/,
+      testMatch: ADMIN_TESTS,
       use: { ...devices['Desktop Safari'] },
     },
   ],

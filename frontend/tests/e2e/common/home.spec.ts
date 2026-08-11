@@ -41,6 +41,7 @@ test.describe('Home page', () => {
     await expect(localLoginAction).toBeVisible()
     await expect(catalogAction).toBeVisible()
     await expect(page.getByRole('button', { name: '登入開始使用', exact: true })).toHaveCount(0)
+    await expect(page.locator('.hero-seo-summary')).toHaveCount(0)
 
     const heroActions = page.locator('.hero-actions button')
     await expect(heroActions).toHaveCount(3)
@@ -114,19 +115,27 @@ test.describe('Home page', () => {
     expect(actionLayout[0].height).toBe(actionLayout[1].height)
   })
 
-  test('public catalog action opens the anonymous course route', async ({ page }) => {
-    await page.route('**/api/courses/public/categories', (route) =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
-    )
-    await page.route('**/api/courses/public', (route) =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
-    )
+  test('public catalog renders canonical courses and a zero-archive detail', async ({ page }) => {
     await page.goto('/')
 
     await page.getByRole('button', { name: '瀏覽公開課程目錄', exact: true }).click()
 
     await expect(page).toHaveURL(/\/courses$/)
-    await expect(page.getByRole('heading', { name: '目前尚未有可公開瀏覽的課程' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '清大物理考古題課程目錄' })).toBeVisible()
+
+    const courseCards = page.locator('.course-card')
+    await expect(courseCards).toHaveCount(71)
+    await expect(page.locator('.public-catalog > .empty-state')).toHaveCount(0)
+
+    const zeroArchiveCourse = page.locator('a[href="/courses/1"]')
+    await expect(zeroArchiveCourse).toBeVisible()
+    await zeroArchiveCourse.click()
+
+    await expect(page).toHaveURL(/\/courses\/1$/)
+    await expect(page.getByRole('heading', { name: '普通化學(一)考古題' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '目前尚未有可公開瀏覽的考古題' })).toBeVisible()
+    await expect(page.locator('a, button').filter({ hasText: '下載' })).toHaveCount(0)
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex, follow')
   })
 
   test('homepage local login action opens the existing login dialog', async ({ page }) => {
