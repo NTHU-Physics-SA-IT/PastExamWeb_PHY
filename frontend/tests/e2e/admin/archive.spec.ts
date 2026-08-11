@@ -224,8 +224,17 @@ test.describe('Admin › Archive management', () => {
       })
     )
 
+    const courseSearch = page.getByPlaceholder('搜尋課程')
+
+    // Vite can invalidate the first document after discovering dependencies for this lazy
+    // route. Finish that discovery before exercising the dialog so a dev-server reload
+    // cannot detach controls in the middle of the 404/409 state-preservation assertions.
     await page.goto('/archive', { waitUntil: 'networkidle' })
-    await page.getByPlaceholder('搜尋課程').fill('普通物理')
+    await expect(courseSearch).toBeVisible()
+    await page.reload({ waitUntil: 'networkidle' })
+    await expect(courseSearch).toBeVisible()
+
+    await courseSearch.fill('普通物理')
     await clickWhenVisible(page.getByRole('button', { name: '普通物理(一)', exact: true }))
 
     const openEditor = async () => {
