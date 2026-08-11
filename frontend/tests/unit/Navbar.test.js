@@ -797,7 +797,6 @@ describe('Navbar methods', () => {
           template: '<div><slot /><slot name="label" /></div>',
         },
         Password: { name: 'PasswordStub', template: '<input type="password" />' },
-        Divider: { name: 'DividerStub', template: '<div class="divider"><slot /></div>' },
       },
       mocks: {
         $route: { path: '/archive' },
@@ -816,6 +815,14 @@ describe('Navbar methods', () => {
 
     expect(unauthWrapper.find('[data-icon="pi pi-sign-in"]').exists()).toBe(true)
     expect(unauthWrapper.find('[data-icon="pi pi-sign-out"]').exists()).toBe(false)
+
+    await unauthWrapper.find('[data-icon="pi pi-sign-in"]').trigger('click')
+    await nextTick()
+    const loginDialog = unauthWrapper.get('.dialog')
+    expect(loginDialog.find('[data-label="登入"]').exists()).toBe(true)
+    expect(loginDialog.find('[data-label="清華校務系統登入"]').exists()).toBe(false)
+    expect(loginDialog.text()).not.toContain('或')
+
     expect(window.__pastexam?.openLoginModal).toBeTypeOf('function')
     expect(window.__pastexam?.startNthuLogin).toBeTypeOf('function')
 

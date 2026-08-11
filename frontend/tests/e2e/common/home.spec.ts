@@ -137,9 +137,13 @@ test.describe('Home page', () => {
     await clickWhenVisible(localLoginAction)
     const loginDialog = page.getByRole('dialog', { name: '登入' })
     await expect(loginDialog).toBeVisible()
+    await expect(loginDialog.getByLabel('帳號')).toBeVisible()
+    await expect(loginDialog.getByLabel('密碼')).toBeVisible()
+    await expect(loginDialog.getByRole('button', { name: '登入', exact: true })).toBeVisible()
     await expect(
       loginDialog.getByRole('button', { name: '清華校務系統登入', exact: true })
-    ).toBeVisible()
+    ).toHaveCount(0)
+    await expect(loginDialog.getByText('或', { exact: true })).toHaveCount(0)
   })
 
   test('homepage NTHU login action initiates the canonical OAuth boundary once', async ({

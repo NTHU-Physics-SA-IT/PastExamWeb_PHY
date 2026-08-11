@@ -205,21 +205,6 @@
             :loading="loading"
           />
         </div>
-        <div class="flex align-items-center gap-3 my-3" aria-hidden="true">
-          <div class="flex-1 border-top-1 surface-border"></div>
-          <span class="text-sm text-color-secondary">或</span>
-          <div class="flex-1 border-top-1 surface-border"></div>
-        </div>
-        <div class="field">
-          <Button
-            label="清華校務系統登入"
-            icon="pi pi-building-columns"
-            type="button"
-            severity="secondary"
-            class="w-full"
-            @click="handleNthuLogin"
-          />
-        </div>
       </div>
     </Dialog>
 
