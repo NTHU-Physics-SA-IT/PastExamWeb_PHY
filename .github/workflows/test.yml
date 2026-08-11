@@ -348,10 +348,15 @@ jobs:
           path: frontend/coverage
           if-no-files-found: warn
 
-  frontend-e2e:
+  frontend-e2e-family:
+    name: frontend-e2e-${{ matrix.family }}
     if: ${{ inputs.run_checks }}
     runs-on: ubuntu-latest
     needs: [backend, frontend-unit]
+    strategy:
+      fail-fast: false
+      matrix:
+        family: [chromium, firefox, webkit]
 
     steps:
       - name: Checkout repository
@@ -493,9 +498,26 @@ jobs:
             logs nginx
           exit 1
 
+      - name: List selected frontend E2E cases
+        working-directory: ./frontend
+        env:
+          CI: true
+          E2E_FAMILY: ${{ matrix.family }}
+          PLAYWRIGHT_START_SERVER: false
+          PLAYWRIGHT_ADMIN_USERNAME: admin
+          PLAYWRIGHT_ADMIN_PASSWORD: local-admin-only
+        run: >-
+          ./node_modules/.bin/playwright test
+          --list
+          --reporter=list
+          --project="$E2E_FAMILY"
+          --project="${E2E_FAMILY}-admin"
+
       - name: Run frontend E2E tests
         env:
+          E2E_FAMILY: ${{ matrix.family }}
           PLAYWRIGHT_IMAGE: ${{ steps.playwright-image.outputs.image }}
+          PLAYWRIGHT_BLOB_OUTPUT_FILE: blob-report/report-${{ matrix.family }}.zip
           PLAYWRIGHT_ADMIN_USERNAME: admin
           PLAYWRIGHT_ADMIN_PASSWORD: local-admin-only
         run: |
@@ -513,6 +535,8 @@ jobs:
             -e CI=true \
             -e PLAYWRIGHT_START_SERVER=false \
             -e PLAYWRIGHT_BASE_URL=http://nginx:8080 \
+            -e E2E_FAMILY \
+            -e PLAYWRIGHT_BLOB_OUTPUT_FILE \
             -e PLAYWRIGHT_ADMIN_USERNAME \
             -e PLAYWRIGHT_ADMIN_PASSWORD \
             -v "$GITHUB_WORKSPACE:/work" \
@@ -520,16 +544,19 @@ jobs:
             "$PLAYWRIGHT_IMAGE" \
             bash -lc '
               mkdir -p "$HOME"
-              ./node_modules/.bin/playwright test
+              ./node_modules/.bin/playwright test \
+                --project="$E2E_FAMILY" \
+                --project="${E2E_FAMILY}-admin" \
+                --reporter=dot,blob
             '
 
-      - name: Upload Playwright HTML report
+      - name: Upload Playwright blob report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: frontend-e2e-report
-          path: frontend/playwright-report
-          if-no-files-found: warn
+          name: frontend-e2e-blob-${{ matrix.family }}
+          path: frontend/blob-report/report-${{ matrix.family }}.zip
+          if-no-files-found: error
 
       - name: Tear down
         if: always()
@@ -538,3 +565,88 @@ jobs:
           --env-file docker/.env
           -f docker/docker-compose.dev.yml
           down --volumes --remove-orphans
+
+  frontend-e2e:
+    name: frontend-e2e
+    if: ${{ always() && inputs.run_checks }}
+    needs: [frontend-e2e-family]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install Playwright report tooling
+        working-directory: ./frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Download Chromium blob report
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-e2e-blob-chromium
+          path: frontend/blob-report
+
+      - name: Download Firefox blob report
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-e2e-blob-firefox
+          path: frontend/blob-report
+
+      - name: Download WebKit blob report
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-e2e-blob-webkit
+          path: frontend/blob-report
+
+      - name: Verify complete browser-family artifacts
+        working-directory: ./frontend
+        run: |
+          set -euo pipefail
+
+          expected=(
+            blob-report/report-chromium.zip
+            blob-report/report-firefox.zip
+            blob-report/report-webkit.zip
+          )
+          for report in "${expected[@]}"; do
+            test -f "$report"
+          done
+
+          mapfile -t observed < <(
+            find blob-report -maxdepth 1 -type f -name '*.zip' -print | sort
+          )
+          if [[ "${#observed[@]}" -ne "${#expected[@]}" ]]; then
+            printf 'Unexpected browser-family blob reports:\n' >&2
+            printf '  %s\n' "${observed[@]}" >&2
+            exit 1
+          fi
+
+      - name: Merge Playwright reports
+        working-directory: ./frontend
+        run: pnpm exec playwright merge-reports --reporter=html blob-report
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-e2e-report
+          path: frontend/playwright-report
+          if-no-files-found: error
+
+      - name: Verify browser-family results
+        if: always()
+        env:
+          FAMILY_RESULT: ${{ needs.frontend-e2e-family.result }}
+        run: test "$FAMILY_RESULT" = success
