@@ -86,10 +86,6 @@ def load_manifest(
         if not isinstance(raw_paths, list) or not raw_paths:
             raise BackendShardManifestError(f"backend shard {shard} must be non-empty")
         paths = tuple(_validate_path(path) for path in raw_paths)
-        if paths != tuple(sorted(paths)):
-            raise BackendShardManifestError(
-                f"backend shard {shard} paths must be sorted"
-            )
         for path in paths:
             prior = assigned_to.get(path)
             if prior is not None:

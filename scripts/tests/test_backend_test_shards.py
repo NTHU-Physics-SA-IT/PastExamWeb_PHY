@@ -95,16 +95,18 @@ def test_unknown_shard_is_rejected() -> None:
         manifest.paths_for_shard("c")
 
 
-def test_path_output_is_sorted_and_deterministic(
+def test_path_output_preserves_manifest_order_deterministically(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    expected = "\n".join(_payload()["shards"]["a"]) + "\n"
+
     assert shards.main(["paths", "--shard", "a"]) == 0
     first = capsys.readouterr().out
     assert shards.main(["paths", "--shard", "a"]) == 0
     second = capsys.readouterr().out
 
     assert first == second
-    assert first.splitlines() == sorted(first.splitlines())
+    assert first == expected
 
 
 def test_new_unassigned_test_file_fails_closed(tmp_path: Path) -> None:
@@ -118,15 +120,22 @@ def test_new_unassigned_test_file_fails_closed(tmp_path: Path) -> None:
         shards.load_manifest(repository_root=repository, manifest_path=manifest)
 
 
-def test_logging_reset_precedes_logging_sensitive_unit_contracts() -> None:
+def test_logging_sensitive_contracts_precede_integration_scenarios() -> None:
     manifest = shards.load_manifest()
-    shard_a_paths = manifest.paths_for_shard("a")
 
-    # Alembic migration tests configure logging with disable_existing_loggers.
-    # Keep the accepted unsharded suite's Uvicorn reset before caplog contracts.
-    assert shard_a_paths.index("tests/integration/test_uvicorn_runtime.py") < (
-        shard_a_paths.index("tests/unit/test_archive_submission_links.py")
-    )
+    # Alembic scenarios configure logging with disable_existing_loggers. Each
+    # independent shard must exercise its caplog contracts before that state.
+    for shard, logging_contract in (
+        ("a", "tests/unit/test_archive_submission_links.py"),
+        ("b", "tests/unit/test_archive_submission_status.py"),
+    ):
+        paths = manifest.paths_for_shard(shard)
+        first_integration = next(
+            index
+            for index, path in enumerate(paths)
+            if path.startswith("tests/integration/")
+        )
+        assert paths.index(logging_contract) < first_integration
 
 
 def test_workflow_runs_independent_shards_and_parallel_coverage_combine() -> None:
