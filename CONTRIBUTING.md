@@ -6,6 +6,8 @@ Use these sources instead of duplicating their rules here:
 
 - [Repository Agent and automation rules](AGENTS.md)
 - [Documentation index and authority map](docs/README.md)
+- [Decision Record index](docs/decisions/README.md)
+- [Collaboration and conflict resolution](docs/development/collaboration-and-conflict-resolution.md)
 - [Local development environment](docs/development/local-environment.md)
 - [Feature development workflow](docs/development/feature-development-workflow.md)
 - [Validation policy](docs/development/validation.md)
@@ -28,6 +30,12 @@ reclassify the work. The canonical workflow contains the detailed conditions,
 planning, and implementation procedure, while the merge strategy remains in
 this document.
 
+Before modifying established behavior or shared infrastructure, identify
+relevant `Accepted` Decision Records by path and conceptual or Domain scope and
+preserve their invariants. Intentionally reversing a durable accepted decision
+requires explicit task authority, a superseding Decision Record linked in both
+directions, and coherent updates to affected operating documents or code.
+
 ## Branches and commits
 
 - Fetch current remote refs before choosing a development base.
@@ -36,6 +44,11 @@ this document.
 - Coordinated work starts from the optional coordination branch resolved by
   `python3 scripts/ci/project_governance.py coordination-branch`; its existence
   does not make it the universal development base.
+- A dormant coordination branch may lag `main`, but it is not a valid base for
+  newly declared coordinated work until fresh refs prove that current `main`
+  is its ancestor. If it is stale, refresh it in a separately scoped pull
+  request through the allowed protected-branch workflow; do not bypass
+  protection or rewrite it.
 - Keep task branches developer-owned; a visible branch name does not grant
   project authority or make an external, bot, analytics, backup, or recovery
   branch a valid target.
@@ -45,6 +58,12 @@ this document.
 - Before merge readiness, fetch current refs and integrate the latest intended
   target baseline safely. Do not silently rebase, reset, or retarget shared or
   external work.
+- If the target advanced since the branch merge-base, review the relevant
+  merged PR context and Accepted Decision Records before integration. Commit
+  history alone is insufficient when design intent or invariants are material;
+  reconcile semantic conflicts even when Git reports no textual conflict and
+  stop on unresolved authority conflicts. Follow the
+  [collaboration runbook](docs/development/collaboration-and-conflict-resolution.md).
 
 ## Merge strategy
 
@@ -141,6 +160,12 @@ description should state:
 - Domain impact;
 - migration impact; and
 - remaining risk.
+
+The repository's `CODEOWNERS` file routes review of governance-sensitive paths
+to verified owners. It does not grant permission, change canonical authority,
+or make owner review a branch-protection requirement by itself. The absence of
+a CODEOWNER entry does not permit contributors to ignore repository rules or
+the affected canonical documents.
 
 ## Domain and documentation changes
 
