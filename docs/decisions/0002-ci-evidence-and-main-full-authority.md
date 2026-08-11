@@ -37,6 +37,13 @@ when the classifier's current path and event rules permit. Unknown, malformed,
 stale, unavailable, or otherwise unsafe evidence fails closed according to the
 current implementation.
 
+The exact `.github/CODEOWNERS` path is allowlisted as lightweight repository
+metadata for ordinary source-branch classification and uses the existing
+docs-only mode when every changed path is lightweight. This does not treat
+arbitrary `.github/` content as documentation, create a new CI mode, or exempt
+main PRs and exact main pushes from Full. A mixed change follows the highest-risk
+path under the existing fail-closed priority rules.
+
 Successful source evidence does not authorize weakening a later formal PR,
 main, or merge-commit gate. Full, Equivalent, and docs-only describe CI
 evidence modes; they are not product-impact or Domain-risk labels.
@@ -80,8 +87,9 @@ missing or ambiguous evidence from silently weakening a formal gate.
 
 ## Consequences
 
-- Some low-code governance changes run Full because their paths are not
-  classifier-eligible for docs-only.
+- CODEOWNERS-only source changes can use the lightweight docs-only path because
+  broad runtime suites do not validate review-routing metadata; mixed
+  higher-risk changes and formal main gates still use Full.
 - Coordination evidence can reduce duplication without transferring authority
   to main.
 - Durable documentation records policy and rationale while exact workflow,
