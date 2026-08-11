@@ -942,10 +942,31 @@ def test_full_attestation_checks_each_required_execution_job(
         def __init__(self, **arguments: Any) -> None:
             pass
 
-        def run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        def workflow_run(self, run_id: int) -> dict[str, Any]:
             assert run_id == 77
+            return {
+                "id": 77,
+                "run_attempt": 2,
+                "event": "push",
+                "head_sha": fixture["merge"],
+            }
+
+        def run_attempt_jobs(
+            self,
+            run_id: int,
+            run_attempt: int,
+        ) -> list[dict[str, Any]]:
+            assert run_id == 77
+            assert run_attempt == 2
             return [
-                {"name": name, "conclusion": "success"}
+                {
+                    "name": name,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "run_id": 77,
+                    "run_attempt": 2,
+                    "head_sha": fixture["merge"],
+                }
                 for name in gate.REQUIRED_EXECUTION_JOBS
             ]
 
@@ -963,7 +984,12 @@ def test_full_attestation_checks_each_required_execution_job(
             "api_url": "https://api.github.invalid",
             "repository": REPOSITORY,
             "run_id": 77,
-            "sha": fixture["merge"],
+            "run_attempt": 2,
+            "event_name": "push",
+            "attested_sha": fixture["merge"],
+            "execution_head_sha": fixture["merge"],
+            "pr_number": 0,
+            "base_sha": "",
             "repository_root": fixture["root"],
             "github_output": output,
         },
@@ -987,13 +1013,29 @@ def test_full_attestation_rejects_a_skipped_required_job(
         def __init__(self, **arguments: Any) -> None:
             pass
 
-        def run_jobs(self, run_id: int) -> list[dict[str, Any]]:
+        def workflow_run(self, run_id: int) -> dict[str, Any]:
+            return {
+                "id": run_id,
+                "run_attempt": 2,
+                "event": "push",
+                "head_sha": fixture["merge"],
+            }
+
+        def run_attempt_jobs(
+            self,
+            run_id: int,
+            run_attempt: int,
+        ) -> list[dict[str, Any]]:
             return [
                 {
                     "name": name,
+                    "status": "completed",
                     "conclusion": (
                         "skipped" if name == "test / backend" else "success"
                     ),
+                    "run_id": run_id,
+                    "run_attempt": run_attempt,
+                    "head_sha": fixture["merge"],
                 }
                 for name in gate.REQUIRED_EXECUTION_JOBS
             ]
@@ -1011,7 +1053,12 @@ def test_full_attestation_rejects_a_skipped_required_job(
             "api_url": "https://api.github.invalid",
             "repository": REPOSITORY,
             "run_id": 77,
-            "sha": fixture["merge"],
+            "run_attempt": 2,
+            "event_name": "push",
+            "attested_sha": fixture["merge"],
+            "execution_head_sha": fixture["merge"],
+            "pr_number": 0,
+            "base_sha": "",
             "repository_root": fixture["root"],
             "github_output": None,
         },
@@ -1055,6 +1102,18 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
         "pull-requests": "read",
     }
     assert parsed["jobs"]["full_attestation"]["name"] == "Full CI Attestation"
+    assert parsed["jobs"]["full_attestation"]["permissions"] == {
+        "contents": "read",
+        "actions": "read",
+        "pull-requests": "read",
+    }
+    assert "--run-attempt '${{ github.run_attempt }}'" in workflow
+    assert '--event-name "$EVENT_NAME"' in workflow
+    assert '--attested-sha "$ATTESTED_SHA"' in workflow
+    assert '--execution-head-sha "$EXECUTION_HEAD_SHA"' in workflow
+    assert '--pr-number "$EVENT_PR_NUMBER"' in workflow
+    assert '--base-sha "$EVENT_BASE_SHA"' in workflow
+    assert "${{ github.event.pull_request.head.sha || github.sha }}" in workflow
     assert parsed["jobs"]["ci_gate"]["name"] == "CI Gate"
     assert parsed["jobs"]["ci_gate"]["if"] == "${{ always() }}"
     assert "needs.ci_mode.outputs.ci_mode == 'full'" in workflow
