@@ -20,7 +20,7 @@ from typing import Any, Sequence
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 DEV_COMPOSE = REPOSITORY_ROOT / "scripts" / "dev-compose.sh"
-EXPECTED_ALEMBIC_HEAD = "9f1c2a7e4b63"
+EXPECTED_ALEMBIC_HEAD = "b7e3d9a1c5f2"
 ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 EXIT_CODES = {
     "healthy": 0,
