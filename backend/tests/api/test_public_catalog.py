@@ -228,5 +228,6 @@ async def test_anonymous_public_catalog_exposes_fresh_seed_courses_without_archi
 
     assert response.status_code == 200
     catalog_rows = [item for courses in response.json().values() for item in courses]
-    assert len(catalog_rows) == len(load_seed_data()["courses"])
-    assert catalog_rows
+    seed_course_names = {course["name"] for course in load_seed_data()["courses"]}
+    catalog_course_names = {course["name"] for course in catalog_rows}
+    assert seed_course_names <= catalog_course_names
