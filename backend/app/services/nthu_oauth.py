@@ -37,7 +37,7 @@ class NthuOAuthBusinessError(Exception):
 @dataclass(frozen=True)
 class NthuProfile:
     uuid: str
-    userid: str
+    userid: str | None
     name: str
     email: str
     inschool: bool
@@ -83,6 +83,12 @@ def _required_opaque(value: object) -> str:
     return normalized
 
 
+def _optional_opaque(value: object) -> str | None:
+    if value is None:
+        return None
+    return _required_opaque(value)
+
+
 def _required_text(value: object) -> str:
     if not isinstance(value, str):
         raise NthuOAuthProviderError()
@@ -100,7 +106,7 @@ def _profile_from_resource(payload: object) -> NthuProfile:
         raise NthuOAuthProviderError()
 
     uuid_value = _required_opaque(payload.get("uuid"))
-    userid = _required_opaque(payload.get("userid"))
+    userid = _optional_opaque(payload.get("userid"))
     name = _required_text(payload.get("name"))
     email = _required_opaque(payload.get("email"))
     if "@" not in email:

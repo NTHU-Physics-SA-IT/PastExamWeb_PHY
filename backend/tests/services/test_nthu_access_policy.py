@@ -10,7 +10,11 @@ from app.services.nthu_access_policy import (
 from app.services.nthu_oauth import NthuOAuthBusinessError, NthuProfile
 
 
-def _profile(*, student_id: str = "112022123", inschool: bool = True) -> NthuProfile:
+def _profile(
+    *,
+    student_id: str | None = "112022123",
+    inschool: bool = True,
+) -> NthuProfile:
     return NthuProfile(
         uuid="stable-uuid",
         userid=student_id,
@@ -35,9 +39,12 @@ def test_selected_physics_department_allows_physics_student() -> None:
     ensure_profile_matches_access_policy(_profile(), policy)
 
 
-@pytest.mark.parametrize("student_id", ["112023123", "special", "", "11202A123"])
+@pytest.mark.parametrize(
+    "student_id",
+    ["112023123", "special", "", "11202A123", None],
+)
 def test_selected_department_denies_other_or_unknown_affiliation(
-    student_id: str,
+    student_id: str | None,
 ) -> None:
     policy = NthuAccessPolicy(
         mode=NthuAccessMode.SELECTED_DEPARTMENTS,

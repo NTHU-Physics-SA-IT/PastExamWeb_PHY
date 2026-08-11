@@ -225,15 +225,17 @@ async def test_nthu_callback_creates_user_and_state_is_single_use(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("userid", ["112023123", "X1106099", None])
 async def test_nthu_callback_denial_creates_no_user_or_handoff(
     client,
     monkeypatch,
     session_maker,
+    userid,
 ):
     suffix = uuid.uuid4().hex[:8]
     profile = NthuProfile(
         uuid=f"nthu-denied-{suffix}",
-        userid="112023123",
+        userid=userid,
         name=f"Denied NTHU User {suffix}",
         email=f"denied-{suffix}@example.com",
         inschool=True,

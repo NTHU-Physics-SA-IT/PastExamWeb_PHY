@@ -146,6 +146,30 @@ async def test_fetch_nthu_profile_exchanges_code_and_uses_bearer_resource(monkey
 
 
 @pytest.mark.asyncio
+async def test_fetch_nthu_profile_accepts_missing_userid(monkeypatch):
+    _configure_provider(monkeypatch)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url == httpx.URL(settings.OAUTH_TOKEN_URL):
+            return httpx.Response(200, json={"access_token": "access-token"})
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "uuid": "stable-uuid-without-userid",
+                "name": "NTHU User",
+                "email": "student@example.com",
+                "inschool": True,
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        profile = await fetch_nthu_profile("provider-code", client=client)
+
+    assert profile.userid is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "token_response",
     [
@@ -281,10 +305,16 @@ async def test_ineligible_profile_is_denied_without_account_mutation(session_mak
     profile = _profile(inschool=False)
 
     async with session_maker() as session:
+        before_user_ids = tuple(
+            (await session.execute(select(User.id).order_by(User.id))).scalars()
+        )
         with pytest.raises(NthuOAuthBusinessError) as exc_info:
             await resolve_nthu_user(session, profile)
         assert exc_info.value.code == "oauth_not_in_school"
-        assert (await session.execute(select(User))).scalars().all() == []
+        after_user_ids = tuple(
+            (await session.execute(select(User.id).order_by(User.id))).scalars()
+        )
+        assert after_user_ids == before_user_ids
 
 
 @pytest.mark.asyncio
@@ -312,6 +342,7 @@ async def test_first_and_repeat_login_use_nthu_uuid_and_preserve_nickname(
 
     updated = _profile(
         uuid=first.uuid,
+        userid="112022123",
         name=f"Updated {uuid.uuid4().hex[:8]}",
         email=f"updated-{uuid.uuid4().hex[:8]}@example.com",
     )
@@ -327,8 +358,65 @@ async def test_first_and_repeat_login_use_nthu_uuid_and_preserve_nickname(
 
 
 @pytest.mark.asyncio
-async def test_selected_department_denies_before_user_mutation(session_maker):
+@pytest.mark.parametrize("userid", ["112023123", "X1106099", None])
+async def test_all_nthu_allows_any_in_school_affiliation(session_maker, userid):
+    profile = _profile(userid=userid)
+
+    async with session_maker() as session:
+        user = await resolve_nthu_user(session, profile)
+        await session.commit()
+
+        assert user.oauth_sub == profile.uuid
+        assert user.student_id == userid
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("userid", ["112023123", "X1106099", None])
+async def test_selected_department_denies_before_user_mutation(
+    session_maker,
+    userid,
+):
+    profile = _profile(userid=userid)
+    async with session_maker() as session:
+        session.add(
+            SystemSetting(
+                key=NTHU_ACCESS_POLICY_SETTING_KEY,
+                value={
+                    "mode": "selected_departments",
+                    "allowed_department_codes": ["022"],
+                },
+            )
+        )
+        await session.commit()
+        before_user_ids = tuple(
+            (await session.execute(select(User.id).order_by(User.id))).scalars()
+        )
+
+        with pytest.raises(NthuOAuthBusinessError) as exc_info:
+            await resolve_nthu_user(session, profile)
+
+        assert exc_info.value.code == "oauth_department_not_allowed"
+        after_user_ids = tuple(
+            (await session.execute(select(User.id).order_by(User.id))).scalars()
+        )
+        assert after_user_ids == before_user_ids
+
+
+@pytest.mark.asyncio
+async def test_existing_user_is_preserved_when_policy_later_denies(session_maker):
     profile = _profile(userid="112023123")
+    async with session_maker() as session:
+        user = await resolve_nthu_user(session, profile)
+        await session.commit()
+        user_id = user.id
+        original = (
+            user.oauth_sub,
+            user.student_id,
+            user.name,
+            user.email,
+            user.deleted_at,
+        )
+
     async with session_maker() as session:
         session.add(
             SystemSetting(
@@ -343,9 +431,19 @@ async def test_selected_department_denies_before_user_mutation(session_maker):
 
         with pytest.raises(NthuOAuthBusinessError) as exc_info:
             await resolve_nthu_user(session, profile)
-
         assert exc_info.value.code == "oauth_department_not_allowed"
-        assert (await session.execute(select(User))).scalars().all() == []
+        await session.rollback()
+
+    async with session_maker() as session:
+        stored = await session.get(User, user_id)
+        assert stored is not None
+        assert (
+            stored.oauth_sub,
+            stored.student_id,
+            stored.name,
+            stored.email,
+            stored.deleted_at,
+        ) == original
 
 
 @pytest.mark.asyncio
