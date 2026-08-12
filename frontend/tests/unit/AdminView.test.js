@@ -356,7 +356,9 @@ describe('AdminView', () => {
     await flushPromises()
 
     expect(getUsersMock).toHaveBeenCalled()
-    expect(wrapper.vm.filteredUsers.length).toBe(2)
+    expect(wrapper.vm.filteredUsers).toEqual([
+      expect.objectContaining({ id: sampleUsers[0].id, account_source: 'local' }),
+    ])
 
     wrapper.vm.openCreateDialog()
     wrapper.vm.courseForm.name = '量子物理'
@@ -391,13 +393,16 @@ describe('AdminView', () => {
     })
 
     wrapper.vm.openEditUserDialog(sampleUsers[1])
+    await wrapper.vm.$nextTick()
+    expect(wrapper.vm.isEditingNthuUser).toBe(true)
+    expect(adminTemplateSource.match(/:disabled="isEditingNthuUser"/g)).toHaveLength(2)
     wrapper.vm.userForm.name = 'Bob Updated'
+    wrapper.vm.userForm.email = 'bob-updated@example.com'
     wrapper.vm.userForm.password = ''
+    wrapper.vm.userForm.is_admin = true
     await wrapper.vm.saveUser()
     expect(updateUserMock).toHaveBeenCalledWith(sampleUsers[1].id, {
-      name: 'Bob Updated',
-      email: sampleUsers[1].email,
-      is_admin: sampleUsers[1].is_admin,
+      is_admin: true,
     })
 
     wrapper.vm.confirmDeleteUser(sampleUsers[1])
@@ -473,7 +478,7 @@ describe('AdminView', () => {
 
     expect(adminTemplateSource).toContain('設定哪些清大學生可以透過 NTHU OAuth 登入網站')
     expect(adminTemplateSource).toContain("user.student_id || '—'")
-    expect(adminTemplateSource).toContain("getUserAffiliationCategory(user) || '—'")
+    expect(adminTemplateSource).toContain('getNthuIdentitySecondaryLine(user)')
     expect(adminTemplateSource).toContain('filterPlaceholder="搜尋中文系所名稱或代碼"')
 
     wrapper.unmount()
@@ -527,7 +532,7 @@ describe('AdminView', () => {
     wrapper.unmount()
   })
 
-  it('combines account source, affiliation, and department filters', async () => {
+  it('switches account-source tabs and keeps NTHU identity filters scoped to NTHU users', async () => {
     const wrapper = createWrapper()
     await flushPromises()
     const extraUsers = [
@@ -564,21 +569,39 @@ describe('AdminView', () => {
       contributor_level: 1,
     }))
 
-    wrapper.vm.filterAccountSource = 'local'
+    expect(wrapper.vm.activeUserSource).toBe('local')
     expect(wrapper.vm.filteredUsers.map((user) => user.name)).toEqual(['Alice'])
 
-    wrapper.vm.filterAccountSource = 'nthu'
+    wrapper.vm.activeUserSource = 'nthu'
     wrapper.vm.filterNthuAffiliation = 'standard_student'
     wrapper.vm.filterNthuDepartment = '022'
     expect(wrapper.vm.filteredUsers.map((user) => user.name)).toEqual(['Bob'])
+    expect(wrapper.vm.getNthuIdentitySecondaryLine(wrapper.vm.filteredUsers[0])).toBe('物理學系')
 
     wrapper.vm.filterNthuAffiliation = 'unresolved'
     wrapper.vm.filterNthuDepartment = null
     expect(wrapper.vm.filteredUsers.map((user) => user.name)).toEqual(['Unresolved'])
+    expect(wrapper.vm.getNthuIdentitySecondaryLine(wrapper.vm.filteredUsers[0])).toBe('未解析')
 
     wrapper.vm.filterNthuAffiliation = null
     wrapper.vm.userSearchQuery = '未解析'
     expect(wrapper.vm.filteredUsers.map((user) => user.name)).toEqual(['Unresolved'])
+
+    expect(adminTemplateSource).toContain('<Tab value="local">本地帳號</Tab>')
+    expect(adminTemplateSource).toContain('<Tab value="nthu">清大 OAuth</Tab>')
+    expect(adminTemplateSource).not.toContain('admin-user-source-filter')
+    expect(adminTemplateSource).not.toContain('header="學號 / 員工編號"')
+    expect(adminTemplateSource).not.toContain('header="系所 / 類別"')
+    expect(adminTemplateSource).not.toContain('header="帳號類型"')
+    expect(adminTemplateSource).not.toContain(
+      '<span class="admin-tablet-metadata-label">帳號類型</span>'
+    )
+    expect(adminTemplateSource).toContain(
+      'class="admin-tablet-metadata-value nthu-identity nthu-identity--card"'
+    )
+    expect(adminViewSource).toMatch(
+      /\.nthu-identity--card\s*\{[^}]*flex-direction:\s*row;[^}]*flex-wrap:\s*wrap;[^}]*align-items:\s*baseline;/
+    )
     wrapper.unmount()
   })
 
@@ -1471,6 +1494,7 @@ describe('AdminView', () => {
     await wrapper.vm.$nextTick()
     expect(wrapper.vm.filteredCourses).toEqual([sampleCourses[1]])
 
+    wrapper.vm.activeUserSource = 'nthu'
     wrapper.vm.userSearchQuery = 'bob'
     await wrapper.vm.$nextTick()
     expect(wrapper.vm.filteredUsers).toEqual([
@@ -1490,6 +1514,7 @@ describe('AdminView', () => {
     expect(wrapper.vm.filteredUsers).toEqual([expect.objectContaining({ id: sampleUsers[1].id })])
 
     wrapper.vm.userSearchQuery = ''
+    wrapper.vm.activeUserSource = 'local'
     await wrapper.vm.$nextTick()
     wrapper.vm.filterUserType = true
     await wrapper.vm.$nextTick()

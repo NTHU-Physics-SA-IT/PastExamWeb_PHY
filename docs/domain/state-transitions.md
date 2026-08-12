@@ -377,6 +377,8 @@ classification never grants access and never implies an organizational unit.
 
 Authorization runs after the provider profile is established and before local User creation or profile synchronization. A denial produces no User mutation, login handoff, exchange success, or application JWT. Existing users remain persisted and unchanged when a later policy denies a login.
 
+For a NTHU OAuth User, provider-synchronized `name` and `email` remain provider-owned profile attributes. An administrator may still update existing administrative metadata such as `is_admin`, but the admin user-update operation rejects an attempted change to either provider-owned field with `409` before applying any field mutation or commit. Local-account profile updates retain their existing behavior.
+
 ## Public visibility
 
 ### Intended invariant

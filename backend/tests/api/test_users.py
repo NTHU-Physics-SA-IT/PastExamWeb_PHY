@@ -251,6 +251,57 @@ async def test_admin_can_update_user(client, session_maker):
 
 
 @pytest.mark.asyncio
+async def test_update_nthu_user_rejects_provider_profile_mutation_but_allows_admin_metadata(
+    session_maker,
+):
+    unique = uuid.uuid4().hex
+    original_name = f"nthu-user-{unique[:8]}"
+    original_email = f"nthu-{unique[:8]}@example.com"
+    async with session_maker() as session:
+        user = User(
+            name=original_name,
+            email=original_email,
+            is_admin=False,
+            is_local=False,
+            oauth_provider="nthu",
+            oauth_sub=unique,
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+
+        for user_data in (
+            UserUpdate(name=f"changed-{unique[:8]}", is_admin=True),
+            UserUpdate(email=f"changed-{unique[:8]}@example.com", is_admin=True),
+        ):
+            with pytest.raises(HTTPException) as exc:
+                await update_user(
+                    user_id=user.id,
+                    user_data=user_data,
+                    current_user=UserRoles(user_id=1, is_admin=True),
+                    db=session,
+                )
+            assert exc.value.status_code == 409
+            await session.refresh(user)
+            assert user.name == original_name
+            assert user.email == original_email
+            assert user.is_admin is False
+
+        updated = await update_user(
+            user_id=user.id,
+            user_data=UserUpdate(is_admin=True),
+            current_user=UserRoles(user_id=1, is_admin=True),
+            db=session,
+        )
+        assert updated.name == original_name
+        assert updated.email == original_email
+        assert updated.is_admin is True
+
+        await session.delete(updated)
+        await session.commit()
+
+
+@pytest.mark.asyncio
 async def test_update_user_prevents_duplicate_email(client, session_maker):
     unique = uuid.uuid4().hex[:8]
     other = uuid.uuid4().hex[:8]

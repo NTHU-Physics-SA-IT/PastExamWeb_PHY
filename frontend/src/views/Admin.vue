@@ -986,6 +986,13 @@
                 </div>
               </section>
 
+              <Tabs v-model:value="activeUserSource" class="user-source-tabs mb-4">
+                <TabList>
+                  <Tab value="local">本地帳號</Tab>
+                  <Tab value="nthu">清大 OAuth</Tab>
+                </TabList>
+              </Tabs>
+
               <div class="admin-toolbar admin-toolbar--users mb-4">
                 <div class="admin-toolbar__filters">
                   <div class="admin-toolbar__search relative w-full md:w-auto">
@@ -999,18 +1006,7 @@
                     />
                   </div>
                   <Select
-                    inputId="admin-user-source-filter"
-                    name="admin-user-source-filter"
-                    v-model="filterAccountSource"
-                    :options="accountSourceFilterOptions"
-                    optionLabel="name"
-                    optionValue="value"
-                    placeholder="帳號來源"
-                    aria-label="帳號來源"
-                    class="admin-toolbar__select w-full md:w-14rem"
-                  />
-                  <Select
-                    v-if="filterAccountSource === 'nthu'"
+                    v-if="activeUserSource === 'nthu'"
                     inputId="admin-user-affiliation-filter"
                     name="admin-user-affiliation-filter"
                     v-model="filterNthuAffiliation"
@@ -1022,7 +1018,7 @@
                     class="admin-toolbar__select w-full md:w-14rem"
                   />
                   <Select
-                    v-if="filterAccountSource === 'nthu'"
+                    v-if="activeUserSource === 'nthu'"
                     inputId="admin-user-department-filter"
                     name="admin-user-department-filter"
                     v-model="filterNthuDepartment"
@@ -1073,7 +1069,7 @@
                 :rowsPerPageOptions="ADMIN_PAGE_SIZE_OPTIONS"
                 paginatorTemplate="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown CurrentPageReport"
                 currentPageReportTemplate="第 {currentPage} / {totalPages} 頁，共 {totalRecords} 筆"
-                tableStyle="min-width: 78rem"
+                :tableStyle="{ minWidth: activeUserSource === 'nthu' ? '76rem' : '70rem' }"
                 scrollable
                 scrollHeight="65vh"
                 responsiveLayout="stack"
@@ -1096,40 +1092,6 @@
                     </span>
                   </template>
                 </Column>
-                <Column
-                  field="student_id"
-                  header="學號 / 員工編號"
-                  sortable
-                  style="width: 9rem; min-width: 9rem"
-                >
-                  <template #body="{ data }">
-                    <span class="admin-desktop-cell">{{ data.student_id || '—' }}</span>
-                  </template>
-                </Column>
-                <Column
-                  field="department_name"
-                  header="系所 / 類別"
-                  sortable
-                  style="width: 12rem; min-width: 12rem"
-                >
-                  <template #body="{ data }">
-                    <span class="admin-desktop-cell user-department-name">
-                      {{ getUserAffiliationCategory(data) || '—' }}
-                    </span>
-                  </template>
-                </Column>
-                <Column
-                  field="nthu_affiliation_label"
-                  header="清大身分"
-                  sortable
-                  style="width: 10rem; min-width: 10rem"
-                >
-                  <template #body="{ data }">
-                    <span class="admin-desktop-cell">
-                      {{ data.nthu_affiliation_label || '—' }}
-                    </span>
-                  </template>
-                </Column>
                 <Column header="使用者名稱" sortable style="width: 15%">
                   <template #body="{ data }">
                     <span class="mobile-primary-text admin-desktop-cell">{{ data.name }}</span>
@@ -1147,9 +1109,6 @@
                         />
                         <Tag :severity="data.is_admin ? 'success' : 'secondary'" class="text-sm">
                           {{ data.is_admin ? '是' : '否' }}
-                        </Tag>
-                        <Tag :severity="getAccountSourceSeverity(data)" class="text-sm">
-                          {{ getAccountSourceLabel(data) }}
                         </Tag>
                         <span class="admin-card-meta-text">
                           {{ data.last_login ? formatDateTime(data.last_login) : '從未登入' }}
@@ -1170,11 +1129,20 @@
                     </Tag>
                   </template>
                 </Column>
-                <Column field="account_source" header="帳號來源" sortable style="width: 15%">
+                <Column
+                  v-if="activeUserSource === 'nthu'"
+                  field="student_id"
+                  header="清大身分"
+                  sortable
+                  style="width: 12rem; min-width: 12rem"
+                >
                   <template #body="{ data }">
-                    <Tag :severity="getAccountSourceSeverity(data)" class="text-sm">
-                      {{ getAccountSourceLabel(data) }}
-                    </Tag>
+                    <span class="nthu-identity admin-desktop-cell">
+                      <span class="nthu-identity__userid">{{ data.student_id || '—' }}</span>
+                      <span class="nthu-identity__detail">
+                        {{ getNthuIdentitySecondaryLine(data) }}
+                      </span>
+                    </span>
                   </template>
                 </Column>
                 <Column field="last_login" header="最近登入" sortable style="width: 15%">
@@ -1269,26 +1237,18 @@
                         user.email
                       }}</span>
                     </div>
-                    <div class="admin-tablet-metadata-item">
-                      <span class="admin-tablet-metadata-label">學號 / 員工編號</span>
-                      <span class="admin-tablet-metadata-value">{{ user.student_id || '—' }}</span>
-                    </div>
-                    <div class="admin-tablet-metadata-item admin-tablet-metadata-item--wide">
-                      <span class="admin-tablet-metadata-label">系所 / 類別</span>
-                      <span class="admin-tablet-metadata-value user-department-name">
-                        {{ getUserAffiliationCategory(user) || '—' }}
-                      </span>
-                    </div>
-                    <div class="admin-tablet-metadata-item">
+                    <div
+                      v-if="activeUserSource === 'nthu'"
+                      class="admin-tablet-metadata-item admin-tablet-metadata-item--wide"
+                    >
                       <span class="admin-tablet-metadata-label">清大身分</span>
-                      <span class="admin-tablet-metadata-value">
-                        {{ user.nthu_affiliation_label || '—' }}
-                      </span>
-                    </div>
-                    <div class="admin-tablet-metadata-item">
-                      <span class="admin-tablet-metadata-label">帳號來源</span>
-                      <span class="admin-tablet-metadata-value">
-                        {{ getAccountSourceLabel(user) }}
+                      <span
+                        class="admin-tablet-metadata-value nthu-identity nthu-identity--card"
+                      >
+                        <span class="nthu-identity__userid">{{ user.student_id || '—' }}</span>
+                        <span class="nthu-identity__detail">
+                          {{ getNthuIdentitySecondaryLine(user) }}
+                        </span>
                       </span>
                     </div>
                     <div class="admin-tablet-metadata-item">
@@ -4020,6 +3980,7 @@
               placeholder="輸入使用者名稱"
               class="w-full"
               :class="{ 'p-invalid': userFormErrors.name }"
+              :disabled="isEditingNthuUser"
             />
             <small v-if="userFormErrors.name" class="p-error">
               {{ userFormErrors.name }}
@@ -4035,6 +3996,7 @@
               placeholder="輸入電子郵件"
               class="w-full"
               :class="{ 'p-invalid': userFormErrors.email }"
+              :disabled="isEditingNthuUser"
             />
             <small v-if="userFormErrors.email" class="p-error">
               {{ userFormErrors.email }}
@@ -4593,7 +4555,7 @@ const nthuDepartmentGroups = computed(() => {
 })
 const userSearchQuery = ref('')
 const filterUserType = ref(null)
-const filterAccountSource = ref(null)
+const activeUserSource = ref('local')
 const filterNthuAffiliation = ref(null)
 const filterNthuDepartment = ref(null)
 const selectedContributorLevels = ref([])
@@ -4666,22 +4628,12 @@ const userSortMeta = ref([
 const USER_PASSWORD_MIN_LENGTH = 8
 const NON_LOCAL_PASSWORD_RESET_HINT = '此帳號不是本地帳號，無法由系統重設密碼。'
 
-const getAccountSourceLabel = (user) => {
-  if (user?.account_source === 'local') return '本地帳號'
-  if (user?.account_source === 'nthu') return '清大 OAuth'
-  return '未分類'
-}
-
-const getAccountSourceSeverity = (user) =>
-  user?.account_source === 'local'
-    ? 'info'
-    : user?.account_source === 'nthu'
-      ? 'warning'
-      : 'secondary'
-
-const getUserAffiliationCategory = (user) => {
-  if (user?.department_name) return user.department_name
-  return null
+const getNthuIdentitySecondaryLine = (user) => {
+  if (user?.nthu_affiliation_kind === 'standard_student' && user?.department_name) {
+    return user.department_name
+  }
+  if (user?.nthu_affiliation_kind === 'staff') return '教職員'
+  return '未解析'
 }
 
 const getResetPasswordTargetLabel = (user) => {
@@ -4710,6 +4662,7 @@ const getOnlineStatusDotClass = (user) => {
 
 const showUserDialog = ref(false)
 const editingUser = ref(null)
+const isEditingNthuUser = computed(() => Boolean(editingUser.value && !editingUser.value.is_local))
 const userSaveLoading = ref(false)
 
 const showResetPasswordDialog = ref(false)
@@ -5540,12 +5493,6 @@ const categoryInfoMap = computed(() =>
 const userTypeFilterOptions = [
   { name: '管理員', value: true },
   { name: '一般使用者', value: false },
-]
-
-const accountSourceFilterOptions = [
-  { name: '全部', value: null },
-  { name: '本地帳號', value: 'local' },
-  { name: '清大 OAuth', value: 'nthu' },
 ]
 
 const nthuAffiliationFilterOptions = [
@@ -6414,9 +6361,7 @@ const filteredUsers = computed(() => {
     )
   }
 
-  if (filterAccountSource.value !== null) {
-    filtered = filtered.filter((user) => user.account_source === filterAccountSource.value)
-  }
+  filtered = filtered.filter((user) => user.account_source === activeUserSource.value)
 
   if (filterNthuAffiliation.value !== null) {
     filtered = filtered.filter(
@@ -6552,7 +6497,7 @@ watch([searchQuery, filterCategory], () => {
   courseFirst.value = 0
 })
 watch(
-  filterAccountSource,
+  activeUserSource,
   (source) => {
     if (source !== 'nthu') {
       filterNthuAffiliation.value = null
@@ -6565,7 +6510,7 @@ watch(
   [
     userSearchQuery,
     filterUserType,
-    filterAccountSource,
+    activeUserSource,
     filterNthuAffiliation,
     filterNthuDepartment,
     selectedContributorLevels,
@@ -8356,12 +8301,14 @@ const saveUser = async () => {
   try {
     if (editingUser.value) {
       const updateData = {
-        name: userForm.value.name,
-        email: userForm.value.email,
         is_admin: userForm.value.is_admin,
       }
-      if (userForm.value.password.trim()) {
-        updateData.password = userForm.value.password
+      if (editingUser.value.is_local) {
+        updateData.name = userForm.value.name
+        updateData.email = userForm.value.email
+        if (userForm.value.password.trim()) {
+          updateData.password = userForm.value.password
+        }
       }
       await updateUser(editingUser.value.id, updateData)
       trackEvent(EVENTS.UPDATE_USER, {
@@ -13631,6 +13578,41 @@ onBeforeUnmount(() => {
 .admin-toolbar--users :deep(.p-component),
 .user-management-table {
   font-size: var(--app-font-size-base) !important;
+}
+
+.user-source-tabs {
+  font-size: var(--app-font-size-base);
+}
+
+.user-source-tabs :deep(.p-tablist-tab-list) {
+  background: transparent;
+}
+
+.nthu-identity {
+  display: inline-flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.12rem;
+  line-height: 1.3;
+}
+
+.nthu-identity__userid {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.nthu-identity__detail {
+  color: var(--text-secondary);
+  font-size: var(--app-font-size-xs);
+}
+
+.nthu-identity--card {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.55rem;
+  max-width: 100%;
 }
 
 .admin-toolbar--users .search-icon,

@@ -642,6 +642,16 @@ async def update_user(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
+    provider_profile_changed = not user.is_local and (
+        (user_data.name is not None and user_data.name != user.name)
+        or (user_data.email is not None and user_data.email != user.email)
+    )
+    if provider_profile_changed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="清大 OAuth 帳號的使用者名稱與電子郵件由身分提供者管理，無法手動修改。",
+        )
+
     if user_data.name is not None:
         result = await db.execute(
             select(User).where(User.name == user_data.name, User.id != user_id)
