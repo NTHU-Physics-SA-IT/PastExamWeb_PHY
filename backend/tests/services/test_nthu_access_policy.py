@@ -4,6 +4,7 @@ from app.services.nthu_access_policy import (
     NthuAccessMode,
     NthuAccessPolicy,
     NthuAccessPolicyValidationError,
+    NthuSpecialAffiliation,
     NthuStaffAccess,
     ensure_profile_matches_access_policy,
     normalize_nthu_access_policy,
@@ -61,6 +62,34 @@ def test_selected_staff_allowlist_is_case_sensitive() -> None:
         ensure_profile_matches_access_policy(_profile(student_id="w90001"), policy)
 
 
+def test_staff_display_heuristic_never_authorizes_without_exact_allowlist() -> None:
+    policy = NthuAccessPolicy(
+        mode=NthuAccessMode.SELECTED_DEPARTMENTS,
+        allowed_department_codes=("022",),
+    )
+
+    with pytest.raises(NthuOAuthBusinessError) as exc_info:
+        ensure_profile_matches_access_policy(_profile(student_id="W99999"), policy)
+
+    assert exc_info.value.code == "oauth_department_not_allowed"
+
+
+def test_special_student_requires_explicit_special_affiliation_permission() -> None:
+    special_profile = _profile(student_id="X1106099")
+    denied_policy = NthuAccessPolicy(
+        mode=NthuAccessMode.SELECTED_DEPARTMENTS,
+        allowed_department_codes=("022",),
+    )
+    allowed_policy = NthuAccessPolicy(
+        mode=NthuAccessMode.SELECTED_DEPARTMENTS,
+        allowed_special_affiliations=(NthuSpecialAffiliation.SPECIAL_STUDENT,),
+    )
+
+    with pytest.raises(NthuOAuthBusinessError):
+        ensure_profile_matches_access_policy(special_profile, denied_policy)
+    ensure_profile_matches_access_policy(special_profile, allowed_policy)
+
+
 @pytest.mark.parametrize(
     "student_id",
     ["112023123", "special", "", "11202A123", None],
@@ -102,6 +131,7 @@ def test_policy_normalization_deduplicates_and_orders_codes() -> None:
     assert policy.allowed_department_codes == ("022", "025")
     assert policy.staff_access is NthuStaffAccess.NONE
     assert policy.allowed_staff_userids == ()
+    assert policy.allowed_special_affiliations == ()
 
 
 def test_policy_normalization_supports_staff_only_and_trims_userids() -> None:
@@ -119,9 +149,26 @@ def test_policy_normalization_supports_staff_only_and_trims_userids() -> None:
     assert policy.as_storage_value() == {
         "mode": "selected_departments",
         "allowed_department_codes": [],
+        "allowed_special_affiliations": [],
         "staff_access": "allowlist",
         "allowed_staff_userids": ["W90001", "W90002"],
     }
+
+
+def test_policy_normalization_supports_special_only_scope() -> None:
+    policy = normalize_nthu_access_policy(
+        {
+            "mode": "selected_departments",
+            "allowed_department_codes": [],
+            "allowed_special_affiliations": ["special_student"],
+            "staff_access": "none",
+            "allowed_staff_userids": [],
+        }
+    )
+
+    assert policy.allowed_special_affiliations == (
+        NthuSpecialAffiliation.SPECIAL_STUDENT,
+    )
 
 
 def test_all_nthu_canonicalizes_ignored_custom_fields() -> None:
@@ -143,6 +190,11 @@ def test_all_nthu_canonicalizes_ignored_custom_fields() -> None:
         {"mode": "invalid", "allowed_department_codes": []},
         {"mode": "selected_departments", "allowed_department_codes": []},
         {"mode": "selected_departments", "allowed_department_codes": ["999"]},
+        {
+            "mode": "selected_departments",
+            "allowed_department_codes": [],
+            "allowed_special_affiliations": ["faculty"],
+        },
         {
             "mode": "selected_departments",
             "allowed_department_codes": [],

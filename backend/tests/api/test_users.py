@@ -159,6 +159,20 @@ async def test_admin_user_list_projects_student_affiliation_without_general_api_
         student_id="112022123",
     )
     local_user = await make_user()
+    special_user = await make_user(
+        is_local=False,
+        password_hash=None,
+        oauth_provider="nthu",
+        oauth_sub=f"uuid-{uuid.uuid4().hex}",
+        student_id="X1106099",
+    )
+    staff_user = await make_user(
+        is_local=False,
+        password_hash=None,
+        oauth_provider="nthu",
+        oauth_sub=f"uuid-{uuid.uuid4().hex}",
+        student_id="W90001",
+    )
     app.dependency_overrides[get_current_user] = lambda: UserRoles(
         user_id=admin.id,
         is_admin=True,
@@ -170,9 +184,21 @@ async def test_admin_user_list_projects_student_affiliation_without_general_api_
         by_id = {user["id"]: user for user in response.json()}
         assert by_id[nthu_user.id]["student_id"] == "112022123"
         assert by_id[nthu_user.id]["department_code"] == "022"
+        assert by_id[nthu_user.id]["account_source"] == "nthu"
+        assert by_id[nthu_user.id]["nthu_affiliation_kind"] == "standard_student"
+        assert by_id[nthu_user.id]["nthu_affiliation_label"] == "一般學生"
+        assert by_id[special_user.id]["account_source"] == "nthu"
+        assert by_id[special_user.id]["nthu_affiliation_kind"] == "special_student"
+        assert by_id[special_user.id]["nthu_affiliation_label"] == "交換生／特殊學生"
+        assert by_id[special_user.id]["department_code"] is None
+        assert by_id[staff_user.id]["nthu_affiliation_kind"] == "staff"
+        assert by_id[staff_user.id]["nthu_affiliation_label"] == "教職員"
+        assert by_id[staff_user.id]["department_code"] is None
         assert by_id[nthu_user.id]["department_name"] == "物理學系"
         assert by_id[local_user.id]["student_id"] is None
         assert by_id[local_user.id]["department_name"] is None
+        assert by_id[local_user.id]["account_source"] == "local"
+        assert by_id[local_user.id]["nthu_affiliation_kind"] is None
 
         app.dependency_overrides[get_current_user] = lambda: UserRoles(
             user_id=nthu_user.id,
@@ -182,6 +208,7 @@ async def test_admin_user_list_projects_student_affiliation_without_general_api_
         assert me_response.status_code == 200
         assert "student_id" not in me_response.json()
         assert "department_code" not in me_response.json()
+        assert "nthu_affiliation_kind" not in me_response.json()
     finally:
         app.dependency_overrides.pop(get_current_user, None)
 

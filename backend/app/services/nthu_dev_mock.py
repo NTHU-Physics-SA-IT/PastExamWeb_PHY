@@ -7,8 +7,7 @@ import secrets
 
 from app.core.config import settings
 from app.services.nthu_affiliation import (
-    department_by_code,
-    parse_nthu_student_affiliation,
+    classify_nthu_affiliation,
 )
 from app.services.nthu_oauth import NthuOAuthProviderError, NthuProfile
 from app.utils.auth import redis_client
@@ -40,16 +39,18 @@ class NthuDevProfileDefinition:
         )
 
     def public_value(self) -> dict[str, object]:
-        affiliation = parse_nthu_student_affiliation(self.userid)
-        department = department_by_code(affiliation.department_code)
+        affiliation = classify_nthu_affiliation(self.userid)
         return {
             "key": self.key,
             "label": self.label,
             "userid": self.userid,
             "name": self.name,
             "inschool": self.inschool,
-            "department_code": department.code if department else None,
-            "department_name": department.name if department else None,
+            "department_code": affiliation.department_code,
+            "department_name": affiliation.department_name,
+            "nthu_affiliation_kind": affiliation.kind.value,
+            "nthu_affiliation_label": affiliation.label,
+            "classification_source": affiliation.classification_source.value,
         }
 
 

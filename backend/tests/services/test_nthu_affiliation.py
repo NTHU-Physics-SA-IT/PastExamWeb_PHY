@@ -2,6 +2,9 @@ import pytest
 
 from app.services.nthu_affiliation import (
     AffiliationStatus,
+    NthuAffiliationKind,
+    NthuAffiliationSource,
+    classify_nthu_affiliation,
     department_by_code,
     parse_nthu_student_affiliation,
 )
@@ -39,3 +42,79 @@ def test_invalid_missing_or_special_student_id_is_unknown(
     assert affiliation.college_code is None
     assert affiliation.department_code is None
     assert affiliation.program_code is None
+
+
+@pytest.mark.parametrize(
+    ("userid", "kind", "label", "department_code", "source"),
+    [
+        (
+            "112022123",
+            NthuAffiliationKind.STANDARD_STUDENT,
+            "一般學生",
+            "022",
+            NthuAffiliationSource.STUDENT_ID_PARSER,
+        ),
+        (
+            "112025123",
+            NthuAffiliationKind.STANDARD_STUDENT,
+            "一般學生",
+            "025",
+            NthuAffiliationSource.STUDENT_ID_PARSER,
+        ),
+        (
+            "X1106099",
+            NthuAffiliationKind.SPECIAL_STUDENT,
+            "交換生／特殊學生",
+            None,
+            NthuAffiliationSource.HEURISTIC,
+        ),
+        (
+            "W90001",
+            NthuAffiliationKind.STAFF,
+            "教職員",
+            None,
+            NthuAffiliationSource.HEURISTIC,
+        ),
+        (
+            "W90002",
+            NthuAffiliationKind.STAFF,
+            "教職員",
+            None,
+            NthuAffiliationSource.HEURISTIC,
+        ),
+        (
+            None,
+            NthuAffiliationKind.UNKNOWN,
+            "未分類",
+            None,
+            NthuAffiliationSource.UNCLASSIFIED,
+        ),
+        (
+            "arbitrary",
+            NthuAffiliationKind.UNKNOWN,
+            "未分類",
+            None,
+            NthuAffiliationSource.UNCLASSIFIED,
+        ),
+    ],
+)
+def test_classifies_nthu_affiliation_for_admin_display(
+    userid: str | None,
+    kind: NthuAffiliationKind,
+    label: str,
+    department_code: str | None,
+    source: NthuAffiliationSource,
+) -> None:
+    affiliation = classify_nthu_affiliation(userid)
+
+    assert affiliation.kind is kind
+    assert affiliation.label == label
+    assert affiliation.department_code == department_code
+    assert affiliation.classification_source is source
+
+
+def test_unknown_catalog_department_is_not_a_standard_student() -> None:
+    affiliation = classify_nthu_affiliation("112999123")
+
+    assert affiliation.kind is NthuAffiliationKind.UNKNOWN
+    assert affiliation.department_code is None

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import re
 
 
 NTHU_STUDENT_ID_LENGTH = 9
@@ -14,6 +15,27 @@ NTHU_DEPARTMENT_CATALOG_REVISION = "113.5.14"
 class AffiliationStatus(str, Enum):
     PARSED = "parsed"
     UNKNOWN_SPECIAL = "unknown_special"
+
+
+class NthuAffiliationKind(str, Enum):
+    STANDARD_STUDENT = "standard_student"
+    SPECIAL_STUDENT = "special_student"
+    STAFF = "staff"
+    UNKNOWN = "unknown"
+
+
+class NthuAffiliationSource(str, Enum):
+    STUDENT_ID_PARSER = "student_id_parser"
+    HEURISTIC = "heuristic"
+    UNCLASSIFIED = "unclassified"
+
+
+NTHU_AFFILIATION_LABELS = {
+    NthuAffiliationKind.STANDARD_STUDENT: "一般學生",
+    NthuAffiliationKind.SPECIAL_STUDENT: "交換生／特殊學生",
+    NthuAffiliationKind.STAFF: "教職員",
+    NthuAffiliationKind.UNKNOWN: "未分類",
+}
 
 
 @dataclass(frozen=True)
@@ -31,6 +53,15 @@ class NthuStudentAffiliation:
     college_code: str | None = None
     department_code: str | None = None
     program_code: str | None = None
+
+
+@dataclass(frozen=True)
+class NthuAffiliation:
+    kind: NthuAffiliationKind
+    label: str
+    classification_source: NthuAffiliationSource
+    department_code: str | None = None
+    department_name: str | None = None
 
 
 def _departments(
@@ -304,6 +335,47 @@ def department_by_code(code: str | None) -> NthuDepartment | None:
     if code is None:
         return None
     return _DEPARTMENTS_BY_CODE.get(code)
+
+
+_SPECIAL_STUDENT_USERID_PATTERN = re.compile(r"X[0-9]{7}\Z", re.ASCII)
+_STAFF_LIKE_USERID_PATTERN = re.compile(r"W[0-9]{5}\Z", re.ASCII)
+
+
+def classify_nthu_affiliation(userid: str | None) -> NthuAffiliation:
+    parsed = parse_nthu_student_affiliation(userid)
+    department = department_by_code(parsed.department_code)
+    if parsed.status is AffiliationStatus.PARSED and department is not None:
+        kind = NthuAffiliationKind.STANDARD_STUDENT
+        return NthuAffiliation(
+            kind=kind,
+            label=NTHU_AFFILIATION_LABELS[kind],
+            classification_source=NthuAffiliationSource.STUDENT_ID_PARSER,
+            department_code=department.code,
+            department_name=department.name,
+        )
+
+    if isinstance(userid, str) and _SPECIAL_STUDENT_USERID_PATTERN.fullmatch(userid):
+        kind = NthuAffiliationKind.SPECIAL_STUDENT
+        return NthuAffiliation(
+            kind=kind,
+            label=NTHU_AFFILIATION_LABELS[kind],
+            classification_source=NthuAffiliationSource.HEURISTIC,
+        )
+
+    if isinstance(userid, str) and _STAFF_LIKE_USERID_PATTERN.fullmatch(userid):
+        kind = NthuAffiliationKind.STAFF
+        return NthuAffiliation(
+            kind=kind,
+            label=NTHU_AFFILIATION_LABELS[kind],
+            classification_source=NthuAffiliationSource.HEURISTIC,
+        )
+
+    kind = NthuAffiliationKind.UNKNOWN
+    return NthuAffiliation(
+        kind=kind,
+        label=NTHU_AFFILIATION_LABELS[kind],
+        classification_source=NthuAffiliationSource.UNCLASSIFIED,
+    )
 
 
 def parse_nthu_student_affiliation(

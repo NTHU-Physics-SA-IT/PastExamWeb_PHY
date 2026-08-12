@@ -51,6 +51,16 @@ def test_fixed_catalog_has_exactly_seven_safe_unique_profiles(enabled_mock) -> N
     assert all(profile.email.endswith(".invalid") for profile in profiles)
     assert all(profile.name.startswith("[DEV]") for profile in profiles)
 
+    public = {
+        profile["key"]: profile for profile in nthu_dev_mock.public_nthu_dev_profiles()
+    }
+    assert public["physics"]["nthu_affiliation_kind"] == "standard_student"
+    assert public["special_userid"]["nthu_affiliation_kind"] == "special_student"
+    assert public["staff_allowed"]["nthu_affiliation_kind"] == "staff"
+    assert public["staff_unlisted"]["nthu_affiliation_kind"] == "staff"
+    assert public["missing_userid"]["nthu_affiliation_kind"] == "unknown"
+    assert all("nthu_affiliation_label" in profile for profile in public.values())
+
 
 def test_dev_code_is_opaque_ttl_bound_and_one_time(enabled_mock) -> None:
     code = nthu_dev_mock.create_nthu_dev_code("physics")

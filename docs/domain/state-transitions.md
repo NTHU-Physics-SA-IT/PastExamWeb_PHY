@@ -367,7 +367,14 @@ a conflict.
 
 NTHU UUID remains the canonical external identity. Provider `userid` is a synchronized affiliation attribute and never an identity key. An `inschool=false` profile is always denied before any allow path.
 
-`all_nthu` preserves the existing eligible-member behavior and ignores department and staff lists. `selected_departments` authorizes when either the parsed student department is selected or the exact provider `userid` appears in the administrator-maintained staff allowlist. Staff userids are trimmed at configuration input but remain case-sensitive; the system never guesses staff status or organizational unit from userid format.
+`all_nthu` preserves the existing eligible-member behavior and ignores
+department, special-affiliation, and staff lists. `selected_departments`
+authorizes through one of three explicit paths: a standard student's parsed
+department is selected, `special_student` is explicitly selected for a derived
+special-student affiliation, or the exact provider `userid` appears in the
+administrator-maintained staff allowlist. Staff userids are trimmed at
+configuration input but remain case-sensitive. A staff-like display
+classification never grants access and never implies an organizational unit.
 
 Authorization runs after the provider profile is established and before local User creation or profile synchronization. A denial produces no User mutation, login handoff, exchange success, or application JWT. Existing users remain persisted and unchanged when a later policy denies a login.
 
@@ -662,14 +669,17 @@ identity mapping. A future policy change may permit another population without
 changing `oauth_provider="nthu"` or the UUID subject.
 
 The access policy defaults to `all_nthu`, preserving the existing in-school
-eligibility rule. An administrator may persist `selected_departments` with one
-or more canonical three-digit department codes. In that mode, only a parsed
-department in the selected set is eligible. Missing, malformed, special, or
-otherwise unverifiable `userid` values fail closed with the same friendly
-department-scope denial as a non-selected department. The callback enforces
-this after provider-profile validation and before provider-identity lookup,
-profile synchronization, new User creation, PostgreSQL commit, Redis handoff,
-or application JWT issuance. Existing accounts are retained when later denied.
+eligibility rule. An administrator may persist `selected_departments` with any
+non-empty combination of canonical three-digit department codes, the explicit
+`special_student` affiliation bucket, and exact staff userids. Standard
+students require a selected parsed department; special-student classification
+requires the explicit bucket; staff access always requires an exact allowlist
+match. Classification alone never authorizes either special students or staff.
+Missing, malformed, and otherwise unverifiable `userid` values fail closed with
+the same friendly scope denial. The callback enforces this after
+provider-profile validation and before provider-identity lookup, profile
+synchronization, new User creation, PostgreSQL commit, Redis handoff, or
+application JWT issuance. Existing accounts are retained when later denied.
 Local password authentication never reads this policy.
 
 | Operation | Anonymous | Authenticated user | Owner | Administrator | System |

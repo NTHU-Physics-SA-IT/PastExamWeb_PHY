@@ -32,20 +32,37 @@ POLICIES = {
     "selected_022": {
         "mode": "selected_departments",
         "allowed_department_codes": ["022"],
+        "allowed_special_affiliations": [],
         "staff_access": "none",
         "allowed_staff_userids": [],
     },
     "selected_022_staff": {
         "mode": "selected_departments",
         "allowed_department_codes": ["022"],
+        "allowed_special_affiliations": ["special_student"],
         "staff_access": "allowlist",
         "allowed_staff_userids": ["W90001"],
+    },
+    "selected_022_special": {
+        "mode": "selected_departments",
+        "allowed_department_codes": ["022"],
+        "allowed_special_affiliations": ["special_student"],
+        "staff_access": "none",
+        "allowed_staff_userids": [],
     },
     "staff_only": {
         "mode": "selected_departments",
         "allowed_department_codes": [],
+        "allowed_special_affiliations": [],
         "staff_access": "allowlist",
         "allowed_staff_userids": ["W90001"],
+    },
+    "special_only": {
+        "mode": "selected_departments",
+        "allowed_department_codes": [],
+        "allowed_special_affiliations": ["special_student"],
+        "staff_access": "none",
+        "allowed_staff_userids": [],
     },
 }
 
@@ -59,8 +76,10 @@ EXPECTED = {
         "staff_unlisted",
     },
     "selected_022": {"physics"},
-    "selected_022_staff": {"physics", "staff_allowed"},
+    "selected_022_staff": {"physics", "special_userid", "staff_allowed"},
+    "selected_022_special": {"physics", "special_userid"},
     "staff_only": {"staff_allowed"},
+    "special_only": {"special_userid"},
 }
 
 
@@ -83,6 +102,9 @@ async def test_dev_profile_catalog_is_gated_and_backend_owned(client):
         definition.key for definition in nthu_dev_mock.NTHU_DEV_PROFILES
     ]
     assert all("uuid" not in profile and "email" not in profile for profile in profiles)
+    by_key = {profile["key"]: profile for profile in profiles}
+    assert by_key["special_userid"]["nthu_affiliation_kind"] == "special_student"
+    assert by_key["staff_unlisted"]["nthu_affiliation_kind"] == "staff"
 
 
 @pytest.mark.asyncio

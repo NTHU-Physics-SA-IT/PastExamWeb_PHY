@@ -38,7 +38,7 @@ from app.api.services.presence import (
 )
 from app.utils.auth import get_current_user, get_password_hash
 from app.services.nthu_affiliation import (
-    department_by_code,
+    classify_nthu_affiliation,
     parse_nthu_student_affiliation,
 )
 
@@ -96,14 +96,29 @@ def _to_admin_user_read(
     user: User, contributor_experience: int = 0, is_online: bool = False
 ) -> AdminUserRead:
     base = _to_user_read(user, contributor_experience, is_online)
-    affiliation = parse_nthu_student_affiliation(user.student_id)
-    department = department_by_code(affiliation.department_code)
+    parsed_affiliation = parse_nthu_student_affiliation(user.student_id)
+    account_source = (
+        "local"
+        if user.is_local
+        else "nthu"
+        if user.oauth_provider == "nthu"
+        else "unknown"
+    )
+    affiliation = (
+        classify_nthu_affiliation(user.student_id) if account_source == "nthu" else None
+    )
     return AdminUserRead(
         **base.model_dump(),
+        account_source=account_source,
         student_id=user.student_id,
-        department_code=affiliation.department_code,
-        department_name=department.name if department else None,
-        affiliation_status=affiliation.status.value,
+        department_code=affiliation.department_code if affiliation else None,
+        department_name=affiliation.department_name if affiliation else None,
+        affiliation_status=parsed_affiliation.status.value,
+        nthu_affiliation_kind=affiliation.kind.value if affiliation else None,
+        nthu_affiliation_label=affiliation.label if affiliation else None,
+        nthu_classification_source=(
+            affiliation.classification_source.value if affiliation else None
+        ),
     )
 
 
