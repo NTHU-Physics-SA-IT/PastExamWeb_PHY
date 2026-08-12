@@ -322,7 +322,10 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
     await expectNoHorizontalOverflow(page)
   }
 
-  await page.evaluate(() => document.documentElement.style.setProperty('--app-font-scale', '1.5'))
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = '150%'
+    document.documentElement.style.setProperty('--app-effective-font-scale', '1.5')
+  })
   const scaledTops = await summaryCards.evaluateAll((elements) =>
     elements.map((element) => Math.round(element.getBoundingClientRect().top))
   )

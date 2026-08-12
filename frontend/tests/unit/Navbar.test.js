@@ -114,6 +114,24 @@ vi.mock('@/components/NotificationCenterModal.vue', () => ({
 }))
 
 describe('Navbar methods', () => {
+  it('hides guest login only on Home and the public course catalog', () => {
+    const guest = { isAuthenticated: false }
+
+    expect(Navbar.computed.showGuestLogin.call({ ...guest, $route: { path: '/' } })).toBe(false)
+    expect(Navbar.computed.showGuestLogin.call({ ...guest, $route: { path: '/courses' } })).toBe(
+      false
+    )
+    expect(
+      Navbar.computed.showGuestLogin.call({ ...guest, $route: { path: '/courses/42' } })
+    ).toBe(false)
+    expect(
+      Navbar.computed.showGuestLogin.call({ ...guest, $route: { path: '/personal-settings' } })
+    ).toBe(true)
+    expect(
+      Navbar.computed.showGuestLogin.call({ isAuthenticated: true, $route: { path: '/archive' } })
+    ).toBe(false)
+  })
+
   beforeEach(() => {
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     trackEventMock.mockReset()

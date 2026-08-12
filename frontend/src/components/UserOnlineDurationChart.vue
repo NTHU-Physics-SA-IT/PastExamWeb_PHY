@@ -496,7 +496,7 @@ onBeforeUnmount(() => requestController?.abort())
 }
 
 .user-duration-chart {
-  --temporal-edge-padding: clamp(1rem, calc(1.35rem * var(--app-font-scale)), 2rem);
+  --temporal-edge-padding: 1.35rem;
   display: grid;
   grid-template-columns: 3.5rem minmax(0, 1fr);
   gap: 0.5rem;

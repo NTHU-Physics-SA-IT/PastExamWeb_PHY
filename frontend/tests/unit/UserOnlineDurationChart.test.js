@@ -262,7 +262,9 @@ describe('UserOnlineDurationChart', () => {
       [150, '1.35'],
     ]) {
       applyFontSizePreference(percent)
-      expect(document.documentElement.style.getPropertyValue('--app-font-scale')).toBe(scale)
+      expect(document.documentElement.style.getPropertyValue('--app-effective-font-scale')).toBe(
+        scale
+      )
       expect(wrapper.findAll('.user-duration-chart')).toHaveLength(1)
       expect(wrapper.findAll('.user-duration-chart__bar')[4].classes()).toContain('has-value')
     }
@@ -273,6 +275,6 @@ describe('UserOnlineDurationChart', () => {
     expect(componentSource).toMatch(/user-duration-switch button[\s\S]*var\(--app-font-size-xs\)/)
     expect(componentSource).not.toMatch(/font-size:\s*(11|12)px/)
     expect(componentSource).not.toContain('overflow-x: auto')
-    expect(componentSource).toContain('var(--app-font-scale)')
+    expect(componentSource).not.toContain('var(--app-effective-font-scale)')
   })
 })

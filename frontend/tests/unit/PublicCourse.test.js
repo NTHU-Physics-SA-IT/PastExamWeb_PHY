@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import publicCourseSource from '@/views/PublicCourse.vue?raw'
 
 import PublicCourse from '@/views/PublicCourse.vue'
 
@@ -44,6 +45,16 @@ describe('PublicCourse', () => {
     setSeoMock.mockReset()
   })
 
+  it('vertically centers breadcrumb links, separators, and current-page text', () => {
+    expect(publicCourseSource).toMatch(/\.breadcrumbs\s*\{[^}]*align-items:\s*center/s)
+    expect(publicCourseSource).toMatch(
+      /\.breadcrumbs a\s*\{[^}]*display:\s*inline-flex[^}]*min-height:\s*2rem[^}]*align-items:\s*center/s
+    )
+    expect(publicCourseSource).toMatch(
+      /\.breadcrumbs > span\s*\{[^}]*display:\s*inline-flex[^}]*min-height:\s*2rem[^}]*align-items:\s*center/s
+    )
+  })
+
   it('renders safe archive metadata without exposing file actions', async () => {
     courseServiceMock.listPublicCategories.mockResolvedValue({
       data: [{ key: 'fundamental', name: '基礎課程', label: '基礎' }],
@@ -77,6 +88,8 @@ describe('PublicCourse', () => {
     expect(wrapper.text()).toContain('附解答')
     expect(wrapper.find('button').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('下載檔案')
+    expect(wrapper.find('.login-notice').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('預覽或下載完整文件')
     expect(setSeoMock).toHaveBeenCalledWith(
       expect.objectContaining({
         title: expect.not.stringContaining('PhysArchive'),

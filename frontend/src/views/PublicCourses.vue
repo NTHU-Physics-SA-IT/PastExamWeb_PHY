@@ -9,10 +9,7 @@
     <header class="catalog-header">
       <p class="eyebrow">PHY ARCHIVE</p>
       <h1>清大物理考古題課程目錄</h1>
-      <p>
-        瀏覽清大物理相關課程；有公開考古題時，頁面會提供學年度、授課教師、
-        考試類型與解答收錄狀況。完整 PDF 的預覽與下載仍需登入。
-      </p>
+      <p>瀏覽清大物理相關課程；有公開考古題時，頁面會提供學年度、授課教師、考試類型與解答收錄狀況。完整 PDF 的預覽與下載仍需登入。</p>
     </header>
 
     <p v-if="loading" class="status-message" aria-live="polite">正在載入課程資料……</p>
@@ -40,21 +37,18 @@
 
         <div class="course-grid">
           <article v-for="course in section.courses" :key="course.id" class="course-card">
-            <h3>
-              <RouterLink :to="{ name: 'PublicCourse', params: { courseId: course.id } }">
-                {{ course.name }}考古題
-              </RouterLink>
-            </h3>
-            <p>查看課程資訊，以及已公開收錄的學年度、授課教師、考試類型與解答資訊。</p>
+            <RouterLink
+              class="course-card-link"
+              :to="{ name: 'PublicCourse', params: { courseId: course.id } }"
+            >
+              <h3>{{ course.name }}</h3>
+              <i class="pi pi-arrow-right" aria-hidden="true"></i>
+            </RouterLink>
           </article>
         </div>
       </section>
     </div>
 
-    <aside class="access-note" aria-label="檔案存取說明">
-      <h2>公開頁面不提供檔案下載</h2>
-      <p>課程與考古題中繼資料可匿名瀏覽；完整文件仍受網站登入與權限保護。</p>
-    </aside>
   </main>
 </template>
 
@@ -181,23 +175,53 @@ onMounted(loadCatalog)
   color: inherit;
 }
 
+.breadcrumbs a {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  padding: 0.3rem 0.62rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.55rem;
+  background: var(--bg-secondary);
+  text-decoration: none;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+.breadcrumbs > span {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  line-height: 1.25;
+}
+
+.breadcrumbs a:hover {
+  border-color: var(--primary-color);
+  background: var(--bg-primary);
+}
+
 .catalog-header {
-  max-width: 760px;
-  margin-bottom: 2.5rem;
+  max-width: 720px;
+  margin-bottom: 2rem;
 }
 
 .catalog-header h1 {
-  margin: 0.35rem 0 1rem;
-  font-size: clamp(2rem, 5vw, 3.4rem);
+  margin: 0.35rem 0 0.85rem;
+  font-size: clamp(1.6rem, 2.6vw, 2rem);
 }
 
 .catalog-header > p,
-.course-card p,
-.access-note p,
 .empty-state p,
 .error-message p {
   color: var(--text-secondary);
   line-height: 1.75;
+}
+
+.catalog-header > p {
+  max-width: 68ch;
+  margin: 0;
+  text-wrap: pretty;
 }
 
 .eyebrow,
@@ -224,6 +248,7 @@ onMounted(loadCatalog)
 
 .category-header h2 {
   margin: 0.25rem 0 0;
+  font-size: 1.2rem;
 }
 
 .category-header > span {
@@ -237,32 +262,70 @@ onMounted(loadCatalog)
   gap: 1rem;
 }
 
-.course-card,
-.access-note,
 .empty-state,
 .error-message {
   padding: 1.25rem;
-  border: 1px solid var(--surface-border);
+  border: 1px solid var(--border-color);
   border-radius: 1rem;
-  background: var(--surface-card);
+  background: var(--bg-secondary);
+}
+
+.course-card {
+  border: 1px solid var(--border-color);
+  border-radius: 0.8rem;
+  background: var(--bg-secondary);
+  overflow: hidden;
+  transition:
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.course-card:hover {
+  border-color: var(--primary-color);
+  transform: translateY(-2px);
+}
+
+.course-card-link {
+  display: flex;
+  min-height: 4.75rem;
+  padding: 1rem 1.15rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  text-decoration: none;
+}
+
+.course-card-link h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.course-card-link i {
+  color: var(--primary-color);
+  transition: transform 160ms ease;
+}
+
+.course-card-link:hover i {
+  transform: translateX(0.2rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .course-card,
+  .course-card-link i {
+    transition: none;
+  }
 }
 
 .course-card h3,
-.access-note h2,
 .empty-state h2,
 .error-message h2 {
   margin-top: 0;
 }
 
 .course-card p,
-.access-note p,
 .empty-state p,
 .error-message p {
   margin-bottom: 0;
-}
-
-.access-note {
-  margin-top: 3rem;
 }
 
 .status-message {

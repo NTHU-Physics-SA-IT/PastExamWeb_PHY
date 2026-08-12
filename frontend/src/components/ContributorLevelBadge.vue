@@ -84,8 +84,8 @@ const accessibleLabel = computed(() =>
   align-items: center;
   justify-content: center;
   gap: 0.22rem;
-  min-width: calc(4.15rem * var(--app-font-scale));
-  padding: calc(0.28rem * var(--app-font-scale)) calc(0.65rem * var(--app-font-scale));
+  min-width: 4.15rem;
+  padding: 0.28rem 0.65rem;
   border: 0;
   clip-path: polygon(10% 0, 90% 0, 100% 50%, 90% 100%, 10% 100%, 0 50%);
   background: var(--level-badge-bg);
@@ -136,8 +136,8 @@ const accessibleLabel = computed(() =>
 }
 
 .contributor-level--compact .contributor-level__badge {
-  min-width: calc(3.5rem * var(--app-font-scale));
-  padding: calc(0.18rem * var(--app-font-scale)) calc(0.5rem * var(--app-font-scale));
+  min-width: 3.5rem;
+  padding: 0.18rem 0.5rem;
   font-size: var(--app-font-size-xs);
   line-height: 1.25;
 }

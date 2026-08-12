@@ -1806,7 +1806,7 @@ onBeforeUnmount(teardownCardLayout)
   line-height: 1.35;
 }
 .report-management :deep(.p-button) {
-  min-height: calc(2rem * var(--app-font-scale));
+  min-height: 2rem;
   font-size: var(--app-font-size-sm) !important;
   line-height: 1.25;
 }
@@ -1931,7 +1931,7 @@ onBeforeUnmount(teardownCardLayout)
 .report-management__filters :deep(.p-inputtext),
 .report-management__filters :deep(.p-select),
 .report-management__filters :deep(.p-button) {
-  min-height: max(2.35rem, calc(2.35rem * var(--app-font-scale)));
+  min-height: 2.35rem;
 }
 @container report-section (max-width: 62rem) {
   .report-management__filters {
@@ -2365,7 +2365,7 @@ onBeforeUnmount(teardownCardLayout)
   font-size: var(--app-control-font-size) !important;
 }
 :global(.report-management-dialog .p-button) {
-  min-height: calc(2rem * var(--app-font-scale));
+  min-height: 2rem;
   font-size: var(--app-font-size-sm) !important;
   line-height: 1.25;
 }

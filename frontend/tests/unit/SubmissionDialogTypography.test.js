@@ -2,7 +2,12 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import process from 'node:process'
 import { afterEach, describe, expect, it } from 'vitest'
-import { actualScaleFromDisplayPercent, applyFontSizePreference } from '@/utils/fontSizePreference'
+import {
+  APP_FONT_BASELINE,
+  applyFontSizePreference,
+  effectiveFontScaleFromDisplayPercent,
+  userScaleFromDisplayPercent,
+} from '@/utils/fontSizePreference'
 
 const frontendRoot = resolve(process.cwd())
 const styleSource = readFileSync(`${frontendRoot}/src/style.css`, 'utf8')
@@ -18,13 +23,24 @@ describe('submission dialog typography', () => {
     [50, '0.45'],
     [100, '0.9'],
     [150, '1.35'],
-  ])('applies %s%% immediately through the authoritative root scale', (percent, scale) => {
-    expect(actualScaleFromDisplayPercent(percent)).toBe(Number(scale))
+  ])('applies %s%% as a user multiplier over the application baseline', (percent, scale) => {
+    expect(APP_FONT_BASELINE).toBe(0.9)
+    expect(userScaleFromDisplayPercent(percent)).toBe(percent / 100)
+    expect(effectiveFontScaleFromDisplayPercent(percent)).toBe(Number(scale))
     applyFontSizePreference(percent)
 
-    expect(document.documentElement.style.getPropertyValue('--app-font-scale')).toBe(scale)
+    expect(document.documentElement.style.fontSize).toBe(`${Number(scale) * 100}%`)
+    expect(document.documentElement.style.getPropertyValue('--app-font-baseline')).toBe('0.9')
+    expect(document.documentElement.style.getPropertyValue('--app-user-font-scale')).toBe(
+      String(percent / 100)
+    )
+    expect(document.documentElement.style.getPropertyValue('--app-effective-font-scale')).toBe(
+      scale
+    )
     expect(document.documentElement.dataset.appFontSizeDisplayPercent).toBe(String(percent))
-    expect(styleSource).toContain('--app-font-size-base: calc(1rem * var(--app-font-scale))')
+    expect(styleSource).toContain('font-size: 90%')
+    expect(styleSource).toContain('--app-font-size-base: 1rem')
+    expect(styleSource).not.toMatch(/font-size:\s*calc\([^;]*var\(--app-effective-font-scale\)/)
   })
 
   it('scopes all three dialogs and the teleported Select options to the same scaled token', () => {
@@ -38,14 +54,18 @@ describe('submission dialog typography', () => {
       /\.submission-typography-overlay[\s\S]*font-size: var\(--app-font-size-base\)/
     )
     expect(styleSource).not.toMatch(
-      /\.submission-typography-dialog\s*\{[^}]*calc\([^)]*--app-font-scale/
+      /\.submission-typography-dialog\s*\{[^}]*calc\([^)]*--app-effective-font-scale/
     )
   })
 
   it('keeps the statistics footer outside the scrollable content with its own action spacing', () => {
-    const contentEnd = adminSource.indexOf('</div>\n        <template #footer>')
-    const footerStart = adminSource.indexOf('<template #footer>', contentEnd)
-    const closeButton = adminSource.indexOf('class="user-data-stats-dialog__close"', footerStart)
+    const normalizedAdminSource = adminSource.replace(/\r\n?/g, '\n')
+    const contentEnd = normalizedAdminSource.indexOf('</div>\n        <template #footer>')
+    const footerStart = normalizedAdminSource.indexOf('<template #footer>', contentEnd)
+    const closeButton = normalizedAdminSource.indexOf(
+      'class="user-data-stats-dialog__close"',
+      footerStart
+    )
 
     expect(contentEnd).toBeGreaterThan(-1)
     expect(footerStart).toBeGreaterThan(contentEnd)

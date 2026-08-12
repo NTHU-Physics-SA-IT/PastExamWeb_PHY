@@ -85,10 +85,13 @@ contract rather than a local mapping copied into a new screen.
 
 ## Font scaling
 
-`frontend/src/utils/fontSizePreference.js` defines a supported display range of
-50% to 150%, applies it through `--app-font-scale`, and retains legacy stored
-values. UI work must not be verified only at 100%. Enlarged text must preserve
-the main actions, labels, validation messages, and data needed to recover.
+`frontend/src/utils/fontSizePreference.js` defines the 90% application typography
+baseline and a supported 50% to 150% user multiplier. Their product is applied
+once at the root font size and exposed as `--app-effective-font-scale`; nested
+`rem` typography must not multiply that effective scale again. The preference
+retains legacy stored values. UI work must not be verified only at 100%. Enlarged
+text must preserve the main actions, labels, validation messages, and data needed
+to recover.
 
 ## Verification expectations
 

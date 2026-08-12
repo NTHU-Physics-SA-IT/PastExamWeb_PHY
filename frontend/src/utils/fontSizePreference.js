@@ -2,11 +2,11 @@ import { getLocalItem, setLocalItem } from './storage'
 
 export const FONT_SIZE_STORAGE_KEY = 'personal-settings-font-size'
 
-export const FONT_SIZE_BASELINE_SCALE = 0.9
+export const APP_FONT_BASELINE = 0.9
 export const FONT_SIZE_MIN = 50
 export const FONT_SIZE_MAX = 150
 export const FONT_SIZE_STEP = 1
-export const FONT_SIZE_DEFAULT = 100
+export const USER_SCALE_DEFAULT_PERCENT = 100
 
 const DISPLAY_PERCENT_PREFIX = 'display-percent:'
 
@@ -20,34 +20,38 @@ const LEGACY_FONT_SIZE_SCALE = {
 function normalizeFontSizePercent(value) {
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) {
-    return FONT_SIZE_DEFAULT
+    return USER_SCALE_DEFAULT_PERCENT
   }
 
   const clamped = Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, numeric))
   return Math.round(clamped)
 }
 
-function displayPercentFromActualScale(value) {
+function displayPercentFromEffectiveScale(value) {
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) {
-    return FONT_SIZE_DEFAULT
+    return USER_SCALE_DEFAULT_PERCENT
   }
 
-  return normalizeFontSizePercent((numeric / FONT_SIZE_BASELINE_SCALE) * 100)
+  return normalizeFontSizePercent((numeric / APP_FONT_BASELINE) * 100)
 }
 
-export function actualScaleFromDisplayPercent(value) {
+export function userScaleFromDisplayPercent(value) {
   const percent = normalizeFontSizePercent(value)
-  return Number((FONT_SIZE_BASELINE_SCALE * (percent / 100)).toFixed(4))
+  return Number((percent / 100).toFixed(4))
+}
+
+export function effectiveFontScaleFromDisplayPercent(value) {
+  return Number((APP_FONT_BASELINE * userScaleFromDisplayPercent(value)).toFixed(4))
 }
 
 function parseStoredFontSizePercent(stored) {
   if (!stored) {
-    return FONT_SIZE_DEFAULT
+    return USER_SCALE_DEFAULT_PERCENT
   }
 
   if (Object.hasOwn(LEGACY_FONT_SIZE_SCALE, stored)) {
-    return displayPercentFromActualScale(LEGACY_FONT_SIZE_SCALE[stored])
+    return displayPercentFromEffectiveScale(LEGACY_FONT_SIZE_SCALE[stored])
   }
 
   if (stored.startsWith(DISPLAY_PERCENT_PREFIX)) {
@@ -56,14 +60,14 @@ function parseStoredFontSizePercent(stored) {
 
   const numeric = Number(stored)
   if (!Number.isFinite(numeric)) {
-    return FONT_SIZE_DEFAULT
+    return USER_SCALE_DEFAULT_PERCENT
   }
 
   if (numeric > 2) {
     return normalizeFontSizePercent(numeric)
   }
 
-  return displayPercentFromActualScale(numeric)
+  return displayPercentFromEffectiveScale(numeric)
 }
 
 export function getFontSizePreference() {
@@ -73,12 +77,20 @@ export function getFontSizePreference() {
 
 export function applyFontSizePreference(value = getFontSizePreference()) {
   const percent = normalizeFontSizePercent(value)
-  const scale = actualScaleFromDisplayPercent(percent)
+  const userScale = userScaleFromDisplayPercent(percent)
+  const effectiveScale = effectiveFontScaleFromDisplayPercent(percent)
 
   if (typeof document !== 'undefined') {
-    document.documentElement.style.setProperty('--app-font-scale', String(scale))
-    document.documentElement.dataset.appFontSize = String(scale)
-    document.documentElement.dataset.appFontScale = String(scale)
+    document.documentElement.style.fontSize = `${effectiveScale * 100}%`
+    document.documentElement.style.setProperty('--app-font-baseline', String(APP_FONT_BASELINE))
+    document.documentElement.style.setProperty('--app-user-font-scale', String(userScale))
+    document.documentElement.style.setProperty(
+      '--app-effective-font-scale',
+      String(effectiveScale)
+    )
+    document.documentElement.dataset.appFontBaseline = String(APP_FONT_BASELINE)
+    document.documentElement.dataset.appFontUserScale = String(userScale)
+    document.documentElement.dataset.appFontEffectiveScale = String(effectiveScale)
     document.documentElement.dataset.appFontSizeDisplayPercent = String(percent)
   }
 

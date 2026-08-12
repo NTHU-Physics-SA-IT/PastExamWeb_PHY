@@ -6662,16 +6662,9 @@ const saveNthuAccessPolicy = async () => {
   try {
     const payload = {
       mode: nthuAccessPolicyForm.value.mode,
-      allowed_department_codes:
-        nthuAccessPolicyForm.value.mode === NTHU_ACCESS_MODES.ALL_NTHU
-          ? []
-          : [...nthuAccessPolicyForm.value.allowed_department_codes],
-      staff_access:
-        nthuAccessPolicyForm.value.mode === NTHU_ACCESS_MODES.ALL_NTHU
-          ? NTHU_STAFF_ACCESS.NONE
-          : nthuAccessPolicyForm.value.staff_access,
+      allowed_department_codes: [...nthuAccessPolicyForm.value.allowed_department_codes],
+      staff_access: nthuAccessPolicyForm.value.staff_access,
       allowed_staff_userids:
-        nthuAccessPolicyForm.value.mode === NTHU_ACCESS_MODES.ALL_NTHU ||
         nthuAccessPolicyForm.value.staff_access === NTHU_STAFF_ACCESS.NONE
           ? []
           : [...nthuAccessPolicyForm.value.allowed_staff_userids],
@@ -8639,7 +8632,9 @@ const scheduleLoginStatsRefresh = () => {
 const updateStatisticsFontScale = () => {
   if (typeof document === 'undefined') return
   const scale = Number.parseFloat(
-    window.getComputedStyle(document.documentElement).getPropertyValue('--app-font-scale')
+    window
+      .getComputedStyle(document.documentElement)
+      .getPropertyValue('--app-effective-font-scale')
   )
   statisticsFontScale.value = Number.isFinite(scale) && scale > 0 ? scale : 1
 }
@@ -9192,8 +9187,8 @@ onBeforeUnmount(() => {
 }
 
 .contributor-level-stat :deep(.contributor-level--compact .contributor-level__badge) {
-  min-width: calc(2.9rem * var(--app-font-scale));
-  padding: calc(0.12rem * var(--app-font-scale)) calc(0.34rem * var(--app-font-scale));
+  min-width: 2.9rem;
+  padding: 0.12rem 0.34rem;
   font-size: var(--app-font-size-xs);
 }
 
@@ -9222,9 +9217,9 @@ onBeforeUnmount(() => {
 
 :deep(.user-management-table .p-datatable-thead > tr > th:first-child),
 :deep(.user-management-table .p-datatable-tbody > tr > td:first-child) {
-  width: clamp(7.5rem, calc(7.5rem * var(--app-font-scale)), 10.5rem);
-  min-width: clamp(7.5rem, calc(7.5rem * var(--app-font-scale)), 10.5rem);
-  max-width: clamp(7.5rem, calc(7.5rem * var(--app-font-scale)), 10.5rem);
+  width: 7.5rem;
+  min-width: 7.5rem;
+  max-width: 10.5rem;
   white-space: nowrap;
 }
 
@@ -9336,7 +9331,7 @@ onBeforeUnmount(() => {
 }
 
 .user-login-column-chart {
-  --temporal-edge-padding: clamp(1rem, calc(1.35rem * var(--app-font-scale)), 2rem);
+  --temporal-edge-padding: 1.35rem;
   display: grid;
   grid-template-columns: 2rem minmax(0, 1fr);
   gap: 0.45rem;
@@ -13431,7 +13426,7 @@ onBeforeUnmount(() => {
 
 .review-center :deep(.p-button),
 .review-center .review-action-button {
-  min-height: calc(2rem * var(--app-font-scale));
+  min-height: 2rem;
   font-size: var(--app-font-size-sm) !important;
   line-height: 1.25;
 }
@@ -13505,7 +13500,7 @@ onBeforeUnmount(() => {
 .category-management-table :deep(.p-button),
 .admin-mobile-list--courses :deep(.p-button),
 .admin-mobile-list--categories :deep(.p-button) {
-  min-height: calc(2rem * var(--app-font-scale));
+  min-height: 2rem;
   font-size: var(--app-font-size-sm) !important;
   line-height: 1.25;
 }
@@ -13563,7 +13558,7 @@ onBeforeUnmount(() => {
 .admin-toolbar--announcement :deep(.p-button),
 .notification-management-table :deep(.p-button),
 .admin-mobile-list--notifications :deep(.p-button) {
-  min-height: calc(2rem * var(--app-font-scale));
+  min-height: 2rem;
   font-size: var(--app-font-size-sm) !important;
   line-height: 1.25;
 }
@@ -13656,7 +13651,7 @@ onBeforeUnmount(() => {
 .admin-toolbar--users :deep(.p-button),
 .user-management-table :deep(.p-button),
 .admin-mobile-list--users :deep(.p-button) {
-  min-height: calc(2rem * var(--app-font-scale));
+  min-height: 2rem;
   font-size: var(--app-font-size-sm) !important;
   line-height: 1.25;
 }
@@ -13695,7 +13690,7 @@ onBeforeUnmount(() => {
 }
 
 .admin-insights-card :deep(.p-button) {
-  min-height: max(2.25rem, calc(2rem * var(--app-font-scale)));
+  min-height: 2.25rem;
   font-size: var(--app-font-size-sm) !important;
 }
 
@@ -13704,18 +13699,18 @@ onBeforeUnmount(() => {
 .admin-insights-card .section-collapse-toggle,
 .admin-insights-card .contributor-level-toggle,
 .admin-insights-card .contributor-level-stat {
-  min-height: max(2.25rem, calc(2rem * var(--app-font-scale)));
+  min-height: 2.25rem;
 }
 
 .admin-toolbar--users :deep(.p-inputtext),
 .admin-toolbar--users :deep(.p-select) {
-  min-height: max(2.35rem, calc(2.35rem * var(--app-font-scale)));
+  min-height: 2.35rem;
 }
 
 .admin-toolbar--users :deep(.p-button),
 .user-management-table :deep(.p-button),
 .admin-mobile-list--users :deep(.p-button) {
-  min-height: max(2.25rem, calc(2rem * var(--app-font-scale)));
+  min-height: 2.25rem;
 }
 
 .admin-insights-card :deep(.p-button-label),
@@ -13779,7 +13774,7 @@ onBeforeUnmount(() => {
 .trash-center :deep(.p-button),
 .trash-action-button,
 .trash-mobile-card-actions :deep(.p-button) {
-  min-height: calc(2rem * var(--app-font-scale));
+  min-height: 2rem;
   font-size: var(--app-font-size-sm) !important;
   line-height: 1.25;
 }
@@ -13994,7 +13989,7 @@ onBeforeUnmount(() => {
   }
 
   .user-login-column-chart {
-    --temporal-edge-padding: clamp(1.5rem, calc(1.75rem * var(--app-font-scale)), 2.5rem);
+    --temporal-edge-padding: 1.75rem;
     grid-template-columns: 1.6rem minmax(0, 1fr);
     height: 13rem;
     gap: 0.3rem;
@@ -14817,7 +14812,7 @@ onBeforeUnmount(() => {
   .admin-mobile-list--users .user-management-card-actions :deep(.p-button),
   .review-center :deep(.review-card-actions .p-button),
   .trash-center .trash-mobile-card-actions :deep(.p-button) {
-    min-height: calc(2rem * var(--app-font-scale));
+    min-height: 2rem;
     padding-block: var(--p-button-sm-padding-y, 0.375rem);
     line-height: 1.25;
     align-items: center;

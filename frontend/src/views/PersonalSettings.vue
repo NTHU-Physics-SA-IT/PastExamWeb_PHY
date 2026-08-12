@@ -68,7 +68,7 @@
 
                     <div class="preview-sample-column">
                       <p class="preview-sample-label">範例顯示：</p>
-                      <div class="font-size-preview" :style="fontSizePreviewStyle">
+                      <div class="font-size-preview">
                         <section class="preview-course-sample" aria-label="字體大小預覽">
                           <div class="preview-course-heading">
                             <Tag severity="secondary" class="subject-tag preview-tag">必修</Tag>
@@ -143,7 +143,7 @@
           >
             <div class="settings-group-header">
               <h2>帳號設定</h2>
-              <p>管理名稱、電子郵件與密碼。</p>
+              <p>{{ accountSettingsDescription }}</p>
             </div>
 
             <Card id="profile-setting" class="settings-section settings-anchor">
@@ -158,9 +158,9 @@
                       v-model="profileForm.name"
                       class="w-full"
                       maxlength="15"
-                      :disabled="profileLoading"
+                      :disabled="profileLoading || !canEditProfile"
                     />
-                    <small>最多 15 字，會優先作為站內顯示名稱。</small>
+                    <small v-if="canEditProfile">最多 15 字，會優先作為站內顯示名稱。</small>
                   </div>
 
                   <div class="field">
@@ -174,8 +174,13 @@
                     />
                   </div>
 
-                  <div class="form-actions">
+                  <small v-if="!canEditProfile" class="oauth-profile-helper">
+                    此資料由清華校務系統提供，無法在本站修改。
+                  </small>
+
+                  <div v-if="canEditProfile" class="form-actions">
                     <Button
+                      class="profile-save-button"
                       label="儲存基本資料"
                       icon="pi pi-save"
                       type="submit"
@@ -187,7 +192,11 @@
               </template>
             </Card>
 
-            <Card id="password-setting" class="settings-section settings-anchor">
+            <Card
+              v-if="showPasswordSettings"
+              id="password-setting"
+              class="settings-section settings-anchor"
+            >
               <template #title>密碼設定</template>
               <template #content>
                 <form class="settings-form" @submit.prevent="savePassword">
@@ -258,7 +267,6 @@ import {
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
   FONT_SIZE_STEP,
-  actualScaleFromDisplayPercent,
   getFontSizePreference,
   setFontSizePreference,
 } from '../utils/fontSizePreference'
@@ -278,6 +286,7 @@ export default {
   data() {
     return {
       isLocalAccount: null,
+      profileLoaded: false,
       profileLoading: true,
       profileSaving: false,
       originalName: '',
@@ -308,7 +317,18 @@ export default {
   },
   computed: {
     showAccountSettings() {
+      return this.profileLoaded
+    },
+    canEditProfile() {
       return this.isLocalAccount === true
+    },
+    showPasswordSettings() {
+      return this.isLocalAccount === true
+    },
+    accountSettingsDescription() {
+      return this.isLocalAccount
+        ? '管理名稱、電子郵件與密碼。'
+        : '查看由清華校務系統提供的帳號資料。'
     },
     navItems() {
       const items = [
@@ -320,18 +340,17 @@ export default {
       if (this.showAccountSettings) {
         items.push(
           { id: 'account-settings', label: '帳號設定', level: 'group' },
-          { id: 'profile-setting', label: '基本資料', level: 'item' },
-          { id: 'password-setting', label: '密碼設定', level: 'item' }
+          { id: 'profile-setting', label: '基本資料', level: 'item' }
         )
+        if (this.showPasswordSettings) {
+          items.push({ id: 'password-setting', label: '密碼設定', level: 'item' })
+        }
       }
 
       return items
     },
     fontSizePercent() {
       return Math.round(this.fontSizeScale)
-    },
-    fontSizeActualScale() {
-      return actualScaleFromDisplayPercent(this.fontSizePercent)
     },
     fontSizeToneLabel() {
       if (this.fontSizePercent < 100) {
@@ -345,14 +364,11 @@ export default {
     fontSizeDisplayText() {
       return `目前大小：${this.fontSizePercent}%（${this.fontSizeToneLabel}）`
     },
-    fontSizePreviewStyle() {
-      return {
-        '--preview-font-scale': this.fontSizeActualScale,
-      }
-    },
     canSaveProfile() {
       return (
-        Boolean(this.profileForm.name.trim()) && this.profileForm.name.trim() !== this.originalName
+        this.canEditProfile &&
+        Boolean(this.profileForm.name.trim()) &&
+        this.profileForm.name.trim() !== this.originalName
       )
     },
     passwordMismatch() {
@@ -441,18 +457,17 @@ export default {
 
     async loadProfile() {
       this.profileLoading = true
+      this.profileLoaded = false
+      this.isLocalAccount = null
 
       try {
         const { data } = await userService.getMe()
         this.isLocalAccount = data?.is_local === true
-        if (!this.isLocalAccount) {
-          return
-        }
-
         const displayName = (data?.nickname || data?.name || '').trim()
         this.originalName = displayName
         this.profileForm.name = displayName
         this.profileForm.email = (data?.email || this.profileForm.email || '').trim()
+        this.profileLoaded = true
       } catch (error) {
         console.error('Load profile failed:', error)
       } finally {
@@ -461,6 +476,10 @@ export default {
     },
 
     async saveProfile() {
+      if (!this.canEditProfile) {
+        return
+      }
+
       const nextName = this.profileForm.name.trim()
       if (!nextName || nextName === this.originalName) {
         return
@@ -800,7 +819,7 @@ h1 {
   border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg-primary) 72%, var(--bg-secondary));
-  font-size: calc(1rem * var(--preview-font-scale));
+  font-size: 1rem;
   box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 22%, transparent);
   min-width: 0;
 }
@@ -952,6 +971,11 @@ small {
 .form-actions {
   display: flex;
   justify-content: flex-start;
+}
+
+.oauth-profile-helper {
+  display: block;
+  line-height: 1.5;
 }
 
 @media (max-width: 980px) {
