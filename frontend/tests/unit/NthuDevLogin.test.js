@@ -28,19 +28,15 @@ const profiles = [
   nthu_affiliation_kind:
     key === 'physics' || key === 'other_department' || key === 'not_inschool'
       ? 'standard_student'
-      : key === 'special_userid'
-        ? 'special_student'
-        : key.startsWith('staff_')
-          ? 'staff'
-          : 'unknown',
+      : key.startsWith('staff_')
+        ? 'staff'
+        : 'unresolved',
   nthu_affiliation_label:
     key === 'physics' || key === 'other_department' || key === 'not_inschool'
       ? '一般學生'
-      : key === 'special_userid'
-        ? '交換生／特殊學生'
-        : key.startsWith('staff_')
-          ? '教職員'
-          : '未分類',
+      : key.startsWith('staff_')
+        ? '教職員'
+        : '未解析',
   department_name: key === 'physics' ? '物理學系' : null,
 }))
 
@@ -57,7 +53,8 @@ describe('NTHU development login harness', () => {
 
     expect(wrapper.findAll('.nthu-dev-login__card')).toHaveLength(7)
     expect(wrapper.text()).toContain('W90001')
-    expect(wrapper.text()).toContain('交換生／特殊學生')
+    expect(wrapper.text()).toContain('未解析')
+    expect(wrapper.text()).not.toContain('交換生／' + '特殊學生')
     expect(wrapper.text()).toContain('教職員')
     expect(wrapper.find('input').exists()).toBe(false)
 

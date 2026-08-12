@@ -55,10 +55,10 @@ def test_fixed_catalog_has_exactly_seven_safe_unique_profiles(enabled_mock) -> N
         profile["key"]: profile for profile in nthu_dev_mock.public_nthu_dev_profiles()
     }
     assert public["physics"]["nthu_affiliation_kind"] == "standard_student"
-    assert public["special_userid"]["nthu_affiliation_kind"] == "special_student"
+    assert public["special_userid"]["nthu_affiliation_kind"] == "unresolved"
     assert public["staff_allowed"]["nthu_affiliation_kind"] == "staff"
     assert public["staff_unlisted"]["nthu_affiliation_kind"] == "staff"
-    assert public["missing_userid"]["nthu_affiliation_kind"] == "unknown"
+    assert public["missing_userid"]["nthu_affiliation_kind"] == "unresolved"
     assert all("nthu_affiliation_label" in profile for profile in public.values())
 
 

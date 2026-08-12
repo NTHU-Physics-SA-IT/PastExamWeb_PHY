@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 NTHU_ACCESS_POLICY_SETTING_KEY = "nthu_access_policy"
 NTHU_STAFF_USERID_MAX_LENGTH = 255
+LEGACY_SPECIAL_AFFILIATIONS_KEY = "allowed_special_affiliations"
 
 
 class NthuAccessMode(str, Enum):
@@ -35,10 +36,6 @@ class NthuStaffAccess(str, Enum):
     ALLOWLIST = "allowlist"
 
 
-class NthuSpecialAffiliation(str, Enum):
-    SPECIAL_STUDENT = "special_student"
-
-
 class NthuAccessPolicyValidationError(ValueError):
     pass
 
@@ -47,7 +44,6 @@ class NthuAccessPolicyValidationError(ValueError):
 class NthuAccessPolicy:
     mode: NthuAccessMode
     allowed_department_codes: tuple[str, ...] = ()
-    allowed_special_affiliations: tuple[NthuSpecialAffiliation, ...] = ()
     staff_access: NthuStaffAccess = NthuStaffAccess.NONE
     allowed_staff_userids: tuple[str, ...] = ()
 
@@ -55,9 +51,6 @@ class NthuAccessPolicy:
         return {
             "mode": self.mode.value,
             "allowed_department_codes": list(self.allowed_department_codes),
-            "allowed_special_affiliations": [
-                affiliation.value for affiliation in self.allowed_special_affiliations
-            ],
             "staff_access": self.staff_access.value,
             "allowed_staff_userids": list(self.allowed_staff_userids),
         }
@@ -71,7 +64,7 @@ def normalize_nthu_access_policy(value: object) -> NthuAccessPolicy:
         raise NthuAccessPolicyValidationError("登入範圍格式不正確")
     required_keys = {"mode", "allowed_department_codes"}
     optional_keys = {
-        "allowed_special_affiliations",
+        LEGACY_SPECIAL_AFFILIATIONS_KEY,
         "staff_access",
         "allowed_staff_userids",
     }
@@ -94,21 +87,6 @@ def normalize_nthu_access_policy(value: object) -> NthuAccessPolicy:
     codes = tuple(sorted(set(raw_codes)))
     if any(department_by_code(code) is None for code in codes):
         raise NthuAccessPolicyValidationError("登入範圍包含未知系所")
-
-    raw_special_affiliations = value.get("allowed_special_affiliations", [])
-    if not isinstance(raw_special_affiliations, list) or any(
-        not isinstance(affiliation, str) for affiliation in raw_special_affiliations
-    ):
-        raise NthuAccessPolicyValidationError("特殊學生身分設定格式不正確")
-    if len(raw_special_affiliations) != len(set(raw_special_affiliations)):
-        raise NthuAccessPolicyValidationError("特殊學生身分不可重複")
-    try:
-        special_affiliations = tuple(
-            NthuSpecialAffiliation(affiliation)
-            for affiliation in raw_special_affiliations
-        )
-    except ValueError as error:
-        raise NthuAccessPolicyValidationError("包含未知的特殊學生身分") from error
 
     try:
         staff_access = NthuStaffAccess(value.get("staff_access", "none"))
@@ -139,7 +117,6 @@ def normalize_nthu_access_policy(value: object) -> NthuAccessPolicy:
 
     if mode is NthuAccessMode.ALL_NTHU:
         codes = ()
-        special_affiliations = ()
         staff_access = NthuStaffAccess.NONE
         staff_userids = []
     else:
@@ -147,15 +124,12 @@ def normalize_nthu_access_policy(value: object) -> NthuAccessPolicy:
             raise NthuAccessPolicyValidationError("未啟用教職員清單時不可包含員工編號")
         if staff_access is NthuStaffAccess.ALLOWLIST and not staff_userids:
             raise NthuAccessPolicyValidationError("教職員個別允許至少需要一個員工編號")
-        if not codes and not special_affiliations and not staff_userids:
-            raise NthuAccessPolicyValidationError(
-                "自訂範圍至少需要一個系所、特殊學生身分或員工編號"
-            )
+        if not codes and not staff_userids:
+            raise NthuAccessPolicyValidationError("自訂範圍至少需要一個系所或員工編號")
 
     return NthuAccessPolicy(
         mode=mode,
         allowed_department_codes=codes,
-        allowed_special_affiliations=special_affiliations,
         staff_access=staff_access,
         allowed_staff_userids=tuple(staff_userids),
     )
@@ -225,12 +199,6 @@ def ensure_profile_matches_access_policy(
     if (
         affiliation.kind is NthuAffiliationKind.STANDARD_STUDENT
         and affiliation.department_code in policy.allowed_department_codes
-    ):
-        return
-    if (
-        affiliation.kind is NthuAffiliationKind.SPECIAL_STUDENT
-        and NthuSpecialAffiliation.SPECIAL_STUDENT
-        in policy.allowed_special_affiliations
     ):
         return
     raise NthuOAuthBusinessError("oauth_department_not_allowed")

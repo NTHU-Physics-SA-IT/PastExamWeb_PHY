@@ -188,8 +188,8 @@ async def test_admin_user_list_projects_student_affiliation_without_general_api_
         assert by_id[nthu_user.id]["nthu_affiliation_kind"] == "standard_student"
         assert by_id[nthu_user.id]["nthu_affiliation_label"] == "一般學生"
         assert by_id[special_user.id]["account_source"] == "nthu"
-        assert by_id[special_user.id]["nthu_affiliation_kind"] == "special_student"
-        assert by_id[special_user.id]["nthu_affiliation_label"] == "交換生／特殊學生"
+        assert by_id[special_user.id]["nthu_affiliation_kind"] == "unresolved"
+        assert by_id[special_user.id]["nthu_affiliation_label"] == "未解析"
         assert by_id[special_user.id]["department_code"] is None
         assert by_id[staff_user.id]["nthu_affiliation_kind"] == "staff"
         assert by_id[staff_user.id]["nthu_affiliation_label"] == "教職員"

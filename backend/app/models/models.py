@@ -1148,7 +1148,7 @@ class AdminUserRead(UserRead):
     student_id: Optional[str] = None
     department_code: Optional[str] = None
     department_name: Optional[str] = None
-    affiliation_status: str = "unknown_special"
+    affiliation_status: str = "unresolved"
     nthu_affiliation_kind: Optional[str] = None
     nthu_affiliation_label: Optional[str] = None
     nthu_classification_source: Optional[str] = None

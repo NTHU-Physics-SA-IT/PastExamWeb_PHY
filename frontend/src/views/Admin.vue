@@ -582,22 +582,6 @@
                         </span>
                       </template>
                     </MultiSelect>
-                    <div class="nthu-access-policy__special">
-                      <span class="nthu-access-policy__section-label">特殊學生身分</span>
-                      <label for="nthu-special-student" class="nthu-access-policy__special-option">
-                        <Checkbox
-                          v-model="nthuAccessPolicyForm.allowed_special_affiliations"
-                          inputId="nthu-special-student"
-                          name="nthu-special-affiliation"
-                          :value="NTHU_SPECIAL_AFFILIATIONS.SPECIAL_STUDENT"
-                        />
-                        <span>交換生／特殊學生</span>
-                      </label>
-                      <p>
-                        特殊學生身分無法使用一般 9
-                        位學號規則解析系所，因此可在此獨立決定是否允許登入。
-                      </p>
-                    </div>
                     <div class="nthu-access-policy__staff">
                       <span class="nthu-access-policy__section-label">教職員</span>
                       <p>
@@ -4566,9 +4550,6 @@ const NTHU_STAFF_ACCESS = Object.freeze({
   NONE: 'none',
   ALLOWLIST: 'allowlist',
 })
-const NTHU_SPECIAL_AFFILIATIONS = Object.freeze({
-  SPECIAL_STUDENT: 'special_student',
-})
 const nthuAccessPolicyLoading = ref(false)
 const nthuAccessPolicySaving = ref(false)
 const nthuAccessPolicyError = ref('')
@@ -4576,7 +4557,6 @@ const nthuDepartments = ref([])
 const nthuAccessPolicyForm = ref({
   mode: NTHU_ACCESS_MODES.ALL_NTHU,
   allowed_department_codes: [],
-  allowed_special_affiliations: [],
   staff_access: NTHU_STAFF_ACCESS.NONE,
   allowed_staff_userids: [],
 })
@@ -4592,7 +4572,6 @@ const isNthuAccessPolicyValid = computed(() => {
   }
   return (
     nthuAccessPolicyForm.value.allowed_department_codes.length > 0 ||
-    nthuAccessPolicyForm.value.allowed_special_affiliations.length > 0 ||
     (nthuAccessPolicyForm.value.staff_access === NTHU_STAFF_ACCESS.ALLOWLIST &&
       nthuAccessPolicyForm.value.allowed_staff_userids.length > 0)
   )
@@ -4702,7 +4681,6 @@ const getAccountSourceSeverity = (user) =>
 
 const getUserAffiliationCategory = (user) => {
   if (user?.department_name) return user.department_name
-  if (user?.nthu_affiliation_kind === 'special_student') return user.nthu_affiliation_label
   return null
 }
 
@@ -5573,9 +5551,8 @@ const accountSourceFilterOptions = [
 const nthuAffiliationFilterOptions = [
   { name: '全部', value: null },
   { name: '一般學生', value: 'standard_student' },
-  { name: '交換生／特殊學生', value: 'special_student' },
   { name: '教職員', value: 'staff' },
-  { name: '未分類', value: 'unknown' },
+  { name: '未解析', value: 'unresolved' },
 ]
 
 const contributorLevelStats = computed(() => {
@@ -6666,12 +6643,6 @@ const loadCourses = async () => {
 const applyNthuAccessPolicyResponse = (data) => {
   const validMode = Object.values(NTHU_ACCESS_MODES).includes(data?.mode)
   const validCodes = Array.isArray(data?.allowed_department_codes)
-  const validSpecialAffiliations =
-    data?.allowed_special_affiliations === undefined ||
-    (Array.isArray(data.allowed_special_affiliations) &&
-      data.allowed_special_affiliations.every(
-        (affiliation) => affiliation === NTHU_SPECIAL_AFFILIATIONS.SPECIAL_STUDENT
-      ))
   const validStaffAccess = Object.values(NTHU_STAFF_ACCESS).includes(data?.staff_access)
   const validStaffUserids =
     Array.isArray(data?.allowed_staff_userids) &&
@@ -6685,14 +6656,7 @@ const applyNthuAccessPolicyResponse = (data) => {
         typeof department?.college_code === 'string' &&
         typeof department?.college_name === 'string'
     )
-  if (
-    !validMode ||
-    !validCodes ||
-    !validSpecialAffiliations ||
-    !validStaffAccess ||
-    !validStaffUserids ||
-    !validDepartments
-  ) {
+  if (!validMode || !validCodes || !validStaffAccess || !validStaffUserids || !validDepartments) {
     throw new TypeError('Invalid NTHU access policy response')
   }
 
@@ -6700,7 +6664,6 @@ const applyNthuAccessPolicyResponse = (data) => {
   nthuAccessPolicyForm.value = {
     mode: data.mode,
     allowed_department_codes: [...data.allowed_department_codes],
-    allowed_special_affiliations: [...(data.allowed_special_affiliations || [])],
     staff_access: data.staff_access,
     allowed_staff_userids: [...data.allowed_staff_userids],
   }
@@ -6758,10 +6721,6 @@ const saveNthuAccessPolicy = async () => {
         nthuAccessPolicyForm.value.mode === NTHU_ACCESS_MODES.ALL_NTHU
           ? []
           : [...nthuAccessPolicyForm.value.allowed_department_codes],
-      allowed_special_affiliations:
-        nthuAccessPolicyForm.value.mode === NTHU_ACCESS_MODES.ALL_NTHU
-          ? []
-          : [...nthuAccessPolicyForm.value.allowed_special_affiliations],
       staff_access:
         nthuAccessPolicyForm.value.mode === NTHU_ACCESS_MODES.ALL_NTHU
           ? NTHU_STAFF_ACCESS.NONE
@@ -9021,24 +8980,6 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--border-color);
 }
 
-.nthu-access-policy__special {
-  display: grid;
-  gap: 0.55rem;
-  min-width: 0;
-  margin-top: 0.5rem;
-  padding-top: 0.85rem;
-  border-top: 1px solid var(--border-color);
-}
-
-.nthu-access-policy__special-option {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  width: fit-content;
-  max-width: 100%;
-}
-
-.nthu-access-policy__special p,
 .nthu-access-policy__classification-note {
   margin: 0;
   color: var(--text-secondary);

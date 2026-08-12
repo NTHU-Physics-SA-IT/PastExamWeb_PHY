@@ -22,8 +22,8 @@ The backend stores opaque `dev_` provider codes in a separate Redis namespace fo
 | --- | --- | --- | --- | --- | --- |
 | `physics` | `112022123` | `dev-nthu-physics-0001` | `STANDARD_STUDENT` | `022` | true |
 | `other_department` | `112025123` | `dev-nthu-other-0001` | `STANDARD_STUDENT` | `025` | true |
-| `special_userid` | `X1106099` | `dev-nthu-special-0001` | `SPECIAL_STUDENT` | unknown | true |
-| `missing_userid` | null | `dev-nthu-missing-0001` | `UNKNOWN` | unknown | true |
+| `special_userid` | `X1106099` | `dev-nthu-special-0001` | `UNRESOLVED` | unknown | true |
+| `missing_userid` | null | `dev-nthu-missing-0001` | `UNRESOLVED` | unknown | true |
 | `staff_allowed` | `W90001` | `dev-nthu-staff-allowed-0001` | `STAFF` | unknown | true |
 | `staff_unlisted` | `W90002` | `dev-nthu-staff-unlisted-0001` | `STAFF` | unknown | true |
 | `not_inschool` | `112022124` | `dev-nthu-inactive-0001` | `STANDARD_STUDENT` | `022` | false |
@@ -32,26 +32,35 @@ All emails use `.invalid` and all display names start with `[DEV]`. Successful l
 
 ## Affiliation classification
 
-The centralized backend classifier derives `STANDARD_STUDENT`,
-`SPECIAL_STUDENT`, `STAFF`, or `UNKNOWN` from the current provider userid and
-department catalog. Special-student-like and staff-like formats are explicitly
-best-effort display classifications; they are not persisted account types.
+The centralized backend classifier derives `STANDARD_STUDENT`, `STAFF`, or
+`UNRESOLVED` from the current provider userid and department catalog. Staff-like
+formats are explicitly best-effort display classifications; they are not
+persisted account types. Non-standard identifiers such as `X1106099` remain
+unresolved instead of receiving a special-student inference.
 
 Display classification is not authorization. In particular, a `STAFF` label
 does not grant login access: custom scope still requires that exact userid in
-the staff allowlist. A `SPECIAL_STUDENT` label likewise requires the explicit
-`special_student` policy bucket. `inschool=false` always denies first.
+the staff allowlist. `UNRESOLVED` profiles fail closed in custom scope, while
+`all_nthu` continues to allow them when `inschool=true`. `inschool=false`
+always denies first.
 
 ## Policy checks
 
 - `all_nthu` allows every `inschool=true` profile and denies `not_inschool`.
 - custom `022` with staff disabled allows only `physics`.
-- custom `022` plus special affiliation allows `physics` and `special_userid`.
-- custom `022` plus special affiliation and staff allowlist `W90001` allows
-  `physics`, `special_userid`, and `staff_allowed`.
-- special-only allows only `special_userid` among the listed in-school cases.
+- custom `022` plus staff allowlist `W90001` allows `physics` and
+  `staff_allowed`; unresolved profiles remain denied.
 - staff-only `W90001` allows only `staff_allowed` among the student/staff cases.
 
-Restore local QA policy to `all_nthu`, no departments, no special
-affiliations, staff access `none`, and no staff userids when testing is
-complete.
+Restore local QA policy to `all_nthu`, no departments, staff access `none`, and
+no staff userids when testing is complete.
+
+## Local administrator QA fixture
+
+Set `DEV_QA_ADMIN_PASSWORD` only in the command environment, then run
+`python -m app.scripts.ensure_local_admin_qa` inside the development backend.
+The command refuses non-development/test environments and missing passwords,
+checks the database schema before writing, and creates or updates only the
+exact `dev-local-admin` / `dev-local-admin@example.invalid` fixture. Browser QA
+then uses the normal local `/auth/login` flow; there is no development login
+bypass route and the password is not stored in the repository.

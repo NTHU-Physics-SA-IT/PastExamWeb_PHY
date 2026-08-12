@@ -368,11 +368,10 @@ a conflict.
 NTHU UUID remains the canonical external identity. Provider `userid` is a synchronized affiliation attribute and never an identity key. An `inschool=false` profile is always denied before any allow path.
 
 `all_nthu` preserves the existing eligible-member behavior and ignores
-department, special-affiliation, and staff lists. `selected_departments`
-authorizes through one of three explicit paths: a standard student's parsed
-department is selected, `special_student` is explicitly selected for a derived
-special-student affiliation, or the exact provider `userid` appears in the
-administrator-maintained staff allowlist. Staff userids are trimmed at
+department and staff lists. `selected_departments` authorizes through one of
+two explicit paths: a standard student's parsed department is selected, or the
+exact provider `userid` appears in the administrator-maintained staff allowlist.
+Staff userids are trimmed at
 configuration input but remain case-sensitive. A staff-like display
 classification never grants access and never implies an organizational unit.
 
@@ -670,12 +669,11 @@ changing `oauth_provider="nthu"` or the UUID subject.
 
 The access policy defaults to `all_nthu`, preserving the existing in-school
 eligibility rule. An administrator may persist `selected_departments` with any
-non-empty combination of canonical three-digit department codes, the explicit
-`special_student` affiliation bucket, and exact staff userids. Standard
-students require a selected parsed department; special-student classification
-requires the explicit bucket; staff access always requires an exact allowlist
-match. Classification alone never authorizes either special students or staff.
-Missing, malformed, and otherwise unverifiable `userid` values fail closed with
+non-empty combination of canonical three-digit department codes and exact staff
+userids. Standard students require a selected parsed department; staff access
+always requires an exact allowlist match. A staff display classification never
+authorizes by itself. Missing, malformed, non-standard, and otherwise
+unverifiable `userid` values are `unresolved` and fail closed with
 the same friendly scope denial. The callback enforces this after
 provider-profile validation and before provider-identity lookup, profile
 synchronization, new User creation, PostgreSQL commit, Redis handoff, or

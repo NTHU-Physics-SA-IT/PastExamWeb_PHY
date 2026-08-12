@@ -14,14 +14,13 @@ NTHU_DEPARTMENT_CATALOG_REVISION = "113.5.14"
 
 class AffiliationStatus(str, Enum):
     PARSED = "parsed"
-    UNKNOWN_SPECIAL = "unknown_special"
+    UNRESOLVED = "unresolved"
 
 
 class NthuAffiliationKind(str, Enum):
     STANDARD_STUDENT = "standard_student"
-    SPECIAL_STUDENT = "special_student"
     STAFF = "staff"
-    UNKNOWN = "unknown"
+    UNRESOLVED = "unresolved"
 
 
 class NthuAffiliationSource(str, Enum):
@@ -32,9 +31,8 @@ class NthuAffiliationSource(str, Enum):
 
 NTHU_AFFILIATION_LABELS = {
     NthuAffiliationKind.STANDARD_STUDENT: "一般學生",
-    NthuAffiliationKind.SPECIAL_STUDENT: "交換生／特殊學生",
     NthuAffiliationKind.STAFF: "教職員",
-    NthuAffiliationKind.UNKNOWN: "未分類",
+    NthuAffiliationKind.UNRESOLVED: "未解析",
 }
 
 
@@ -337,7 +335,6 @@ def department_by_code(code: str | None) -> NthuDepartment | None:
     return _DEPARTMENTS_BY_CODE.get(code)
 
 
-_SPECIAL_STUDENT_USERID_PATTERN = re.compile(r"X[0-9]{7}\Z", re.ASCII)
 _STAFF_LIKE_USERID_PATTERN = re.compile(r"W[0-9]{5}\Z", re.ASCII)
 
 
@@ -354,14 +351,6 @@ def classify_nthu_affiliation(userid: str | None) -> NthuAffiliation:
             department_name=department.name,
         )
 
-    if isinstance(userid, str) and _SPECIAL_STUDENT_USERID_PATTERN.fullmatch(userid):
-        kind = NthuAffiliationKind.SPECIAL_STUDENT
-        return NthuAffiliation(
-            kind=kind,
-            label=NTHU_AFFILIATION_LABELS[kind],
-            classification_source=NthuAffiliationSource.HEURISTIC,
-        )
-
     if isinstance(userid, str) and _STAFF_LIKE_USERID_PATTERN.fullmatch(userid):
         kind = NthuAffiliationKind.STAFF
         return NthuAffiliation(
@@ -370,7 +359,7 @@ def classify_nthu_affiliation(userid: str | None) -> NthuAffiliation:
             classification_source=NthuAffiliationSource.HEURISTIC,
         )
 
-    kind = NthuAffiliationKind.UNKNOWN
+    kind = NthuAffiliationKind.UNRESOLVED
     return NthuAffiliation(
         kind=kind,
         label=NTHU_AFFILIATION_LABELS[kind],
@@ -387,7 +376,7 @@ def parse_nthu_student_affiliation(
         or not student_id.isascii()
         or not student_id.isdigit()
     ):
-        return NthuStudentAffiliation(status=AffiliationStatus.UNKNOWN_SPECIAL)
+        return NthuStudentAffiliation(status=AffiliationStatus.UNRESOLVED)
 
     return NthuStudentAffiliation(
         status=AffiliationStatus.PARSED,

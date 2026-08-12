@@ -3,7 +3,10 @@ from sqlalchemy import delete
 
 from app.main import app
 from app.models.models import SystemSetting, UserRoles
-from app.services.nthu_access_policy import NTHU_ACCESS_POLICY_SETTING_KEY
+from app.services.nthu_access_policy import (
+    LEGACY_SPECIAL_AFFILIATIONS_KEY,
+    NTHU_ACCESS_POLICY_SETTING_KEY,
+)
 from app.utils.auth import get_current_user
 
 
@@ -28,7 +31,7 @@ async def test_admin_reads_default_and_persists_selected_departments(
         default_body = default_response.json()
         assert default_body["mode"] == "all_nthu"
         assert default_body["allowed_department_codes"] == []
-        assert default_body["allowed_special_affiliations"] == []
+        assert LEGACY_SPECIAL_AFFILIATIONS_KEY not in default_body
         assert default_body["staff_access"] == "none"
         assert default_body["allowed_staff_userids"] == []
         physics = next(
@@ -42,27 +45,27 @@ async def test_admin_reads_default_and_persists_selected_departments(
             json={
                 "mode": "selected_departments",
                 "allowed_department_codes": ["025", "022", "022"],
-                "allowed_special_affiliations": ["special_student"],
+                LEGACY_SPECIAL_AFFILIATIONS_KEY: ["special_student"],
                 "staff_access": "allowlist",
                 "allowed_staff_userids": [" W90001 "],
             },
         )
         assert update_response.status_code == 200
         assert update_response.json()["allowed_department_codes"] == ["022", "025"]
-        assert update_response.json()["allowed_special_affiliations"] == [
-            "special_student"
-        ]
+        assert LEGACY_SPECIAL_AFFILIATIONS_KEY not in update_response.json()
         assert update_response.json()["allowed_staff_userids"] == ["W90001"]
 
         reload_response = await client.get(PATH)
         assert reload_response.status_code == 200
         assert reload_response.json()["mode"] == "selected_departments"
         assert reload_response.json()["allowed_department_codes"] == ["022", "025"]
-        assert reload_response.json()["allowed_special_affiliations"] == [
-            "special_student"
-        ]
+        assert LEGACY_SPECIAL_AFFILIATIONS_KEY not in reload_response.json()
         assert reload_response.json()["staff_access"] == "allowlist"
         assert reload_response.json()["allowed_staff_userids"] == ["W90001"]
+        async with session_maker() as session:
+            stored = await session.get(SystemSetting, NTHU_ACCESS_POLICY_SETTING_KEY)
+            assert stored is not None
+            assert LEGACY_SPECIAL_AFFILIATIONS_KEY not in stored.value
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:

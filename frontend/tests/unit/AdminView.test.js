@@ -48,7 +48,6 @@ const sampleUsers = [
 const sampleNthuAccessPolicy = {
   mode: 'all_nthu',
   allowed_department_codes: [],
-  allowed_special_affiliations: [],
   staff_access: 'none',
   allowed_staff_userids: [],
   departments: [
@@ -465,7 +464,6 @@ describe('AdminView', () => {
     expect(updateNthuAccessPolicyMock).toHaveBeenCalledWith({
       mode: 'selected_departments',
       allowed_department_codes: ['022', '025'],
-      allowed_special_affiliations: [],
       staff_access: 'none',
       allowed_staff_userids: [],
     })
@@ -500,7 +498,6 @@ describe('AdminView', () => {
     expect(updateNthuAccessPolicyMock).toHaveBeenCalledWith({
       mode: 'selected_departments',
       allowed_department_codes: [],
-      allowed_special_affiliations: [],
       staff_access: 'allowlist',
       allowed_staff_userids: ['W90001'],
     })
@@ -510,31 +507,18 @@ describe('AdminView', () => {
     wrapper.unmount()
   })
 
-  it('supports special-only access and defaults old policy responses safely', async () => {
+  it('has only department and staff allow paths in the custom policy UI', async () => {
     const wrapper = createWrapper()
     await flushPromises()
 
     wrapper.vm.nthuAccessPolicyForm.mode = 'selected_departments'
     wrapper.vm.nthuAccessPolicyForm.allowed_department_codes = []
-    wrapper.vm.nthuAccessPolicyForm.allowed_special_affiliations = ['special_student']
     wrapper.vm.nthuAccessPolicyForm.staff_access = 'none'
     wrapper.vm.nthuAccessPolicyForm.allowed_staff_userids = []
-    expect(wrapper.vm.isNthuAccessPolicyValid).toBe(true)
-
-    await wrapper.vm.saveNthuAccessPolicy()
-    expect(updateNthuAccessPolicyMock).toHaveBeenCalledWith({
-      mode: 'selected_departments',
-      allowed_department_codes: [],
-      allowed_special_affiliations: ['special_student'],
-      staff_access: 'none',
-      allowed_staff_userids: [],
-    })
-
-    wrapper.vm.applyNthuAccessPolicyResponse({
-      ...sampleNthuAccessPolicy,
-      allowed_special_affiliations: undefined,
-    })
-    expect(wrapper.vm.nthuAccessPolicyForm.allowed_special_affiliations).toEqual([])
+    expect(wrapper.vm.isNthuAccessPolicyValid).toBe(false)
+    expect(wrapper.vm.nthuAccessPolicyForm).not.toHaveProperty('allowed_special_' + 'affiliations')
+    expect(adminTemplateSource).not.toContain('交換生／' + '特殊學生')
+    expect(adminTemplateSource).not.toContain('nthu-special-student')
     wrapper.unmount()
   })
 
@@ -544,7 +528,7 @@ describe('AdminView', () => {
     const extraUsers = [
       {
         id: 3,
-        name: 'Special',
+        name: 'Unresolved',
         email: 'special@example.com',
         is_admin: false,
         is_local: false,
@@ -552,8 +536,8 @@ describe('AdminView', () => {
         student_id: 'X1106099',
         department_code: null,
         department_name: null,
-        nthu_affiliation_kind: 'special_student',
-        nthu_affiliation_label: '交換生／特殊學生',
+        nthu_affiliation_kind: 'unresolved',
+        nthu_affiliation_label: '未解析',
       },
       {
         id: 4,
@@ -583,13 +567,13 @@ describe('AdminView', () => {
     wrapper.vm.filterNthuDepartment = '022'
     expect(wrapper.vm.filteredUsers.map((user) => user.name)).toEqual(['Bob'])
 
-    wrapper.vm.filterNthuAffiliation = 'special_student'
+    wrapper.vm.filterNthuAffiliation = 'unresolved'
     wrapper.vm.filterNthuDepartment = null
-    expect(wrapper.vm.filteredUsers.map((user) => user.name)).toEqual(['Special'])
+    expect(wrapper.vm.filteredUsers.map((user) => user.name)).toEqual(['Unresolved'])
 
     wrapper.vm.filterNthuAffiliation = null
-    wrapper.vm.userSearchQuery = '交換生'
-    expect(wrapper.vm.filteredUsers.map((user) => user.name)).toEqual(['Special'])
+    wrapper.vm.userSearchQuery = '未解析'
+    expect(wrapper.vm.filteredUsers.map((user) => user.name)).toEqual(['Unresolved'])
     wrapper.unmount()
   })
 

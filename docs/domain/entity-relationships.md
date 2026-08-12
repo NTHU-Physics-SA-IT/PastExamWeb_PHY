@@ -52,9 +52,9 @@ Registrar-derived department catalog. A standard nine-digit value is split into
 admission year `[0:3]`, college code `[3:5]`, department code `[3:6]`, and
 program code `[3:7]`. The parser does not infer bachelor, master, or doctoral
 status from one digit. A parsed value whose department exists in the catalog is
-`standard_student`; recognized special-student-like and staff-like development
-formats may be shown as `special_student` or `staff` with a heuristic
-classification source. Missing and unsupported values remain `unknown`.
+`standard_student`; staff-like employee identifiers may be shown as `staff`
+with a heuristic classification source. Missing, non-standard, and unsupported
+values remain `unresolved` and receive no inferred department or special status.
 These classifications are derived on read and are never persisted as identity
 or authorization facts. Full userids and derived affiliation fields are
 projected only by the administrator user-management API, not by general user

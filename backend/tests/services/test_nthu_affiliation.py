@@ -32,12 +32,12 @@ def test_physics_department_is_owned_by_the_official_catalog() -> None:
 @pytest.mark.parametrize(
     "student_id", ["11202212", "1120221234", "11202A123", "special", "", None]
 )
-def test_invalid_missing_or_special_student_id_is_unknown(
+def test_invalid_missing_or_nonstandard_student_id_is_unresolved(
     student_id: str | None,
 ) -> None:
     affiliation = parse_nthu_student_affiliation(student_id)
 
-    assert affiliation.status is AffiliationStatus.UNKNOWN_SPECIAL
+    assert affiliation.status is AffiliationStatus.UNRESOLVED
     assert affiliation.admission_year is None
     assert affiliation.college_code is None
     assert affiliation.department_code is None
@@ -63,10 +63,10 @@ def test_invalid_missing_or_special_student_id_is_unknown(
         ),
         (
             "X1106099",
-            NthuAffiliationKind.SPECIAL_STUDENT,
-            "交換生／特殊學生",
+            NthuAffiliationKind.UNRESOLVED,
+            "未解析",
             None,
-            NthuAffiliationSource.HEURISTIC,
+            NthuAffiliationSource.UNCLASSIFIED,
         ),
         (
             "W90001",
@@ -84,15 +84,15 @@ def test_invalid_missing_or_special_student_id_is_unknown(
         ),
         (
             None,
-            NthuAffiliationKind.UNKNOWN,
-            "未分類",
+            NthuAffiliationKind.UNRESOLVED,
+            "未解析",
             None,
             NthuAffiliationSource.UNCLASSIFIED,
         ),
         (
             "arbitrary",
-            NthuAffiliationKind.UNKNOWN,
-            "未分類",
+            NthuAffiliationKind.UNRESOLVED,
+            "未解析",
             None,
             NthuAffiliationSource.UNCLASSIFIED,
         ),
@@ -116,5 +116,5 @@ def test_classifies_nthu_affiliation_for_admin_display(
 def test_unknown_catalog_department_is_not_a_standard_student() -> None:
     affiliation = classify_nthu_affiliation("112999123")
 
-    assert affiliation.kind is NthuAffiliationKind.UNKNOWN
+    assert affiliation.kind is NthuAffiliationKind.UNRESOLVED
     assert affiliation.department_code is None
