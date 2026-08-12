@@ -340,7 +340,12 @@ onBeforeUnmount(() => requestController?.abort())
   color: var(--text-color);
 }
 
-@container user-duration (max-width: 40rem) {
+.user-duration-card .chart-summary-item {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+@container user-duration (max-width: 640px) {
   .user-duration-card .user-duration-heading {
     align-items: stretch;
     flex-direction: column;
@@ -496,7 +501,7 @@ onBeforeUnmount(() => requestController?.abort())
 }
 
 .user-duration-chart {
-  --temporal-edge-padding: clamp(1rem, calc(1.35rem * var(--app-font-scale)), 2rem);
+  --temporal-edge-padding: 1.35rem;
   display: grid;
   grid-template-columns: 3.5rem minmax(0, 1fr);
   gap: 0.5rem;

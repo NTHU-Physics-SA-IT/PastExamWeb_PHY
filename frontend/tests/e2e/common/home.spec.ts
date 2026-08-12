@@ -117,15 +117,20 @@ test.describe('Home page', () => {
 
   test('public catalog renders canonical courses and a zero-archive detail', async ({ page }) => {
     await page.goto('/')
+    await expect(page.getByRole('button', { name: 'Login', exact: true })).toHaveCount(0)
 
     await page.getByRole('button', { name: '瀏覽公開課程目錄', exact: true }).click()
 
     await expect(page).toHaveURL(/\/courses$/)
     await expect(page.getByRole('heading', { name: '清大物理考古題課程目錄' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Login', exact: true })).toHaveCount(0)
 
     const courseCards = page.locator('.course-card')
     await expect(courseCards).toHaveCount(71)
     await expect(page.locator('.public-catalog > .empty-state')).toHaveCount(0)
+    expect(await courseCards.first().evaluate((card) => getComputedStyle(card).borderTopWidth)).toBe(
+      '1px'
+    )
 
     const zeroArchiveCourse = page.locator('a[href="/courses/1"]')
     await expect(zeroArchiveCourse).toBeVisible()
@@ -133,9 +138,46 @@ test.describe('Home page', () => {
 
     await expect(page).toHaveURL(/\/courses\/1$/)
     await expect(page.getByRole('heading', { name: '普通化學(一)考古題' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Login', exact: true })).toHaveCount(0)
     await expect(page.getByRole('heading', { name: '目前尚未有可公開瀏覽的考古題' })).toBeVisible()
     await expect(page.locator('a, button').filter({ hasText: '下載' })).toHaveCount(0)
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex, follow')
+
+    const breadcrumbCenters = await page.locator('.breadcrumbs > *').evaluateAll((items) =>
+      items.map((item) => {
+        const { top, height } = item.getBoundingClientRect()
+        return top + height / 2
+      })
+    )
+    expect(Math.max(...breadcrumbCenters) - Math.min(...breadcrumbCenters)).toBeLessThanOrEqual(1)
+  })
+
+  test('applies the default user preference once over the application font baseline', async ({
+    page,
+  }) => {
+    await page.goto('/')
+
+    expect(
+      await page.evaluate(() => ({
+        computedRootSize: getComputedStyle(document.documentElement).fontSize,
+        baseline: getComputedStyle(document.documentElement)
+          .getPropertyValue('--app-font-baseline')
+          .trim(),
+        userScale: getComputedStyle(document.documentElement)
+          .getPropertyValue('--app-user-font-scale')
+          .trim(),
+        effectiveScale: getComputedStyle(document.documentElement)
+          .getPropertyValue('--app-effective-font-scale')
+          .trim(),
+        displayPercent: document.documentElement.dataset.appFontSizeDisplayPercent,
+      }))
+    ).toEqual({
+      computedRootSize: '14.4px',
+      baseline: '0.9',
+      userScale: '1',
+      effectiveScale: '0.9',
+      displayPercent: '100',
+    })
   })
 
   test('homepage local login action opens the existing login dialog', async ({ page }) => {
@@ -181,8 +223,7 @@ test.describe('Home page', () => {
     const brand = page.getByRole('button', { name: /Physics Archive · NTHU/ })
     await expect(brand).toBeVisible()
     await expect(page.getByRole('img', { name: '清大物理考古系統' })).toBeVisible()
-    const loginButton = page.getByRole('button', { name: 'Login', exact: true })
-    await expect(loginButton).toBeVisible({ timeout: 15000 })
+    await expect(page.getByRole('button', { name: 'Login', exact: true })).toHaveCount(0)
 
     const themeToggle = page.getByRole('button', { name: /切換至(?:深色|淺色)模式/ })
     await expect(themeToggle).toBeVisible()
@@ -196,25 +237,6 @@ test.describe('Home page', () => {
 
     await expect(page.getByRole('heading', { name: '清大物理考古系統' })).toBeVisible()
 
-    await page.evaluate(() => {
-      const globalWindow = window as typeof window & {
-        __pastexam?: {
-          openLoginModal?: () => void
-        }
-      }
-      const pastexam = globalWindow.__pastexam
-      if (pastexam && typeof pastexam.openLoginModal === 'function') {
-        pastexam.openLoginModal()
-      }
-    })
-    const loginDialog = page.getByRole('dialog', { name: '登入' })
-    await expect(loginDialog).toBeVisible()
-    await expect(loginButton).toHaveAttribute('aria-expanded', 'true')
-    const closeButton = loginDialog.getByRole('button', { name: 'Close' })
-    await expect(closeButton).toBeVisible()
-    await clickWhenVisible(closeButton)
-    await expect(loginButton).toHaveAttribute('aria-expanded', 'false')
-
     const statCards = page.getByRole('article')
     await expect(statCards).toHaveCount(STAT_LABELS.length, { timeout: 15000 })
 
@@ -223,5 +245,17 @@ test.describe('Home page', () => {
       await expect(card, `${label} card should be visible`).toBeVisible()
       await expect(card.locator('strong')).toHaveText(/^[0-9]+$/, { timeout: 15000 })
     }
+
+    await page.goto('/not-found-for-navbar-check')
+    const loginButton = page.getByRole('button', { name: 'Login', exact: true })
+    await expect(loginButton).toBeVisible({ timeout: 15000 })
+    await clickWhenVisible(loginButton)
+    const loginDialog = page.getByRole('dialog', { name: '登入' })
+    await expect(loginDialog).toBeVisible()
+    await expect(loginButton).toHaveAttribute('aria-expanded', 'true')
+    const closeButton = loginDialog.getByRole('button', { name: 'Close' })
+    await expect(closeButton).toBeVisible()
+    await clickWhenVisible(closeButton)
+    await expect(loginButton).toHaveAttribute('aria-expanded', 'false')
   })
 })

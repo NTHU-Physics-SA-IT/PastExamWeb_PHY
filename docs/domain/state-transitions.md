@@ -682,6 +682,15 @@ synchronization, new User creation, PostgreSQL commit, Redis handoff, or
 application JWT issuance. Existing accounts are retained when later denied.
 Local password authentication never reads this policy.
 
+The active mode and inactive custom configuration have separate lifecycles.
+Switching to `all_nthu` preserves the last selected department codes, staff
+access mode, and exact staff userid allowlist in the persisted setting so that
+they can be restored when an administrator later selects
+`selected_departments`. While `all_nthu` is active, those preserved custom
+fields never participate in authorization: every profile that passes the
+existing in-school gate remains eligible. An older `all_nthu` setting with
+empty custom fields remains valid.
+
 | Operation | Anonymous | Authenticated user | Owner | Administrator | System |
 | --- | --- | --- | --- | --- | --- |
 | View safe public Course/Archive metadata catalog | Allowed | Allowed | Allowed | Allowed | Allowed |

@@ -71,6 +71,8 @@ contract rather than a local mapping copied into a new screen.
 - A mobile fix must not change the desktop contract unintentionally.
 - Prefer the existing common breakpoint tiers. A page-specific breakpoint is
   acceptable only when the component's intrinsic layout demonstrates the need.
+- Keep fixed layout-tier boundaries in pixels so root typography preferences do
+  not reclassify the same viewport or container as a different responsive tier.
 - For a changed breakpoint `B`, verify `B-1`, `B`, and `B+1`, plus one
   representative narrow mobile, wide mobile/tablet, and desktop viewport.
 - Do not begin with another extremely narrow media query when the issue may be
@@ -85,10 +87,13 @@ contract rather than a local mapping copied into a new screen.
 
 ## Font scaling
 
-`frontend/src/utils/fontSizePreference.js` defines a supported display range of
-50% to 150%, applies it through `--app-font-scale`, and retains legacy stored
-values. UI work must not be verified only at 100%. Enlarged text must preserve
-the main actions, labels, validation messages, and data needed to recover.
+`frontend/src/utils/fontSizePreference.js` defines the 90% application typography
+baseline and a supported 50% to 150% user multiplier. Their product is applied
+once at the root font size and exposed as `--app-effective-font-scale`; nested
+`rem` typography must not multiply that effective scale again. The preference
+retains legacy stored values. UI work must not be verified only at 100%. Enlarged
+text must preserve the main actions, labels, validation messages, and data needed
+to recover.
 
 ## Verification expectations
 

@@ -3,7 +3,10 @@ import { resolve } from 'node:path'
 import process from 'node:process'
 import { describe, expect, it } from 'vitest'
 
-const adminSource = readFileSync(resolve(process.cwd(), 'src/views/Admin.vue'), 'utf8')
+const adminSource = readFileSync(resolve(process.cwd(), 'src/views/Admin.vue'), 'utf8').replace(
+  /\r\n?/g,
+  '\n'
+)
 const durationChartSource = readFileSync(
   resolve(process.cwd(), 'src/components/UserOnlineDurationChart.vue'),
   'utf8'
@@ -51,12 +54,12 @@ describe('user statistics chart layout styles', () => {
     expect(adminSource).toContain('class="user-login-column-chart__bar"')
   })
 
-  it('centers shared summaries and keeps the mobile controls above one three-column row', () => {
+  it('keeps statistics narrow layouts on a fixed 640px container boundary', () => {
     expect(adminSource).toMatch(
       /\.admin-insights-card \.chart-summary-item\s*\{[^}]*justify-items: center;[^}]*text-align: center;/s
     )
     expect(adminSource).toMatch(
-      /@container admin-insights \(max-width: 40rem\)[\s\S]*?\.admin-insights-card \.chart-summary-control-row\s*\{[^}]*grid-template-areas:[^}]*'controls'[^}]*'summary'[^}]*'timezone'/
+      /@container admin-insights \(max-width: 640px\)[\s\S]*?\.admin-insights-card \.chart-summary-control-row\s*\{[^}]*grid-template-areas:[^}]*'controls'[^}]*'summary'[^}]*'timezone'/
     )
     expect(adminSource).toMatch(
       /\.admin-insights-card\s*\{[^}]*container: admin-insights \/ inline-size;/
@@ -67,6 +70,10 @@ describe('user statistics chart layout styles', () => {
     expect(adminSource).toMatch(
       /\.admin-insights-card \.chart-control-stack \.user-insights__range\s*\{[^}]*display: inline-flex;[^}]*width: max-content;[^}]*flex-wrap: nowrap;[^}]*justify-self: end;/s
     )
+    expect(adminSource).toMatch(
+      /\.admin-insights-card \.user-insights__switch\s*\{[^}]*flex-wrap: nowrap;/
+    )
+    expect(adminSource).not.toContain('@container admin-insights (max-width: 40rem)')
   })
 
   it('keeps the <=640px chart controls compact and right-aligned as one group', () => {

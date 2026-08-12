@@ -28,7 +28,8 @@ const CardStub = {
 
 const formControlStub = {
   inheritAttrs: false,
-  template: '<input v-bind="$attrs" />',
+  props: ['modelValue'],
+  template: '<input v-bind="$attrs" :value="modelValue" />',
 }
 
 function mountSettings() {
@@ -82,7 +83,7 @@ describe('PersonalSettings account visibility', () => {
     delete globalThis.IntersectionObserver
   })
 
-  it('renders only display settings for an external account', async () => {
+  it('renders read-only basic profile data without password settings for an OAuth account', async () => {
     userServiceMock.getMe.mockResolvedValue({
       data: {
         is_local: false,
@@ -96,21 +97,44 @@ describe('PersonalSettings account visibility', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('顯示設定')
-    expect(wrapper.text()).not.toContain('帳號設定')
-    expect(wrapper.text()).not.toContain('基本資料')
+    expect(wrapper.text()).toContain('帳號設定')
+    expect(wrapper.text()).toContain('基本資料')
+    expect(wrapper.text()).toContain('查看由清華校務系統提供的帳號資料。')
+    expect(wrapper.text()).toContain('此資料由清華校務系統提供，無法在本站修改。')
     expect(wrapper.text()).not.toContain('密碼設定')
-    expect(wrapper.find('#account-settings').exists()).toBe(false)
-    expect(wrapper.find('#profile-setting').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('儲存基本資料')
+    expect(wrapper.find('#account-settings').exists()).toBe(true)
+    expect(wrapper.find('#profile-setting').exists()).toBe(true)
     expect(wrapper.find('#password-setting').exists()).toBe(false)
+    expect(wrapper.find('#display-name').attributes()).toHaveProperty('disabled')
+    expect(wrapper.find('#email').attributes()).toHaveProperty('readonly')
+    expect(wrapper.find('#display-name').element.value).toBe('External nickname')
+    expect(wrapper.find('#email').element.value).toBe('external@example.com')
+    expect(wrapper.find('.profile-save-button').exists()).toBe(false)
     expect(wrapper.findAll('.settings-nav-item').map((item) => item.text())).toEqual([
       '顯示設定',
       '字體大小',
       '語言',
+      '帳號設定',
+      '基本資料',
     ])
-    expect(wrapper.vm.profileForm).toEqual({ name: '', email: '' })
+    expect(wrapper.vm.profileForm).toEqual({
+      name: 'External nickname',
+      email: 'external@example.com',
+    })
     expect(
       IntersectionObserverMock.instances[0].observe.mock.calls.map(([element]) => element.id)
-    ).toEqual(['display-settings', 'font-size-setting', 'language-setting'])
+    ).toEqual([
+      'display-settings',
+      'font-size-setting',
+      'language-setting',
+      'account-settings',
+      'profile-setting',
+    ])
+
+    wrapper.vm.profileForm.name = 'Attempted edit'
+    await wrapper.vm.saveProfile()
+    expect(userServiceMock.updateMyNickname).not.toHaveBeenCalled()
 
     wrapper.unmount()
   })
@@ -134,6 +158,10 @@ describe('PersonalSettings account visibility', () => {
     expect(wrapper.find('#account-settings').exists()).toBe(true)
     expect(wrapper.find('#profile-setting').exists()).toBe(true)
     expect(wrapper.find('#password-setting').exists()).toBe(true)
+    expect(wrapper.find('#display-name').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('#email').attributes()).toHaveProperty('readonly')
+    expect(wrapper.find('.profile-save-button').exists()).toBe(true)
+    expect(wrapper.text()).toContain('儲存基本資料')
     expect(wrapper.findAll('.settings-nav-item').map((item) => item.text())).toEqual([
       '顯示設定',
       '字體大小',
@@ -157,7 +185,7 @@ describe('PersonalSettings account visibility', () => {
     wrapper.unmount()
   })
 
-  it('treats an external staff account exactly like every other external account', async () => {
+  it('keeps an external staff profile read-only without local password controls', async () => {
     userServiceMock.getMe.mockResolvedValue({
       data: {
         is_local: false,
@@ -170,10 +198,12 @@ describe('PersonalSettings account visibility', () => {
     const wrapper = mountSettings()
     await flushPromises()
 
-    expect(wrapper.find('#account-settings').exists()).toBe(false)
-    expect(wrapper.find('#profile-setting').exists()).toBe(false)
+    expect(wrapper.find('#account-settings').exists()).toBe(true)
+    expect(wrapper.find('#profile-setting').exists()).toBe(true)
     expect(wrapper.find('#password-setting').exists()).toBe(false)
-    expect(wrapper.findAll('.settings-nav-item')).toHaveLength(3)
+    expect(wrapper.find('#display-name').attributes()).toHaveProperty('disabled')
+    expect(wrapper.find('.profile-save-button').exists()).toBe(false)
+    expect(wrapper.findAll('.settings-nav-item')).toHaveLength(5)
     wrapper.unmount()
   })
 
@@ -190,6 +220,8 @@ describe('PersonalSettings account visibility', () => {
 
     request.resolve({ data: { is_local: false } })
     await flushPromises()
+    expect(wrapper.find('#account-settings').exists()).toBe(true)
+    expect(wrapper.find('#password-setting').exists()).toBe(false)
     wrapper.unmount()
   })
 

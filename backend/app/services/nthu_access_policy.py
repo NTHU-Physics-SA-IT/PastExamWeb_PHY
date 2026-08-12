@@ -115,11 +115,7 @@ def normalize_nthu_access_policy(value: object) -> NthuAccessPolicy:
             raise NthuAccessPolicyValidationError("員工編號不可重複")
         staff_userids.append(userid)
 
-    if mode is NthuAccessMode.ALL_NTHU:
-        codes = ()
-        staff_access = NthuStaffAccess.NONE
-        staff_userids = []
-    else:
+    if mode is NthuAccessMode.SELECTED_DEPARTMENTS:
         if staff_access is NthuStaffAccess.NONE and staff_userids:
             raise NthuAccessPolicyValidationError("未啟用教職員清單時不可包含員工編號")
         if staff_access is NthuStaffAccess.ALLOWLIST and not staff_userids:

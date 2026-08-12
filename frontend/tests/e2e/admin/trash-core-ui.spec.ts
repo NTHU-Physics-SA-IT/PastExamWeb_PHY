@@ -242,7 +242,8 @@ test.describe('Admin › Trash Core UI', () => {
 
     await page.setViewportSize({ width: 337, height: 1000 })
     await page.evaluate(() => {
-      document.documentElement.style.setProperty('--app-font-scale', '1.35')
+      document.documentElement.style.setProperty('--app-effective-font-scale', '1.35')
+      document.documentElement.style.fontSize = '135%'
       document.documentElement.dataset.appFontSizeDisplayPercent = '150'
     })
     await assertActionRowFits(pendingRow, ['查看/編輯', '通過', '下架', '退回', '刪除'], {

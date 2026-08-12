@@ -60,7 +60,7 @@
               aria-label="Logout"
             />
             <Button
-              v-else
+              v-else-if="showGuestLogin"
               icon="pi pi-sign-in"
               label="登入"
               @click="openLoginDialog"
@@ -94,7 +94,7 @@
               aria-label="More actions"
             />
             <Button
-              v-else
+              v-else-if="showGuestLogin"
               icon="pi pi-sign-in"
               @click="openLoginDialog"
               severity="secondary"
@@ -1073,6 +1073,12 @@ export default {
   },
 
   computed: {
+    showGuestLogin() {
+      const isPublicDiscoveryRoute =
+        this.$route.path === '/' || this.$route.path === '/courses' || this.$route.path.startsWith('/courses/')
+      return !this.isAuthenticated && !isPublicDiscoveryRoute
+    },
+
     isDesktopView() {
       return this.viewportWidth >= 768
     },

@@ -62,19 +62,23 @@ const mountChart = () =>
   })
 
 describe('UserOnlineDurationChart', () => {
-  it('keeps all three duration summary cards in one mobile grid row', () => {
+  it('keeps the narrow layout on a fixed 640px container boundary', () => {
     expect(componentSource).toMatch(
       /\.user-duration-card\s*\{[^}]*container: user-duration \/ inline-size;/
     )
     expect(componentSource).toMatch(
-      /@container user-duration \(max-width: 40rem\)[\s\S]*?\.user-duration-card \.chart-summary-group\s*\{[^}]*display: grid;[^}]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);[^}]*width: 100%;/
+      /@container user-duration \(max-width: 640px\)[\s\S]*?\.user-duration-card \.chart-summary-group\s*\{[^}]*display: grid;[^}]*grid-template-columns: repeat\(3, minmax\(0, 1fr\)\);[^}]*width: 100%;/
     )
     expect(componentSource).toMatch(
-      /@container user-duration \(max-width: 40rem\)[\s\S]*?\.user-duration-card \.user-duration-switch\s*\{[^}]*display: grid;[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[^}]*width: 100%;/
+      /@container user-duration \(max-width: 640px\)[\s\S]*?\.user-duration-card \.user-duration-switch\s*\{[^}]*display: grid;[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[^}]*width: 100%;/
     )
     expect(componentSource).toMatch(
       /\.user-duration-card \.chart-summary-item\s*\{[^}]*box-sizing: border-box;[^}]*min-width: 0;[^}]*width: 100%;[^}]*justify-items: center;[^}]*text-align: center;/
     )
+    expect(componentSource).toMatch(
+      /\.user-duration-card \.chart-summary-item\s*\{[^}]*flex: 1 1 0;[^}]*min-width: 0;/
+    )
+    expect(componentSource).not.toContain('@container user-duration (max-width: 40rem)')
   })
 
   beforeEach(() => {
@@ -262,7 +266,9 @@ describe('UserOnlineDurationChart', () => {
       [150, '1.35'],
     ]) {
       applyFontSizePreference(percent)
-      expect(document.documentElement.style.getPropertyValue('--app-font-scale')).toBe(scale)
+      expect(document.documentElement.style.getPropertyValue('--app-effective-font-scale')).toBe(
+        scale
+      )
       expect(wrapper.findAll('.user-duration-chart')).toHaveLength(1)
       expect(wrapper.findAll('.user-duration-chart__bar')[4].classes()).toContain('has-value')
     }
@@ -273,6 +279,6 @@ describe('UserOnlineDurationChart', () => {
     expect(componentSource).toMatch(/user-duration-switch button[\s\S]*var\(--app-font-size-xs\)/)
     expect(componentSource).not.toMatch(/font-size:\s*(11|12)px/)
     expect(componentSource).not.toContain('overflow-x: auto')
-    expect(componentSource).toContain('var(--app-font-scale)')
+    expect(componentSource).not.toContain('var(--app-effective-font-scale)')
   })
 })
