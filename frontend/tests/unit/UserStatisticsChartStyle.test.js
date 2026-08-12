@@ -70,6 +70,9 @@ describe('user statistics chart layout styles', () => {
     expect(adminSource).toMatch(
       /\.admin-insights-card \.chart-control-stack \.user-insights__range\s*\{[^}]*display: inline-flex;[^}]*width: max-content;[^}]*flex-wrap: nowrap;[^}]*justify-self: end;/s
     )
+    expect(adminSource).toMatch(
+      /\.admin-insights-card \.user-insights__switch\s*\{[^}]*flex-wrap: nowrap;/
+    )
     expect(adminSource).not.toContain('@container admin-insights (max-width: 40rem)')
   })
 

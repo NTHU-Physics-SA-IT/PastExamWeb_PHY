@@ -9037,6 +9037,10 @@ onBeforeUnmount(() => {
   row-gap: 0.5rem;
 }
 
+.admin-insights-card .user-insights__switch {
+  flex-wrap: nowrap;
+}
+
 .admin-insights-card .chart-summary-item {
   align-content: center;
   justify-items: center;
