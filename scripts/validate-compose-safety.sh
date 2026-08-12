@@ -21,6 +21,7 @@ env -i \
   docker compose \
   --env-file "$repository_root/docker/.env.production.example" \
   --file "$repository_root/docker/docker-compose.prod.yml" \
+  --file "$repository_root/docker/docker-compose.prod-edge.example.yml" \
   config --format json >"$production_json"
 
 env -i \
@@ -36,16 +37,23 @@ env -i \
 
 python3 - \
   "$production_json" \
-  "$development_json" <<'PY'
+  "$development_json" \
+  "$repository_root/proxy/nginx.conf" \
+  "$repository_root/proxy/nginx.production-listeners.conf" \
+  "$repository_root/proxy/nginx.development-listeners.conf" <<'PY'
 import json
+import re
 import sys
 from pathlib import Path
 
 
 production, development = (
     json.loads(Path(path).read_text(encoding="utf-8"))
-    for path in sys.argv[1:]
+    for path in sys.argv[1:3]
 )
+nginx_config = Path(sys.argv[3]).read_text(encoding="utf-8")
+production_listener_config = Path(sys.argv[4]).read_text(encoding="utf-8")
+development_listener_config = Path(sys.argv[5]).read_text(encoding="utf-8")
 
 for compose in (production, development):
     migrate = compose["services"]["migrate"]
@@ -64,6 +72,42 @@ for service in production["services"].values():
     )
     assert "seed_db" not in command
     assert "bootstrap" not in command.lower()
+
+def listeners(config):
+    return {
+    int(port)
+    for port in re.findall(r"\blisten\s+(?:[^\s;:]+:)?([0-9]{1,5})(?=[\s;])", config)
+    }
+
+
+assert "include /etc/nginx/pastexam-listeners.conf;" in nginx_config
+production_listeners = listeners(production_listener_config)
+development_listeners = listeners(development_listener_config)
+production_nginx_ports = production["services"]["nginx"]["ports"]
+assert production_nginx_ports
+assert {
+    (int(binding["published"]), int(binding["target"]))
+    for binding in production_nginx_ports
+} == {(80, 8080), (8080, 8080), (443, 8443)}
+assert {int(binding["target"]) for binding in production_nginx_ports} <= production_listeners
+development_nginx_ports = development["services"]["nginx"]["ports"]
+assert {int(binding["target"]) for binding in development_nginx_ports} <= development_listeners
+
+production_mounts = {
+    mount["target"]: mount
+    for mount in production["services"]["nginx"]["volumes"]
+}
+for target in (
+    "/etc/nginx/nginx.conf",
+    "/etc/nginx/pastexam-listeners.conf",
+    "/etc/nginx/certs/origin.pem",
+    "/etc/nginx/certs/origin-key.pem",
+):
+    assert production_mounts[target]["type"] == "bind"
+    assert production_mounts[target]["read_only"] is True
+assert "listen 8443 ssl;" in production_listener_config
+assert "ssl_certificate /etc/nginx/certs/origin.pem;" in production_listener_config
+assert "ssl_certificate_key /etc/nginx/certs/origin-key.pem;" in production_listener_config
 
 assert (
     production["services"]["backend"]["depends_on"]["migrate"]["condition"]

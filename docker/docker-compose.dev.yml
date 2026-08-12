@@ -1,6 +1,8 @@
 name: ${COMPOSE_PROJECT_NAME:-pastexam-dev}
 
 x-application-environment: &application-environment
+  APP_ENVIRONMENT: development
+  NTHU_DEV_MOCK_ENABLED: ${NTHU_DEV_MOCK_ENABLED:-false}
   DB_HOST: db
   DB_PORT: "5432"
   DB_NAME: ${POSTGRES_DB:?Set POSTGRES_DB}
@@ -126,6 +128,7 @@ services:
     environment:
       <<: *runtime-environment
       ALLOW_DATABASE_BOOTSTRAP: "true"
+      BOOTSTRAP_LOCAL_PROJECT: ${COMPOSE_PROJECT_NAME:?Set COMPOSE_PROJECT_NAME}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -175,6 +178,7 @@ services:
     environment:
       VITE_API_BASE_URL: /api
       VITE_SITE_HOSTNAME: http://localhost:${DEV_HTTP_PORT:-8080}
+      VITE_NTHU_DEV_MOCK_ENABLED: ${NTHU_DEV_MOCK_ENABLED:-false}
     command: >-
       sh -c "pnpm install --frozen-lockfile
       --store-dir /app/node_modules/.pnpm-store
@@ -194,6 +198,7 @@ services:
       - "127.0.0.1:${DEV_HTTP_PORT:-8080}:8080"
     volumes:
       - ../proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../proxy/nginx.development-listeners.conf:/etc/nginx/pastexam-listeners.conf:ro
     depends_on:
       backend:
         condition: service_healthy

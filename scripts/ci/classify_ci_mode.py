@@ -41,8 +41,13 @@ REQUIRED_SOURCE_JOBS = frozenset(
         "lint / backend",
         "lint / frontend",
         "test / migration-safety",
-        "test / backend",
+        "test / backend-shard-a",
+        "test / backend-shard-b",
+        "test / backend-coverage",
         "test / frontend-unit",
+        "test / frontend-e2e-chromium",
+        "test / frontend-e2e-firefox",
+        "test / frontend-e2e-webkit",
         "test / frontend-e2e",
         "build / backend",
         "build / frontend",
@@ -419,6 +424,8 @@ def is_docs_only_path(path: str) -> bool:
     if "/" not in path and (path.endswith(".md") or path.startswith("LICENSE")):
         return True
     if path.startswith("docs/"):
+        return True
+    if path == ".github/CODEOWNERS":
         return True
     if path.startswith(".github/ISSUE_TEMPLATE/"):
         return True

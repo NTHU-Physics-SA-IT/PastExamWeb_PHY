@@ -18,6 +18,7 @@ export type User = {
   email: string
   is_admin: boolean
   is_local: boolean
+  account_source: 'local' | 'nthu'
   last_login: string | null
 }
 
@@ -92,6 +93,7 @@ export const defaultUsers: User[] = [
     email: 'admin@example.com',
     is_admin: true,
     is_local: false,
+    account_source: 'nthu',
     last_login: '2025-10-30T10:00:00Z',
   },
   {
@@ -100,6 +102,7 @@ export const defaultUsers: User[] = [
     email: 'user@example.com',
     is_admin: false,
     is_local: true,
+    account_source: 'local',
     last_login: '2025-10-29T12:00:00Z',
   },
 ]
@@ -316,6 +319,8 @@ export const mockAdminUserEndpoints = async (
       const created = {
         id: createdUserId,
         ...(payload as Record<string, unknown>),
+        is_local: true,
+        account_source: 'local',
       }
       users = [...users, created as User]
       await route.fulfill({

@@ -163,6 +163,7 @@ test.describe('Admin Dashboard › Courses', () => {
       email: `page-user-${index + 1}@example.com`,
       is_admin: index % 2 === 0,
       is_local: true,
+      account_source: 'local',
       last_login: null,
     }))
     const notifications: Notification[] = Array.from({ length: 11 }, (_, index) => ({
@@ -214,6 +215,7 @@ test.describe('Admin Dashboard › Courses', () => {
     await expect(coursePaginator.locator('.p-paginator-prev')).toBeDisabled()
 
     await clickWhenVisible(page.getByRole('tab', { name: '使用者管理' }))
+    await clickWhenVisible(page.getByRole('tab', { name: '本地帳號', exact: true }))
     const userList = page.locator('.admin-mobile-list--users')
     const userPaginator = userList.locator('.admin-mobile-paginator')
     await expect(userList.locator('.admin-user-card')).toHaveCount(10)

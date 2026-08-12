@@ -105,6 +105,30 @@ describe('LoginCallback view', () => {
     expect(wrapper.text()).toContain('目前僅限在校生登入')
   })
 
+  it('shows a friendly affiliation message without exposing the internal error code', async () => {
+    mockURLSearchParams({ error: 'oauth_department_not_allowed' })
+
+    const wrapper = mount(LoginCallback, {
+      global: {
+        mocks: {
+          $router: routerMock,
+        },
+        stubs: {
+          Card: { template: '<div><slot name="title"></slot><slot name="content"></slot></div>' },
+          Button: { template: '<button><slot /></button>' },
+          ProgressSpinner: { template: '<div class="spinner"></div>' },
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(exchangeNthuCodeMock).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('auth-token')).toBeNull()
+    expect(wrapper.text()).toContain('目前網站僅開放指定的清大成員登入，您的身分不在開放範圍內。')
+    expect(wrapper.text()).not.toContain('oauth_department_not_allowed')
+  })
+
   it('shows a safe error when code exchange fails', async () => {
     mockURLSearchParams({ code: 'expired-code' })
     exchangeNthuCodeMock.mockRejectedValueOnce(new Error('expired'))

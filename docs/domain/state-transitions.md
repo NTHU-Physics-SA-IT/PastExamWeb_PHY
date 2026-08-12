@@ -363,14 +363,44 @@ Submission or deleting its stored object. The Archive transition, Report
 decision, and result notification commit atomically; a finalized retry remains
 a conflict.
 
+## NTHU login authorization
+
+NTHU UUID remains the canonical external identity. Provider `userid` is a synchronized affiliation attribute and never an identity key. An `inschool=false` profile is always denied before any allow path.
+
+`all_nthu` preserves the existing eligible-member behavior and ignores
+department and staff lists. `selected_departments` authorizes through one of
+two explicit paths: a standard student's parsed department is selected, or the
+exact provider `userid` appears in the administrator-maintained staff allowlist.
+Staff userids are trimmed at
+configuration input but remain case-sensitive. A staff-like display
+classification never grants access and never implies an organizational unit.
+
+Authorization runs after the provider profile is established and before local User creation or profile synchronization. A denial produces no User mutation, login handoff, exchange success, or application JWT. Existing users remain persisted and unchanged when a later policy denies a login.
+
+For a NTHU OAuth User, provider-synchronized `name` and `email` remain provider-owned profile attributes. An administrator may still update existing administrative metadata such as `is_admin`, but the admin user-update operation rejects an attempted change to either provider-owned field with `409` before applying any field mutation or commit. Local-account profile updates retain their existing behavior.
+
 ## Public visibility
 
 ### Intended invariant
 
-- A public Archive is public only to an authenticated user who may use the
-  system; it is not anonymously accessible on the internet.
-- Authentication is required for Archive browsing, list-carried detail data,
-  preview metadata, preview-file streaming, and download/download-URL access.
+- Full public-Archive data is public only to an authenticated user who may use
+  the system. Authentication is required for Archive browsing, list-carried
+  detail data, preview metadata, preview-file streaming, and
+  download/download-URL access.
+- An anonymous read-only catalog may expose active, non-deleted Courses in
+  active, non-deleted canonical Categories whether or not a Course currently
+  has an effective public Archive. Its Archive projection is limited to `id`,
+  `name`, `professor`, `archive_type`, `has_answers`, and `academic_year`.
+- The anonymous catalog must not expose PDF bytes, preview data, object-storage
+  keys or paths, signed URLs, uploader or submission identity, user data, or
+  internal storage metadata. Backend queries enforce this boundary; frontend
+  control visibility is not authorization.
+- A Course without an effective public Archive remains anonymously
+  discoverable and human-browsable, and its Archive endpoint returns an empty
+  list. Its detail page is `noindex, follow` and is omitted from the sitemap.
+  A Course becomes `index, follow` and sitemap-eligible only when at least one
+  Archive satisfies the effective-public conditions. Empty catalog responses
+  remain valid only when no canonical active Course is available.
 - There is no independent Archive detail `GET` route in the current API;
   Archive detail data is carried by the authenticated list response.
 - Authentication must reject access before object storage is read. Existing
@@ -620,9 +650,10 @@ all of these gates:
 3. the resource has `success=true` and a required valid `uuid`, `userid`,
    `name`, `email`, and boolean `inschool`;
 4. `inschool` is exactly `true`;
-5. the matching provider identity is active, or a new identity has no email or
+5. the server-persisted NTHU access policy permits the affiliation;
+6. the matching provider identity is active, or a new identity has no email or
    name collision; and
-6. the browser atomically consumes the short-lived login handoff.
+7. the browser atomically consumes the short-lived login handoff.
 
 `inschool=false` returns `oauth_not_in_school` and mutates no User. A matching
 soft-deleted identity returns `oauth_account_deleted` and is never restored by
@@ -638,8 +669,22 @@ The in-school decision is an authentication Domain policy independent of
 identity mapping. A future policy change may permit another population without
 changing `oauth_provider="nthu"` or the UUID subject.
 
+The access policy defaults to `all_nthu`, preserving the existing in-school
+eligibility rule. An administrator may persist `selected_departments` with any
+non-empty combination of canonical three-digit department codes and exact staff
+userids. Standard students require a selected parsed department; staff access
+always requires an exact allowlist match. A staff display classification never
+authorizes by itself. Missing, malformed, non-standard, and otherwise
+unverifiable `userid` values are `unresolved` and fail closed with
+the same friendly scope denial. The callback enforces this after
+provider-profile validation and before provider-identity lookup, profile
+synchronization, new User creation, PostgreSQL commit, Redis handoff, or
+application JWT issuance. Existing accounts are retained when later denied.
+Local password authentication never reads this policy.
+
 | Operation | Anonymous | Authenticated user | Owner | Administrator | System |
 | --- | --- | --- | --- | --- | --- |
+| View safe public Course/Archive metadata catalog | Allowed | Allowed | Allowed | Allowed | Allowed |
 | View public effective archive | Denied | Allowed | Allowed | Allowed | Allowed |
 | Create archive/comment report | Denied | Allowed | Allowed | Allowed | Allowed when explicitly designed |
 | Submit archive | Denied | Allowed | Allowed | Allowed | Explicit system imports only |
@@ -651,7 +696,9 @@ changing `oauth_provider="nthu"` or the UUID subject.
 ### Current implementation
 
 Authentication dependencies and `is_admin`/owner checks are enforced in the
-backend, often inline in endpoint modules. The Archive list, preview,
+backend, often inline in endpoint modules. Anonymous catalog queries reuse the
+canonical effective-public-Archive conditions and a dedicated safe response
+projection. The authenticated Archive list, preview,
 preview-file, and download routes depend on `get_current_user`; the list route
 has focused anonymous-access test evidence, and
 `test_archive_file_endpoints_require_authentication` confirms that anonymous

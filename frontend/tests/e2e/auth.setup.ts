@@ -20,8 +20,15 @@ const resolveEnv = () => {
 }
 
 const env = resolveEnv()
-const ADMIN_USERNAME = env.PLAYWRIGHT_ADMIN_USERNAME ?? 'admin'
-const ADMIN_PASSWORD = env.PLAYWRIGHT_ADMIN_PASSWORD ?? 'admin'
+const requireEnv = (name: 'PLAYWRIGHT_ADMIN_USERNAME' | 'PLAYWRIGHT_ADMIN_PASSWORD') => {
+  const value = env[name]?.trim()
+  if (!value) {
+    throw new Error(`${name} is required for authenticated Playwright projects`)
+  }
+  return value
+}
+const ADMIN_USERNAME = requireEnv('PLAYWRIGHT_ADMIN_USERNAME')
+const ADMIN_PASSWORD = requireEnv('PLAYWRIGHT_ADMIN_PASSWORD')
 
 setup('authenticate as admin', async ({ page }) => {
   await page.goto('/')

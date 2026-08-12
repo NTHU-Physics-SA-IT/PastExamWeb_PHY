@@ -5,6 +5,11 @@ export const buildNthuLoginUrl = () => {
   return `${baseUrl}/auth/nthu/login`
 }
 
+export const buildNthuDevLoginUrl = (profileKey) => {
+  const baseUrl = (api.defaults.baseURL || '/api').replace(/\/$/, '')
+  return `${baseUrl}/auth/dev/nthu/login/${encodeURIComponent(profileKey)}`
+}
+
 export const authService = {
   login() {
     window.__pastexam?.openLoginModal?.()
@@ -21,6 +26,15 @@ export const authService = {
 
   nthuLogin() {
     window.location.assign(buildNthuLoginUrl())
+  },
+
+  async getNthuDevProfiles() {
+    const response = await api.get('/auth/dev/nthu/profiles')
+    return response.data
+  },
+
+  nthuDevLogin(profileKey) {
+    window.location.assign(buildNthuDevLoginUrl(profileKey))
   },
 
   async exchangeNthuCode(code) {

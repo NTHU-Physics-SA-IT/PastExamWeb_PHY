@@ -12,6 +12,8 @@ Related documents:
 - [Repository working agreement](../../AGENTS.md)
 - [Code organization](code-organization.md)
 - [Validation policy](validation.md)
+- [Decision Record index](../decisions/README.md)
+- [Collaboration and conflict resolution](collaboration-and-conflict-resolution.md)
 - [UI guidelines](../ui/guidelines.md)
 - [Domain contracts](../domain/README.md)
 - [Migration safety](../migration-safety.md)
@@ -205,6 +207,9 @@ ask them together rather than interrupting for each small detail.
 ## Existing implementation search
 
 Before application changes, search as applicable for the closest:
+
+- relevant `Accepted` Decision Records by changed path and affected conceptual
+  or Domain scope;
 
 - route, service or use case, policy or helper, and model constraint;
 - status mapping, authorization rule, notification builder, visibility rule,
@@ -407,6 +412,11 @@ Merge strategy and merge readiness are owned by
 [CONTRIBUTING.md](../../CONTRIBUTING.md#merge-strategy). When a milestone uses
 `--no-ff`, its new merge commit needs its own pushed, exact-SHA successful CI
 run; source-branch CI is not a substitute.
+
+If the intended target advanced since the branch merge-base, use the
+[collaboration and conflict-resolution runbook](collaboration-and-conflict-resolution.md)
+to review relevant merged PR and Accepted Decision context and reconcile
+semantic as well as textual conflicts before claiming merge readiness.
 
 Normal independent implementation starts from fresh `main`. A task or milestone
 uses the optional coordination branch only when its authority explicitly

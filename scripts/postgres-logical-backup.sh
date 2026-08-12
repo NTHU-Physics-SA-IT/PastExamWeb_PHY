@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 set -euo pipefail
+umask 077
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
@@ -8,6 +9,12 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 : "${DATABASE_CONTAINER:?Set DATABASE_CONTAINER}"
 : "${DATABASE_NAME:?Set DATABASE_NAME}"
 : "${DATABASE_USER:?Set DATABASE_USER}"
+: "${APPLICATION_RELEASE_SHA:?Set APPLICATION_RELEASE_SHA}"
+
+if [[ ! "$APPLICATION_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "APPLICATION_RELEASE_SHA must be a full lowercase release SHA." >&2
+  exit 2
+fi
 
 case "$BACKUP_DIRECTORY" in
   /*) ;;
@@ -84,12 +91,6 @@ postgres_version="$(
       -U "$1" -d "$2" -Atc "SHOW server_version"
   ' sh "$DATABASE_USER" "$DATABASE_NAME"
 )"
-application_commit="$(git -C "$repository_root" rev-parse HEAD)"
-repository_head="$(
-  git -C "$repository_root" rev-parse refs/heads/"$(
-    git -C "$repository_root" branch --show-current
-  )"
-)"
 
 cleanup_partial() {
   if [ -f "$temporary_dump" ]; then
@@ -120,16 +121,22 @@ fi
 
 mv "$temporary_dump" "$dump_path"
 trap - EXIT HUP INT TERM
-checksum="$(shasum -a 256 "$dump_path" | awk '{print $1}')"
+if command -v shasum >/dev/null 2>&1; then
+  checksum="$(shasum -a 256 "$dump_path" | awk '{print $1}')"
+elif command -v sha256sum >/dev/null 2>&1; then
+  checksum="$(sha256sum "$dump_path" | awk '{print $1}')"
+else
+  echo "Neither shasum nor sha256sum is available." >&2
+  exit 2
+fi
 printf '%s  %s\n' "$checksum" "$(basename "$dump_path")" >"$checksum_path"
 
 cat >"$metadata_path" <<EOF
 {
-  "manifest_version": 1,
+  "manifest_version": 2,
   "utc_timestamp": "$timestamp",
-  "application_commit_sha": "$application_commit",
+  "application_release_sha": "$APPLICATION_RELEASE_SHA",
   "alembic_revision": "$alembic_revision",
-  "repository_head": "$repository_head",
   "postgresql_version": "$postgres_version",
   "database_name": "$DATABASE_NAME",
   "backup_file": "$(basename "$dump_path")",

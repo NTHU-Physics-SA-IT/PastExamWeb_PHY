@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.db.session import get_session
 from app.models.models import (
     ArchiveSubmission,
+    AdminUserRead,
     SubmissionStatus,
     User,
     UserCreate,
@@ -36,6 +37,11 @@ from app.api.services.presence import (
     merge_presence_intervals,
 )
 from app.utils.auth import get_current_user, get_password_hash
+from app.services.nthu_affiliation import (
+    classify_nthu_affiliation,
+    parse_nthu_student_affiliation,
+)
+
 router = APIRouter()
 
 NICKNAME_MAX_LENGTH = 15
@@ -86,7 +92,37 @@ def _to_user_read(
     )
 
 
-@router.get("/admin/users", response_model=List[UserRead])
+def _to_admin_user_read(
+    user: User, contributor_experience: int = 0, is_online: bool = False
+) -> AdminUserRead:
+    base = _to_user_read(user, contributor_experience, is_online)
+    parsed_affiliation = parse_nthu_student_affiliation(user.student_id)
+    account_source = (
+        "local"
+        if user.is_local
+        else "nthu"
+        if user.oauth_provider == "nthu"
+        else "unknown"
+    )
+    affiliation = (
+        classify_nthu_affiliation(user.student_id) if account_source == "nthu" else None
+    )
+    return AdminUserRead(
+        **base.model_dump(),
+        account_source=account_source,
+        student_id=user.student_id,
+        department_code=affiliation.department_code if affiliation else None,
+        department_name=affiliation.department_name if affiliation else None,
+        affiliation_status=parsed_affiliation.status.value,
+        nthu_affiliation_kind=affiliation.kind.value if affiliation else None,
+        nthu_affiliation_label=affiliation.label if affiliation else None,
+        nthu_classification_source=(
+            affiliation.classification_source.value if affiliation else None
+        ),
+    )
+
+
+@router.get("/admin/users", response_model=List[AdminUserRead])
 async def get_users(
     current_user: UserRoles = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
@@ -111,7 +147,8 @@ async def get_users(
         .group_by(ArchiveSubmission.requester_id)
     )
     experience_by_user = {
-        requester_id: int(experience) for requester_id, experience in experience_result.all()
+        requester_id: int(experience)
+        for requester_id, experience in experience_result.all()
     }
     now_utc = datetime.now(timezone.utc)
     active_sessions = await load_presence_sessions(
@@ -121,7 +158,7 @@ async def get_users(
     )
     online_user_ids = distinct_online_user_ids(active_sessions, now_utc)
     return [
-        _to_user_read(
+        _to_admin_user_read(
             user,
             experience_by_user.get(user.id, 0),
             user.id in online_user_ids,
@@ -313,7 +350,9 @@ async def get_user_online_duration(
         select(User).where(User.id == user_id, User.deleted_at.is_(None))
     )
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
 
     now_utc = datetime.now(timezone.utc)
     today = _product_date(now_utc)
@@ -380,7 +419,9 @@ async def get_user_submission_stats(
     )
     user = user_result.scalar_one_or_none()
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
 
     counts_result = await db.execute(
         select(ArchiveSubmission.status, func.count(ArchiveSubmission.id))
@@ -397,9 +438,10 @@ async def get_user_submission_stats(
         if status_key in counts:
             counts[status_key] = int(count)
 
-    contributor_experience = counts[SubmissionStatus.APPROVED.value] + counts[
-        SubmissionStatus.TAKEDOWN.value
-    ]
+    contributor_experience = (
+        counts[SubmissionStatus.APPROVED.value]
+        + counts[SubmissionStatus.TAKEDOWN.value]
+    )
     submission_records = []
     if include_records:
         records_result = await db.execute(
@@ -432,7 +474,9 @@ async def get_user_submission_stats(
         contributor_experience=contributor_experience,
         total_count=sum(counts.values()),
         status_counts=UserSubmissionStatusCounts(**counts),
-        records_total=len(submission_records) if include_records else sum(counts.values()),
+        records_total=len(submission_records)
+        if include_records
+        else sum(counts.values()),
         submission_records=submission_records,
     )
 
@@ -457,7 +501,9 @@ async def reset_user_password(
     )
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
 
     if not user.is_local:
         raise HTTPException(
@@ -465,16 +511,17 @@ async def reset_user_password(
             detail="此帳號不是本地帳號，無法由系統重設密碼。",
         )
 
-    new_password = payload.new_password.strip() if payload.new_password else ''
+    new_password = payload.new_password.strip() if payload.new_password else ""
 
     if not new_password:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="新密碼不可為空")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="新密碼不可為空"
+        )
 
     user.password_hash = get_password_hash(new_password)
     await db.commit()
 
     return {"message": "密碼已重設"}
-
 
 
 @router.post("/admin/users", response_model=UserRead)
@@ -593,6 +640,16 @@ async def update_user(
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
+
+    provider_profile_changed = not user.is_local and (
+        (user_data.name is not None and user_data.name != user.name)
+        or (user_data.email is not None and user_data.email != user.email)
+    )
+    if provider_profile_changed:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="清大 OAuth 帳號的使用者名稱與電子郵件由身分提供者管理，無法手動修改。",
         )
 
     if user_data.name is not None:

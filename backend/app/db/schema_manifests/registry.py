@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-HEAD_SCHEMA_REVISION = "9f1c2a7e4b63"
+HEAD_SCHEMA_REVISION = "b7e3d9a1c5f2"
 
 
 @dataclass(frozen=True)
@@ -82,6 +82,11 @@ MANIFESTS = {
         revision="6f3a9c2d8e41",
         description="schema before NTHU OAuth identity uniqueness",
         metadata_variant="pre_user_oauth_identity_unique",
+    ),
+    "9f1c2a7e4b63": ManifestSpec(
+        revision="9f1c2a7e4b63",
+        description="schema before persisted NTHU student ID",
+        metadata_variant="pre_nthu_student_id",
     ),
     HEAD_SCHEMA_REVISION: ManifestSpec(
         revision=HEAD_SCHEMA_REVISION,

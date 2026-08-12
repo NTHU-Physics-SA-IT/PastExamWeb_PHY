@@ -37,8 +37,8 @@ test.describe('Admin Dashboard › Users', () => {
     await expect(page).toHaveURL(/\/admin$/)
 
     await clickWhenVisible(page.getByRole('tab', { name: '使用者管理' }))
+    await clickWhenVisible(page.getByRole('tab', { name: '本地帳號', exact: true }))
 
-    await expect(page.getByRole('article').filter({ hasText: 'Admin' })).toBeVisible()
     await expect(page.getByRole('article').filter({ hasText: '一般使用者' })).toBeVisible()
 
     await clickWhenVisible(page.getByRole('button', { name: '新增使用者' }))

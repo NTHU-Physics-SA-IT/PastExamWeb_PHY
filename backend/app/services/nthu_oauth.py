@@ -9,6 +9,11 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.config import settings
 from app.models.models import User
+from app.services.nthu_access_policy import (
+    NthuAccessPolicyValidationError,
+    ensure_profile_matches_access_policy,
+    load_nthu_access_policy,
+)
 
 
 NTHU_PROVIDER = "nthu"
@@ -32,7 +37,7 @@ class NthuOAuthBusinessError(Exception):
 @dataclass(frozen=True)
 class NthuProfile:
     uuid: str
-    userid: str
+    userid: str | None
     name: str
     email: str
     inschool: bool
@@ -78,6 +83,12 @@ def _required_opaque(value: object) -> str:
     return normalized
 
 
+def _optional_opaque(value: object) -> str | None:
+    if value is None:
+        return None
+    return _required_opaque(value)
+
+
 def _required_text(value: object) -> str:
     if not isinstance(value, str):
         raise NthuOAuthProviderError()
@@ -95,7 +106,7 @@ def _profile_from_resource(payload: object) -> NthuProfile:
         raise NthuOAuthProviderError()
 
     uuid_value = _required_opaque(payload.get("uuid"))
-    userid = _required_opaque(payload.get("userid"))
+    userid = _optional_opaque(payload.get("userid"))
     name = _required_text(payload.get("name"))
     email = _required_opaque(payload.get("email"))
     if "@" not in email:
@@ -172,11 +183,6 @@ async def fetch_nthu_profile(
             await client.aclose()
 
 
-def ensure_nthu_login_allowed(profile: NthuProfile) -> None:
-    if profile.inschool is not True:
-        raise NthuOAuthBusinessError("oauth_not_in_school")
-
-
 async def _find_collision(
     db: AsyncSession,
     *,
@@ -192,7 +198,11 @@ async def _find_collision(
 
 async def resolve_nthu_user(db: AsyncSession, profile: NthuProfile) -> User:
     """Resolve and synchronize the NTHU identity without committing."""
-    ensure_nthu_login_allowed(profile)
+    try:
+        policy = await load_nthu_access_policy(db)
+    except NthuAccessPolicyValidationError as error:
+        raise NthuOAuthBusinessError("oauth_login_failed") from error
+    ensure_profile_matches_access_policy(profile, policy)
     identity_rows = list(
         (
             await db.execute(
@@ -228,6 +238,7 @@ async def resolve_nthu_user(db: AsyncSession, profile: NthuProfile) -> User:
             raise NthuOAuthBusinessError("oauth_profile_conflict")
         user.email = profile.email
         user.name = profile.name
+        user.student_id = profile.userid
         await db.flush()
         return user
 
@@ -239,6 +250,7 @@ async def resolve_nthu_user(db: AsyncSession, profile: NthuProfile) -> User:
     user = User(
         oauth_provider=NTHU_PROVIDER,
         oauth_sub=profile.uuid,
+        student_id=profile.userid,
         email=profile.email,
         name=profile.name,
         nickname=profile.name,

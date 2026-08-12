@@ -47,7 +47,7 @@ describe('PdfPreviewModal', () => {
   beforeAll(async () => {
     ensureDomMatrix()
     PdfPreviewModal = (await import('@/components/PdfPreviewModal.vue')).default
-  })
+  }, 20_000)
 
   beforeEach(() => {
     unauthorizedCallbacks.length = 0

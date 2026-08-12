@@ -13,7 +13,6 @@ archive="${ARCHIVE_PATH:?Set ARCHIVE_PATH}"
 
 releases_root="${RELEASES_ROOT:-/opt/pastexam-releases}"
 production_compose_env="${PRODUCTION_COMPOSE_ENV_FILE:-/etc/pastexam/compose.prod.env}"
-production_backend_env="${PRODUCTION_BACKEND_ENV_FILE:-/opt/pastexam-config/backend.env}"
 frontend_repository="${FRONTEND_IMAGE_REPOSITORY:-ghcr.io/nthu-physics-sa-it/pastexam}"
 backend_repository="${BACKEND_IMAGE_REPOSITORY:-ghcr.io/nthu-physics-sa-it/pastexam}"
 
@@ -111,6 +110,7 @@ verify_candidate() {
 
   configured_images="$(
     docker compose \
+      --env-file "$production_compose_env" \
       --env-file "$candidate_compose_env" \
       --file "$candidate_root/docker/docker-compose.prod.yml" \
       config --images
@@ -136,9 +136,8 @@ if [ -e "$staging_root" ]; then
 fi
 
 root_env="$production_compose_env"
-backend_env="$production_backend_env"
 
-if [ ! -f "$root_env" ] || [ ! -f "$backend_env" ]; then
+if [ ! -f "$root_env" ]; then
   echo "Required production configuration files are unavailable." >&2
   exit 1
 fi
@@ -157,23 +156,22 @@ test "$("${checksum_command[@]}" "$staging_root/.release-files.sha256" |
   "${checksum_check_command[@]}" .release-files.sha256
 )
 
-install -m 600 "$root_env" "$staging_root/compose.prod.env"
-install -m 600 "$backend_env" "$staging_root/backend/.env"
-
 {
-  printf '\n'
   printf '# Immutable images for release %s\n' "$release_sha"
   printf 'FRONTEND_IMAGE=%s\n' "$frontend_image"
   printf 'BACKEND_IMAGE=%s\n' "$backend_image"
-} >>"$staging_root/compose.prod.env"
+} >"$staging_root/compose.prod.env"
+chmod 600 "$staging_root/compose.prod.env"
 
 docker compose \
+  --env-file "$root_env" \
   --env-file "$staging_root/compose.prod.env" \
   --file "$staging_root/docker/docker-compose.prod.yml" \
   config --quiet
 
 configured_images="$(
   docker compose \
+    --env-file "$root_env" \
     --env-file "$staging_root/compose.prod.env" \
     --file "$staging_root/docker/docker-compose.prod.yml" \
     config --images

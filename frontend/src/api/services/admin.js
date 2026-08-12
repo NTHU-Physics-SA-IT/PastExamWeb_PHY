@@ -26,6 +26,14 @@ export const getUsers = () => {
   return api.get('/users/admin/users')
 }
 
+export const getNthuAccessPolicy = () => {
+  return api.get('/settings/nthu-access-policy')
+}
+
+export const updateNthuAccessPolicy = (policy) => {
+  return api.put('/settings/nthu-access-policy', policy)
+}
+
 export const getOnlineStatistics = (range) => {
   return api.get('/users/admin/online-statistics', { params: { range } })
 }

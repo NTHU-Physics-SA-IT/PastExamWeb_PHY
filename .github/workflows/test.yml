@@ -117,16 +117,30 @@ jobs:
             --output json
           uv run python -m pytest -q \
             ../scripts/tests/test_dev_compose_schema_controls.py \
+            ../scripts/tests/test_nginx_oauth_access_logging.py \
             ../scripts/tests/test_postgres_test_bootstrap_contract.py \
+            ../scripts/tests/test_production_activation_contract.py \
+            ../scripts/tests/test_release_workflow_contract.py \
             --confcutdir=../scripts/tests
 
+      - name: Validate Compose safety contract
+        run: ./scripts/validate-compose-safety.sh
+
   backend:
+    name: backend-shard-${{ matrix.shard }}
     if: ${{ inputs.run_checks }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [a, b]
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Validate backend shard manifest
+        run: python3 scripts/ci/backend_test_shards.py validate
 
       - name: Prepare backend env
         run: |
@@ -199,24 +213,46 @@ jobs:
             backend uv run python app/scripts/seed_db.py \
               --confirm-database-name pastexam_test_local
 
-      - name: Run backend tests with coverage
+      - name: Run backend shard with coverage
+        env:
+          BACKEND_TEST_SHARD: ${{ matrix.shard }}
         run: |
+          set -euo pipefail
+
+          mapfile -t test_paths < <(
+            python3 scripts/ci/backend_test_shards.py \
+              paths \
+              --shard "$BACKEND_TEST_SHARD"
+          )
+          if [[ "${#test_paths[@]}" -eq 0 ]]; then
+            echo "Backend test shard resolved to no files." >&2
+            exit 1
+          fi
+          printf 'Backend shard %s selected files:\n' "$BACKEND_TEST_SHARD"
+          printf '  %s\n' "${test_paths[@]}"
+
           docker compose \
             --env-file docker/.env \
             -f docker/docker-compose.dev.yml \
             run --rm \
             -e TEST_DATABASE_URL=postgresql+asyncpg://pastexam_test_local:local-test-only@db:5432/pastexam_test_local \
             -e PASTEXAM_TEST_DATABASE_ISOLATED=true \
+            -e COVERAGE_FILE="/app/.coverage.${BACKEND_TEST_SHARD}" \
             backend \
-            uv run pytest --cov=app --cov-report=term-missing --cov-report=html
+            uv run pytest \
+              --cov=app \
+              --cov-config=.coveragerc \
+              --cov-report= \
+              "${test_paths[@]}"
 
-      - name: Upload backend coverage report
+      - name: Upload raw backend coverage
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: backend-coverage
-          path: backend/htmlcov
-          if-no-files-found: warn
+          name: backend-coverage-raw-${{ matrix.shard }}
+          path: backend/.coverage.${{ matrix.shard }}
+          if-no-files-found: error
+          include-hidden-files: true
 
       - name: Tear down
         if: always()
@@ -225,6 +261,56 @@ jobs:
           --env-file docker/.env
           -f docker/docker-compose.dev.yml
           down --volumes --remove-orphans
+
+  backend-coverage:
+    name: backend-coverage
+    if: ${{ inputs.run_checks }}
+    needs: [backend]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install backend coverage tooling
+        working-directory: backend
+        run: uv sync --locked --only-group dev --no-install-project
+
+      - name: Download shard A coverage
+        uses: actions/download-artifact@v8
+        with:
+          name: backend-coverage-raw-a
+          path: backend/coverage-raw/a
+
+      - name: Download shard B coverage
+        uses: actions/download-artifact@v8
+        with:
+          name: backend-coverage-raw-b
+          path: backend/coverage-raw/b
+
+      - name: Combine backend coverage
+        working-directory: backend
+        run: |
+          set -euo pipefail
+
+          test -f coverage-raw/a/.coverage.a
+          test -f coverage-raw/b/.coverage.b
+          uv run --no-sync coverage combine coverage-raw/a coverage-raw/b
+          uv run --no-sync coverage report --show-missing
+          uv run --no-sync coverage html
+
+      - name: Upload backend coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-coverage
+          path: backend/htmlcov
+          if-no-files-found: error
 
   frontend-unit:
     if: ${{ inputs.run_checks }}
@@ -244,6 +330,7 @@ jobs:
         with:
           node-version: "20"
           cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Install frontend dependencies
         working-directory: ./frontend
@@ -261,10 +348,15 @@ jobs:
           path: frontend/coverage
           if-no-files-found: warn
 
-  frontend-e2e:
+  frontend-e2e-family:
+    name: frontend-e2e-${{ matrix.family }}
     if: ${{ inputs.run_checks }}
     runs-on: ubuntu-latest
     needs: [backend, frontend-unit]
+    strategy:
+      fail-fast: false
+      matrix:
+        family: [chromium, firefox, webkit]
 
     steps:
       - name: Checkout repository
@@ -280,6 +372,7 @@ jobs:
         with:
           node-version: "20"
           cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Install frontend dependencies
         working-directory: ./frontend
@@ -405,9 +498,26 @@ jobs:
             logs nginx
           exit 1
 
+      - name: List selected frontend E2E cases
+        working-directory: ./frontend
+        env:
+          CI: true
+          E2E_FAMILY: ${{ matrix.family }}
+          PLAYWRIGHT_START_SERVER: false
+          PLAYWRIGHT_ADMIN_USERNAME: admin
+          PLAYWRIGHT_ADMIN_PASSWORD: local-admin-only
+        run: >-
+          ./node_modules/.bin/playwright test
+          --list
+          --reporter=list
+          --project="$E2E_FAMILY"
+          --project="${E2E_FAMILY}-admin"
+
       - name: Run frontend E2E tests
         env:
+          E2E_FAMILY: ${{ matrix.family }}
           PLAYWRIGHT_IMAGE: ${{ steps.playwright-image.outputs.image }}
+          PLAYWRIGHT_BLOB_OUTPUT_FILE: blob-report/report-${{ matrix.family }}.zip
           PLAYWRIGHT_ADMIN_USERNAME: admin
           PLAYWRIGHT_ADMIN_PASSWORD: local-admin-only
         run: |
@@ -425,6 +535,8 @@ jobs:
             -e CI=true \
             -e PLAYWRIGHT_START_SERVER=false \
             -e PLAYWRIGHT_BASE_URL=http://nginx:8080 \
+            -e E2E_FAMILY \
+            -e PLAYWRIGHT_BLOB_OUTPUT_FILE \
             -e PLAYWRIGHT_ADMIN_USERNAME \
             -e PLAYWRIGHT_ADMIN_PASSWORD \
             -v "$GITHUB_WORKSPACE:/work" \
@@ -432,16 +544,19 @@ jobs:
             "$PLAYWRIGHT_IMAGE" \
             bash -lc '
               mkdir -p "$HOME"
-              ./node_modules/.bin/playwright test
+              ./node_modules/.bin/playwright test \
+                --project="$E2E_FAMILY" \
+                --project="${E2E_FAMILY}-admin" \
+                --reporter=dot,blob
             '
 
-      - name: Upload Playwright HTML report
+      - name: Upload Playwright blob report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: frontend-e2e-report
-          path: frontend/playwright-report
-          if-no-files-found: warn
+          name: frontend-e2e-blob-${{ matrix.family }}
+          path: frontend/blob-report/report-${{ matrix.family }}.zip
+          if-no-files-found: error
 
       - name: Tear down
         if: always()
@@ -450,3 +565,88 @@ jobs:
           --env-file docker/.env
           -f docker/docker-compose.dev.yml
           down --volumes --remove-orphans
+
+  frontend-e2e:
+    name: frontend-e2e
+    if: ${{ always() && inputs.run_checks }}
+    needs: [frontend-e2e-family]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install Playwright report tooling
+        working-directory: ./frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Download Chromium blob report
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-e2e-blob-chromium
+          path: frontend/blob-report
+
+      - name: Download Firefox blob report
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-e2e-blob-firefox
+          path: frontend/blob-report
+
+      - name: Download WebKit blob report
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-e2e-blob-webkit
+          path: frontend/blob-report
+
+      - name: Verify complete browser-family artifacts
+        working-directory: ./frontend
+        run: |
+          set -euo pipefail
+
+          expected=(
+            blob-report/report-chromium.zip
+            blob-report/report-firefox.zip
+            blob-report/report-webkit.zip
+          )
+          for report in "${expected[@]}"; do
+            test -f "$report"
+          done
+
+          mapfile -t observed < <(
+            find blob-report -maxdepth 1 -type f -name '*.zip' -print | sort
+          )
+          if [[ "${#observed[@]}" -ne "${#expected[@]}" ]]; then
+            printf 'Unexpected browser-family blob reports:\n' >&2
+            printf '  %s\n' "${observed[@]}" >&2
+            exit 1
+          fi
+
+      - name: Merge Playwright reports
+        working-directory: ./frontend
+        run: pnpm exec playwright merge-reports --reporter=html blob-report
+
+      - name: Upload Playwright HTML report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-e2e-report
+          path: frontend/playwright-report
+          if-no-files-found: error
+
+      - name: Verify browser-family results
+        if: always()
+        env:
+          FAMILY_RESULT: ${{ needs.frontend-e2e-family.result }}
+        run: test "$FAMILY_RESULT" = success

@@ -16,6 +16,11 @@ Each rule or topic should have exactly one canonical source.
 - **Planned:** Intended for future creation, but does not yet exist or is not yet
   in effect.
 
+Decision Records use the separate status vocabulary defined in the
+[Decision Record index](decisions/README.md). In particular, a `Superseded`
+Decision Record is retained rationale that defers to its linked replacement;
+it is not current operating authority merely because this index retains it.
+
 ## Authority map
 
 | Source | Authority | Status | Notes |
@@ -28,7 +33,9 @@ Each rule or topic should have exactly one canonical source.
 | [`development/backend-runtime-recovery.md`](development/backend-runtime-recovery.md) | Backend runtime diagnosis, controlled restart eligibility, and clean-start acceptance | Active | The checker is read-only; restart remains separately authorized. |
 | [`development/code-organization.md`](development/code-organization.md) | Code responsibility and pattern consistency | Active | Records current structure and intended ownership direction. |
 | [`development/feature-development-workflow.md`](development/feature-development-workflow.md) | Feature and behavior-change planning, implementation, and test-design workflow | Active | Procedural authority; does not store product contracts or replace validation, Domain, UI, migration, or production guidance. |
+| [`development/collaboration-and-conflict-resolution.md`](development/collaboration-and-conflict-resolution.md) | Parallel-development reconciliation and semantic-conflict workflow | Active | Current procedure for target refresh, PR and Decision review, conflict classification, and safe integration. |
 | [`development/validation.md`](development/validation.md) | Risk-proportional verification and CI completion policy | Active | Canonical validation budget, retry, and reporting rules. |
+| [`decisions/README.md`](decisions/README.md) | Decision Record index, status rules, and durable design history | Active | Accepted records preserve scoped rationale and invariants; superseded records are historical rather than operating authority. |
 | [`../scripts/run-isolated-backend-tests.py`](../scripts/run-isolated-backend-tests.py) | Guarded local isolated PostgreSQL test execution | Active tool | Direct Docker runner; no Compose or persistent test service. |
 | [`../scripts/check-backend-runtime.py`](../scripts/check-backend-runtime.py) | Read-only backend source/runtime/service/data classification | Active tool | Requires exact container IDs and explicit backend source paths. |
 | [`ui/guidelines.md`](ui/guidelines.md) | UI presentation and responsive consistency | Active | Canonical UI-level decisions; Domain meaning is linked, not duplicated. |
@@ -50,6 +57,9 @@ Each rule or topic should have exactly one canonical source.
 - A policy describes constraints and guarantees; a runbook describes concrete
   operating steps.
 - Historical documents do not replace current Active documents.
+- Active operating documents own current procedure. Accepted Decision Records
+  preserve durable rationale and invariants within scope; they do not silently
+  override higher machine-enforced contracts or current operating documents.
 - Product or Domain behavior changes must eventually update the Domain contract
   and its tests together.
 - Protect the public design and stable links of the root `README.md`.

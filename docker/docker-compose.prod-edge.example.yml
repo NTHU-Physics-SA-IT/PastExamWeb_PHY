@@ -1,0 +1,18 @@
+# Example for the supported DigitalOcean / Cloudflare Origin TLS topology.
+# Install a reviewed host-specific copy at /etc/pastexam/docker-compose.edge.yml
+# with root ownership and mode 0600. Certificate contents remain host-managed.
+services:
+  nginx:
+    ports:
+      - "80:8080"
+      - "8080:8080"
+      - "443:8443"
+    volumes:
+      - type: bind
+        source: ${PRODUCTION_TLS_CERT_FILE:?Set PRODUCTION_TLS_CERT_FILE}
+        target: /etc/nginx/certs/origin.pem
+        read_only: true
+      - type: bind
+        source: ${PRODUCTION_TLS_KEY_FILE:?Set PRODUCTION_TLS_KEY_FILE}
+        target: /etc/nginx/certs/origin-key.pem
+        read_only: true

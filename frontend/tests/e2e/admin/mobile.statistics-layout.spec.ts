@@ -90,6 +90,17 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
       )
     )
   )
+  await page.route('**/api/settings/nthu-access-policy', (route) =>
+    route.fulfill(
+      json({
+        mode: 'all_nthu',
+        allowed_department_codes: [],
+        staff_access: 'none',
+        allowed_staff_userids: [],
+        departments: [],
+      })
+    )
+  )
   await mockAdminCourseEndpoints(page)
   await mockAdminUserEndpoints(
     page,
@@ -100,6 +111,7 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
       online_status_label: index === 0 ? '在線' : '離線',
     }))
   )
+  const localStatsUserId = defaultUsers.find((user) => user.account_source === 'local')!.id
 
   const onlinePoints = buildOnlinePoints()
   await page.route('**/api/users/admin/online-statistics**', (route) =>
@@ -117,11 +129,11 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
       })
     )
   )
-  await page.route('**/api/users/admin/users/1/submission-stats**', (route) =>
+  await page.route(`**/api/users/admin/users/${localStatsUserId}/submission-stats**`, (route) =>
     route.fulfill(
       json({
-        user_id: 1,
-        name: 'Admin',
+        user_id: localStatsUserId,
+        name: '一般使用者',
         contributor_experience: 5,
         total_count: 0,
         status_counts: { pending: 0, approved: 0, rejected: 0, takedown: 0, deleted: 0 },
@@ -131,10 +143,10 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
     )
   )
   const durationPoints = buildDurationPoints()
-  await page.route('**/api/users/admin/users/1/online-duration**', (route) =>
+  await page.route(`**/api/users/admin/users/${localStatsUserId}/online-duration**`, (route) =>
     route.fulfill(
       json({
-        user_id: 1,
+        user_id: localStatsUserId,
         mode: 'hourly',
         timezone: 'Asia/Taipei',
         online_timeout_seconds: 300,
@@ -197,6 +209,7 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
 
   await page.getByRole('tab', { name: '使用者管理' }).click()
   await expect(page.getByRole('heading', { name: '使用者統計圖表' })).toBeVisible()
+  await page.getByRole('button', { name: '展開使用者統計圖表' }).click()
 
   const userInsightsCard = page
     .locator('.admin-insights-card')

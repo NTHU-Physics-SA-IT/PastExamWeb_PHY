@@ -122,6 +122,10 @@ class User(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     oauth_provider: Optional[str] = Field(default=None)
     oauth_sub: Optional[str] = Field(default=None)
+    student_id: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String(255), nullable=True),
+    )
     email: str = Field(unique=True, index=True)
     name: str = Field(unique=True, index=True)
     nickname: Optional[str] = Field(default=None, index=True)
@@ -1139,6 +1143,17 @@ class UserRead(BaseModel):
         from_attributes = True
 
 
+class AdminUserRead(UserRead):
+    account_source: str
+    student_id: Optional[str] = None
+    department_code: Optional[str] = None
+    department_name: Optional[str] = None
+    affiliation_status: str = "unresolved"
+    nthu_affiliation_kind: Optional[str] = None
+    nthu_affiliation_label: Optional[str] = None
+    nthu_classification_source: Optional[str] = None
+
+
 class OnlineStatisticsPoint(BaseModel):
     start: datetime
     end: datetime
@@ -1502,6 +1517,20 @@ class ArchiveRead(BaseModel):
     uploader_id: Optional[int] = None
     download_count: int = 0
     source_submission_ids: List[int] = []
+
+    class Config:
+        from_attributes = True
+
+
+class PublicArchiveRead(BaseModel):
+    """Archive metadata that is safe to expose without authentication."""
+
+    id: int
+    name: str
+    academic_year: int
+    archive_type: ArchiveType
+    professor: str
+    has_answers: bool
 
     class Config:
         from_attributes = True

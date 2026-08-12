@@ -228,6 +228,7 @@ def _metadata_for_variant(variant: str) -> MetaData:
     if variant == "head":
         return metadata
     if variant not in {
+        "pre_nthu_student_id",
         "pre_user_oauth_identity_unique",
         "pre_archive_submission_one_to_one",
         "pre_archive_submission_previous_status",
@@ -239,6 +240,10 @@ def _metadata_for_variant(variant: str) -> MetaData:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
 
     users = metadata.tables["users"]
+    users._columns.remove(users.c.student_id)
+    if variant == "pre_nthu_student_id":
+        return metadata
+
     for constraint in list(users.constraints):
         if (
             isinstance(constraint, UniqueConstraint)
