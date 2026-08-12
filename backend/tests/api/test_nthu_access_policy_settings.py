@@ -1,5 +1,6 @@
 import pytest
 from sqlalchemy import delete
+from sqlmodel import select
 
 from app.main import app
 from app.models.models import SystemSetting, UserRoles
@@ -63,7 +64,11 @@ async def test_admin_reads_default_and_persists_selected_departments(
         assert reload_response.json()["staff_access"] == "allowlist"
         assert reload_response.json()["allowed_staff_userids"] == ["W90001"]
         async with session_maker() as session:
-            stored = await session.get(SystemSetting, NTHU_ACCESS_POLICY_SETTING_KEY)
+            stored = await session.scalar(
+                select(SystemSetting).where(
+                    SystemSetting.key == NTHU_ACCESS_POLICY_SETTING_KEY
+                )
+            )
             assert stored is not None
             assert LEGACY_SPECIAL_AFFILIATIONS_KEY not in stored.value
     finally:
