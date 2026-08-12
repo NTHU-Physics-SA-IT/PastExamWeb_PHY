@@ -54,6 +54,7 @@
       "tests/integration/test_archive_submission_one_to_one_migration.py",
       "tests/integration/test_category_canonicalization_migration.py",
       "tests/integration/test_nthu_oauth_identity_migration.py",
+      "tests/services/test_dev_local_admin.py",
       "tests/services/test_nthu_access_policy.py",
       "tests/services/test_nthu_affiliation.py",
       "tests/services/test_nthu_dev_mock.py",
