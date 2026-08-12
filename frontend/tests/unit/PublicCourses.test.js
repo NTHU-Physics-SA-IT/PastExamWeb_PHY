@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import publicCoursesSource from '@/views/PublicCourses.vue?raw'
 
 import PublicCourses from '@/views/PublicCourses.vue'
 
@@ -32,6 +33,19 @@ describe('PublicCourses', () => {
     courseServiceMock.listPublicCategories.mockReset()
     courseServiceMock.listPublicCourses.mockReset()
     setSeoMock.mockReset()
+  })
+
+  it('uses plain breadcrumbs and stable responsive gutters', () => {
+    expect(publicCoursesSource).toMatch(
+      /\.breadcrumbs a\s*\{[^}]*padding:\s*0;[^}]*text-decoration:\s*none/s
+    )
+    expect(publicCoursesSource).not.toMatch(/\.breadcrumbs a\s*\{[^}]*border:/s)
+    expect(publicCoursesSource).toMatch(
+      /@media \(max-width: 820px\)[\s\S]*?\.public-catalog\s*\{[^}]*width:\s*min\(100% - 56px, 1080px\)/
+    )
+    expect(publicCoursesSource).toMatch(
+      /@media \(max-width: 560px\)[\s\S]*?\.public-catalog\s*\{[^}]*width:\s*min\(100% - 40px, 1080px\)/
+    )
   })
 
   it('renders loading and a useful empty state for a fresh database', async () => {

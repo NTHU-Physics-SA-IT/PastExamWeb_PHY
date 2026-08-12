@@ -55,6 +55,19 @@ describe('PublicCourse', () => {
     )
   })
 
+  it('uses plain breadcrumbs and stable responsive gutters', () => {
+    expect(publicCourseSource).toMatch(
+      /\.breadcrumbs a\s*\{[^}]*padding:\s*0;[^}]*text-decoration:\s*none/s
+    )
+    expect(publicCourseSource).not.toMatch(/\.breadcrumbs a\s*\{[^}]*border:/s)
+    expect(publicCourseSource).toMatch(
+      /@media \(max-width: 820px\)[\s\S]*?\.public-course\s*\{[^}]*width:\s*min\(100% - 56px, 980px\)/
+    )
+    expect(publicCourseSource).toMatch(
+      /@media \(max-width: 560px\)[\s\S]*?\.public-course\s*\{[^}]*width:\s*min\(100% - 40px, 980px\)/
+    )
+  })
+
   it('renders safe archive metadata without exposing file actions', async () => {
     courseServiceMock.listPublicCategories.mockResolvedValue({
       data: [{ key: 'fundamental', name: '基礎課程', label: '基礎' }],

@@ -1660,6 +1660,14 @@ h1 {
 }
 
 @media (max-width: 768px) {
+  h1 {
+    font-size: clamp(1.7rem, 7.8vw, 2.15rem);
+  }
+
+  .title-campus {
+    font-size: 0.666rem;
+  }
+
   .dashboard-strip {
     grid-template-columns: 1fr;
     width: min(100% - 2rem, 32rem);
