@@ -164,6 +164,42 @@ def _manifest_release_sha(path: Path) -> str:
     return values[0]
 
 
+def _manifest_value(path: Path, key: str) -> str:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise ContractError("Cannot read the release manifest.") from error
+    prefix = f"{key}="
+    values = [line.removeprefix(prefix) for line in lines if line.startswith(prefix)]
+    if len(values) != 1 or not values[0]:
+        raise ContractError(f"Release manifest has no unique {key} value.")
+    return values[0]
+
+
+def _verify_images(compose_path: Path, manifest: Path) -> None:
+    compose = _load_json(compose_path)
+    if not isinstance(compose, dict):
+        raise ContractError("Rendered Compose root must be an object.")
+    expected_frontend = _manifest_value(manifest, "frontend_image")
+    expected_backend = _manifest_value(manifest, "backend_image")
+    expected = {
+        "frontend": expected_frontend,
+        "backend": expected_backend,
+        "migrate": expected_backend,
+    }
+    mismatches = [
+        name
+        for name, expected_image in expected.items()
+        if _required_string(_service(compose, name), "image", f"{name} image")
+        != expected_image
+    ]
+    if mismatches:
+        raise ContractError(
+            "Rendered Compose images disagree with the immutable release manifest: "
+            + ", ".join(mismatches)
+        )
+
+
 def _verify_release(
     manifest: Path, source_sha_path: Path, release_directory: Path
 ) -> None:
@@ -374,6 +410,10 @@ def _parser() -> argparse.ArgumentParser:
     release.add_argument("--source-sha", type=Path, required=True)
     release.add_argument("--release-directory", type=Path, required=True)
 
+    images = subparsers.add_parser("verify-images")
+    images.add_argument("--compose-json", type=Path, required=True)
+    images.add_argument("--manifest", type=Path, required=True)
+
     ingress = subparsers.add_parser("verify-ingress")
     ingress.add_argument("--compose-json", type=Path, required=True)
     ingress.add_argument("--current-ports-json", type=Path, required=True)
@@ -392,6 +432,8 @@ def main() -> int:
             _mount_values(args.compose_json)
         elif args.command == "verify-release":
             _verify_release(args.manifest, args.source_sha, args.release_directory)
+        elif args.command == "verify-images":
+            _verify_images(args.compose_json, args.manifest)
         else:
             _verify_ingress(
                 args.compose_json, args.current_ports_json, args.release_directory

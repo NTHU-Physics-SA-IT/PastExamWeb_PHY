@@ -21,9 +21,27 @@ fi
 : "${PRODUCTION_LOCK_FILE:=/var/lock/pastexam-production-activation.lock}"
 : "${INTERNAL_HEALTH_URL:=http://127.0.0.1:8080/api/health}"
 : "${EXTERNAL_HEALTH_URL:?Set EXTERNAL_HEALTH_URL}"
+: "${HEALTH_CHECK_ATTEMPTS:=10}"
+: "${HEALTH_CHECK_INITIAL_DELAY_SECONDS:=2}"
+: "${HEALTH_CHECK_MAX_DELAY_SECONDS:=10}"
 
 if [ "$ACTIVATION_CONFIRMATION" != "activate-reviewed-production-release" ]; then
   echo "Production activation confirmation is invalid." >&2
+  exit 2
+fi
+
+for retry_value in \
+  "$HEALTH_CHECK_ATTEMPTS" \
+  "$HEALTH_CHECK_INITIAL_DELAY_SECONDS" \
+  "$HEALTH_CHECK_MAX_DELAY_SECONDS"
+do
+  if [[ ! "$retry_value" =~ ^[0-9]+$ ]]; then
+    echo "Health retry settings must be non-negative integers." >&2
+    exit 2
+  fi
+done
+if [ "$HEALTH_CHECK_ATTEMPTS" -lt 1 ]; then
+  echo "HEALTH_CHECK_ATTEMPTS must be at least 1." >&2
   exit 2
 fi
 
@@ -48,6 +66,12 @@ do
     exit 2
   fi
 done
+
+candidate_compose_env="$RELEASE_DIRECTORY/compose.prod.env"
+if [ ! -f "$candidate_compose_env" ]; then
+  echo "Immutable candidate Compose environment is missing." >&2
+  exit 2
+fi
 
 verify_external_file() {
   local external_file mode owner_uid
@@ -102,6 +126,7 @@ compose_file="$RELEASE_DIRECTORY/docker/docker-compose.prod.yml"
 compose=(
   docker compose
   --env-file "$PRODUCTION_COMPOSE_ENV_FILE"
+  --env-file "$candidate_compose_env"
   --file "$compose_file"
   --file "$PRODUCTION_EDGE_COMPOSE_FILE"
 )
@@ -118,6 +143,10 @@ trap cleanup_contract EXIT HUP INT TERM
 rendered_compose="$contract_directory/compose.json"
 current_nginx_ports="$contract_directory/current-nginx-ports.json"
 "${compose[@]}" config --format json >"$rendered_compose"
+
+python3 "$contract_helper" verify-images \
+  --compose-json "$rendered_compose" \
+  --manifest "$RELEASE_MANIFEST"
 
 production_values="$(
   python3 "$contract_helper" compose-values \
@@ -178,8 +207,35 @@ env -i \
 
 "${compose[@]}" up -d backend frontend nginx
 
-curl --fail --silent --show-error "$INTERNAL_HEALTH_URL" >/dev/null
-curl --fail --silent --show-error "$EXTERNAL_HEALTH_URL" >/dev/null
+wait_for_health() {
+  local label url attempt delay
+  label="$1"
+  url="$2"
+  attempt=1
+  delay="$HEALTH_CHECK_INITIAL_DELAY_SECONDS"
+  while true; do
+    if curl --fail --silent --show-error \
+      --connect-timeout 5 --max-time 10 "$url" >/dev/null
+    then
+      echo "$label health check succeeded."
+      return 0
+    fi
+    if [ "$attempt" -ge "$HEALTH_CHECK_ATTEMPTS" ]; then
+      echo "$label health check failed after $attempt attempts." >&2
+      return 1
+    fi
+    echo "$label health check attempt $attempt failed; retrying in ${delay}s." >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+    if [ "$delay" -gt "$HEALTH_CHECK_MAX_DELAY_SECONDS" ]; then
+      delay="$HEALTH_CHECK_MAX_DELAY_SECONDS"
+    fi
+  done
+}
+
+wait_for_health "Internal" "$INTERNAL_HEALTH_URL"
+wait_for_health "External" "$EXTERNAL_HEALTH_URL"
 
 activated_marker="$RELEASE_DIRECTORY/.activated"
 temporary_marker="$activated_marker.partial"
