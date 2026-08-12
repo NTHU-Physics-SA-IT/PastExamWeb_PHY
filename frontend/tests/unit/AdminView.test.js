@@ -472,6 +472,31 @@ describe('AdminView', () => {
       staff_access: 'none',
       allowed_staff_userids: [],
     })
+
+    wrapper.vm.nthuAccessPolicyForm.staff_access = 'allowlist'
+    wrapper.vm.nthuAccessPolicyForm.allowed_staff_userids = ['W90001']
+    wrapper.vm.nthuAccessPolicyForm.mode = 'all_nthu'
+    await wrapper.vm.saveNthuAccessPolicy()
+    expect(updateNthuAccessPolicyMock).toHaveBeenLastCalledWith({
+      mode: 'all_nthu',
+      allowed_department_codes: ['022', '025'],
+      staff_access: 'allowlist',
+      allowed_staff_userids: ['W90001'],
+    })
+    getNthuAccessPolicyMock.mockResolvedValueOnce({
+      data: {
+        ...sampleNthuAccessPolicy,
+        mode: 'all_nthu',
+        allowed_department_codes: ['022', '025'],
+        staff_access: 'allowlist',
+        allowed_staff_userids: ['W90001'],
+      },
+    })
+    await wrapper.vm.loadNthuAccessPolicy()
+    wrapper.vm.nthuAccessPolicyForm.mode = 'selected_departments'
+    expect(wrapper.vm.nthuAccessPolicyForm.allowed_department_codes).toEqual(['022', '025'])
+    expect(wrapper.vm.nthuAccessPolicyForm.staff_access).toBe('allowlist')
+    expect(wrapper.vm.nthuAccessPolicyForm.allowed_staff_userids).toEqual(['W90001'])
     expect(toastAddMock).toHaveBeenLastCalledWith(
       expect.objectContaining({ severity: 'success', detail: 'NTHU 登入範圍已更新。' })
     )
@@ -1396,7 +1421,9 @@ describe('AdminView', () => {
       [150, '1.35'],
     ]) {
       applyFontSizePreference(percent)
-      expect(document.documentElement.style.getPropertyValue('--app-font-scale')).toBe(scale)
+      expect(document.documentElement.style.getPropertyValue('--app-effective-font-scale')).toBe(
+        scale
+      )
       expect(wrapper.vm.loginChartData.counts).toEqual(counts)
       expect(wrapper.vm.reviewSubmissionChartData.buckets.map(({ count }) => count)).toEqual(
         reviewCounts

@@ -25,6 +25,8 @@ const AUTH_FILE = 'playwright/.auth/admin.json'
 const chromiumExecutablePath = env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
 const NON_ADMIN_TESTS = /.*[\\/](?:common|user)[\\/].*\.spec\.ts/
 const ADMIN_TESTS = /.*[\\/]admin[\\/].*\.spec\.ts/
+const READINESS_TEST = /frontend\.readiness\.ts/
+const AUTH_TEST = /auth\.setup\.ts/
 const chromiumUse = {
   ...devices['Desktop Chrome'],
   ...(chromiumExecutablePath ? { launchOptions: { executablePath: chromiumExecutablePath } } : {}),
@@ -46,11 +48,17 @@ const config: PlaywrightTestConfig = {
   },
   projects: [
     {
+      name: 'readiness',
+      testMatch: READINESS_TEST,
+    },
+    {
       name: 'setup',
-      testMatch: /.*\.setup\.ts/,
+      dependencies: ['readiness'],
+      testMatch: AUTH_TEST,
     },
     {
       name: 'chromium',
+      dependencies: ['readiness'],
       testMatch: NON_ADMIN_TESTS,
       use: chromiumUse,
     },
@@ -62,6 +70,7 @@ const config: PlaywrightTestConfig = {
     },
     {
       name: 'firefox',
+      dependencies: ['readiness'],
       testMatch: NON_ADMIN_TESTS,
       use: { ...devices['Desktop Firefox'] },
     },
@@ -73,6 +82,7 @@ const config: PlaywrightTestConfig = {
     },
     {
       name: 'webkit',
+      dependencies: ['readiness'],
       testMatch: NON_ADMIN_TESTS,
       use: { ...devices['Desktop Safari'] },
     },

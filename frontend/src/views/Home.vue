@@ -427,7 +427,7 @@ function formatNumber(num) {
 h1 {
   margin: 0;
   color: #edf7ed;
-  font-size: clamp(2.85rem, 4.4vw, 4.85rem);
+  font-size: clamp(2.3rem, 3.5vw, 3.8rem);
   font-weight: 780;
   line-height: 1.04;
   letter-spacing: 0.08em;
@@ -468,7 +468,7 @@ h1 {
   width: min(100%, 38rem);
   margin: 0;
   color: rgba(202, 179, 111, 0.98);
-  font-size: clamp(0.9rem, 1.1vw, 1.05rem);
+  font-size: clamp(0.81rem, 0.99vw, 0.945rem);
   font-weight: 760;
   letter-spacing: 0.5em;
   text-indent: 0.5em;
@@ -1697,7 +1697,7 @@ h1 {
 
   h1 {
     max-width: min(100%, 7.2em);
-    font-size: clamp(2rem, 9.7vw, 2.72rem);
+    font-size: clamp(1.7rem, 7.8vw, 2.15rem);
     line-height: 1.1;
     letter-spacing: 0.03em;
     margin-inline: auto;
@@ -1718,7 +1718,7 @@ h1 {
   .title-campus {
     width: min(100%, 18rem);
     gap: 0.55rem;
-    font-size: 0.74rem;
+    font-size: 0.666rem;
     letter-spacing: 0.34em;
     text-indent: 0.34em;
     margin-inline: auto;

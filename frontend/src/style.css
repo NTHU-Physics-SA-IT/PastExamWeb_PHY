@@ -12,8 +12,12 @@
   --title-gradient-start: #176f7b;
   --title-gradient-end: #b9821d;
   --code-bg-svg-fill: rgba(29, 116, 130, 0.16);
-  --app-font-scale: 1;
-  --app-font-size-base: calc(1rem * var(--app-font-scale));
+  --app-font-baseline: 0.9;
+  --app-user-font-scale: 1;
+  --app-effective-font-scale: 0.9;
+  /* Root rem is the single typography scaling authority; 90% is the app baseline. */
+  font-size: 90%;
+  --app-font-size-base: 1rem;
   --app-font-size-xs: calc(var(--app-font-size-base) * 0.78);
   --app-font-size-sm: calc(var(--app-font-size-base) * 0.92);
   --app-font-size-lg: calc(var(--app-font-size-base) * 1.08);
@@ -238,12 +242,12 @@ body {
 }
 
 .p-button {
-  min-height: calc(2.35rem * var(--app-font-scale));
+  min-height: 2.35rem;
 }
 
 .p-button.p-button-sm,
 .p-button-sm > .p-button {
-  min-height: calc(2rem * var(--app-font-scale));
+  min-height: 2rem;
 }
 
 .p-inputtext,
@@ -252,7 +256,7 @@ body {
 .p-select,
 .p-dropdown,
 .p-multiselect {
-  min-height: calc(2.35rem * var(--app-font-scale));
+  min-height: 2.35rem;
 }
 
 .p-tag,
@@ -316,7 +320,7 @@ body {
 
 .action-button,
 [class*='action-button'] {
-  min-height: calc(2rem * var(--app-font-scale));
+  min-height: 2rem;
 }
 
 .p-dialog,
@@ -453,8 +457,8 @@ body {
 }
 
 .p-dialog-close-button {
-  min-width: calc(2.2rem * var(--app-font-scale));
-  min-height: calc(2.2rem * var(--app-font-scale));
+  min-width: 2.2rem;
+  min-height: 2.2rem;
 }
 
 .p-dialog .p-stepper,
@@ -560,7 +564,7 @@ body {
 .p-dialog .comparison-mobile-actions .p-button,
 .p-dialog .review-dialog-actions .p-button,
 .issue-report-dialog .p-button {
-  min-height: calc(2rem * var(--app-font-scale));
+  min-height: 2rem;
   font-size: var(--app-font-size-sm) !important;
   line-height: 1.25;
   white-space: normal;
@@ -568,15 +572,15 @@ body {
 
 .p-dialog .discussion-pin-btn,
 .p-dialog .discussion-delete-btn {
-  min-width: calc(1.45rem * var(--app-font-scale));
-  width: calc(1.45rem * var(--app-font-scale));
-  height: calc(1.45rem * var(--app-font-scale));
+  min-width: 1.45rem;
+  width: 1.45rem;
+  height: 1.45rem;
 }
 
 .p-dialog .discussion-settings-btn {
-  min-width: calc(1.7rem * var(--app-font-scale));
-  width: calc(1.7rem * var(--app-font-scale));
-  height: calc(1.7rem * var(--app-font-scale));
+  min-width: 1.7rem;
+  width: 1.7rem;
+  height: 1.7rem;
 }
 
 .p-dialog .p-button-label,
@@ -687,39 +691,39 @@ body {
 }
 
 .pi.text-xs {
-  font-size: calc(0.75rem * var(--app-font-scale));
+  font-size: 0.75rem;
 }
 
 .pi.text-sm {
-  font-size: calc(0.875rem * var(--app-font-scale));
+  font-size: 0.875rem;
 }
 
 .pi.text-lg {
-  font-size: calc(1.125rem * var(--app-font-scale));
+  font-size: 1.125rem;
 }
 
 .pi.text-xl {
-  font-size: calc(1.25rem * var(--app-font-scale));
+  font-size: 1.25rem;
 }
 
 .pi.text-2xl {
-  font-size: calc(1.5rem * var(--app-font-scale));
+  font-size: 1.5rem;
 }
 
 .pi.text-3xl {
-  font-size: calc(1.875rem * var(--app-font-scale));
+  font-size: 1.875rem;
 }
 
 .pi.text-4xl {
-  font-size: calc(2.25rem * var(--app-font-scale));
+  font-size: 2.25rem;
 }
 
 .pi.text-5xl {
-  font-size: calc(3rem * var(--app-font-scale));
+  font-size: 3rem;
 }
 
 .pi.text-6xl {
-  font-size: calc(3.75rem * var(--app-font-scale));
+  font-size: 3.75rem;
 }
 
 html {

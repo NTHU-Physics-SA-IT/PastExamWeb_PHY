@@ -22,10 +22,7 @@
       <header class="course-header">
         <p v-if="category" class="eyebrow">{{ category.name }}</p>
         <h1>{{ course.name }}考古題</h1>
-        <p>
-          本頁公開顯示這門課程已收錄考古題的學年度、授課教師、考試類型與是否附解答。 完整 PDF
-          仍需登入後依網站權限使用。
-        </p>
+        <p>本頁公開顯示這門課程已收錄考古題的學年度、授課教師、考試類型與是否附解答。完整 PDF 仍需登入後依網站權限使用。</p>
         <div class="course-summary" aria-label="課程收錄摘要">
           <span>共 {{ archives.length }} 份</span>
           <span v-if="latestAcademicYear">最新：{{ latestAcademicYear }}</span>
@@ -68,11 +65,6 @@
         </section>
       </section>
 
-      <aside v-if="archives.length > 0" class="login-notice">
-        <h2>預覽或下載完整文件</h2>
-        <p>公開頁面不提供 PDF、物件位置或下載網址；請回到首頁登入後使用文件功能。</p>
-        <RouterLink to="/">前往登入</RouterLink>
-      </aside>
     </template>
   </main>
 </template>
@@ -267,6 +259,7 @@ watch(() => route.params.courseId, loadCourse)
 .breadcrumbs {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.5rem;
   margin-bottom: 2rem;
   color: var(--text-secondary);
@@ -274,9 +267,34 @@ watch(() => route.params.courseId, loadCourse)
 }
 
 .breadcrumbs a,
-.login-notice a,
 .error-message a {
   color: inherit;
+}
+
+.breadcrumbs a {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  padding: 0.3rem 0.62rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.55rem;
+  background: var(--bg-secondary);
+  text-decoration: none;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+.breadcrumbs > span {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  line-height: 1.25;
+}
+
+.breadcrumbs a:hover {
+  border-color: var(--primary-color);
+  background: var(--bg-primary);
 }
 
 .course-header {
@@ -286,14 +304,19 @@ watch(() => route.params.courseId, loadCourse)
 
 .course-header h1 {
   margin: 0.35rem 0 1rem;
-  font-size: clamp(2rem, 5vw, 3.4rem);
+  font-size: clamp(1.7rem, 3vw, 2.25rem);
 }
 
 .course-header > p,
-.login-notice p,
 .error-message p {
   color: var(--text-secondary);
   line-height: 1.75;
+}
+
+.course-header > p {
+  max-width: 68ch;
+  margin: 0;
+  text-wrap: pretty;
 }
 
 .eyebrow {
@@ -339,12 +362,11 @@ watch(() => route.params.courseId, loadCourse)
 
 .archive-card,
 .empty-state,
-.login-notice,
 .error-message {
   padding: 1.25rem;
-  border: 1px solid var(--surface-border);
+  border: 1px solid var(--border-color);
   border-radius: 1rem;
-  background: var(--surface-card);
+  background: var(--bg-secondary);
 }
 
 .archive-title-row {
@@ -386,11 +408,6 @@ watch(() => route.params.courseId, loadCourse)
   margin: 0;
 }
 
-.login-notice {
-  margin-top: 3rem;
-}
-
-.login-notice h2,
 .empty-state h2,
 .error-message h1 {
   margin-top: 0;
@@ -408,7 +425,6 @@ watch(() => route.params.courseId, loadCourse)
 }
 
 .breadcrumbs a:focus-visible,
-.login-notice a:focus-visible,
 .error-message a:focus-visible {
   outline: 2px solid var(--primary-color);
   outline-offset: 3px;
