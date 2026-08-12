@@ -264,9 +264,11 @@
 import { userService } from '../api'
 import { getLocalItem, setLocalItem } from '../utils/storage'
 import {
+  APP_FONT_BASELINE,
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
   FONT_SIZE_STEP,
+  USER_SCALE_DEFAULT_PERCENT,
   getFontSizePreference,
   setFontSizePreference,
 } from '../utils/fontSizePreference'
@@ -350,13 +352,14 @@ export default {
       return items
     },
     fontSizePercent() {
-      return Math.round(this.fontSizeScale)
+      return Math.round(this.fontSizeScale * APP_FONT_BASELINE)
     },
     fontSizeToneLabel() {
-      if (this.fontSizePercent < 100) {
+      const defaultDisplayPercent = Math.round(USER_SCALE_DEFAULT_PERCENT * APP_FONT_BASELINE)
+      if (this.fontSizePercent < defaultDisplayPercent) {
         return '偏小'
       }
-      if (this.fontSizePercent > 100) {
+      if (this.fontSizePercent > defaultDisplayPercent) {
         return '偏大'
       }
       return '預設'

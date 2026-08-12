@@ -220,8 +220,9 @@ test.describe('Home page', () => {
   test('renders hero section with backend data and interactive navbar', async ({ page }) => {
     await page.goto('/')
 
-    const brand = page.getByRole('button', { name: /Physics Archive · NTHU/ })
+    const brand = page.getByRole('link', { name: '回到首頁', exact: true })
     await expect(brand).toBeVisible()
+    await expect(brand).toHaveAttribute('href', '/')
     await expect(page.getByRole('img', { name: '清大物理考古系統' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Login', exact: true })).toHaveCount(0)
 

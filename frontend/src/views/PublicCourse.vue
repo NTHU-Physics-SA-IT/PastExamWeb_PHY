@@ -275,14 +275,9 @@ watch(() => route.params.courseId, loadCourse)
   display: inline-flex;
   min-height: 2rem;
   align-items: center;
-  padding: 0.3rem 0.62rem;
-  border: 1px solid var(--border-color);
-  border-radius: 0.55rem;
-  background: var(--bg-secondary);
+  padding: 0;
   text-decoration: none;
-  transition:
-    border-color 160ms ease,
-    background-color 160ms ease;
+  transition: color 160ms ease;
 }
 
 .breadcrumbs > span {
@@ -293,8 +288,7 @@ watch(() => route.params.courseId, loadCourse)
 }
 
 .breadcrumbs a:hover {
-  border-color: var(--primary-color);
-  background: var(--bg-primary);
+  color: var(--primary-color);
 }
 
 .course-header {
@@ -430,9 +424,15 @@ watch(() => route.params.courseId, loadCourse)
   outline-offset: 3px;
 }
 
+@media (max-width: 820px) {
+  .public-course {
+    width: min(100% - 56px, 980px);
+  }
+}
+
 @media (max-width: 560px) {
   .public-course {
-    width: min(100% - 1.25rem, 980px);
+    width: min(100% - 40px, 980px);
     padding-top: 1.25rem;
   }
 
