@@ -518,6 +518,11 @@ describe('AdminView', () => {
     expect(wrapper.vm.isNthuAccessPolicyValid).toBe(false)
     expect(wrapper.vm.nthuAccessPolicyForm).not.toHaveProperty('allowed_special_' + 'affiliations')
     expect(adminTemplateSource).not.toContain('交換生／' + '特殊學生')
+    expect(adminTemplateSource).not.toContain('特殊學生' + '身分')
+    expect(adminTemplateSource).toContain('自訂登入範圍仍依學生系所與教職員 allowlist')
+    expect(adminTemplateSource).toContain(
+      '自訂範圍至少需要選擇一個系所，或加入一個允許的員工編號。'
+    )
     expect(adminTemplateSource).not.toContain('nthu-special-student')
     wrapper.unmount()
   })

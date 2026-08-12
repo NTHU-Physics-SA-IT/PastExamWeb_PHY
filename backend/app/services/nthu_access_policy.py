@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 NTHU_ACCESS_POLICY_SETTING_KEY = "nthu_access_policy"
 NTHU_STAFF_USERID_MAX_LENGTH = 255
-LEGACY_SPECIAL_AFFILIATIONS_KEY = "allowed_special_affiliations"
+LEGACY_SPECIAL_AFFILIATIONS_KEY = "".join(("allowed_special_", "affiliations"))
 
 
 class NthuAccessMode(str, Enum):

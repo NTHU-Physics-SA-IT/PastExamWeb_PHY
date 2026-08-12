@@ -658,15 +658,15 @@
                       </div>
                     </div>
                     <p class="nthu-access-policy__classification-note">
-                      清大身分類別用於管理與篩選；自訂登入範圍仍依學生系所、特殊學生設定與教職員
-                      allowlist 分別判定。
+                      清大身分類別用於管理與篩選；自訂登入範圍仍依學生系所與教職員 allowlist
+                      分別判定。
                     </p>
                     <small
                       v-if="!isNthuAccessPolicyValid"
                       class="nthu-access-policy__validation"
                       role="alert"
                     >
-                      自訂範圍至少需要選擇一個系所、允許特殊學生身分，或加入一個允許的員工編號。
+                      自訂範圍至少需要選擇一個系所，或加入一個允許的員工編號。
                     </small>
                   </div>
                 </div>
