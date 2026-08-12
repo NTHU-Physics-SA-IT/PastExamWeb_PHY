@@ -340,7 +340,7 @@ onBeforeUnmount(() => requestController?.abort())
   color: var(--text-color);
 }
 
-@container user-duration (max-width: 40rem) {
+@container user-duration (max-width: 640px) {
   .user-duration-card .user-duration-heading {
     align-items: stretch;
     flex-direction: column;

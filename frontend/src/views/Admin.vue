@@ -13872,7 +13872,7 @@ onBeforeUnmount(() => {
   }
 }
 
-@container admin-insights (max-width: 40rem) {
+@container admin-insights (max-width: 640px) {
   .admin-insights-card .chart-summary-control-row {
     display: grid;
     grid-template-areas:
