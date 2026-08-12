@@ -29,6 +29,10 @@
             <dt>系所</dt>
             <dd>{{ profile.department_name || '—' }}</dd>
           </div>
+          <div>
+            <dt>預期身分類別</dt>
+            <dd>{{ profile.nthu_affiliation_label }}</dd>
+          </div>
         </dl>
         <Button label="以此測試身分登入" icon="pi pi-sign-in" @click="startLogin(profile.key)" />
       </article>
@@ -48,7 +52,13 @@ const errorMessage = ref('')
 onMounted(async () => {
   try {
     const data = await authService.getNthuDevProfiles()
-    if (!Array.isArray(data?.profiles) || data.profiles.length !== 7) {
+    if (
+      !Array.isArray(data?.profiles) ||
+      data.profiles.length !== 7 ||
+      data.profiles.some(
+        (profile) => !profile.nthu_affiliation_kind || !profile.nthu_affiliation_label
+      )
+    ) {
       throw new TypeError('Invalid NTHU development profile catalog')
     }
     profiles.value = data.profiles

@@ -582,6 +582,22 @@
                         </span>
                       </template>
                     </MultiSelect>
+                    <div class="nthu-access-policy__special">
+                      <span class="nthu-access-policy__section-label">特殊學生身分</span>
+                      <label for="nthu-special-student" class="nthu-access-policy__special-option">
+                        <Checkbox
+                          v-model="nthuAccessPolicyForm.allowed_special_affiliations"
+                          inputId="nthu-special-student"
+                          name="nthu-special-affiliation"
+                          :value="NTHU_SPECIAL_AFFILIATIONS.SPECIAL_STUDENT"
+                        />
+                        <span>交換生／特殊學生</span>
+                      </label>
+                      <p>
+                        特殊學生身分無法使用一般 9
+                        位學號規則解析系所，因此可在此獨立決定是否允許登入。
+                      </p>
+                    </div>
                     <div class="nthu-access-policy__staff">
                       <span class="nthu-access-policy__section-label">教職員</span>
                       <p>
@@ -657,12 +673,16 @@
                         </div>
                       </div>
                     </div>
+                    <p class="nthu-access-policy__classification-note">
+                      清大身分類別用於管理與篩選；自訂登入範圍仍依學生系所、特殊學生設定與教職員
+                      allowlist 分別判定。
+                    </p>
                     <small
                       v-if="!isNthuAccessPolicyValid"
                       class="nthu-access-policy__validation"
                       role="alert"
                     >
-                      自訂範圍至少需要選擇一個系所，或加入一個允許的員工編號。
+                      自訂範圍至少需要選擇一個系所、允許特殊學生身分，或加入一個允許的員工編號。
                     </small>
                   </div>
                 </div>
@@ -995,6 +1015,43 @@
                     />
                   </div>
                   <Select
+                    inputId="admin-user-source-filter"
+                    name="admin-user-source-filter"
+                    v-model="filterAccountSource"
+                    :options="accountSourceFilterOptions"
+                    optionLabel="name"
+                    optionValue="value"
+                    placeholder="帳號來源"
+                    aria-label="帳號來源"
+                    class="admin-toolbar__select w-full md:w-14rem"
+                  />
+                  <Select
+                    v-if="filterAccountSource === 'nthu'"
+                    inputId="admin-user-affiliation-filter"
+                    name="admin-user-affiliation-filter"
+                    v-model="filterNthuAffiliation"
+                    :options="nthuAffiliationFilterOptions"
+                    optionLabel="name"
+                    optionValue="value"
+                    placeholder="清大身分"
+                    aria-label="清大身分"
+                    class="admin-toolbar__select w-full md:w-14rem"
+                  />
+                  <Select
+                    v-if="filterAccountSource === 'nthu'"
+                    inputId="admin-user-department-filter"
+                    name="admin-user-department-filter"
+                    v-model="filterNthuDepartment"
+                    :options="nthuDepartments"
+                    optionLabel="name"
+                    optionValue="code"
+                    placeholder="系所"
+                    aria-label="系所"
+                    filter
+                    showClear
+                    class="admin-toolbar__select w-full md:w-14rem"
+                  />
+                  <Select
                     inputId="admin-user-type-filter"
                     name="admin-user-type-filter"
                     v-model="filterUserType"
@@ -1067,13 +1124,25 @@
                 </Column>
                 <Column
                   field="department_name"
-                  header="系所"
+                  header="系所 / 類別"
                   sortable
                   style="width: 12rem; min-width: 12rem"
                 >
                   <template #body="{ data }">
                     <span class="admin-desktop-cell user-department-name">
-                      {{ data.department_name || '—' }}
+                      {{ getUserAffiliationCategory(data) || '—' }}
+                    </span>
+                  </template>
+                </Column>
+                <Column
+                  field="nthu_affiliation_label"
+                  header="清大身分"
+                  sortable
+                  style="width: 10rem; min-width: 10rem"
+                >
+                  <template #body="{ data }">
+                    <span class="admin-desktop-cell">
+                      {{ data.nthu_affiliation_label || '—' }}
                     </span>
                   </template>
                 </Column>
@@ -1095,8 +1164,8 @@
                         <Tag :severity="data.is_admin ? 'success' : 'secondary'" class="text-sm">
                           {{ data.is_admin ? '是' : '否' }}
                         </Tag>
-                        <Tag :severity="data.is_local ? 'info' : 'warning'" class="text-sm">
-                          {{ data.is_local ? '本地帳號' : '外部帳號' }}
+                        <Tag :severity="getAccountSourceSeverity(data)" class="text-sm">
+                          {{ getAccountSourceLabel(data) }}
                         </Tag>
                         <span class="admin-card-meta-text">
                           {{ data.last_login ? formatDateTime(data.last_login) : '從未登入' }}
@@ -1117,10 +1186,10 @@
                     </Tag>
                   </template>
                 </Column>
-                <Column field="is_local" header="帳號類型" sortable style="width: 15%">
+                <Column field="account_source" header="帳號來源" sortable style="width: 15%">
                   <template #body="{ data }">
-                    <Tag :severity="data.is_local ? 'info' : 'warning'" class="text-sm">
-                      {{ data.is_local ? '本地帳號' : '外部帳號' }}
+                    <Tag :severity="getAccountSourceSeverity(data)" class="text-sm">
+                      {{ getAccountSourceLabel(data) }}
                     </Tag>
                   </template>
                 </Column>
@@ -1221,16 +1290,22 @@
                       <span class="admin-tablet-metadata-value">{{ user.student_id || '—' }}</span>
                     </div>
                     <div class="admin-tablet-metadata-item admin-tablet-metadata-item--wide">
-                      <span class="admin-tablet-metadata-label">系所</span>
+                      <span class="admin-tablet-metadata-label">系所 / 類別</span>
                       <span class="admin-tablet-metadata-value user-department-name">
-                        {{ user.department_name || '—' }}
+                        {{ getUserAffiliationCategory(user) || '—' }}
                       </span>
                     </div>
                     <div class="admin-tablet-metadata-item">
-                      <span class="admin-tablet-metadata-label">帳號類型</span>
-                      <span class="admin-tablet-metadata-value">{{
-                        user.is_local ? '本地帳號' : '外部帳號'
-                      }}</span>
+                      <span class="admin-tablet-metadata-label">清大身分</span>
+                      <span class="admin-tablet-metadata-value">
+                        {{ user.nthu_affiliation_label || '—' }}
+                      </span>
+                    </div>
+                    <div class="admin-tablet-metadata-item">
+                      <span class="admin-tablet-metadata-label">帳號來源</span>
+                      <span class="admin-tablet-metadata-value">
+                        {{ getAccountSourceLabel(user) }}
+                      </span>
                     </div>
                     <div class="admin-tablet-metadata-item">
                       <span class="admin-tablet-metadata-label">最後登入</span>
@@ -4491,6 +4566,9 @@ const NTHU_STAFF_ACCESS = Object.freeze({
   NONE: 'none',
   ALLOWLIST: 'allowlist',
 })
+const NTHU_SPECIAL_AFFILIATIONS = Object.freeze({
+  SPECIAL_STUDENT: 'special_student',
+})
 const nthuAccessPolicyLoading = ref(false)
 const nthuAccessPolicySaving = ref(false)
 const nthuAccessPolicyError = ref('')
@@ -4498,6 +4576,7 @@ const nthuDepartments = ref([])
 const nthuAccessPolicyForm = ref({
   mode: NTHU_ACCESS_MODES.ALL_NTHU,
   allowed_department_codes: [],
+  allowed_special_affiliations: [],
   staff_access: NTHU_STAFF_ACCESS.NONE,
   allowed_staff_userids: [],
 })
@@ -4513,6 +4592,7 @@ const isNthuAccessPolicyValid = computed(() => {
   }
   return (
     nthuAccessPolicyForm.value.allowed_department_codes.length > 0 ||
+    nthuAccessPolicyForm.value.allowed_special_affiliations.length > 0 ||
     (nthuAccessPolicyForm.value.staff_access === NTHU_STAFF_ACCESS.ALLOWLIST &&
       nthuAccessPolicyForm.value.allowed_staff_userids.length > 0)
   )
@@ -4534,6 +4614,9 @@ const nthuDepartmentGroups = computed(() => {
 })
 const userSearchQuery = ref('')
 const filterUserType = ref(null)
+const filterAccountSource = ref(null)
+const filterNthuAffiliation = ref(null)
+const filterNthuDepartment = ref(null)
 const selectedContributorLevels = ref([])
 const isLevelStatsExpanded = ref(false)
 const showContributorLevelSettingsDialog = ref(false)
@@ -4603,6 +4686,25 @@ const userSortMeta = ref([
 ])
 const USER_PASSWORD_MIN_LENGTH = 8
 const NON_LOCAL_PASSWORD_RESET_HINT = '此帳號不是本地帳號，無法由系統重設密碼。'
+
+const getAccountSourceLabel = (user) => {
+  if (user?.account_source === 'local') return '本地帳號'
+  if (user?.account_source === 'nthu') return '清大 OAuth'
+  return '未分類'
+}
+
+const getAccountSourceSeverity = (user) =>
+  user?.account_source === 'local'
+    ? 'info'
+    : user?.account_source === 'nthu'
+      ? 'warning'
+      : 'secondary'
+
+const getUserAffiliationCategory = (user) => {
+  if (user?.department_name) return user.department_name
+  if (user?.nthu_affiliation_kind === 'special_student') return user.nthu_affiliation_label
+  return null
+}
 
 const getResetPasswordTargetLabel = (user) => {
   return user?.name || user?.email || '該使用者'
@@ -5462,6 +5564,20 @@ const userTypeFilterOptions = [
   { name: '一般使用者', value: false },
 ]
 
+const accountSourceFilterOptions = [
+  { name: '全部', value: null },
+  { name: '本地帳號', value: 'local' },
+  { name: '清大 OAuth', value: 'nthu' },
+]
+
+const nthuAffiliationFilterOptions = [
+  { name: '全部', value: null },
+  { name: '一般學生', value: 'standard_student' },
+  { name: '交換生／特殊學生', value: 'special_student' },
+  { name: '教職員', value: 'staff' },
+  { name: '未分類', value: 'unknown' },
+]
+
 const contributorLevelStats = computed(() => {
   const counts = new Map(SUBMISSION_LEVELS.map((level) => [level.level, 0]))
   users.value.forEach((user) => {
@@ -6306,11 +6422,36 @@ const filteredUsers = computed(() => {
   if (userSearchQuery.value) {
     const query = userSearchQuery.value.trim().toLowerCase()
     filtered = filtered.filter((user) =>
-      [user.name, user.nickname, user.email, user.student_id, user.department_name].some((value) =>
+      [
+        user.name,
+        user.nickname,
+        user.email,
+        user.student_id,
+        user.department_name,
+        user.nthu_affiliation_label,
+      ].some((value) =>
         String(value || '')
           .toLowerCase()
           .includes(query)
       )
+    )
+  }
+
+  if (filterAccountSource.value !== null) {
+    filtered = filtered.filter((user) => user.account_source === filterAccountSource.value)
+  }
+
+  if (filterNthuAffiliation.value !== null) {
+    filtered = filtered.filter(
+      (user) =>
+        user.account_source === 'nthu' && user.nthu_affiliation_kind === filterNthuAffiliation.value
+    )
+  }
+
+  if (filterNthuDepartment.value !== null) {
+    filtered = filtered.filter(
+      (user) =>
+        user.account_source === 'nthu' && user.department_code === filterNthuDepartment.value
     )
   }
 
@@ -6433,9 +6574,29 @@ const clampPaginatorFirst = (firstRef, rowsRef, totalRecords) => {
 watch([searchQuery, filterCategory], () => {
   courseFirst.value = 0
 })
-watch([userSearchQuery, filterUserType, selectedContributorLevels], () => {
-  userFirst.value = 0
-})
+watch(
+  filterAccountSource,
+  (source) => {
+    if (source !== 'nthu') {
+      filterNthuAffiliation.value = null
+      filterNthuDepartment.value = null
+    }
+  },
+  { flush: 'sync' }
+)
+watch(
+  [
+    userSearchQuery,
+    filterUserType,
+    filterAccountSource,
+    filterNthuAffiliation,
+    filterNthuDepartment,
+    selectedContributorLevels,
+  ],
+  () => {
+    userFirst.value = 0
+  }
+)
 watch([notificationSearchQuery, notificationSeverityFilter], () => {
   notificationFirst.value = 0
 })
@@ -6505,6 +6666,12 @@ const loadCourses = async () => {
 const applyNthuAccessPolicyResponse = (data) => {
   const validMode = Object.values(NTHU_ACCESS_MODES).includes(data?.mode)
   const validCodes = Array.isArray(data?.allowed_department_codes)
+  const validSpecialAffiliations =
+    data?.allowed_special_affiliations === undefined ||
+    (Array.isArray(data.allowed_special_affiliations) &&
+      data.allowed_special_affiliations.every(
+        (affiliation) => affiliation === NTHU_SPECIAL_AFFILIATIONS.SPECIAL_STUDENT
+      ))
   const validStaffAccess = Object.values(NTHU_STAFF_ACCESS).includes(data?.staff_access)
   const validStaffUserids =
     Array.isArray(data?.allowed_staff_userids) &&
@@ -6518,7 +6685,14 @@ const applyNthuAccessPolicyResponse = (data) => {
         typeof department?.college_code === 'string' &&
         typeof department?.college_name === 'string'
     )
-  if (!validMode || !validCodes || !validStaffAccess || !validStaffUserids || !validDepartments) {
+  if (
+    !validMode ||
+    !validCodes ||
+    !validSpecialAffiliations ||
+    !validStaffAccess ||
+    !validStaffUserids ||
+    !validDepartments
+  ) {
     throw new TypeError('Invalid NTHU access policy response')
   }
 
@@ -6526,6 +6700,7 @@ const applyNthuAccessPolicyResponse = (data) => {
   nthuAccessPolicyForm.value = {
     mode: data.mode,
     allowed_department_codes: [...data.allowed_department_codes],
+    allowed_special_affiliations: [...(data.allowed_special_affiliations || [])],
     staff_access: data.staff_access,
     allowed_staff_userids: [...data.allowed_staff_userids],
   }
@@ -6583,6 +6758,10 @@ const saveNthuAccessPolicy = async () => {
         nthuAccessPolicyForm.value.mode === NTHU_ACCESS_MODES.ALL_NTHU
           ? []
           : [...nthuAccessPolicyForm.value.allowed_department_codes],
+      allowed_special_affiliations:
+        nthuAccessPolicyForm.value.mode === NTHU_ACCESS_MODES.ALL_NTHU
+          ? []
+          : [...nthuAccessPolicyForm.value.allowed_special_affiliations],
       staff_access:
         nthuAccessPolicyForm.value.mode === NTHU_ACCESS_MODES.ALL_NTHU
           ? NTHU_STAFF_ACCESS.NONE
@@ -8838,6 +9017,34 @@ onBeforeUnmount(() => {
   gap: 0.65rem;
   min-width: 0;
   margin-top: 0.5rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.nthu-access-policy__special {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+  margin-top: 0.5rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.nthu-access-policy__special-option {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.nthu-access-policy__special p,
+.nthu-access-policy__classification-note {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.nthu-access-policy__classification-note {
   padding-top: 0.85rem;
   border-top: 1px solid var(--border-color);
 }

@@ -24,6 +24,7 @@ const sampleUsers = [
     email: 'alice@example.com',
     is_admin: true,
     is_local: true,
+    account_source: 'local',
     student_id: null,
     department_code: null,
     department_name: null,
@@ -35,8 +36,11 @@ const sampleUsers = [
     email: 'bob@example.com',
     is_admin: false,
     is_local: false,
+    account_source: 'nthu',
     student_id: '112022123',
     department_code: '022',
+    nthu_affiliation_kind: 'standard_student',
+    nthu_affiliation_label: '一般學生',
     department_name: '物理學系',
   },
 ]
@@ -44,6 +48,7 @@ const sampleUsers = [
 const sampleNthuAccessPolicy = {
   mode: 'all_nthu',
   allowed_department_codes: [],
+  allowed_special_affiliations: [],
   staff_access: 'none',
   allowed_staff_userids: [],
   departments: [
@@ -460,6 +465,7 @@ describe('AdminView', () => {
     expect(updateNthuAccessPolicyMock).toHaveBeenCalledWith({
       mode: 'selected_departments',
       allowed_department_codes: ['022', '025'],
+      allowed_special_affiliations: [],
       staff_access: 'none',
       allowed_staff_userids: [],
     })
@@ -469,7 +475,7 @@ describe('AdminView', () => {
 
     expect(adminTemplateSource).toContain('設定哪些清大學生可以透過 NTHU OAuth 登入網站')
     expect(adminTemplateSource).toContain("user.student_id || '—'")
-    expect(adminTemplateSource).toContain("user.department_name || '—'")
+    expect(adminTemplateSource).toContain("getUserAffiliationCategory(user) || '—'")
     expect(adminTemplateSource).toContain('filterPlaceholder="搜尋中文系所名稱或代碼"')
 
     wrapper.unmount()
@@ -494,12 +500,96 @@ describe('AdminView', () => {
     expect(updateNthuAccessPolicyMock).toHaveBeenCalledWith({
       mode: 'selected_departments',
       allowed_department_codes: [],
+      allowed_special_affiliations: [],
       staff_access: 'allowlist',
       allowed_staff_userids: ['W90001'],
     })
 
     wrapper.vm.removeNthuStaffUserid('W90001')
     expect(wrapper.vm.isNthuAccessPolicyValid).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('supports special-only access and defaults old policy responses safely', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    wrapper.vm.nthuAccessPolicyForm.mode = 'selected_departments'
+    wrapper.vm.nthuAccessPolicyForm.allowed_department_codes = []
+    wrapper.vm.nthuAccessPolicyForm.allowed_special_affiliations = ['special_student']
+    wrapper.vm.nthuAccessPolicyForm.staff_access = 'none'
+    wrapper.vm.nthuAccessPolicyForm.allowed_staff_userids = []
+    expect(wrapper.vm.isNthuAccessPolicyValid).toBe(true)
+
+    await wrapper.vm.saveNthuAccessPolicy()
+    expect(updateNthuAccessPolicyMock).toHaveBeenCalledWith({
+      mode: 'selected_departments',
+      allowed_department_codes: [],
+      allowed_special_affiliations: ['special_student'],
+      staff_access: 'none',
+      allowed_staff_userids: [],
+    })
+
+    wrapper.vm.applyNthuAccessPolicyResponse({
+      ...sampleNthuAccessPolicy,
+      allowed_special_affiliations: undefined,
+    })
+    expect(wrapper.vm.nthuAccessPolicyForm.allowed_special_affiliations).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('combines account source, affiliation, and department filters', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    const extraUsers = [
+      {
+        id: 3,
+        name: 'Special',
+        email: 'special@example.com',
+        is_admin: false,
+        is_local: false,
+        account_source: 'nthu',
+        student_id: 'X1106099',
+        department_code: null,
+        department_name: null,
+        nthu_affiliation_kind: 'special_student',
+        nthu_affiliation_label: '交換生／特殊學生',
+      },
+      {
+        id: 4,
+        name: 'Staff',
+        email: 'staff@example.com',
+        is_admin: false,
+        is_local: false,
+        account_source: 'nthu',
+        student_id: 'W90001',
+        department_code: null,
+        department_name: null,
+        nthu_affiliation_kind: 'staff',
+        nthu_affiliation_label: '教職員',
+      },
+    ]
+    wrapper.vm.users = [...sampleUsers, ...extraUsers].map((user) => ({
+      ...user,
+      contributorLevel: { level: 1, name: 'Level 1' },
+      contributor_level: 1,
+    }))
+
+    wrapper.vm.filterAccountSource = 'local'
+    expect(wrapper.vm.filteredUsers.map((user) => user.name)).toEqual(['Alice'])
+
+    wrapper.vm.filterAccountSource = 'nthu'
+    wrapper.vm.filterNthuAffiliation = 'standard_student'
+    wrapper.vm.filterNthuDepartment = '022'
+    expect(wrapper.vm.filteredUsers.map((user) => user.name)).toEqual(['Bob'])
+
+    wrapper.vm.filterNthuAffiliation = 'special_student'
+    wrapper.vm.filterNthuDepartment = null
+    expect(wrapper.vm.filteredUsers.map((user) => user.name)).toEqual(['Special'])
+
+    wrapper.vm.filterNthuAffiliation = null
+    wrapper.vm.userSearchQuery = '交換生'
+    expect(wrapper.vm.filteredUsers.map((user) => user.name)).toEqual(['Special'])
     wrapper.unmount()
   })
 
