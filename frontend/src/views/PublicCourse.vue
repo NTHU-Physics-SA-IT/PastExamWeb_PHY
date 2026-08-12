@@ -134,7 +134,7 @@ function findCourse(courseId, categories, coursesByCategory) {
 
 function applyMissingSeo() {
   setSeo({
-    title: '找不到公開課程｜PhysArchive',
+    title: '找不到公開課程',
     canonicalPath: route.path,
     robots: 'noindex, nofollow',
   })
@@ -203,7 +203,7 @@ function applyCourseSeo() {
   }
 
   setSeo({
-    title: `${course.value.name}考古題｜清大物理｜PhysArchive`,
+    title: `${course.value.name}考古題｜清大物理`,
     description,
     canonicalPath: `/courses/${course.value.id}`,
     robots: hasPublicArchives ? 'index, follow' : 'noindex, follow',

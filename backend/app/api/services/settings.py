@@ -11,6 +11,13 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db.session import get_session
 from app.models.models import SystemSetting, UserRoles
+from app.services.nthu_access_policy import (
+    NthuAccessPolicy,
+    NthuAccessPolicyValidationError,
+    load_nthu_access_policy,
+    save_nthu_access_policy,
+)
+from app.services.nthu_affiliation import NTHU_DEPARTMENTS
 from app.utils.auth import get_current_user
 
 router = APIRouter()
@@ -40,6 +47,41 @@ class ContributorLevelSettingRead(BaseModel):
 
     class Config:
         extra = "forbid"
+
+
+class NthuDepartmentRead(BaseModel):
+    code: str
+    name: str
+    college_code: str
+    college_name: str
+
+
+class NthuAccessPolicyRead(BaseModel):
+    mode: str
+    allowed_department_codes: list[str]
+    staff_access: str
+    allowed_staff_userids: list[str]
+    departments: list[NthuDepartmentRead]
+
+
+def _require_admin(current_user: UserRoles) -> None:
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions",
+        )
+
+
+def _nthu_access_policy_response(policy: NthuAccessPolicy) -> NthuAccessPolicyRead:
+    return NthuAccessPolicyRead(
+        mode=policy.mode.value,
+        allowed_department_codes=list(policy.allowed_department_codes),
+        staff_access=policy.staff_access.value,
+        allowed_staff_userids=list(policy.allowed_staff_userids),
+        departments=[
+            NthuDepartmentRead(**department.__dict__) for department in NTHU_DEPARTMENTS
+        ],
+    )
 
 
 def _contains_visible_character(value: str) -> bool:
@@ -184,3 +226,45 @@ async def update_contributor_level_settings(
         await db.rollback()
         raise
     return normalized
+
+
+@router.get("/nthu-access-policy", response_model=NthuAccessPolicyRead)
+async def get_nthu_access_policy(
+    current_user: UserRoles = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    _require_admin(current_user)
+    try:
+        policy = await load_nthu_access_policy(db)
+    except NthuAccessPolicyValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="NTHU access policy is invalid",
+        ) from exc
+    return _nthu_access_policy_response(policy)
+
+
+@router.put("/nthu-access-policy", response_model=NthuAccessPolicyRead)
+async def update_nthu_access_policy(
+    payload: dict[str, Any],
+    current_user: UserRoles = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    _require_admin(current_user)
+    try:
+        policy = await save_nthu_access_policy(
+            db,
+            payload,
+            updated_by_id=current_user.user_id,
+        )
+        await db.commit()
+    except NthuAccessPolicyValidationError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except Exception:
+        await db.rollback()
+        raise
+    return _nthu_access_policy_response(policy)

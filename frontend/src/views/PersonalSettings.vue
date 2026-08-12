@@ -136,7 +136,11 @@
             </Card>
           </section>
 
-          <section id="account-settings" class="settings-group settings-anchor">
+          <section
+            v-if="showAccountSettings"
+            id="account-settings"
+            class="settings-group settings-anchor"
+          >
             <div class="settings-group-header">
               <h2>帳號設定</h2>
               <p>管理名稱、電子郵件與密碼。</p>
@@ -249,7 +253,6 @@
 
 <script>
 import { userService } from '../api'
-import { getCurrentUser } from '../utils/auth'
 import { getLocalItem, setLocalItem } from '../utils/storage'
 import {
   FONT_SIZE_MAX,
@@ -273,15 +276,14 @@ export default {
     }
   },
   data() {
-    const currentUser = getCurrentUser()
-
     return {
-      profileLoading: false,
+      isLocalAccount: null,
+      profileLoading: true,
       profileSaving: false,
-      originalName: (currentUser?.name || '').trim(),
+      originalName: '',
       profileForm: {
-        name: (currentUser?.name || '').trim(),
-        email: (currentUser?.email || '').trim(),
+        name: '',
+        email: '',
       },
       passwordForm: {
         currentPassword: '',
@@ -298,14 +300,6 @@ export default {
       fontSizeStep: FONT_SIZE_STEP,
       activeSection: 'display-settings',
       sectionObserver: null,
-      navItems: [
-        { id: 'display-settings', label: '顯示設定', level: 'group' },
-        { id: 'font-size-setting', label: '字體大小', level: 'item' },
-        { id: 'language-setting', label: '語言', level: 'item' },
-        { id: 'account-settings', label: '帳號設定', level: 'group' },
-        { id: 'profile-setting', label: '基本資料', level: 'item' },
-        { id: 'password-setting', label: '密碼設定', level: 'item' },
-      ],
       languageOptions: [
         { label: '繁體中文', value: 'zh-TW' },
         { label: 'English', value: 'en' },
@@ -313,6 +307,26 @@ export default {
     }
   },
   computed: {
+    showAccountSettings() {
+      return this.isLocalAccount === true
+    },
+    navItems() {
+      const items = [
+        { id: 'display-settings', label: '顯示設定', level: 'group' },
+        { id: 'font-size-setting', label: '字體大小', level: 'item' },
+        { id: 'language-setting', label: '語言', level: 'item' },
+      ]
+
+      if (this.showAccountSettings) {
+        items.push(
+          { id: 'account-settings', label: '帳號設定', level: 'group' },
+          { id: 'profile-setting', label: '基本資料', level: 'item' },
+          { id: 'password-setting', label: '密碼設定', level: 'item' }
+        )
+      }
+
+      return items
+    },
     fontSizePercent() {
       return Math.round(this.fontSizeScale)
     },
@@ -369,11 +383,10 @@ export default {
       setLocalItem(LANGUAGE_KEY, value)
     },
   },
-  mounted() {
-    void this.loadProfile()
-    this.$nextTick(() => {
-      this.setupSectionObserver()
-    })
+  async mounted() {
+    await this.loadProfile()
+    await this.$nextTick()
+    this.setupSectionObserver()
   },
   beforeUnmount() {
     this.teardownSectionObserver()
@@ -431,6 +444,11 @@ export default {
 
       try {
         const { data } = await userService.getMe()
+        this.isLocalAccount = data?.is_local === true
+        if (!this.isLocalAccount) {
+          return
+        }
+
         const displayName = (data?.nickname || data?.name || '').trim()
         this.originalName = displayName
         this.profileForm.name = displayName

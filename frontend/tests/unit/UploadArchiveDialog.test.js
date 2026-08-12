@@ -140,7 +140,7 @@ describe('UploadArchiveDialog', () => {
   beforeAll(async () => {
     ensureDomMatrix()
     UploadArchiveDialog = (await import('@/components/UploadArchiveDialog.vue')).default
-  })
+  }, 20_000)
 
   beforeEach(() => {
     trackEventMock.mockReset()

@@ -1,6 +1,8 @@
 name: ${COMPOSE_PROJECT_NAME:-pastexam-dev}
 
 x-application-environment: &application-environment
+  APP_ENVIRONMENT: development
+  NTHU_DEV_MOCK_ENABLED: ${NTHU_DEV_MOCK_ENABLED:-false}
   DB_HOST: db
   DB_PORT: "5432"
   DB_NAME: ${POSTGRES_DB:?Set POSTGRES_DB}
@@ -176,6 +178,7 @@ services:
     environment:
       VITE_API_BASE_URL: /api
       VITE_SITE_HOSTNAME: http://localhost:${DEV_HTTP_PORT:-8080}
+      VITE_NTHU_DEV_MOCK_ENABLED: ${NTHU_DEV_MOCK_ENABLED:-false}
     command: >-
       sh -c "pnpm install --frozen-lockfile
       --store-dir /app/node_modules/.pnpm-store

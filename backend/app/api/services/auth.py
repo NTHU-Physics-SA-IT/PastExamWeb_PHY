@@ -26,6 +26,13 @@ from app.services.nthu_oauth import (
     fetch_nthu_profile,
     resolve_nthu_user,
 )
+from app.services.nthu_dev_mock import (
+    consume_nthu_dev_profile,
+    create_nthu_dev_code,
+    is_nthu_dev_code,
+    nthu_dev_mock_is_available,
+    public_nthu_dev_profiles,
+)
 from app.api.services.presence import (
     HEARTBEAT_INTERVAL_SECONDS,
     end_presence_session,
@@ -120,6 +127,32 @@ async def nthu_login(request: Request):
     return _no_store_redirect(authorize_url)
 
 
+@router.get("/dev/nthu/profiles")
+async def nthu_dev_profiles():
+    if not nthu_dev_mock_is_available():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return {"profiles": public_nthu_dev_profiles()}
+
+
+@router.get("/dev/nthu/login/{profile_key}")
+async def nthu_dev_login(profile_key: str, request: Request):
+    if not nthu_dev_mock_is_available():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    state_value = secrets.token_urlsafe(32)
+    request.session[NTHU_OAUTH_STATE_SESSION_KEY] = state_value
+    try:
+        code = create_nthu_dev_code(profile_key)
+    except KeyError as error:
+        request.session.pop(NTHU_OAUTH_STATE_SESSION_KEY, None)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from error
+    except NthuOAuthProviderError as error:
+        request.session.pop(NTHU_OAUTH_STATE_SESSION_KEY, None)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE) from error
+    return _no_store_redirect(
+        f"/api/auth/nthu/callback?{urlencode({'code': code, 'state': state_value})}"
+    )
+
+
 @router.get("/nthu/callback")
 async def nthu_callback(
     request: Request,
@@ -138,7 +171,11 @@ async def nthu_callback(
         return _frontend_oauth_error("oauth_login_failed")
 
     try:
-        profile = await fetch_nthu_profile(code)
+        profile = (
+            consume_nthu_dev_profile(code)
+            if is_nthu_dev_code(code)
+            else await fetch_nthu_profile(code)
+        )
         user = await resolve_nthu_user(db, profile)
         await db.commit()
     except NthuOAuthBusinessError as error:
@@ -150,6 +187,9 @@ async def nthu_callback(
     except IntegrityError:
         await db.rollback()
         return _frontend_oauth_error("oauth_identity_conflict")
+    except Exception:
+        await db.rollback()
+        return _frontend_oauth_error("oauth_login_failed")
 
     try:
         handoff_code = create_login_handoff(user.id)

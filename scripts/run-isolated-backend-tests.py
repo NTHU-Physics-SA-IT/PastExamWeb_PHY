@@ -31,7 +31,7 @@ BACKEND_PYTHON = (
 )
 DEV_COMPOSE = REPOSITORY_ROOT / "scripts" / "dev-compose.sh"
 POSTGRES_IMAGE = "postgres:15.14-alpine3.22"
-EXPECTED_ALEMBIC_HEAD = "9f1c2a7e4b63"
+EXPECTED_ALEMBIC_HEAD = "b7e3d9a1c5f2"
 NAME_PREFIX = "pastexam-test-postgres-s5a-"
 ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SAFE_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,62}$")

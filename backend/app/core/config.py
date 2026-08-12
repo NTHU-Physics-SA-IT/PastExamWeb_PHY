@@ -7,6 +7,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
+    APP_ENVIRONMENT: str = "production"
     DB_HOST: str
     DB_PORT: int
     DB_USER: str
@@ -25,6 +26,8 @@ class Settings(BaseSettings):
     OAUTH_REDIRECT_URI: str = "https://physarchive.com/api/auth/nthu/callback"
     OAUTH_HTTP_TIMEOUT_SECONDS: float = 10.0
     OAUTH_HANDOFF_TTL_SECONDS: int = 90
+    NTHU_DEV_MOCK_ENABLED: bool = False
+    NTHU_DEV_MOCK_TTL_SECONDS: int = 90
     FRONTEND_URL: str
     PRODUCT_TIMEZONE: str = "Asia/Taipei"
 

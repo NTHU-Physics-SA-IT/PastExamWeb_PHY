@@ -95,7 +95,7 @@ function applyCatalogSeo() {
     }))
 
   setSeo({
-    title: '清大物理考古題課程目錄｜PhysArchive',
+    title: '清大物理考古題課程目錄',
     description: '瀏覽清大物理相關課程已公開收錄的歷屆考題資訊。',
     canonicalPath: '/courses',
     robots: 'index, follow',
@@ -147,7 +147,7 @@ async function loadCatalog() {
     coursesByCategory.value = {}
     errorMessage.value = '目前無法讀取課程目錄，請稍後再試。'
     setSeo({
-      title: '課程目錄暫時無法使用｜PhysArchive',
+      title: '課程目錄暫時無法使用',
       canonicalPath: '/courses',
       robots: 'noindex, follow',
     })

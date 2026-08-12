@@ -122,6 +122,10 @@ class User(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     oauth_provider: Optional[str] = Field(default=None)
     oauth_sub: Optional[str] = Field(default=None)
+    student_id: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String(255), nullable=True),
+    )
     email: str = Field(unique=True, index=True)
     name: str = Field(unique=True, index=True)
     nickname: Optional[str] = Field(default=None, index=True)
@@ -1137,6 +1141,17 @@ class UserRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class AdminUserRead(UserRead):
+    account_source: str
+    student_id: Optional[str] = None
+    department_code: Optional[str] = None
+    department_name: Optional[str] = None
+    affiliation_status: str = "unresolved"
+    nthu_affiliation_kind: Optional[str] = None
+    nthu_affiliation_label: Optional[str] = None
+    nthu_classification_source: Optional[str] = None
 
 
 class OnlineStatisticsPoint(BaseModel):

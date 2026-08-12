@@ -17,6 +17,7 @@ ELIGIBILITY_AUDIT_ID = "archive-submission-self-delete-eligibility"
 PREVIOUS_STATUS_REVISION = "d8f2a6c1b4e7"
 ONE_TO_ONE_REVISION = "6f3a9c2d8e41"
 OAUTH_IDENTITY_REVISION = "9f1c2a7e4b63"
+NTHU_STUDENT_ID_REVISION = "b7e3d9a1c5f2"
 
 
 _CLASSIFICATION_CTE = r"""
@@ -780,6 +781,7 @@ _ELIGIBILITY_V3 = AuditAdapter(
             PREVIOUS_STATUS_REVISION,
             ONE_TO_ONE_REVISION,
             OAUTH_IDENTITY_REVISION,
+            NTHU_STUDENT_ID_REVISION,
         }
     ),
     approved_aggregate_labels=tuple(OneToOneAggregateCounts.model_fields),

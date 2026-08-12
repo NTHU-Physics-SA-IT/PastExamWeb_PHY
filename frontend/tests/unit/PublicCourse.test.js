@@ -79,6 +79,7 @@ describe('PublicCourse', () => {
     expect(wrapper.text()).not.toContain('下載檔案')
     expect(setSeoMock).toHaveBeenCalledWith(
       expect.objectContaining({
+        title: expect.not.stringContaining('PhysArchive'),
         canonicalPath: '/courses/42',
         robots: 'index, follow',
       })

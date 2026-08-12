@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.api.api import api_router
 from app.db.init_db import init_db
 from app.utils.access_log import install_oauth_access_log_filter
+from app.services.nthu_dev_mock import validate_nthu_dev_mock_configuration
 
 
 install_oauth_access_log_filter()
@@ -34,4 +35,5 @@ async def health():
 
 @app.on_event("startup")
 async def on_startup():
+    validate_nthu_dev_mock_configuration()
     await init_db()
