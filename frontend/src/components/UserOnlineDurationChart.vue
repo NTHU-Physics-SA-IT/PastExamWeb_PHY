@@ -340,6 +340,11 @@ onBeforeUnmount(() => requestController?.abort())
   color: var(--text-color);
 }
 
+.user-duration-card .chart-summary-item {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
 @container user-duration (max-width: 640px) {
   .user-duration-card .user-duration-heading {
     align-items: stretch;

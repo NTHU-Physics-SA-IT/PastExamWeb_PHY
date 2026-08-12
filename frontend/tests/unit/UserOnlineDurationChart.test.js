@@ -75,6 +75,9 @@ describe('UserOnlineDurationChart', () => {
     expect(componentSource).toMatch(
       /\.user-duration-card \.chart-summary-item\s*\{[^}]*box-sizing: border-box;[^}]*min-width: 0;[^}]*width: 100%;[^}]*justify-items: center;[^}]*text-align: center;/
     )
+    expect(componentSource).toMatch(
+      /\.user-duration-card \.chart-summary-item\s*\{[^}]*flex: 1 1 0;[^}]*min-width: 0;/
+    )
     expect(componentSource).not.toContain('@container user-duration (max-width: 40rem)')
   })
 
