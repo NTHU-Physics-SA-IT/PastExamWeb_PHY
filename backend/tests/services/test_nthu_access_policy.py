@@ -168,17 +168,23 @@ def test_policy_normalization_ignores_legacy_special_affiliation_key() -> None:
     }
 
 
-def test_all_nthu_canonicalizes_ignored_custom_fields() -> None:
+def test_all_nthu_preserves_but_ignores_inactive_custom_fields() -> None:
     policy = normalize_nthu_access_policy(
         {
             "mode": "all_nthu",
             "allowed_department_codes": ["022"],
             "staff_access": "allowlist",
-            "allowed_staff_userids": [],
+            "allowed_staff_userids": ["W90001"],
         }
     )
 
-    assert policy == NthuAccessPolicy(mode=NthuAccessMode.ALL_NTHU)
+    assert policy == NthuAccessPolicy(
+        mode=NthuAccessMode.ALL_NTHU,
+        allowed_department_codes=("022",),
+        staff_access=NthuStaffAccess.ALLOWLIST,
+        allowed_staff_userids=("W90001",),
+    )
+    ensure_profile_matches_access_policy(_profile(student_id="special"), policy)
 
 
 @pytest.mark.parametrize(

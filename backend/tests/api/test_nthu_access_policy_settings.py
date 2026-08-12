@@ -63,6 +63,27 @@ async def test_admin_reads_default_and_persists_selected_departments(
         assert LEGACY_SPECIAL_AFFILIATIONS_KEY not in reload_response.json()
         assert reload_response.json()["staff_access"] == "allowlist"
         assert reload_response.json()["allowed_staff_userids"] == ["W90001"]
+
+        all_nthu_response = await client.put(
+            PATH,
+            json={
+                "mode": "all_nthu",
+                "allowed_department_codes": ["022", "025"],
+                "staff_access": "allowlist",
+                "allowed_staff_userids": ["W90001"],
+            },
+        )
+        assert all_nthu_response.status_code == 200
+        assert all_nthu_response.json()["mode"] == "all_nthu"
+        assert all_nthu_response.json()["allowed_department_codes"] == ["022", "025"]
+        assert all_nthu_response.json()["staff_access"] == "allowlist"
+        assert all_nthu_response.json()["allowed_staff_userids"] == ["W90001"]
+
+        all_nthu_reload = await client.get(PATH)
+        assert all_nthu_reload.status_code == 200
+        assert all_nthu_reload.json()["allowed_department_codes"] == ["022", "025"]
+        assert all_nthu_reload.json()["staff_access"] == "allowlist"
+        assert all_nthu_reload.json()["allowed_staff_userids"] == ["W90001"]
         async with session_maker() as session:
             stored = await session.scalar(
                 select(SystemSetting).where(

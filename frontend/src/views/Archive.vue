@@ -2341,7 +2341,7 @@ const mobileMenuItems = computed(() => {
 }
 
 .upload-section :deep(.p-button) {
-  min-height: max(2.25rem, calc(2rem * var(--app-font-scale)));
+  min-height: 2.25rem;
   font-size: var(--app-font-size-xs) !important;
 }
 
@@ -2441,9 +2441,9 @@ const mobileMenuItems = computed(() => {
 .subject-title {
   color: var(--text-primary);
   font-size: clamp(
-    calc(1.25rem * var(--app-font-scale)),
+    1.25rem,
     2vw,
-    calc(1.75rem * var(--app-font-scale))
+    1.75rem
   );
   font-weight: 800;
   line-height: 1.12;
@@ -2838,9 +2838,9 @@ const mobileMenuItems = computed(() => {
 
   .subject-title {
     font-size: clamp(
-      calc(1.12rem * var(--app-font-scale)),
+      1.12rem,
       2.4vw,
-      calc(1.5rem * var(--app-font-scale))
+      1.5rem
     );
   }
 
@@ -2948,7 +2948,7 @@ const mobileMenuItems = computed(() => {
   }
 
   .subject-title {
-    font-size: calc(1.22rem * var(--app-font-scale));
+    font-size: 1.22rem;
   }
 
   .subject-summary {

@@ -71,7 +71,12 @@ describe('PublicCourses', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.text()).toContain('普通物理(一)考古題')
+    expect(wrapper.find('.course-card h3').text()).toBe('普通物理(一)')
+    expect(wrapper.find('.course-card').text()).not.toContain('考古題')
+    expect(wrapper.find('.course-card').text()).not.toContain('查看課程資訊')
+    expect(wrapper.find('.course-card-link .pi-arrow-right').exists()).toBe(true)
+    expect(wrapper.find('.access-note').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('公開頁面不提供檔案下載')
     expect(wrapper.text()).toContain('1 門課程')
     expect(wrapper.text()).toContain('瀏覽清大物理相關課程')
     expect(wrapper.text()).not.toContain('瀏覽目前已有公開考古題中繼資料的課程')
