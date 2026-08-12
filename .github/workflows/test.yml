@@ -498,6 +498,32 @@ jobs:
             logs nginx
           exit 1
 
+      - name: Settle Archive Vite dependencies
+        env:
+          E2E_FAMILY: ${{ matrix.family }}
+          PLAYWRIGHT_IMAGE: ${{ steps.playwright-image.outputs.image }}
+        run: |
+          set -euo pipefail
+
+          docker network inspect pastexam-dev-network >/dev/null
+
+          docker run \
+            --rm \
+            --init \
+            --ipc=host \
+            --user "$(id -u):$(id -g)" \
+            --network pastexam-dev-network \
+            -e HOME=/tmp/playwright-home \
+            -e E2E_FAMILY \
+            -e PLAYWRIGHT_BASE_URL=http://nginx:8080 \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -w /work/frontend \
+            "$PLAYWRIGHT_IMAGE" \
+            bash -lc '
+              mkdir -p "$HOME"
+              node scripts/settle-vite-route.mjs
+            '
+
       - name: List selected frontend E2E cases
         working-directory: ./frontend
         env:

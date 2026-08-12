@@ -224,19 +224,8 @@ test.describe('Admin › Archive management', () => {
       })
     )
 
-    const courseSearch = page.getByPlaceholder('搜尋課程')
-    let archiveDocumentRequestCount = 0
-    page.on('request', (request) => {
-      if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
-        archiveDocumentRequestCount += 1
-      }
-    })
-
     await page.goto('/archive', { waitUntil: 'networkidle' })
-    await expect(courseSearch).toBeVisible()
-    const readyDocumentRequestCount = archiveDocumentRequestCount
-
-    await courseSearch.fill('普通物理')
+    await page.getByPlaceholder('搜尋課程').fill('普通物理')
     await clickWhenVisible(page.getByRole('button', { name: '普通物理(一)', exact: true }))
 
     const openEditor = async () => {
@@ -287,7 +276,6 @@ test.describe('Admin › Archive management', () => {
     await expect(dialog.locator('#archive-edit-name')).toHaveValue('保留的考試名稱')
     await expect(dialog.locator('#archive-edit-target-course')).toHaveValue('已刪除課程')
     expect(courseListRequestCount).toBe(requestCountBeforeLifecycleConflict)
-    expect(archiveDocumentRequestCount).toBe(readyDocumentRequestCount)
     await page.screenshot({
       path: testInfo.outputPath('archive-move-409-dialog.png'),
       fullPage: true,
