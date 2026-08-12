@@ -18,6 +18,8 @@ BACKUP_SCRIPT = REPOSITORY_ROOT / "scripts" / "postgres-logical-backup.sh"
 CONTRACT_HELPER = REPOSITORY_ROOT / "scripts" / "production-activation-contract.py"
 TEST_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "test.yml"
 RELEASE_SHA = "19782580b710924d8ccdb939600be72ecd44d303"
+FRONTEND_IMAGE = f"ghcr.io/example/pastexam:frontend-{RELEASE_SHA}@sha256:{'1' * 64}"
+BACKEND_IMAGE = f"ghcr.io/example/pastexam:backend-{RELEASE_SHA}@sha256:{'2' * 64}"
 
 
 def _bash() -> Path:
@@ -96,7 +98,12 @@ def _compose_contract(
         )
     return {
         "services": {
-            "backend": {"environment": {"MINIO_BUCKET_NAME": "exam-archive"}},
+            "backend": {
+                "image": BACKEND_IMAGE,
+                "environment": {"MINIO_BUCKET_NAME": "exam-archive"},
+            },
+            "frontend": {"image": FRONTEND_IMAGE},
+            "migrate": {"image": BACKEND_IMAGE},
             "db": {
                 "container_name": "pastexam-postgres",
                 "environment": {
@@ -151,7 +158,16 @@ def _activation_environment(
 
     (release / ".release-source-sha").write_text(f"{source_sha}\n", encoding="utf-8")
     manifest = release / "release-manifest.env"
-    manifest.write_text(f"release_sha={RELEASE_SHA}\n", encoding="utf-8")
+    manifest.write_text(
+        f"release_sha={RELEASE_SHA}\n"
+        f"frontend_image={FRONTEND_IMAGE}\n"
+        f"backend_image={BACKEND_IMAGE}\n",
+        encoding="utf-8",
+    )
+    (release / "compose.prod.env").write_text(
+        f"FRONTEND_IMAGE={FRONTEND_IMAGE}\nBACKEND_IMAGE={BACKEND_IMAGE}\n",
+        encoding="utf-8",
+    )
     (docker_dir / "docker-compose.prod.yml").write_text(
         "services:\n  nginx:\n    image: nginx:contract-test\n",
         encoding="utf-8",
@@ -294,6 +310,9 @@ def _activation_environment(
             "PRODUCTION_BACKUP_DIRECTORY": _bash_path(tmp_path / "backups"),
             "PRODUCTION_LOCK_FILE": _bash_path(tmp_path / "activation.lock"),
             "EXTERNAL_HEALTH_URL": "https://example.invalid/api/health",
+            "HEALTH_CHECK_ATTEMPTS": "3",
+            "HEALTH_CHECK_INITIAL_DELAY_SECONDS": "0",
+            "HEALTH_CHECK_MAX_DELAY_SECONDS": "0",
             "FAKE_COMPOSE_JSON": _bash_path(compose_json),
             "FAKE_CURRENT_PORTS_JSON": _bash_path(ports_json),
             "FAKE_DOCKER_LOG": _bash_path(docker_log),
@@ -314,6 +333,32 @@ def _activation_environment(
     ):
         environment.pop(inherited, None)
     return environment, backup_log, docker_log
+
+
+def _set_health_failures(
+    tmp_path: Path, environment: dict[str, str], failures: int
+) -> Path:
+    health_log = tmp_path / "health.log"
+    health_state = tmp_path / "health-state"
+    health_state.write_text("0\n", encoding="utf-8")
+    bash_env = tmp_path / "activation-bash-env"
+    with bash_env.open("a", encoding="utf-8") as stream:
+        stream.write(
+            "curl() {\n"
+            '  count="$(cat "$FAKE_HEALTH_STATE")"\n'
+            '  printf "%s\\n" "$*" >>"$FAKE_HEALTH_LOG"\n'
+            '  printf "%s\\n" "$((count + 1))" >"$FAKE_HEALTH_STATE"\n'
+            '  [ "$count" -ge "$FAKE_HEALTH_FAILURES" ]\n'
+            "}\n"
+        )
+    environment.update(
+        {
+            "FAKE_HEALTH_FAILURES": str(failures),
+            "FAKE_HEALTH_LOG": _bash_path(health_log),
+            "FAKE_HEALTH_STATE": _bash_path(health_state),
+        }
+    )
+    return health_log
 
 
 def _activate(environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
@@ -364,6 +409,65 @@ def test_release_metadata_disagreement_fails_before_backup(tmp_path: Path) -> No
     assert "release" in process.stderr.lower()
     assert not backup_log.exists()
     assert not docker_log.exists()
+
+
+def test_activation_uses_candidate_compose_environment(tmp_path: Path) -> None:
+    environment, _, docker_log = _activation_environment(tmp_path)
+
+    process = _activate(environment)
+
+    assert process.returncode == 0, process.stderr
+    release = tmp_path / RELEASE_SHA
+    commands = docker_log.read_text(encoding="utf-8")
+    external = f"--env-file {environment['PRODUCTION_COMPOSE_ENV_FILE']}"
+    candidate = f"--env-file {_bash_path(release / 'compose.prod.env')}"
+    assert external in commands
+    assert candidate in commands
+    assert commands.index(external) < commands.index(candidate)
+
+
+@pytest.mark.parametrize("service", ["frontend", "backend", "migrate"])
+def test_rendered_image_mismatch_fails_before_backup(
+    tmp_path: Path, service: str
+) -> None:
+    release = tmp_path / RELEASE_SHA
+    certificate = tmp_path / "origin.pem"
+    certificate_key = tmp_path / "origin-key.pem"
+    contract = _compose_contract(release, certificate, certificate_key)
+    contract["services"][service]["image"] = "ghcr.io/example/pastexam:old"
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path, compose_contract=contract
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "images disagree" in process.stderr
+    assert not backup_log.exists()
+    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+
+
+def test_health_retries_initial_connection_failure_then_succeeds(tmp_path: Path) -> None:
+    environment, _, _ = _activation_environment(tmp_path)
+    health_log = _set_health_failures(tmp_path, environment, failures=1)
+
+    process = _activate(environment)
+
+    assert process.returncode == 0, process.stderr
+    assert len(health_log.read_text(encoding="utf-8").splitlines()) == 3
+    assert (tmp_path / RELEASE_SHA / ".activated").is_file()
+
+
+def test_permanent_health_failure_does_not_activate(tmp_path: Path) -> None:
+    environment, _, _ = _activation_environment(tmp_path)
+    health_log = _set_health_failures(tmp_path, environment, failures=99)
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert len(health_log.read_text(encoding="utf-8").splitlines()) == 3
+    assert not (tmp_path / RELEASE_SHA / ".activated").exists()
+    assert not (tmp_path / RELEASE_SHA / ".activated.partial").exists()
 
 
 def test_external_edge_contract_must_remain_mode_0600(tmp_path: Path) -> None:

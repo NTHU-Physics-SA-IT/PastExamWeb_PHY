@@ -23,6 +23,13 @@ until candidate evidence has been reviewed. Candidate preparation never runs
 
 ## Production configuration boundary
 
+Candidate preparation writes only the digest-pinned frontend and backend image
+references to the immutable release `compose.prod.env`. Activation layers that
+file after the external production Compose environment, so candidate images
+are authoritative while host configuration and secrets remain outside the
+release. The rendered frontend, backend, and migrator images must exactly match
+the checksummed release manifest before backup begins.
+
 The production Compose contract reads host-specific configuration outside the
 release checkout:
 
@@ -32,9 +39,9 @@ release checkout:
 - `/opt/pastexam-config/backend.env` for the restricted runtime role; and
 - `/opt/pastexam-config/migrator.env` for the one-shot migration role.
 
-All four files must be root-owned deployment inputs with mode `0600`.
-Secrets are neither copied into an immutable release nor printed. Runtime and
-migrator credentials must be different.
+All four files must be root-owned deployment inputs with mode `0600`. Secrets
+are neither copied into an immutable release nor printed. Runtime and migrator
+credentials must be different.
 
 The Compose environment names the host-managed Cloudflare Origin certificate
 and private-key paths with `PRODUCTION_TLS_CERT_FILE` and
@@ -42,13 +49,14 @@ and private-key paths with `PRODUCTION_TLS_CERT_FILE` and
 root-owned with mode `0600`. Certificate and key contents remain outside Git
 and outside every immutable release.
 
-`docker/.env.production.example` documents the non-secret Compose variable
-contract. A release is rendered explicitly with the production definition and
-the external environment file:
+`docker/.env.production.example` documents the Compose variable contract. A
+release is rendered explicitly with the production definition, external
+configuration, and its later immutable image override:
 
 ```bash
 docker compose \
   --env-file /etc/pastexam/compose.prod.env \
+  --env-file /opt/pastexam-releases/<release-sha>/compose.prod.env \
   --file docker/docker-compose.prod.yml \
   --file /etc/pastexam/docker-compose.edge.yml \
   config
