@@ -2,6 +2,7 @@ import { userTest as test, expect } from '../support/userTest'
 import { JSON_HEADERS } from '../support/constants'
 import { fromBase64ToBinaryString } from '../support/jwt'
 import { clickWhenVisible } from '../support/ui'
+import { createConsoleErrorCollector } from '../support/consoleDiagnostics'
 
 test.describe('User › Archive browsing', () => {
   test('restricts admin area and supports archive browsing', async ({ page }) => {
@@ -19,11 +20,8 @@ test.describe('User › Archive browsing', () => {
 
     let archiveDownloadCount = 3
     let previewRouteCallCount = 0
-    const consoleErrors: string[] = []
+    const consoleErrors = createConsoleErrorCollector(page)
     const pageErrors: string[] = []
-    page.on('console', (message) => {
-      if (message.type() === 'error') consoleErrors.push(message.text())
-    })
     page.on('pageerror', (error) => pageErrors.push(error.message))
 
     const pdfBody = fromBase64ToBinaryString(
@@ -240,7 +238,7 @@ test.describe('User › Archive browsing', () => {
     const previewDialog = page.getByRole('dialog', { name: /期末考/ })
     await expect(previewDialog).toBeVisible()
     await expect(previewDialog).toContainText('期末考')
-    expect(consoleErrors).toEqual([])
+    expect(await consoleErrors.errors()).toEqual([])
     expect(pageErrors).toEqual([])
     await clickWhenVisible(previewDialog.getByRole('button', { name: '下載' }))
 

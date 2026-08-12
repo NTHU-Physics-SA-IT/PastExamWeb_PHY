@@ -32,8 +32,9 @@ def test_browser_families_partition_configured_projects_exactly() -> None:
     configured = set(_configured_projects())
     selected = {family: {family, f"{family}-admin"} for family in FAMILIES}
 
+    assert "readiness" in configured
     assert "setup" in configured
-    assert set().union(*selected.values()) == configured - {"setup"}
+    assert set().union(*selected.values()) == configured - {"readiness", "setup"}
     assert all(
         selected[left].isdisjoint(selected[right])
         for index, left in enumerate(FAMILIES)
@@ -46,8 +47,12 @@ def test_browser_families_partition_configured_projects_exactly() -> None:
         for match in re.finditer(r"^\s+name: '([^']+)',?$", config, flags=re.MULTILINE)
     }
     ordered_projects = list(_configured_projects())
-    for family in FAMILIES:
-        project = f"{family}-admin"
+    dependency_contract = {
+        "setup": "dependencies: ['readiness']",
+        **{family: "dependencies: ['readiness']" for family in FAMILIES},
+        **{f"{family}-admin": "dependencies: ['setup']" for family in FAMILIES},
+    }
+    for project, dependency in dependency_contract.items():
         start = project_starts[project]
         project_index = ordered_projects.index(project)
         end = (
@@ -55,7 +60,7 @@ def test_browser_families_partition_configured_projects_exactly() -> None:
             if project_index + 1 < len(ordered_projects)
             else len(config)
         )
-        assert "dependencies: ['setup']" in config[start:end]
+        assert dependency in config[start:end]
 
 
 def test_workflow_runs_three_isolated_browser_family_jobs() -> None:
