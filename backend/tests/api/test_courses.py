@@ -655,6 +655,164 @@ async def test_get_course_archives_limits_submission_ids_to_owner_or_admin(
             await session.commit()
 
 
+@pytest.mark.asyncio
+async def test_same_metadata_archives_keep_exact_sources_and_file_objects(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    monkeypatch,
+):
+    requester_a = await make_user()
+    requester_b = await make_user()
+    unrelated_user = await make_user()
+    admin = await make_user(is_admin=True)
+    marker = uuid.uuid4().hex
+    course = await _create_course(
+        session_maker,
+        name=f"Same metadata authenticated course {marker}",
+    )
+
+    async with session_maker() as session:
+        archive_a = Archive(
+            name="Shared midterm",
+            academic_year=20261,
+            archive_type=ArchiveType.MIDTERM,
+            professor="Professor Shared",
+            has_answers=False,
+            object_name=f"archives/{marker}-a.pdf",
+            course_id=course.id,
+            uploader_id=requester_a.id,
+        )
+        archive_b = Archive(
+            name="Shared midterm",
+            academic_year=20261,
+            archive_type=ArchiveType.MIDTERM,
+            professor="Professor Shared",
+            has_answers=False,
+            object_name=f"archives/{marker}-b.pdf",
+            course_id=course.id,
+            uploader_id=requester_b.id,
+        )
+        session.add_all([archive_a, archive_b])
+        await session.flush()
+        submission_a = ArchiveSubmission(
+            subject=course.name,
+            category=CourseCategory.FRESHMAN.value,
+            name=archive_a.name,
+            academic_year=archive_a.academic_year,
+            archive_type=archive_a.archive_type,
+            professor=archive_a.professor,
+            has_answers=archive_a.has_answers,
+            object_name=archive_a.object_name,
+            status=SubmissionStatus.APPROVED,
+            requester_id=requester_a.id,
+            created_archive_id=archive_a.id,
+        )
+        submission_b = ArchiveSubmission(
+            subject=course.name,
+            category=CourseCategory.FRESHMAN.value,
+            name=archive_b.name,
+            academic_year=archive_b.academic_year,
+            archive_type=archive_b.archive_type,
+            professor=archive_b.professor,
+            has_answers=archive_b.has_answers,
+            object_name=archive_b.object_name,
+            status=SubmissionStatus.APPROVED,
+            requester_id=requester_b.id,
+            created_archive_id=archive_b.id,
+        )
+        session.add_all([submission_a, submission_b])
+        await session.commit()
+        await session.refresh(archive_a)
+        await session.refresh(archive_b)
+        await session.refresh(submission_a)
+        await session.refresh(submission_b)
+
+    class ObjectResponse:
+        def __init__(self, object_name: str):
+            self.object_name = object_name
+
+        def read(self):
+            return self.object_name.encode()
+
+        def close(self):
+            return None
+
+        def release_conn(self):
+            return None
+
+    class MinioStub:
+        def stat_object(self, _bucket_name, _object_name):
+            return None
+
+        def get_object(self, _bucket_name, object_name):
+            return ObjectResponse(object_name)
+
+    monkeypatch.setattr(
+        "app.api.services.courses.get_minio_client",
+        lambda: MinioStub(),
+    )
+    monkeypatch.setattr(
+        "app.api.services.courses.presigned_get_url",
+        lambda object_name, *, expires: f"https://objects.example/{object_name}",
+    )
+
+    async def fetch_as(user):
+        app.dependency_overrides[get_current_user] = _override_user(user)
+        response = await client.get(f"/courses/{course.id}/archives")
+        assert response.status_code == 200
+        return {row["id"]: row for row in response.json()}
+
+    try:
+        requester_a_rows = await fetch_as(requester_a)
+        requester_b_rows = await fetch_as(requester_b)
+        unrelated_rows = await fetch_as(unrelated_user)
+        admin_rows = await fetch_as(admin)
+
+        assert set(admin_rows) == {archive_a.id, archive_b.id}
+        assert requester_a_rows[archive_a.id]["source_submission_ids"] == [submission_a.id]
+        assert requester_a_rows[archive_b.id]["source_submission_ids"] == []
+        assert requester_b_rows[archive_a.id]["source_submission_ids"] == []
+        assert requester_b_rows[archive_b.id]["source_submission_ids"] == [submission_b.id]
+        assert unrelated_rows[archive_a.id]["source_submission_ids"] == []
+        assert unrelated_rows[archive_b.id]["source_submission_ids"] == []
+        assert admin_rows[archive_a.id]["source_submission_ids"] == [submission_a.id]
+        assert admin_rows[archive_b.id]["source_submission_ids"] == [submission_b.id]
+
+        app.dependency_overrides[get_current_user] = _override_user(admin)
+        for archive in (archive_a, archive_b):
+            preview = await client.get(
+                f"/courses/{course.id}/archives/{archive.id}/preview"
+            )
+            preview_file = await client.get(
+                f"/courses/{course.id}/archives/{archive.id}/preview-file"
+            )
+            download = await client.get(
+                f"/courses/{course.id}/archives/{archive.id}/download"
+            )
+
+            expected_url = f"https://objects.example/{archive.object_name}"
+            assert preview.status_code == 200
+            assert preview.json() == {"url": expected_url}
+            assert preview_file.status_code == 200
+            assert preview_file.content == archive.object_name.encode()
+            assert download.status_code == 200
+            assert download.json() == {"url": expected_url}
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(ArchiveSubmission).where(
+                    ArchiveSubmission.id.in_([submission_a.id, submission_b.id])
+                )
+            )
+            await session.execute(
+                delete(Archive).where(Archive.id.in_([archive_a.id, archive_b.id]))
+            )
+            await session.execute(delete(Course).where(Course.id == course.id))
+            await session.commit()
+
+
 @pytest.mark.parametrize("endpoint", ["preview", "preview-file", "download"])
 @pytest.mark.asyncio
 async def test_archive_file_endpoints_require_authentication(

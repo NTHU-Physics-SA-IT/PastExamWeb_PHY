@@ -35,15 +35,17 @@ async def _create_archive(
     course_id: int,
     uploader_id: int,
     deleted: bool = False,
+    name: str | None = None,
+    object_name: str | None = None,
 ) -> Archive:
     async with session_maker() as session:
         archive = Archive(
-            name=f"Public archive {uuid.uuid4().hex[:8]}",
+            name=name or f"Public archive {uuid.uuid4().hex[:8]}",
             academic_year=20262,
             archive_type=ArchiveType.FINAL,
             professor="Professor Public",
             has_answers=True,
-            object_name=f"private/{uuid.uuid4().hex}.pdf",
+            object_name=object_name or f"private/{uuid.uuid4().hex}.pdf",
             course_id=course_id,
             uploader_id=uploader_id,
         )
@@ -61,6 +63,7 @@ async def _link_submission(
     archive: Archive,
     requester_id: int,
     status: SubmissionStatus,
+    deleted: bool = False,
 ) -> ArchiveSubmission:
     async with session_maker() as session:
         submission = ArchiveSubmission(
@@ -76,10 +79,105 @@ async def _link_submission(
             requester_id=requester_id,
             created_archive_id=archive.id,
         )
+        if deleted:
+            submission.deleted_at = datetime.now(timezone.utc)
         session.add(submission)
         await session.commit()
         await session.refresh(submission)
         return submission
+
+
+@pytest.mark.parametrize(
+    ("sibling_status", "sibling_deleted", "expect_sibling"),
+    [
+        (SubmissionStatus.APPROVED, False, True),
+        (SubmissionStatus.PENDING, False, False),
+        (SubmissionStatus.REJECTED, False, False),
+        (SubmissionStatus.TAKEDOWN, False, False),
+        (SubmissionStatus.APPROVED, True, False),
+    ],
+    ids=["approved", "pending", "rejected", "takedown", "soft-deleted"],
+)
+@pytest.mark.asyncio
+async def test_public_catalog_keeps_same_metadata_approved_sibling_independent(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    sibling_status: SubmissionStatus,
+    sibling_deleted: bool,
+    expect_sibling: bool,
+):
+    uploader = await make_user()
+    marker = uuid.uuid4().hex
+    course = await _create_course(
+        session_maker,
+        name=f"Same metadata public course {marker}",
+    )
+    archive_a = await _create_archive(
+        session_maker,
+        course_id=course.id,
+        uploader_id=uploader.id,
+        name="Shared final exam",
+        object_name=f"private/{marker}-a.pdf",
+    )
+    archive_b = await _create_archive(
+        session_maker,
+        course_id=course.id,
+        uploader_id=uploader.id,
+        name="Shared final exam",
+        object_name=f"private/{marker}-b.pdf",
+    )
+    submission_a = await _link_submission(
+        session_maker,
+        archive=archive_a,
+        requester_id=uploader.id,
+        status=sibling_status,
+        deleted=sibling_deleted,
+    )
+    submission_b = await _link_submission(
+        session_maker,
+        archive=archive_b,
+        requester_id=uploader.id,
+        status=SubmissionStatus.APPROVED,
+    )
+
+    app.dependency_overrides.pop(get_current_user, None)
+    try:
+        response = await client.get(f"/courses/public/{course.id}/archives")
+
+        assert response.status_code == 200
+        rows = response.json()
+        rows_by_id = {row["id"]: row for row in rows}
+        expected_ids = {archive_b.id}
+        if expect_sibling:
+            expected_ids.add(archive_a.id)
+        assert set(rows_by_id) == expected_ids
+        assert rows_by_id[archive_b.id] == {
+            "id": archive_b.id,
+            "name": archive_b.name,
+            "academic_year": archive_b.academic_year,
+            "archive_type": archive_b.archive_type.value,
+            "professor": archive_b.professor,
+            "has_answers": archive_b.has_answers,
+        }
+        for row in rows:
+            assert "object_name" not in row
+            assert "uploader_id" not in row
+            assert "download_count" not in row
+            assert "source_submission_ids" not in row
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(ArchiveSubmission).where(
+                    ArchiveSubmission.id.in_([submission_a.id, submission_b.id])
+                )
+            )
+            await session.execute(
+                delete(Archive).where(Archive.id.in_([archive_a.id, archive_b.id]))
+            )
+            await session.execute(delete(Course).where(Course.id == course.id))
+            await session.commit()
 
 
 @pytest.mark.asyncio
