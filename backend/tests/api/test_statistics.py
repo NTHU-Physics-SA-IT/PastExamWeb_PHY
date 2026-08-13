@@ -141,14 +141,14 @@ async def test_statistics_endpoint_has_basic_fields(client):
     payload = response.json()
     assert payload["success"] is True
     data = payload["data"]
-    for key in {
+    for key in (
         "totalUsers",
         "totalDownloads",
         "onlineUsers",
         "totalArchives",
         "totalCourses",
         "activeToday",
-    }:
+    ):
         assert key in data
 
 

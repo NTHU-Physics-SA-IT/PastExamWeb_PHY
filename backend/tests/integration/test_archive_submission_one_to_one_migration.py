@@ -571,19 +571,23 @@ def test_downgrade_and_reupgrade_only_toggle_unique_constraint(
             },
         ),
         (
-            "ALTER TABLE archive_submissions "
-            f"DROP CONSTRAINT {CONSTRAINT_NAME}; "
-            "ALTER TABLE archive_submissions "
-            "ADD CONSTRAINT uq_archive_submissions_wrong_name "
-            "UNIQUE (created_archive_id)",
+            (
+                "ALTER TABLE archive_submissions "
+                f"DROP CONSTRAINT {CONSTRAINT_NAME}; "
+                "ALTER TABLE archive_submissions "
+                "ADD CONSTRAINT uq_archive_submissions_wrong_name "
+                "UNIQUE (created_archive_id)"
+            ),
             {"archive_submissions.named_critical_unique_constraints"},
         ),
         (
-            "ALTER TABLE archive_submissions "
-            f"DROP CONSTRAINT {CONSTRAINT_NAME}; "
-            "CREATE UNIQUE INDEX uq_archive_submissions_partial "
-            "ON archive_submissions (created_archive_id) "
-            "WHERE created_archive_id IS NOT NULL",
+            (
+                "ALTER TABLE archive_submissions "
+                f"DROP CONSTRAINT {CONSTRAINT_NAME}; "
+                "CREATE UNIQUE INDEX uq_archive_submissions_partial "
+                "ON archive_submissions (created_archive_id) "
+                "WHERE created_archive_id IS NOT NULL"
+            ),
             {
                 "archive_submissions.unique_constraints",
                 "archive_submissions.named_critical_unique_constraints",
@@ -591,10 +595,12 @@ def test_downgrade_and_reupgrade_only_toggle_unique_constraint(
             },
         ),
         (
-            "ALTER TABLE archive_submissions "
-            f"DROP CONSTRAINT {CONSTRAINT_NAME}; "
-            "CREATE INDEX ix_archive_submissions_created_archive_id "
-            "ON archive_submissions (created_archive_id)",
+            (
+                "ALTER TABLE archive_submissions "
+                f"DROP CONSTRAINT {CONSTRAINT_NAME}; "
+                "CREATE INDEX ix_archive_submissions_created_archive_id "
+                "ON archive_submissions (created_archive_id)"
+            ),
             {
                 "archive_submissions.unique_constraints",
                 "archive_submissions.named_critical_unique_constraints",
@@ -602,8 +608,10 @@ def test_downgrade_and_reupgrade_only_toggle_unique_constraint(
             },
         ),
         (
-            "ALTER TABLE archive_submissions "
-            "ALTER COLUMN created_archive_id SET NOT NULL",
+            (
+                "ALTER TABLE archive_submissions "
+                "ALTER COLUMN created_archive_id SET NOT NULL"
+            ),
             {"archive_submissions.created_archive_id.nullability"},
         ),
     ],

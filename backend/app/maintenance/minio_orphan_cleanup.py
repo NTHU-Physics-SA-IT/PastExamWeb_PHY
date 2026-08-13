@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """MinIO orphan storage audit and optional cleanup for archive/submission files."""
 
 from __future__ import annotations

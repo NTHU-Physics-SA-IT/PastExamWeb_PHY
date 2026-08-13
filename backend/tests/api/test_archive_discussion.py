@@ -34,12 +34,14 @@ def _override_user(user_id: int, *, is_admin: bool = False):
 def test_discussion_ws_rejects_unauthenticated_connection(monkeypatch):
     monkeypatch.setattr("app.main.init_db", AsyncMock())
 
-    with TestClient(app) as ws_client:
-        with pytest.raises(WebSocketDisconnect) as exc_info:
-            with ws_client.websocket_connect(
-                "/courses/1/archives/1/discussion/ws"
-            ) as websocket:
-                websocket.receive_text()
+    with (
+        TestClient(app) as ws_client,
+        pytest.raises(WebSocketDisconnect) as exc_info,
+        ws_client.websocket_connect(
+            "/courses/1/archives/1/discussion/ws"
+        ) as websocket,
+    ):
+        websocket.receive_text()
 
     assert exc_info.value.code == 4401
 
@@ -163,15 +165,14 @@ async def test_discussion_ws_sends_history_and_ignores_blank(
         "app.api.services.courses.get_ws_token_payload", fake_ws_payload
     )
 
-    with TestClient(app) as ws_client:
-        with ws_client.websocket_connect(
-            f"/courses/{course_id}/archives/{archive_id}/discussion/ws"
-        ) as ws:
-            first = ws.receive_json()
-            assert first["type"] == "history"
-            assert first["messages"] == []
+    with TestClient(app) as ws_client, ws_client.websocket_connect(
+        f"/courses/{course_id}/archives/{archive_id}/discussion/ws"
+    ) as ws:
+        first = ws.receive_json()
+        assert first["type"] == "history"
+        assert first["messages"] == []
 
-            ws.send_text(json.dumps({"type": "send", "content": "   "}))
+        ws.send_text(json.dumps({"type": "send", "content": "   "}))
 
     async with session_maker() as session:
         result = await session.execute(
@@ -221,13 +222,12 @@ async def test_discussion_ws_accepts_padded_message_within_limit(
     content = "a" * 200
     raw = f"  {content}  "
 
-    with TestClient(app) as ws_client:
-        with ws_client.websocket_connect(
-            f"/courses/{course_id}/archives/{archive_id}/discussion/ws"
-        ) as ws:
-            ws.receive_json()  # history
-            ws.send_text(json.dumps({"type": "send", "content": raw}))
-            msg = ws.receive_json()
+    with TestClient(app) as ws_client, ws_client.websocket_connect(
+        f"/courses/{course_id}/archives/{archive_id}/discussion/ws"
+    ) as ws:
+        ws.receive_json()  # history
+        ws.send_text(json.dumps({"type": "send", "content": raw}))
+        msg = ws.receive_json()
 
     assert msg["type"] == "message"
     assert msg["message"]["content"] == content
@@ -280,13 +280,12 @@ async def test_discussion_ws_rejects_message_too_long(
         "app.api.services.courses.get_ws_token_payload", fake_ws_payload
     )
 
-    with TestClient(app) as ws_client:
-        with ws_client.websocket_connect(
-            f"/courses/{course_id}/archives/{archive_id}/discussion/ws"
-        ) as ws:
-            ws.receive_json()  # history
-            ws.send_text(json.dumps({"type": "send", "content": "a" * 201}))
-            err = ws.receive_json()
+    with TestClient(app) as ws_client, ws_client.websocket_connect(
+        f"/courses/{course_id}/archives/{archive_id}/discussion/ws"
+    ) as ws:
+        ws.receive_json()  # history
+        ws.send_text(json.dumps({"type": "send", "content": "a" * 201}))
+        err = ws.receive_json()
 
     assert err["type"] == "error"
     assert err["code"] == "message_too_long"
@@ -656,32 +655,31 @@ async def test_discussion_reply_is_threaded_and_cross_archive_reply_is_rejected(
     monkeypatch.setattr(
         "app.api.services.courses.get_ws_token_payload", fake_ws_payload
     )
-    with TestClient(app) as ws_client:
-        with ws_client.websocket_connect(
-            f"/courses/{course.id}/archives/{first_archive.id}/discussion/ws"
-        ) as ws:
-            ws.receive_json()
-            ws.send_text(
-                json.dumps(
-                    {"type": "send", "content": "reply", "reply_to_message_id": root.id}
-                )
+    with TestClient(app) as ws_client, ws_client.websocket_connect(
+        f"/courses/{course.id}/archives/{first_archive.id}/discussion/ws"
+    ) as ws:
+        ws.receive_json()
+        ws.send_text(
+            json.dumps(
+                {"type": "send", "content": "reply", "reply_to_message_id": root.id}
             )
-            reply_event = ws.receive_json()
-            assert reply_event["message"]["parent_id"] == root.id
-            assert reply_event["message"]["reply_to_message_id"] == root.id
+        )
+        reply_event = ws.receive_json()
+        assert reply_event["message"]["parent_id"] == root.id
+        assert reply_event["message"]["reply_to_message_id"] == root.id
 
-            ws.send_text(
-                json.dumps(
-                    {
-                        "type": "send",
-                        "content": "cross archive",
-                        "reply_to_message_id": foreign_root.id,
-                    }
-                )
+        ws.send_text(
+            json.dumps(
+                {
+                    "type": "send",
+                    "content": "cross archive",
+                    "reply_to_message_id": foreign_root.id,
+                }
             )
-            error_event = ws.receive_json()
-            assert error_event["type"] == "error"
-            assert error_event["code"] == "invalid_reply_target"
+        )
+        error_event = ws.receive_json()
+        assert error_event["type"] == "error"
+        assert error_event["code"] == "invalid_reply_target"
 
     async def fake_self_ws_payload(websocket):
         return {"uid": user.id, "exp": 4102444800}
@@ -689,21 +687,20 @@ async def test_discussion_reply_is_threaded_and_cross_archive_reply_is_rejected(
     monkeypatch.setattr(
         "app.api.services.courses.get_ws_token_payload", fake_self_ws_payload
     )
-    with TestClient(app) as ws_client:
-        with ws_client.websocket_connect(
-            f"/courses/{course.id}/archives/{first_archive.id}/discussion/ws"
-        ) as ws:
-            ws.receive_json()
-            ws.send_text(
-                json.dumps(
-                    {
-                        "type": "send",
-                        "content": "self reply",
-                        "reply_to_message_id": root.id,
-                    }
-                )
+    with TestClient(app) as ws_client, ws_client.websocket_connect(
+        f"/courses/{course.id}/archives/{first_archive.id}/discussion/ws"
+    ) as ws:
+        ws.receive_json()
+        ws.send_text(
+            json.dumps(
+                {
+                    "type": "send",
+                    "content": "self reply",
+                    "reply_to_message_id": root.id,
+                }
             )
-            assert ws.receive_json()["type"] == "message"
+        )
+        assert ws.receive_json()["type"] == "message"
 
     async with session_maker() as session:
         personal = (

@@ -462,30 +462,28 @@ def test_database_constraints_reject_deleted_prior_state_and_active_non_null(
     )
     command.upgrade(alembic_config(), NEW_REVISION)
 
-    with pytest.raises(IntegrityError):
-        with migration_engine.begin() as connection:
-            connection.execute(
-                text(
-                    """
+    with pytest.raises(IntegrityError), migration_engine.begin() as connection:
+        connection.execute(
+            text(
+                """
                     UPDATE archive_submissions
                     SET previous_status = 'DELETED'::submissionstatus
                     WHERE id = :submission_id
                     """
-                ),
-                {"submission_id": deleted_id},
-            )
-    with pytest.raises(IntegrityError):
-        with migration_engine.begin() as connection:
-            connection.execute(
-                text(
-                    """
+            ),
+            {"submission_id": deleted_id},
+        )
+    with pytest.raises(IntegrityError), migration_engine.begin() as connection:
+        connection.execute(
+            text(
+                """
                     UPDATE archive_submissions
                     SET previous_status = 'PENDING'::submissionstatus
                     WHERE id = :submission_id
                     """
-                ),
-                {"submission_id": active_id},
-            )
+            ),
+            {"submission_id": active_id},
+        )
 
 
 def test_downgrade_and_reupgrade_only_remove_and_restore_new_contract(
