@@ -5,7 +5,7 @@ description = "Past Exam API Backend"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "alembic>=1.18.5",
+    "alembic>=1.19.1",
     "asyncpg>=0.30.0",
     "bcrypt>=5.0.0",
     "fastapi[standard]>=0.140.0",
@@ -14,7 +14,7 @@ dependencies = [
     "itsdangerous>=2.2.0",
     "minio>=7.2.15",
     "psycopg2-binary>=2.9.12",
-    "pydantic-settings>=2.14.2",
+    "pydantic-settings>=2.15.0",
     "python-jose[cryptography]>=3.5.0",
     "python-multipart>=0.0.32",
     "pyyaml>=6.0.2",
@@ -30,5 +30,5 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.0.0",
-    "ruff>=0.15.22",
+    "ruff>=0.16.2",
 ]
