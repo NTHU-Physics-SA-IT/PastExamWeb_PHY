@@ -1,6 +1,7 @@
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional, Sequence
+from datetime import UTC, datetime, timezone
+from typing import Optional
 
 from fastapi import HTTPException, status
 from minio.error import S3Error
@@ -70,8 +71,8 @@ def course_lifecycle_conflict_error() -> HTTPException:
 def make_course_trash_lifecycle_reason(
     *,
     previous_status: SubmissionStatus,
-    course_id: Optional[int],
-    archive_id: Optional[int],
+    course_id: int | None,
+    archive_id: int | None,
 ) -> str:
     fields: list[str] = [f"{COURSE_TRASH_PREVIOUS_STATUS_KEY}={previous_status.value}"]
     if course_id is not None:
@@ -81,7 +82,7 @@ def make_course_trash_lifecycle_reason(
     return f"{COURSE_TRASH_LIFECYCLE_PREFIX}{'|'.join(fields)}"
 
 
-def is_course_trash_lifecycle_reason(reason: Optional[str]) -> bool:
+def is_course_trash_lifecycle_reason(reason: str | None) -> bool:
     if reason is None:
         return False
     return reason == LIFECYCLE_COURSE_TRASHED or reason.startswith(
@@ -90,8 +91,8 @@ def is_course_trash_lifecycle_reason(reason: Optional[str]) -> bool:
 
 
 def get_course_trash_previous_status(
-    reason: Optional[str],
-) -> Optional[SubmissionStatus]:
+    reason: str | None,
+) -> SubmissionStatus | None:
     marker_data = _parse_course_trash_lifecycle_reason(reason)
     raw_status = marker_data.get(COURSE_TRASH_PREVIOUS_STATUS_KEY)
     if raw_status not in {
@@ -105,7 +106,7 @@ def get_course_trash_previous_status(
     return SubmissionStatus(raw_status)
 
 
-def get_course_trash_course_id(reason: Optional[str]) -> Optional[int]:
+def get_course_trash_course_id(reason: str | None) -> int | None:
     raw_course_id = _parse_course_trash_lifecycle_reason(reason).get(
         COURSE_TRASH_COURSE_ID_KEY
     )
@@ -117,7 +118,7 @@ def get_course_trash_course_id(reason: Optional[str]) -> Optional[int]:
         return None
 
 
-def _parse_course_trash_lifecycle_reason(reason: Optional[str]) -> dict[str, str]:
+def _parse_course_trash_lifecycle_reason(reason: str | None) -> dict[str, str]:
     if reason is None:
         return {}
     marker_fields = reason.split("|")
@@ -150,7 +151,7 @@ def is_archive_submission_trashed(submission: ArchiveSubmission) -> bool:
 
 
 def _resolve_submission_restore_status(
-    previous_status: Optional[SubmissionStatus],
+    previous_status: SubmissionStatus | None,
 ) -> SubmissionStatus:
     if previous_status in {
         SubmissionStatus.PENDING,
@@ -209,7 +210,7 @@ async def _resolve_linked_archive(
     db: SQLModelAsyncSession,
     *,
     submission: ArchiveSubmission,
-) -> tuple[Optional[Archive], list[str]]:
+) -> tuple[Archive | None, list[str]]:
     if submission.created_archive_id:
         linked_archive = await db.get(Archive, submission.created_archive_id)
         if linked_archive:
@@ -245,20 +246,20 @@ async def _resolve_linked_archive(
 async def collect_archive_submission_group(
     db: SQLModelAsyncSession,
     *,
-    archive: Optional[Archive] = None,
-    submission: Optional[ArchiveSubmission] = None,
+    archive: Archive | None = None,
+    submission: ArchiveSubmission | None = None,
     exact_link_only: bool = False,
 ) -> ArchiveSubmissionGroup:
     group = ArchiveSubmissionGroup()
     archive_ids: set[int] = set()
     submission_ids: set[int] = set()
 
-    def add_archive(item: Optional[Archive]) -> None:
+    def add_archive(item: Archive | None) -> None:
         if item and item.id is not None and item.id not in archive_ids:
             archive_ids.add(item.id)
             group.archives.append(item)
 
-    def add_submission(item: Optional[ArchiveSubmission]) -> None:
+    def add_submission(item: ArchiveSubmission | None) -> None:
         if item and item.id is not None and item.id not in submission_ids:
             submission_ids.add(item.id)
             group.submissions.append(item)
@@ -301,7 +302,7 @@ async def collect_archive_submission_group(
 
 
 def _soft_delete_archive(
-    archive: Archive, *, now: datetime, user_id: Optional[int], reason: str
+    archive: Archive, *, now: datetime, user_id: int | None, reason: str
 ) -> bool:
     if archive.deleted_at is not None:
         return False
@@ -317,7 +318,7 @@ def _soft_delete_submission(
     submission: ArchiveSubmission,
     *,
     now: datetime,
-    user_id: Optional[int],
+    user_id: int | None,
     reason: str,
     consume_owner_self_delete: bool = False,
 ) -> bool:
@@ -344,7 +345,7 @@ def _temporarily_takedown_submission(
     submission: ArchiveSubmission,
     *,
     reason: str,
-    reviewer_id: Optional[int],
+    reviewer_id: int | None,
     now: datetime,
 ) -> bool:
     if is_archive_submission_trashed(submission):
@@ -363,11 +364,11 @@ async def soft_delete_archive_with_submission_takedown(
     *,
     archive: Archive,
     submissions: Sequence[ArchiveSubmission],
-    user_id: Optional[int],
+    user_id: int | None,
     reason: str,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> dict:
-    timestamp = now or datetime.now(timezone.utc)
+    timestamp = now or datetime.now(UTC)
     archive_count = (
         1
         if _soft_delete_archive(archive, now=timestamp, user_id=user_id, reason=reason)
@@ -396,10 +397,10 @@ async def soft_delete_submission_with_linked_archive(
     db: SQLModelAsyncSession,
     *,
     submission: ArchiveSubmission,
-    user_id: Optional[int],
+    user_id: int | None,
     reason: str,
-    now: Optional[datetime] = None,
-    linked_archive: Optional[Archive] = None,
+    now: datetime | None = None,
+    linked_archive: Archive | None = None,
     exact_link_only: bool = False,
     consume_owner_self_delete: bool = False,
 ) -> dict:
@@ -414,7 +415,7 @@ async def soft_delete_submission_with_linked_archive(
         )
         warnings.extend(link_warnings)
 
-    timestamp = now or datetime.now(timezone.utc)
+    timestamp = now or datetime.now(UTC)
     submission_count = (
         1
         if _soft_delete_submission(
@@ -447,10 +448,10 @@ async def restore_archive_with_temporary_submissions(
     *,
     archive: Archive,
     submissions: Sequence[ArchiveSubmission],
-    user_id: Optional[int],
-    now: Optional[datetime] = None,
+    user_id: int | None,
+    now: datetime | None = None,
 ) -> dict:
-    timestamp = now or datetime.now(timezone.utc)
+    timestamp = now or datetime.now(UTC)
     restored_archives = 0
     if archive.deleted_at is not None:
         archive.deleted_at = None
@@ -483,10 +484,10 @@ async def mark_linked_submissions_archive_permanently_deleted(
     db: SQLModelAsyncSession,
     *,
     archive: Archive,
-    user_id: Optional[int],
-    now: Optional[datetime] = None,
+    user_id: int | None,
+    now: datetime | None = None,
 ) -> int:
-    timestamp = now or datetime.now(timezone.utc)
+    timestamp = now or datetime.now(UTC)
     submissions = (
         (
             await db.execute(
@@ -515,13 +516,13 @@ async def mark_linked_submissions_archive_permanently_deleted(
 async def soft_delete_archive_submission_group(
     db: SQLModelAsyncSession,
     *,
-    archive: Optional[Archive] = None,
-    submission: Optional[ArchiveSubmission] = None,
-    user_id: Optional[int],
+    archive: Archive | None = None,
+    submission: ArchiveSubmission | None = None,
+    user_id: int | None,
     reason: str,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> dict:
-    timestamp = now or datetime.now(timezone.utc)
+    timestamp = now or datetime.now(UTC)
     group = await collect_archive_submission_group(
         db, archive=archive, submission=submission
     )
@@ -545,13 +546,13 @@ async def soft_delete_archive_submission_group(
 async def restore_archive_submission_group(
     db: SQLModelAsyncSession,
     *,
-    archive: Optional[Archive] = None,
-    submission: Optional[ArchiveSubmission] = None,
-    user_id: Optional[int],
-    now: Optional[datetime] = None,
+    archive: Archive | None = None,
+    submission: ArchiveSubmission | None = None,
+    user_id: int | None,
+    now: datetime | None = None,
     exact_link_only: bool = False,
 ) -> dict:
-    timestamp = now or datetime.now(timezone.utc)
+    timestamp = now or datetime.now(UTC)
     group = await collect_archive_submission_group(
         db,
         archive=archive,
@@ -614,11 +615,11 @@ async def _count_rows(db: SQLModelAsyncSession, statement) -> int:
 
 async def _remove_storage_object_if_unreferenced(
     db: SQLModelAsyncSession,
-    object_name: Optional[str],
+    object_name: str | None,
     warnings: list[str],
     *,
-    exclude_archive_ids: Optional[set[int]] = None,
-    exclude_submission_ids: Optional[set[int]] = None,
+    exclude_archive_ids: set[int] | None = None,
+    exclude_submission_ids: set[int] | None = None,
 ) -> int:
     if not object_name:
         return 0
@@ -685,15 +686,15 @@ async def _remove_storage_object_if_unreferenced(
 async def hard_delete_archive_submission_group(
     db: SQLModelAsyncSession,
     *,
-    archive: Optional[Archive] = None,
-    submission: Optional[ArchiveSubmission] = None,
+    archive: Archive | None = None,
+    submission: ArchiveSubmission | None = None,
     warnings: list[str],
 ) -> dict:
     group = await collect_archive_submission_group(
         db, archive=archive, submission=submission
     )
     group.warnings.extend(warnings)
-    timestamp = datetime.now(timezone.utc)
+    timestamp = datetime.now(UTC)
 
     for item in group.archives:
         _soft_delete_archive(

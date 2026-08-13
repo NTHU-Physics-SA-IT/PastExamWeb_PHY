@@ -17,9 +17,9 @@ from app.models.models import (
     SubmissionStatus,
     UserRoles,
 )
-from app.utils.auth import get_current_user
 from app.services import archive_lifecycle_locks
 from app.services.archive_lifecycle_locks import LifecycleResourceClass
+from app.utils.auth import get_current_user
 
 
 def _override_user(user_id: int, *, is_admin: bool = False):

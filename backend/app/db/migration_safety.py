@@ -33,7 +33,6 @@ from app.db.schema_manifests import (
 )
 from app.models import models as models_module
 
-
 LEDGER_TABLE = "alembic_version"
 MIGRATION_LOCK_CLASS_ID = 1_438_970_421
 CANONICAL_CATEGORY_NAME_INDEX = "uq_course_category_configs_normalized_name"

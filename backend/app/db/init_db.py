@@ -1,6 +1,6 @@
 import asyncio
-from datetime import datetime, timezone
 from collections import defaultdict
+from datetime import UTC, datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -111,7 +111,7 @@ async def sync_course_catalog(session, *, commit: bool = True):
                     changed = True
             for duplicate in duplicates:
                 if duplicate.deleted_at is None:
-                    duplicate.deleted_at = datetime.now(timezone.utc)
+                    duplicate.deleted_at = datetime.now(UTC)
                     changed = True
             continue
 

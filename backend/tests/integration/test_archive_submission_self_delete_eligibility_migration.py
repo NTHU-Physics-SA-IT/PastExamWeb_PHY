@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from pathlib import Path
 import os
 import runpy
+from datetime import UTC, datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import pytest
-from alembic import command
-from sqlalchemy import create_engine, event, inspect as sa_inspect, text
+from sqlalchemy import create_engine, event, text
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import OperationalError
 
+from alembic import command
 from app.core.config import settings
 from app.db.migration_safety import (
     alembic_config,
@@ -30,13 +31,12 @@ from app.models.models import (
     ArchiveType,
 )
 
-
 PREVIOUS_REVISION = "a7c3e9f1b5d2"
 PRODUCTION_BASE_REVISION = "a4c7e9d2f6b1"
 NEW_REVISION = "f5e1d8c3a7b2"
 NEXT_REVISION = "d8f2a6c1b4e7"
 COLUMN_NAME = "owner_self_delete_consumed"
-NOW = datetime(2026, 7, 30, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 30, 12, 0, tzinfo=UTC)
 
 
 @pytest.fixture()

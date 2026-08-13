@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -17,13 +17,13 @@ async def test_bulk_permanent_delete_commits_successes_and_reports_item_failures
         item_type=TrashEntityType.NOTIFICATION,
         id=101,
         display_name="Item A",
-        deleted_at=datetime.now(timezone.utc),
+        deleted_at=datetime.now(UTC),
     )
     item_b = TrashItem(
         item_type=TrashEntityType.USER,
         id=202,
         display_name="Item B",
-        deleted_at=datetime.now(timezone.utc),
+        deleted_at=datetime.now(UTC),
     )
     events = []
 

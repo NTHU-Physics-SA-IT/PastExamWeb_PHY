@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
@@ -13,10 +13,14 @@ from app.api.services.submission_statistics import (
     get_submission_statistics_window,
     record_submission_event,
 )
-from app.models.models import ArchiveSubmission, ArchiveSubmissionEvent, ArchiveType, SubmissionStatus
+from app.models.models import (
+    ArchiveSubmission,
+    ArchiveSubmissionEvent,
+    ArchiveType,
+    SubmissionStatus,
+)
 
-
-NOW = datetime(2026, 7, 15, 4, 23, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 15, 4, 23, tzinfo=UTC)
 
 
 @pytest.mark.parametrize(
@@ -68,10 +72,10 @@ def test_half_open_bucket_boundaries_do_not_overlap():
 @pytest.mark.parametrize(
     "value",
     [
-        datetime(2026, 7, 31, 23, 59, tzinfo=timezone.utc),
-        datetime(2026, 8, 1, 0, 0, tzinfo=timezone.utc),
-        datetime(2026, 12, 31, 23, 59, tzinfo=timezone.utc),
-        datetime(2027, 1, 1, 0, 0, tzinfo=timezone.utc),
+        datetime(2026, 7, 31, 23, 59, tzinfo=UTC),
+        datetime(2026, 8, 1, 0, 0, tzinfo=UTC),
+        datetime(2026, 12, 31, 23, 59, tzinfo=UTC),
+        datetime(2027, 1, 1, 0, 0, tzinfo=UTC),
     ],
 )
 def test_bucket_alignment_handles_day_month_and_year_boundaries(value):
@@ -96,7 +100,7 @@ def test_daily_bucket_uses_product_timezone_midnight():
     local_day = datetime(2026, 7, 15, 0, 5, tzinfo=timezone(timedelta(hours=8)))
     aligned = align_product_bucket(local_day, 24 * 60)
 
-    assert aligned == datetime(2026, 7, 14, 16, 0, tzinfo=timezone.utc)
+    assert aligned == datetime(2026, 7, 14, 16, 0, tzinfo=UTC)
 
 
 class _RowsResult:
@@ -178,7 +182,7 @@ async def test_submission_statistics_admin_response_is_aggregated_and_bounded():
 
 @pytest.mark.asyncio
 async def test_record_submission_event_keeps_only_stable_statistics_fields():
-    submitted_at = datetime(2026, 7, 15, 3, 20, tzinfo=timezone.utc)
+    submitted_at = datetime(2026, 7, 15, 3, 20, tzinfo=UTC)
     submission = ArchiveSubmission(
         id=41,
         subject="course",
@@ -221,7 +225,7 @@ def test_submission_event_survives_delete_restore_and_permanent_delete(range_key
     engine = create_engine("sqlite://")
     ArchiveSubmission.__table__.create(engine)
     ArchiveSubmissionEvent.__table__.create(engine)
-    submitted_at = datetime(2026, 7, 15, 3, 20, tzinfo=timezone.utc)
+    submitted_at = datetime(2026, 7, 15, 3, 20, tzinfo=UTC)
 
     with Session(engine) as session:
         submission = _make_submission(submission_id=101, created_at=submitted_at)

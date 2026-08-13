@@ -1,11 +1,11 @@
-from datetime import datetime, timezone
-from typing import Any, List
 import unicodedata
+from datetime import UTC, datetime, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.exc import ProgrammingError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -159,7 +159,7 @@ def _default_settings() -> list[dict[str, Any]]:
     return [dict(level) for level in DEFAULT_CONTRIBUTOR_LEVEL_SETTINGS]
 
 
-@router.get("/contributor-levels", response_model=List[ContributorLevelSettingRead])
+@router.get("/contributor-levels", response_model=list[ContributorLevelSettingRead])
 async def get_contributor_level_settings(
     db: AsyncSession = Depends(get_session),
 ):
@@ -181,9 +181,9 @@ async def get_contributor_level_settings(
     return validate_contributor_level_settings(setting.value)
 
 
-@router.put("/contributor-levels", response_model=List[ContributorLevelSettingRead])
+@router.put("/contributor-levels", response_model=list[ContributorLevelSettingRead])
 async def update_contributor_level_settings(
-    payload: List[dict[str, Any]],
+    payload: list[dict[str, Any]],
     current_user: UserRoles = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
@@ -200,7 +200,7 @@ async def update_contributor_level_settings(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     statement = (
         postgresql_insert(SystemSetting)
         .values(

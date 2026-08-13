@@ -5,16 +5,13 @@ import os
 from urllib.parse import quote, quote_plus
 
 import pytest
-from alembic import command
-from sqlalchemy import create_engine, inspect as sa_inspect, text
+from sqlalchemy import create_engine, text
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.engine import Engine, make_url
 
 import migrate
+from alembic import command
 from app.core.config import settings
-from app.db.test_database_guard import (
-    validate_connected_test_database,
-    validate_test_database_target,
-)
 from app.db.migration_safety import (
     alembic_config,
     database_url,
@@ -22,6 +19,10 @@ from app.db.migration_safety import (
     migration_advisory_lock,
     revision_graph,
     safe_error,
+)
+from app.db.test_database_guard import (
+    validate_connected_test_database,
+    validate_test_database_target,
 )
 
 

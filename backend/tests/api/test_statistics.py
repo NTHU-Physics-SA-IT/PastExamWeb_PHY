@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 import pytest_asyncio
@@ -20,7 +20,7 @@ from app.models.models import (
 
 @pytest.fixture
 def statistics_now(monkeypatch):
-    frozen_now = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    frozen_now = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
 
     class FrozenDatetime(datetime):
         @classmethod

@@ -1,5 +1,5 @@
-from datetime import datetime, timezone
 import uuid
+from datetime import UTC, datetime, timezone
 
 import pytest
 from sqlalchemy import delete, func, select
@@ -294,7 +294,7 @@ async def test_rejected_reapproval_rolls_back_on_notification_failure(
     object_name = f"archive-submissions/reapproval-{unique}.pdf"
     requester = await make_user(name=f"reapproval-requester-{unique[:8]}")
     admin = await make_user(name=f"reapproval-admin-{unique[:8]}", is_admin=True)
-    previous_reviewed_at = datetime(2026, 1, 2, 3, 4, tzinfo=timezone.utc)
+    previous_reviewed_at = datetime(2026, 1, 2, 3, 4, tzinfo=UTC)
 
     async with session_maker() as session:
         category = CourseCategoryConfig(
@@ -419,9 +419,9 @@ async def test_approve_rolls_back_existing_archive_update_on_notification_failur
     new_object_name = f"archive-submissions/reuse-new-{unique}.pdf"
     requester = await make_user(name=f"reuse-requester-{unique[:8]}")
     admin = await make_user(name=f"reuse-admin-{unique[:8]}", is_admin=True)
-    previous_reviewed_at = datetime(2026, 2, 3, 4, 5, tzinfo=timezone.utc)
-    previous_archive_updated_at = datetime(2025, 12, 1, tzinfo=timezone.utc)
-    previous_archive_deleted_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    previous_reviewed_at = datetime(2026, 2, 3, 4, 5, tzinfo=UTC)
+    previous_archive_updated_at = datetime(2025, 12, 1, tzinfo=UTC)
+    previous_archive_deleted_at = datetime(2026, 1, 1, tzinfo=UTC)
 
     async with session_maker() as session:
         category = CourseCategoryConfig(

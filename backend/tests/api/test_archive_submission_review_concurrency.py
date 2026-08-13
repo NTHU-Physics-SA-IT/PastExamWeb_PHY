@@ -1,6 +1,6 @@
 import asyncio
-from dataclasses import dataclass
 import uuid
+from dataclasses import dataclass
 
 import pytest
 from sqlalchemy import delete, func

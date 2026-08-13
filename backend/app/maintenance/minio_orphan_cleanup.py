@@ -7,26 +7,25 @@ import argparse
 import asyncio
 import json
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from minio.error import S3Error
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.db.init_db import validate_database_ready
 from app.db.session import AsyncSessionLocal
 from app.models.models import Archive, ArchiveSubmission, SubmissionStatus
 from app.utils.storage import get_minio_client
-from sqlalchemy import select
-
 
 KNOWN_PREFIXES = ("archives/", "archive-submissions/")
 SIZE_1GB = 1024 * 1024 * 1024
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _normalize_prefix(key: str) -> str:
@@ -38,7 +37,7 @@ def _normalize_prefix(key: str) -> str:
 
 def _is_empty_folder_marker(obj: Any) -> bool:
     return bool(getattr(obj, "is_dir", False)) or (
-        (getattr(obj, "size", None) == 0 and str(getattr(obj, "object_name", "")).endswith("/") )
+        getattr(obj, "size", None) == 0 and str(getattr(obj, "object_name", "")).endswith("/")
     )
 
 

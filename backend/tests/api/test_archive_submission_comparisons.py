@@ -1,5 +1,5 @@
-from datetime import datetime, timezone
 import uuid
+from datetime import UTC, datetime, timezone
 
 import pytest
 import pytest_asyncio
@@ -15,7 +15,6 @@ from app.models.models import (
     UserRoles,
 )
 from app.utils.auth import get_current_user
-
 
 _DEFAULT_REQUESTED_COURSE_NAME = object()
 
@@ -110,7 +109,7 @@ class ComparisonFixture:
                 status=status,
                 created_archive_id=created_archive_id,
                 deleted_at=(
-                    datetime.now(timezone.utc)
+                    datetime.now(UTC)
                     if status == SubmissionStatus.DELETED
                     else None
                 ),

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import os
+from datetime import UTC, datetime, timezone
 from typing import Any
 
 import pytest
-from alembic import command
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine, make_url
 
+from alembic import command
 from app.core.config import settings
 from app.db.course_categories import (
     CANONICAL_COURSE_CATEGORY_KEYS,
@@ -20,7 +20,6 @@ from app.db.test_database_guard import (
     validate_connected_test_database,
     validate_test_database_target,
 )
-
 
 PREVIOUS_REVISION = "a4c7e9d2f6b1"
 
@@ -112,7 +111,7 @@ def _default_row(
         "deleted_by_id": None,
         "restored_at": None,
         "restored_by_id": None,
-        "updated_at": datetime(2025, 1, 1, tzinfo=timezone.utc),
+        "updated_at": datetime(2025, 1, 1, tzinfo=UTC),
     }
     row.update(overrides)
     return row
@@ -324,8 +323,8 @@ def test_existing_canonical_metadata_and_soft_delete_are_preserved(
     migration_engine: Engine,
     managed_name: str,
 ) -> None:
-    deleted_at = datetime(2025, 2, 3, tzinfo=timezone.utc)
-    restored_at = datetime(2025, 2, 4, tzinfo=timezone.utc)
+    deleted_at = datetime(2025, 2, 3, tzinfo=UTC)
+    restored_at = datetime(2025, 2, 4, tzinfo=UTC)
     _replace_categories(
         migration_engine,
         _canonical_rows(
@@ -385,9 +384,9 @@ def test_known_math_typo_only_updates_name_and_timestamp(
                     "badge_color": "amber",
                     "order_index": 73,
                     "is_active": False,
-                    "deleted_at": datetime(2025, 3, 1, tzinfo=timezone.utc),
+                    "deleted_at": datetime(2025, 3, 1, tzinfo=UTC),
                     "deleted_by_id": 201,
-                    "restored_at": datetime(2025, 3, 2, tzinfo=timezone.utc),
+                    "restored_at": datetime(2025, 3, 2, tzinfo=UTC),
                     "restored_by_id": 202,
                 }
             }
@@ -467,9 +466,9 @@ def test_custom_category_and_its_references_are_untouched(
         badge_color="forest",
         order_index=99,
         is_active=False,
-        deleted_at=datetime(2025, 4, 1, tzinfo=timezone.utc),
+        deleted_at=datetime(2025, 4, 1, tzinfo=UTC),
         deleted_by_id=301,
-        restored_at=datetime(2025, 4, 2, tzinfo=timezone.utc),
+        restored_at=datetime(2025, 4, 2, tzinfo=UTC),
         restored_by_id=302,
     )
     with migration_engine.begin() as connection:

@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import os
+from datetime import UTC, datetime, timezone
 from typing import Any
 
-from alembic import command
 import pytest
-from sqlalchemy import create_engine, inspect as sa_inspect, text
+from sqlalchemy import create_engine, text
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import IntegrityError
 
+from alembic import command
 from app.core.config import settings
 from app.db.audit.registry import (
     ELIGIBILITY_AUDIT_ID,
@@ -32,14 +33,13 @@ from app.models.models import (
     ArchiveSubmissionRead,
 )
 
-
 PREVIOUS_REVISION = "f5e1d8c3a7b2"
 NEW_REVISION = "d8f2a6c1b4e7"
 NEXT_REVISION = "6f3a9c2d8e41"
 COLUMN_NAME = "previous_status"
 NOT_DELETED_CONSTRAINT = "ck_archive_submissions_previous_status_not_deleted"
 ACTIVE_NULL_CONSTRAINT = "ck_archive_submissions_active_previous_status_null"
-NOW = datetime(2026, 8, 3, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 3, 12, 0, tzinfo=UTC)
 
 
 @pytest.fixture()

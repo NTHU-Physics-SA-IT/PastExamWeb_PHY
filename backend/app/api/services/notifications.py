@@ -1,5 +1,4 @@
-from datetime import datetime, timezone
-from typing import List
+from datetime import UTC, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import delete, func, or_, update
@@ -11,6 +10,9 @@ from app.db.session import get_session
 from app.models.models import (
     AnnouncementReadReceipt,
     AnnouncementWithRead,
+    ArchiveDiscussionMessage,
+    ArchiveReport,
+    CommentReport,
     Notification,
     NotificationCenterRead,
     NotificationCreate,
@@ -20,9 +22,6 @@ from app.models.models import (
     NotificationUpdate,
     PersonalNotification,
     PersonalNotificationRead,
-    ArchiveDiscussionMessage,
-    ArchiveReport,
-    CommentReport,
     User,
     UserRoles,
 )
@@ -40,7 +39,7 @@ def _notification_read(
 
 
 def _apply_time_filters(statement):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return (
         statement.where(Notification.deleted_at.is_(None))
         .where(Notification.is_active.is_(True))
@@ -231,7 +230,7 @@ async def _unread_counts(
     )
 
 
-@router.get("/active", response_model=List[NotificationRead])
+@router.get("/active", response_model=list[NotificationRead])
 async def get_active_notifications(
     db: AsyncSession = Depends(get_session),
 ):
@@ -244,7 +243,7 @@ async def get_active_notifications(
     ]
 
 
-@router.get("", response_model=List[NotificationRead])
+@router.get("", response_model=list[NotificationRead])
 async def list_public_notifications(
     db: AsyncSession = Depends(get_session),
 ):
@@ -322,7 +321,7 @@ async def mark_announcement_read(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Announcement not found"
         )
-    read_at = datetime.now(timezone.utc)
+    read_at = datetime.now(UTC)
     await db.execute(
         pg_insert(AnnouncementReadReceipt)
         .values(
@@ -358,7 +357,7 @@ async def mark_personal_notification_read(
             status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found"
         )
     if item.read_at is None:
-        item.read_at = datetime.now(timezone.utc)
+        item.read_at = datetime.now(UTC)
         db.add(item)
         await db.commit()
     return {"success": True, "read_at": item.read_at}
@@ -369,7 +368,7 @@ async def mark_all_personal_notifications_read(
     db: AsyncSession = Depends(get_session),
     current_user: UserRoles = Depends(get_current_user),
 ):
-    read_at = datetime.now(timezone.utc)
+    read_at = datetime.now(UTC)
     await db.execute(
         update(PersonalNotification)
         .where(
@@ -429,7 +428,7 @@ async def mark_all_announcements_and_notifications_read(
     db: AsyncSession = Depends(get_session),
     current_user: UserRoles = Depends(get_current_user),
 ):
-    read_at = datetime.now(timezone.utc)
+    read_at = datetime.now(UTC)
     announcement_ids = [
         announcement.id
         for announcement in await _list_announcements_for_user(db, current_user.user_id)
@@ -464,7 +463,7 @@ async def mark_all_announcements_and_notifications_read(
     return {"success": True, "read_at": read_at}
 
 
-@router.get("/admin/notifications", response_model=List[NotificationRead])
+@router.get("/admin/notifications", response_model=list[NotificationRead])
 async def list_admin_notifications(
     db: AsyncSession = Depends(get_session),
     current_user: UserRoles = Depends(get_current_user),
@@ -503,7 +502,7 @@ async def create_notification(
         )
 
     notification = Notification(**notification_data.model_dump())
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     notification.created_at = now
     notification.updated_at = now
     notification.updated_by_id = current_user.user_id
@@ -542,7 +541,7 @@ async def update_notification(
     for field, value in update_data.items():
         setattr(notification, field, value)
 
-    notification.updated_at = datetime.now(timezone.utc)
+    notification.updated_at = datetime.now(UTC)
     notification.updated_by_id = current_user.user_id
 
     db.add(notification)
@@ -576,7 +575,7 @@ async def delete_notification(
             status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found"
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     notification.deleted_at = now
     notification.updated_at = now
     notification.deleted_by_id = current_user.user_id

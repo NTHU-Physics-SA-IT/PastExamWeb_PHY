@@ -1,13 +1,13 @@
-from datetime import datetime, timezone
 import logging
+from datetime import UTC, datetime, timezone
 
 from fastapi import APIRouter, Depends
 from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.api.services.presence import distinct_online_user_ids, load_presence_sessions
 from app.db.session import get_session
 from app.models.models import Archive, Course, User
-from app.api.services.presence import distinct_online_user_ids, load_presence_sessions
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -39,13 +39,13 @@ async def get_system_statistics(db: AsyncSession = Depends(get_session)):
         )
         total_downloads = result.scalar()
 
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         presence_sessions = await load_presence_sessions(
             db, range_start=now_utc, range_end=now_utc
         )
         online_users = len(distinct_online_user_ids(presence_sessions, now_utc))
 
-        today_start = datetime.now(timezone.utc).replace(
+        today_start = datetime.now(UTC).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
         result = await db.execute(

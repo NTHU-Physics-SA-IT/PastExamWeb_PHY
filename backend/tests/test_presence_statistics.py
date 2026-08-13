@@ -1,6 +1,7 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
+from fastapi import HTTPException
 
 from app.api.services.presence import (
     ONLINE_TIMEOUT_SECONDS,
@@ -13,10 +14,8 @@ from app.api.services.users import (
     get_online_statistics,
 )
 from app.models.models import UserPresenceSession, UserRoles
-from fastapi import HTTPException
 
-
-NOW = datetime(2026, 7, 13, 0, 1, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 13, 0, 1, tzinfo=UTC)
 
 
 def make_session(
@@ -109,7 +108,7 @@ def test_online_statistics_bucket_contract(range_key, bucket_minutes, bucket_cou
 def test_session_crossing_midnight_is_counted_at_sample_points():
     session = make_session(
         1,
-        started_at=datetime(2026, 7, 12, 23, 58, tzinfo=timezone.utc),
+        started_at=datetime(2026, 7, 12, 23, 58, tzinfo=UTC),
         last_seen_at=NOW,
     )
     result = build_online_statistics(
@@ -119,7 +118,7 @@ def test_session_crossing_midnight_is_counted_at_sample_points():
         history_started_at=session.started_at,
     )
 
-    assert result.points[-1].start == datetime(2026, 7, 13, 0, 0, tzinfo=timezone.utc)
+    assert result.points[-1].start == datetime(2026, 7, 13, 0, 0, tzinfo=UTC)
     assert result.points[-1].count == 1
     assert sum(point.count for point in result.points[:-1]) == 1
 

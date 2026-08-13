@@ -3,12 +3,11 @@ from fastapi import FastAPI
 # from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.core.config import settings
 from app.api.api import api_router
+from app.core.config import settings
 from app.db.init_db import init_db
-from app.utils.access_log import install_oauth_access_log_filter
 from app.services.nthu_dev_mock import validate_nthu_dev_mock_configuration
-
+from app.utils.access_log import install_oauth_access_log_filter
 
 install_oauth_access_log_filter()
 

@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import pytest
@@ -511,7 +511,7 @@ async def test_discussion_sorting_prioritizes_pin_then_likes_then_newest(
     author = await make_user(name="sort-author")
     liker_one = await make_user(name="sort-liker-one")
     liker_two = await make_user(name="sort-liker-two")
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     async with session_maker() as session:
         course = Course(name="Sort Course", category=CourseCategory.FRESHMAN)
         session.add(course)
@@ -858,7 +858,7 @@ async def test_discussion_delete_requires_owner_or_admin(
             archive_id=archive.id,
             user_id=owner.id,
             content="hello",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         session.add(message)
         await session.commit()

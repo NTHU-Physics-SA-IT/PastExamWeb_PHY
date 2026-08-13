@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from enum import Enum
 import unicodedata
-from typing import Any, TYPE_CHECKING
+from dataclasses import dataclass
+from datetime import UTC, datetime, timezone
+from enum import Enum
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlmodel import select
@@ -147,7 +147,7 @@ async def save_nthu_access_policy(
     updated_by_id: int,
 ) -> NthuAccessPolicy:
     policy = normalize_nthu_access_policy(value)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     storage_value = policy.as_storage_value()
     statement = (
         postgresql_insert(SystemSetting)

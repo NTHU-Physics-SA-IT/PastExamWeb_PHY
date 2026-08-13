@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 import pytest
 
@@ -502,7 +502,7 @@ async def test_soft_deleted_default_admin_is_restored_and_password_reset(
         password_hash=old_hash,
         is_local=False,
         is_admin=False,
-        deleted_at=datetime(2025, 6, 1, tzinfo=timezone.utc),
+        deleted_at=datetime(2025, 6, 1, tzinfo=UTC),
     )
     categories = _canonical_category_models()
     fake_session = FakeSession(

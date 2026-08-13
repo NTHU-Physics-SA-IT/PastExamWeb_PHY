@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import os
+from datetime import UTC, datetime, timezone
 
-from alembic import command
 import pytest
-from sqlalchemy import UniqueConstraint, create_engine, inspect as sa_inspect, text
+from sqlalchemy import UniqueConstraint, create_engine, text
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import IntegrityError
 
+from alembic import command
 from app.core.config import settings
 from app.db.audit.registry import ELIGIBILITY_AUDIT_ID, get_audit_adapter
 from app.db.migration_safety import (
@@ -24,12 +25,11 @@ from app.db.test_database_guard import (
 )
 from app.models.models import ArchiveSubmission
 
-
 PREVIOUS_REVISION = "d8f2a6c1b4e7"
 NEW_REVISION = "6f3a9c2d8e41"
 NEXT_REVISION = "9f1c2a7e4b63"
 CONSTRAINT_NAME = "uq_archive_submissions_created_archive_id"
-NOW = datetime(2026, 8, 3, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 3, 12, 0, tzinfo=UTC)
 
 
 @pytest.fixture()

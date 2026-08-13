@@ -1,6 +1,6 @@
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import case, func, or_
@@ -41,12 +41,12 @@ from app.models.models import (
     User,
     UserRoles,
 )
+from app.services.archive_report_lifecycle_locks import (
+    acquire_stable_archive_report_locks,
+)
 from app.services.archive_submission_status import (
     normalize_submission_status,
     take_down_archive_submission,
-)
-from app.services.archive_report_lifecycle_locks import (
-    acquire_stable_archive_report_locks,
 )
 from app.services.discussions import soft_delete_discussion_message
 from app.services.personal_notifications import enqueue_personal_notification
@@ -510,7 +510,7 @@ async def update_system_issue_read_state(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="System issue report not found",
         )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     report.read_at = now if payload.is_read else None
     report.read_by_user_id = current_user.user_id if payload.is_read else None
     report.updated_at = now
@@ -543,7 +543,7 @@ async def delete_system_issue_report(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="System issue report not found",
         )
-    report.deleted_at = datetime.now(timezone.utc)
+    report.deleted_at = datetime.now(UTC)
     report.deleted_by_id = current_user.user_id
     db.add(report)
     await db.commit()
@@ -763,7 +763,7 @@ async def delete_comment_report(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Comment report not found",
         )
-    report.deleted_at = datetime.now(timezone.utc)
+    report.deleted_at = datetime.now(UTC)
     report.deleted_by_id = current_user.user_id
     db.add(report)
     await db.commit()
@@ -812,7 +812,7 @@ async def review_comment_report(
             detail="Only an upheld report can delete the source comment",
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     report.status = new_status
     report.admin_response = response or None
     report.reviewed_by = current_user.user_id
@@ -1150,7 +1150,7 @@ async def delete_archive_report(
             detail="Archive report not found",
         )
     report = locked.report
-    report.deleted_at = datetime.now(timezone.utc)
+    report.deleted_at = datetime.now(UTC)
     report.deleted_by_id = current_user.user_id
     db.add(report)
     await db.commit()
@@ -1248,7 +1248,7 @@ async def review_archive_report(
         report.archive_taken_down = True
 
     response = (payload.admin_response or "").strip()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     report.status = new_status
     report.admin_response = response or None
     report.reviewed_by = current_user.user_id

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 import uuid
+from datetime import UTC, datetime, timezone
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -203,7 +203,7 @@ async def test_submission_restore_accepts_its_exact_retained_link(
     marker = uuid.uuid4().hex
     requester = await make_user(name=f"o2-exact-requester-{marker[:8]}")
     admin = await make_user(name=f"o2-exact-admin-{marker[:8]}", is_admin=True)
-    deleted_at = datetime.now(timezone.utc)
+    deleted_at = datetime.now(UTC)
     async with session_maker() as session:
         course = Course(
             name=f"O2 Exact Restore Course {marker}",
@@ -314,7 +314,7 @@ async def test_submission_restore_uses_no_metadata_fallback_for_null_link(
     marker = uuid.uuid4().hex
     requester = await make_user(name=f"o2-null-requester-{marker[:8]}")
     admin = await make_user(name=f"o2-null-admin-{marker[:8]}", is_admin=True)
-    deleted_at = datetime.now(timezone.utc)
+    deleted_at = datetime.now(UTC)
     async with session_maker() as session:
         course = Course(
             name=f"O2 Null Restore Course {marker}",
@@ -399,7 +399,7 @@ async def test_restore_link_conflict_is_409_without_lifecycle_mutation(
     marker = uuid.uuid4().hex
     requester = await make_user(name=f"o2-restore-requester-{marker[:8]}")
     admin = await make_user(name=f"o2-restore-admin-{marker[:8]}", is_admin=True)
-    deleted_at = datetime.now(timezone.utc)
+    deleted_at = datetime.now(UTC)
     async with session_maker() as session:
         course = Course(
             name=f"O2 Restore Course {marker}",
@@ -492,7 +492,7 @@ async def test_submission_restore_rolls_back_status_provenance_and_archive(
     marker = uuid.uuid4().hex
     requester = await make_user(name=f"o2-rollback-requester-{marker[:8]}")
     admin = await make_user(name=f"o2-rollback-admin-{marker[:8]}", is_admin=True)
-    deleted_at = datetime.now(timezone.utc)
+    deleted_at = datetime.now(UTC)
     async with session_maker() as session:
         course = Course(
             name=f"O2 Rollback Course {marker}",
@@ -610,7 +610,7 @@ async def test_restore_internal_invariant_uses_generic_500(
     marker = uuid.uuid4().hex
     requester = await make_user(name=f"o2-anomaly-requester-{marker[:8]}")
     admin = await make_user(name=f"o2-anomaly-admin-{marker[:8]}", is_admin=True)
-    deleted_at = datetime.now(timezone.utc)
+    deleted_at = datetime.now(UTC)
     async with session_maker() as session:
         course = Course(
             name=f"O2 Anomaly Course {marker}",

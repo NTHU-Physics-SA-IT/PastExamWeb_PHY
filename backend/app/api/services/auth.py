@@ -1,8 +1,8 @@
-from datetime import datetime, timezone
 import hmac
 import secrets
-from urllib.parse import urlencode
 import uuid
+from datetime import UTC, datetime, timezone
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
@@ -12,19 +12,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.api.services.presence import (
+    HEARTBEAT_INTERVAL_SECONDS,
+    end_presence_session,
+    touch_presence_session,
+)
 from app.core.config import settings
 from app.db.session import get_session
 from app.models.models import User
 from app.services.login_handoff import (
     consume_login_handoff,
     create_login_handoff,
-)
-from app.services.nthu_oauth import (
-    NthuOAuthBusinessError,
-    NthuOAuthProviderError,
-    build_nthu_authorize_url,
-    fetch_nthu_profile,
-    resolve_nthu_user,
 )
 from app.services.nthu_dev_mock import (
     consume_nthu_dev_profile,
@@ -33,10 +31,12 @@ from app.services.nthu_dev_mock import (
     nthu_dev_mock_is_available,
     public_nthu_dev_profiles,
 )
-from app.api.services.presence import (
-    HEARTBEAT_INTERVAL_SECONDS,
-    end_presence_session,
-    touch_presence_session,
+from app.services.nthu_oauth import (
+    NthuOAuthBusinessError,
+    NthuOAuthProviderError,
+    build_nthu_authorize_url,
+    fetch_nthu_profile,
+    resolve_nthu_user,
 )
 from app.utils.auth import authenticate_user, blacklist_token, get_current_user
 from app.utils.jwt import jwt
@@ -53,7 +53,7 @@ def _ensure_timezone_aware(dt: datetime | None) -> datetime | None:
     if not dt:
         return None
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
+        return dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -102,7 +102,7 @@ async def login(
         )
 
     # Update last login and heartbeat timestamps
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     user.last_login = now_utc
     user.last_seen_at = now_utc
 
@@ -226,7 +226,7 @@ async def exchange_nthu_login(
             detail="oauth_exchange_invalid",
         )
 
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     token = _issue_access_token(user, now=now_utc)
     user.last_login = now_utc
     user.last_seen_at = now_utc
@@ -252,7 +252,7 @@ async def logout(
     )
     user = result.scalar_one_or_none()
     if user:
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         user.last_logout = now_utc
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
@@ -290,7 +290,7 @@ async def heartbeat(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     should_update = True
     normalized_last_seen = _ensure_timezone_aware(user.last_seen_at)
     if normalized_last_seen is not None:
@@ -340,7 +340,7 @@ async def record_login(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     user.last_login = now_utc
     user.last_seen_at = now_utc
     auth_header = request.headers.get("Authorization", "")

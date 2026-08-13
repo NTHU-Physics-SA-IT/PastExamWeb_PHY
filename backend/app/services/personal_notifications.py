@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import Any
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -43,7 +43,7 @@ async def enqueue_personal_notification(
             source_message_id=source_message_id,
             metadata=metadata or {},
             dedupe_key=dedupe_key[:160],
-            created_at=created_at or datetime.now(timezone.utc),
+            created_at=created_at or datetime.now(UTC),
         )
         .on_conflict_do_nothing(constraint="uq_personal_notifications_dedupe_key")
         .returning(PersonalNotification.id)

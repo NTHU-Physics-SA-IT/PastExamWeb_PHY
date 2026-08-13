@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -7,9 +7,9 @@ from app.models.models import Archive, ArchiveReport, ArchiveSubmission, Course
 from app.services import archive_report_lifecycle_locks
 from app.services.archive_lifecycle_locks import (
     LifecycleMembershipFingerprint,
-    LifecycleRevalidationResult,
     LifecycleResourceClass,
     LifecycleResourceRef,
+    LifecycleRevalidationResult,
     LockedLifecycleRows,
 )
 from app.services.archive_report_lifecycle_locks import (
@@ -45,7 +45,7 @@ def _report(
         academic_year_snapshot=2026,
         archive_type_snapshot="final",
         professor_snapshot="Professor",
-        deleted_at=datetime.now(timezone.utc) if deleted else None,
+        deleted_at=datetime.now(UTC) if deleted else None,
     )
 
 

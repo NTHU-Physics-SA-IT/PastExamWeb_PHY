@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 from sqlalchemy import exists
 from sqlmodel import select
@@ -12,7 +12,7 @@ async def soft_delete_discussion_message(
 ) -> bool:
     """Apply the shared discussion deletion policy without committing."""
 
-    message.deleted_at = datetime.now(timezone.utc)
+    message.deleted_at = datetime.now(UTC)
     message.is_pinned = False
     preserve_thread = bool(
         message.parent_id is None

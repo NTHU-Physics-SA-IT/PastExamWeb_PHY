@@ -26,7 +26,6 @@ from app.db.audit.registry import AuditAdapter, get_audit_adapter
 from app.db.migration_safety import redact_text
 from app.db.test_database_guard import validate_test_database_target
 
-
 META_MARKER = "__PASTEXAM_AUDIT_META__"
 RESULT_MARKER = "__PASTEXAM_AUDIT_RESULT__"
 ROLLBACK_SENTINEL = "__PASTEXAM_AUDIT_ROLLBACK_COMPLETE__"

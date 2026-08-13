@@ -1,18 +1,17 @@
+import uuid
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
-import uuid
 
 import pytest
+from fastapi import HTTPException
 from sqlmodel import select
 
-from fastapi import HTTPException
-
+from app.api.services import auth as auth_service
+from app.core.config import settings
 from app.main import app
 from app.models.models import SystemSetting, User, UserPresenceSession, UserRoles
-from app.core.config import settings
 from app.services.nthu_oauth import NthuProfile
 from app.utils.auth import get_current_user
-from app.api.services import auth as auth_service
 
 LEGACY_BCRYPT_HASH = "$2b$04$abcdefghijklmnopqrstuOFeWHo6yW/rrUEe9j8D8ueOhu.9wpWwO"
 

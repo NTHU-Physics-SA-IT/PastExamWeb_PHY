@@ -1,11 +1,10 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 
 from app.api.services import trash
-from app.models.models import TrashEntityType
-from app.models.models import SubmissionStatus
+from app.models.models import SubmissionStatus, TrashEntityType
 
 
 @pytest.mark.parametrize("item_type", list(TrashEntityType))
@@ -14,7 +13,7 @@ def test_trash_items_default_to_explicit_available_actions(item_type):
         item_type=item_type,
         item_id=1,
         display_name="item",
-        deleted_at=datetime.now(timezone.utc),
+        deleted_at=datetime.now(UTC),
         deleted_by_id=None,
     )
 
@@ -44,7 +43,7 @@ def test_trash_item_uses_structured_authority_over_legacy_arguments():
         item_type=TrashEntityType.COURSE,
         item_id=2,
         display_name="course",
-        deleted_at=datetime.now(timezone.utc),
+        deleted_at=datetime.now(UTC),
         deleted_by_id=None,
         dependencies=["ignored"],
         can_restore=False,

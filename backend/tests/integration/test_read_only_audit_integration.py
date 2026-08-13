@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import runpy
+from pathlib import Path
 
 import pytest
-from alembic import command
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine, make_url
 
+from alembic import command
 from app.core.config import settings
 from app.db.audit.registry import (
     ELIGIBILITY_AUDIT_ID,
@@ -19,7 +19,6 @@ from app.db.test_database_guard import (
     validate_connected_test_database,
     validate_test_database_target,
 )
-
 
 PREVIOUS_REVISION = "a7c3e9f1b5d2"
 NEW_REVISION = "f5e1d8c3a7b2"

@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 import pytest
 from sqlalchemy import delete, func
@@ -157,7 +157,7 @@ async def test_comment_report_admin_review_is_authorized_atomic_and_idempotent(
 
         async with session_maker() as session:
             missing_source = await session.get(ArchiveDiscussionMessage, messages[1].id)
-            missing_source.deleted_at = datetime.now(timezone.utc)
+            missing_source.deleted_at = datetime.now(UTC)
             session.add(missing_source)
             await session.commit()
 
@@ -550,7 +550,7 @@ async def test_system_issue_read_state_sorting_is_grouped_stable_and_paginated(
 ):
     reporter = await make_user(name="system-sort-reporter")
     admin = await make_user(name="system-sort-admin", is_admin=True)
-    base_time = datetime(2026, 7, 22, tzinfo=timezone.utc)
+    base_time = datetime(2026, 7, 22, tzinfo=UTC)
     try:
         async with session_maker() as session:
             reports = [
@@ -674,7 +674,7 @@ async def test_comment_report_default_sorting_is_status_ranked_stable_and_pagina
 ):
     reporter = await make_user(name="comment-sort-reporter")
     admin = await make_user(name="comment-sort-admin", is_admin=True)
-    base_time = datetime(2026, 7, 22, tzinfo=timezone.utc)
+    base_time = datetime(2026, 7, 22, tzinfo=UTC)
     try:
         async with session_maker() as session:
             reports = [

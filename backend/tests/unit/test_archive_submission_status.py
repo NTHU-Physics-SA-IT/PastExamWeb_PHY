@@ -14,10 +14,9 @@ from app.services.archive_submission_status import (
     available_archive_submission_admin_actions,
     classify_archive_submission_expected_state,
     classify_archive_submission_review_transition,
-    resolve_archive_submission_delete_source_status,
     resolve_archive_submission_actual_status,
+    resolve_archive_submission_delete_source_status,
 )
-
 
 POLICY_MATRIX = [
     (

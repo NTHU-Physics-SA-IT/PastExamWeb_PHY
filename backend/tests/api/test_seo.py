@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 import pytest
 from httpx import AsyncClient
@@ -47,7 +47,7 @@ async def test_sitemap_contains_only_courses_with_public_archives(
         deleted_course = Course(
             name=f"Sitemap deleted course {suffix}",
             category=CourseCategory.FRESHMAN.value,
-            deleted_at=datetime.now(timezone.utc),
+            deleted_at=datetime.now(UTC),
         )
         session.add_all(
             [
@@ -88,7 +88,7 @@ async def test_sitemap_contains_only_courses_with_public_archives(
             object_name=f"private/deleted-{suffix}.pdf",
             course_id=deleted_archive_course.id,
             uploader_id=uploader.id,
-            deleted_at=datetime.now(timezone.utc),
+            deleted_at=datetime.now(UTC),
         )
         deleted_course_archive = Archive(
             name=f"Sitemap deleted course archive {suffix}",

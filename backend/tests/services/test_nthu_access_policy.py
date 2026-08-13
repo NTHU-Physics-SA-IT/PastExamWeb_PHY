@@ -1,10 +1,10 @@
 import pytest
 
 from app.services.nthu_access_policy import (
+    LEGACY_SPECIAL_AFFILIATIONS_KEY,
     NthuAccessMode,
     NthuAccessPolicy,
     NthuAccessPolicyValidationError,
-    LEGACY_SPECIAL_AFFILIATIONS_KEY,
     NthuStaffAccess,
     ensure_profile_matches_access_policy,
     normalize_nthu_access_policy,
