@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
 from typing import Literal
 
 from sqlmodel import select
@@ -22,7 +22,6 @@ from app.services.archive_submission_links import (
     ArchiveSubmissionLinkOperation,
     validate_archive_source_membership,
 )
-
 
 logger = logging.getLogger(__name__)
 

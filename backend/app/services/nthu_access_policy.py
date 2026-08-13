@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from enum import Enum
 import unicodedata
-from typing import Any, TYPE_CHECKING
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from enum import Enum
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlmodel import select
@@ -23,7 +23,10 @@ if TYPE_CHECKING:
 
 NTHU_ACCESS_POLICY_SETTING_KEY = "nthu_access_policy"
 NTHU_STAFF_USERID_MAX_LENGTH = 255
-LEGACY_SPECIAL_AFFILIATIONS_KEY = "".join(("allowed_special_", "affiliations"))
+# The retired key is constructed so it is not represented as an active config key.
+LEGACY_SPECIAL_AFFILIATIONS_KEY = "".join(  # noqa: FLY002
+    ("allowed_special_", "affiliations")
+)
 
 
 class NthuAccessMode(str, Enum):
@@ -147,7 +150,7 @@ async def save_nthu_access_policy(
     updated_by_id: int,
 ) -> NthuAccessPolicy:
     policy = normalize_nthu_access_policy(value)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     storage_value = policy.as_storage_value()
     statement = (
         postgresql_insert(SystemSetting)

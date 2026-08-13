@@ -1,11 +1,10 @@
 import io
+import logging
 import os
 import re
-import logging
 import uuid
 from dataclasses import dataclass
-from typing import Optional
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -16,30 +15,6 @@ from sqlalchemy.orm import aliased
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.core.config import settings
-from app.db.session import get_session
-from app.db.course_categories import (
-    RESERVED_LEGACY_COURSE_CATEGORY_KEYS,
-    canonicalize_course_category_key,
-    normalize_course_category_key,
-)
-from app.models.models import (
-    Archive,
-    ArchiveSubmissionActionRead,
-    ArchiveSubmissionAdminAction,
-    ArchiveSubmissionAdminRead,
-    ArchiveSubmissionComparisonRead,
-    ArchiveSubmission,
-    ArchiveSubmissionEvent,
-    ArchiveSubmissionRead,
-    SubmissionStatisticsRead,
-    ArchiveSubmissionUpdate,
-    Course,
-    CourseCategoryConfig,
-    SubmissionDecision,
-    SubmissionStatus,
-    User,
-)
 from app.api.services.archive_submission_lifecycle import (
     LIFECYCLE_ARCHIVE_TRASHED,
     LIFECYCLE_LINKED_ARCHIVE_PERMANENTLY_DELETED,
@@ -47,41 +22,35 @@ from app.api.services.archive_submission_lifecycle import (
     is_course_trash_lifecycle_reason,
     soft_delete_submission_with_linked_archive,
 )
-from app.utils.auth import get_current_user
-from app.utils.course_text import (
-    format_course_display_name,
-    normalize_first_course_search_text,
-    normalize_course_search_text,
-    normalized_course_text_expr,
-)
-from app.utils.storage import get_minio_client
 from app.api.services.submission_statistics import (
     SUBMISSION_RANGE_CONFIG,
     build_submission_statistics,
     get_submission_statistics_window,
     record_submission_event,
 )
-from app.services.archive_submission_status import (
-    ArchiveSubmissionExpectedStateClassification,
-    ArchiveSubmissionReviewAction,
-    ArchiveSubmissionTransitionClassification,
-    available_archive_submission_admin_actions,
-    archive_submission_self_delete_consumed_error,
-    capture_submission_status_notification_identity,
-    classify_archive_submission_expected_state,
-    classify_archive_submission_review_transition,
-    enqueue_submission_status_notification,
-    normalize_submission_status,
-    republish_archive_submission,
-    resolve_archive_submission_delete_source_status,
-    resolve_archive_submission_actual_status,
-    take_down_archive_submission,
+from app.core.config import settings
+from app.db.course_categories import (
+    RESERVED_LEGACY_COURSE_CATEGORY_KEYS,
+    canonicalize_course_category_key,
+    normalize_course_category_key,
 )
-from app.services.archive_submission_links import (
-    archive_submission_link_conflict,
-    ensure_archive_submission_link_available,
-    is_archive_submission_link_unique_violation,
-    validate_archive_source_membership,
+from app.db.session import get_session
+from app.models.models import (
+    Archive,
+    ArchiveSubmission,
+    ArchiveSubmissionActionRead,
+    ArchiveSubmissionAdminAction,
+    ArchiveSubmissionAdminRead,
+    ArchiveSubmissionComparisonRead,
+    ArchiveSubmissionEvent,
+    ArchiveSubmissionRead,
+    ArchiveSubmissionUpdate,
+    Course,
+    CourseCategoryConfig,
+    SubmissionDecision,
+    SubmissionStatisticsRead,
+    SubmissionStatus,
+    User,
 )
 from app.services import archive_lifecycle_locks
 from app.services.archive_lifecycle_locks import (
@@ -90,6 +59,37 @@ from app.services.archive_lifecycle_locks import (
     LifecyclePlanRetryExhausted,
     PlanRebuildBudget,
 )
+from app.services.archive_submission_links import (
+    archive_submission_link_conflict,
+    ensure_archive_submission_link_available,
+    is_archive_submission_link_unique_violation,
+    validate_archive_source_membership,
+)
+from app.services.archive_submission_status import (
+    ArchiveSubmissionExpectedStateClassification,
+    ArchiveSubmissionReviewAction,
+    ArchiveSubmissionTransitionClassification,
+    archive_submission_self_delete_consumed_error,
+    available_archive_submission_admin_actions,
+    capture_submission_status_notification_identity,
+    classify_archive_submission_expected_state,
+    classify_archive_submission_review_transition,
+    enqueue_submission_status_notification,
+    normalize_submission_status,
+    republish_archive_submission,
+    resolve_archive_submission_actual_status,
+    resolve_archive_submission_delete_source_status,
+    take_down_archive_submission,
+)
+from app.utils.auth import get_current_user
+from app.utils.course_text import (
+    format_course_display_name,
+    normalize_course_search_text,
+    normalize_first_course_search_text,
+    normalized_course_text_expr,
+)
+from app.utils.exception_logging import redacted_exc_info
+from app.utils.storage import get_minio_client
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -506,15 +506,15 @@ async def _get_deleted_course_id_for_submission(
     return course.id
 
 
-def _normalize_course_name(value: Optional[str]) -> str:
+def _normalize_course_name(value: str | None) -> str:
     return normalize_course_search_text(value)
 
 
-def _normalize_match_text(value: Optional[str]) -> str:
+def _normalize_match_text(value: str | None) -> str:
     return (value or "").strip().lower()
 
 
-def _normalize_course_match_text(value: Optional[str]) -> str:
+def _normalize_course_match_text(value: str | None) -> str:
     return normalize_course_search_text(value)
 
 
@@ -863,7 +863,7 @@ async def upload_archive(
             reviewer_id=current_user.user_id,
             is_admin_upload=True,
             created_archive_id=archive.id,
-            reviewed_at=datetime.now(timezone.utc),
+            reviewed_at=datetime.now(UTC),
         )
         db.add(submission)
         await db.flush()
@@ -900,9 +900,13 @@ async def upload_archive(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(
+            "Unexpected archive upload failure",
+            exc_info=redacted_exc_info(e),
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to upload file: {str(e)}",
+            detail=f"Failed to upload file: {e!s}",
         )
 
 
@@ -1101,9 +1105,9 @@ async def list_archive_submissions_for_admin(
         except Exception as exc:
             skipped_submission_count += 1
             logger.warning(
-                "Skipping archive submission %s due to invalid payload: %s",
+                "Skipping archive submission %s due to invalid payload",
                 row_dict.get("id"),
-                exc,
+                exc_info=redacted_exc_info(exc),
             )
 
     if skipped_submission_count:
@@ -1136,7 +1140,7 @@ async def get_archive_submission_statistics(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid mode"
         )
 
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     _, bucket_minutes, _, range_start, range_end = get_submission_statistics_window(
         range_key, now_utc
     )
@@ -1537,7 +1541,7 @@ async def approve_archive_submission(
             archive.object_name = submission.object_name
             archive.uploader_id = submission.requester_id
             archive.deleted_at = None
-            archive.updated_at = datetime.now(timezone.utc)
+            archive.updated_at = datetime.now(UTC)
         else:
             archive = Archive(
                 course_id=course.id,
@@ -1570,7 +1574,7 @@ async def approve_archive_submission(
             submission.reviewer_id = current_user.user_id
             submission.review_note = decision.note if decision else None
             submission.created_archive_id = archive.id
-            submission.reviewed_at = datetime.now(timezone.utc)
+            submission.reviewed_at = datetime.now(UTC)
             await enqueue_submission_status_notification(
                 db,
                 submission,
@@ -1629,7 +1633,7 @@ async def reject_archive_submission(
             submission.status = SubmissionStatus.REJECTED
             submission.reviewer_id = current_user.user_id
             submission.review_note = decision.note if decision else None
-            submission.reviewed_at = datetime.now(timezone.utc)
+            submission.reviewed_at = datetime.now(UTC)
             await enqueue_submission_status_notification(
                 db,
                 submission,
@@ -1838,7 +1842,7 @@ async def delete_archive_submission_for_admin(
         changed = result["submissions"] == 1
         if changed:
             submission.reviewer_id = current_user.user_id
-            submission.reviewed_at = datetime.now(timezone.utc)
+            submission.reviewed_at = datetime.now(UTC)
         await db.commit()
         return {
             "success": True,

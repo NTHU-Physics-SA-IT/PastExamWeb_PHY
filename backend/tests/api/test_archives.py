@@ -1,12 +1,12 @@
 import io
-from datetime import datetime, timezone
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
 from fastapi import HTTPException
 from httpx import AsyncClient
-from sqlalchemy import delete, select, func
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import UploadFile
 
@@ -1192,12 +1192,12 @@ async def test_admin_edit_enforces_submission_state_contract(
     requester = await make_user()
     admin = await make_user(is_admin=True)
     deleted_at = (
-        datetime.now(timezone.utc)
+        datetime.now(UTC)
         if submission_status == SubmissionStatus.DELETED
         else None
     )
     archive_deleted_at = (
-        datetime.now(timezone.utc)
+        datetime.now(UTC)
         if submission_status == SubmissionStatus.TAKEDOWN
         else None
     )

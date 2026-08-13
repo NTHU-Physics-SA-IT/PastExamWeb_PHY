@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import re
 import secrets
+from dataclasses import dataclass
 
 from app.core.config import settings
 from app.services.nthu_affiliation import (
@@ -11,7 +11,6 @@ from app.services.nthu_affiliation import (
 )
 from app.services.nthu_oauth import NthuOAuthProviderError, NthuProfile
 from app.utils.auth import redis_client
-
 
 _DEV_CODE_PREFIX = "dev_"
 _REDIS_KEY_PREFIX = "auth:nthu-dev-provider-code:"

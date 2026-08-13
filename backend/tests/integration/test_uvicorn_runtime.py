@@ -95,18 +95,16 @@ async def test_uvicorn_auto_websocket_health_and_lifespan(uvicorn_runtime):
 def test_uvicorn_startup_failure_exits_with_dedicated_code(tmp_path: Path):
     failing_app = tmp_path / "failing_app.py"
     failing_app.write_text(
-        "\n".join(
-            [
-                "from contextlib import asynccontextmanager",
-                "from fastapi import FastAPI",
-                "",
-                "@asynccontextmanager",
-                "async def lifespan(_app):",
-                "    raise RuntimeError('expected startup failure')",
-                "    yield",
-                "",
-                "app = FastAPI(lifespan=lifespan)",
-            ]
+        (
+            "from contextlib import asynccontextmanager\n"
+            "from fastapi import FastAPI\n"
+            "\n"
+            "@asynccontextmanager\n"
+            "async def lifespan(_app):\n"
+            "    raise RuntimeError('expected startup failure')\n"
+            "    yield\n"
+            "\n"
+            "app = FastAPI(lifespan=lifespan)"
         ),
         encoding="utf-8",
     )

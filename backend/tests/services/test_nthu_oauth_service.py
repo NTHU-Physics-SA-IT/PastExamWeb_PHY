@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from urllib.parse import parse_qs, urlparse
 import uuid
+from datetime import UTC, datetime
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
@@ -519,7 +519,7 @@ async def test_deleted_nthu_identity_is_denied_without_restore(session_maker):
     async with session_maker() as session:
         user = await resolve_nthu_user(session, first)
         await session.flush()
-        user.deleted_at = datetime.now(timezone.utc)
+        user.deleted_at = datetime.now(UTC)
         await session.commit()
         user_id = user.id
 

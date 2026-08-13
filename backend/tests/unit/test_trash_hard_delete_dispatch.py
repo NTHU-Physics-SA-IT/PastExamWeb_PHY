@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -6,7 +6,6 @@ import pytest
 
 from app.api.services import trash
 from app.models.models import TrashEntityType
-
 
 HARD_DELETE_CASES = (
     (TrashEntityType.COURSE_CATEGORY, "_hard_delete_category"),
@@ -27,7 +26,7 @@ async def test_every_materialized_trash_type_dispatches_to_hard_delete(
 ):
     entity = SimpleNamespace(
         id=17,
-        deleted_at=datetime.now(timezone.utc),
+        deleted_at=datetime.now(UTC),
         name="測試項目",
         title="測試項目",
         subject="測試科目",

@@ -1,13 +1,13 @@
+from app.services.archive_lifecycle_locks import (
+    LifecycleResourceClass,
+    LifecycleResourceRef,
+)
 from app.services.course_lifecycle_locks import (
     CourseArchiveMembership,
     CourseLifecycleFingerprint,
     CourseLifecycleOperation,
     CourseSubmissionMembership,
     build_course_lifecycle_plan,
-)
-from app.services.archive_lifecycle_locks import (
-    LifecycleResourceClass,
-    LifecycleResourceRef,
 )
 
 

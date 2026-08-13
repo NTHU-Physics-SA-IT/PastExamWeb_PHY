@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, or_
 from sqlmodel import select
@@ -17,8 +17,8 @@ ONLINE_TIMEOUT_SECONDS = 5 * 60
 
 def normalize_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def token_fingerprint(token: str) -> str:
@@ -63,7 +63,7 @@ async def touch_presence_session(
     token: str,
     now: datetime | None = None,
 ) -> UserPresenceSession:
-    now_utc = normalize_utc(now or datetime.now(timezone.utc))
+    now_utc = normalize_utc(now or datetime.now(UTC))
     identifier = token_fingerprint(token)
     result = await db.execute(
         select(UserPresenceSession)
@@ -100,7 +100,7 @@ async def end_presence_session(
     token: str,
     now: datetime | None = None,
 ) -> None:
-    now_utc = normalize_utc(now or datetime.now(timezone.utc))
+    now_utc = normalize_utc(now or datetime.now(UTC))
     identifier = token_fingerprint(token)
     result = await db.execute(
         select(UserPresenceSession).where(

@@ -27,7 +27,7 @@ def test_login_handoff_is_opaque_short_lived_and_single_use(monkeypatch):
     code = login_handoff.create_login_handoff(42)
 
     assert code
-    assert all(code not in key for key in redis.values.keys())
+    assert all(code not in key for key in redis.values)
     assert list(redis.ttls.values()) == [login_handoff.LOGIN_HANDOFF_TTL_SECONDS]
     assert login_handoff.consume_login_handoff(code) == 42
     assert login_handoff.consume_login_handoff(code) is None

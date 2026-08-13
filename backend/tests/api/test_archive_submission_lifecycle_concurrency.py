@@ -1,7 +1,7 @@
 import asyncio
-from contextvars import ContextVar
-from datetime import datetime, timezone
 import uuid
+from contextvars import ContextVar
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import delete, func
@@ -26,7 +26,6 @@ from app.models.models import (
 from app.services import archive_lifecycle_locks
 from app.services.archive_lifecycle_locks import LifecycleResourceClass
 from app.utils.auth import get_current_user
-
 
 _current_actor: ContextVar[UserRoles] = ContextVar("lifecycle_concurrency_actor")
 
@@ -418,7 +417,7 @@ async def test_direct_review_and_exact_restore_serialize(
         session_maker,
         requester_id=requester.id,
     )
-    deleted_at = datetime.now(timezone.utc)
+    deleted_at = datetime.now(UTC)
     async with session_maker() as session:
         stored = await session.get(ArchiveSubmission, submission.id)
         stored_archive = await session.get(Archive, archive.id)
