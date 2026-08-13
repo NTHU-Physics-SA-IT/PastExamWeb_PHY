@@ -798,7 +798,7 @@ async def test_discussion_source_requires_coherent_active_root_and_message(
         course, archive = await _add_public_archive(
             session, owner_id=recipient.id, label=uuid.uuid4().hex
         )
-        other_course, other_archive = await _add_public_archive(
+        _other_course, other_archive = await _add_public_archive(
             session, owner_id=recipient.id, label=uuid.uuid4().hex
         )
         deleted_root = ArchiveDiscussionMessage(
