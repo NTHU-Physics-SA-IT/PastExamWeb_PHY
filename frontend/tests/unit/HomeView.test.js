@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import HomeView from '@/views/Home.vue'
+import homeSource from '@/views/Home.vue?raw'
 
 const statisticsPayload = vi.hoisted(() => ({
   totalUsers: 120,
@@ -58,6 +59,15 @@ describe('HomeView', () => {
     window.matchMedia = originalMatchMedia || matchMediaMock
     globalThis.ResizeObserver = originalResizeObserver
     HTMLElement.prototype.scrollIntoView = originalScrollIntoView
+  })
+
+  it('restores the original hero title sizes at tablet and mobile widths', () => {
+    expect(homeSource).toMatch(
+      /@media \(max-width: 768px\)[\s\S]*?h1\s*\{[^}]*font-size:\s*clamp\(1\.7rem, 7\.8vw, 2\.15rem\)/
+    )
+    expect(homeSource).toMatch(
+      /@media \(max-width: 768px\)[\s\S]*?\.title-campus\s*\{[^}]*font-size:\s*0\.666rem/
+    )
   })
 
   it('renders the physics landing page and fetched statistics', async () => {

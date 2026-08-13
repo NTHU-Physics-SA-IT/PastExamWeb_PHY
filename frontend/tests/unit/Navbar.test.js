@@ -498,9 +498,6 @@ describe('Navbar methods', () => {
       notificationStore: notificationStoreMock,
     }
 
-    Navbar.methods.handleTitleClick.call(ctx)
-    expect(routerPush).toHaveBeenCalledWith('/archive')
-
     Navbar.methods.handleNavigateAdmin.call(ctx)
     expect(routerPush).toHaveBeenCalledWith('/admin')
 
@@ -516,14 +513,12 @@ describe('Navbar methods', () => {
     expect(ctx.issueForm.description).toBe('')
   })
 
-  it('skips archive navigation when not authenticated', () => {
-    const routerPush = vi.fn()
-    Navbar.methods.handleTitleClick.call({
-      isAuthenticated: false,
-      $router: { push: routerPush },
-    })
-
-    expect(routerPush).not.toHaveBeenCalled()
+  it('links the complete brand lockup to Home', () => {
+    expect(navbarSource).toContain(
+      '<RouterLink to="/" class="brand-lockup clickable-title" aria-label="回到首頁">'
+    )
+    expect(navbarSource).toContain('<span class="brand-title-main">清大物理考古系統</span>')
+    expect(navbarSource).toContain('<span class="brand-title-sub">PHYSICS ARCHIVE · NTHU</span>')
   })
 
   it('formats issue body with system information', () => {

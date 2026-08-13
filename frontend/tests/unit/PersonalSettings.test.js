@@ -83,6 +83,27 @@ describe('PersonalSettings account visibility', () => {
     delete globalThis.IntersectionObserver
   })
 
+  it.each([
+    [50, 45],
+    [100, 90],
+    [150, 135],
+  ])('maps internal font preference %i to display-only %i%%', (internal, displayed) => {
+    expect(
+      PersonalSettings.computed.fontSizePercent.call({ fontSizeScale: internal })
+    ).toBe(displayed)
+  })
+
+  it('labels the internal default as 90% without changing the stored preference', () => {
+    const tone = PersonalSettings.computed.fontSizeToneLabel.call({ fontSizePercent: 90 })
+    expect(tone).toBe('預設')
+    expect(
+      PersonalSettings.computed.fontSizeDisplayText.call({
+        fontSizePercent: 90,
+        fontSizeToneLabel: tone,
+      })
+    ).toBe('目前大小：90%（預設）')
+  })
+
   it('renders read-only basic profile data without password settings for an OAuth account', async () => {
     userServiceMock.getMe.mockResolvedValue({
       data: {

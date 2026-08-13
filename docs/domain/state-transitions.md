@@ -412,6 +412,13 @@ For a NTHU OAuth User, provider-synchronized `name` and `email` remain provider-
 - An item may be hidden when that public item, its Course, or a required parent
   is explicitly trashed or blocked.
 
+Focused safety-net coverage confirms that the anonymous catalog keeps
+same-metadata Archive identities independent across approved, pending,
+rejected, takedown, and soft-deleted sibling states. Authenticated coverage
+confirms exact source-submission projection and exact Archive/object selection
+for preview, preview-file, and download actions. These tests do not change the
+lifecycle transition matrix.
+
 ### One-to-one corruption boundary
 
 The schema and application contract permit at most one source submission for
@@ -740,6 +747,7 @@ frontend handling, and tests.
 
 ## Required follow-up
 
-The first safety-net slice should characterize the current submission matrix,
-sibling visibility, pending-report trash uniqueness, and category
-delete/restore behavior before implementation changes.
+The public sibling-visibility safety net is characterized. Follow-up slices
+should characterize the remaining submission matrix, pending-report trash
+uniqueness, category delete/restore behavior, and lifecycle grouping before
+implementation changes.
