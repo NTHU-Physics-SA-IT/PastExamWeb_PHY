@@ -14,7 +14,9 @@
   - [Project governance configuration](../../.github/project-governance.json)
 - Related PR / issue: None known
 - Supersedes: None
-- Superseded by: None
+- Superseded by: [ADR-0005](0005-main-pr-docs-only-exception.md), only for
+  the blanket Full-CI requirement on main-target documentation-only pull
+  requests
 
 ## Context
 
@@ -26,8 +28,9 @@ redesign its implementation.
 
 ## Decision
 
-Pull requests targeting `main` use Full CI. An exact pushed or merged `main`
-SHA also uses Full CI. Main never uses Equivalent evidence.
+Pull requests targeting `main` use Full CI by default, with the narrow
+docs-only exception defined by ADR-0005. An exact pushed or merged `main` SHA
+uses Full CI. Main never uses Equivalent evidence.
 
 An ordinary eligible pull request or merge involving the exact machine-resolved
 coordination branch may use the existing Equivalent provenance path only when
@@ -38,11 +41,11 @@ stale, unavailable, or otherwise unsafe evidence fails closed according to the
 current implementation.
 
 The exact `.github/CODEOWNERS` path is allowlisted as lightweight repository
-metadata for ordinary source-branch classification and uses the existing
-docs-only mode when every changed path is lightweight. This does not treat
-arbitrary `.github/` content as documentation, create a new CI mode, or exempt
-main PRs and exact main pushes from Full. A mixed change follows the highest-risk
-path under the existing fail-closed priority rules.
+metadata and uses the existing docs-only mode when every changed path is
+lightweight. This does not treat arbitrary `.github/` content as documentation,
+create a new CI mode, or exempt exact main pushes from Full. Main PRs receive
+only ADR-0005's narrow docs-only exception. A mixed change follows the
+highest-risk path under the existing fail-closed priority rules.
 
 Successful source evidence does not authorize weakening a later formal PR,
 main, or merge-commit gate. Full, Equivalent, and docs-only describe CI
@@ -74,7 +77,8 @@ missing or ambiguous evidence from silently weakening a formal gate.
 
 ## Invariants
 
-- A `main` PR and exact pushed or merged `main` SHA use Full CI.
+- A `main` PR uses Full CI unless ADR-0005 conclusively classifies the entire
+  change as docs-only; exact pushed or merged `main` SHAs use Full CI.
 - Main never uses Equivalent evidence.
 - Coordination can use Equivalent only when the current machine contracts
   prove eligibility and exact provenance.
@@ -87,9 +91,9 @@ missing or ambiguous evidence from silently weakening a formal gate.
 
 ## Consequences
 
-- CODEOWNERS-only source changes can use the lightweight docs-only path because
-  broad runtime suites do not validate review-routing metadata; mixed
-  higher-risk changes and formal main gates still use Full.
+- CODEOWNERS-only changes can use the lightweight docs-only path because broad
+  runtime suites do not validate review-routing metadata; mixed higher-risk
+  changes and exact main pushes still use Full.
 - Coordination evidence can reduce duplication without transferring authority
   to main.
 - Durable documentation records policy and rationale while exact workflow,

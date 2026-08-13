@@ -438,6 +438,61 @@ def is_docs_only_path(path: str) -> bool:
     return path.startswith(".github/assets/")
 
 
+def classify_main_pull_request(
+    *,
+    event: CIEvent,
+    git: GitRepository,
+) -> Classification:
+    if event.action not in SUPPORTED_PR_ACTIONS:
+        raise ClassificationFailure("pull request action is unsupported")
+    if event.pr_number < 1:
+        raise ClassificationFailure("pull request number is malformed")
+    if event.base_ref != "main":
+        raise ClassificationFailure("pull request base is not main")
+    if not event.repository or event.repository_id < 1:
+        raise ClassificationFailure("base repository identity is malformed")
+    if not event.head_ref:
+        raise ClassificationFailure("pull request head ref is malformed")
+    if not event.head_repository or event.head_repository_id < 1:
+        raise ClassificationFailure("head repository identity is malformed")
+    if not SHA_PATTERN.fullmatch(event.current_sha):
+        raise ClassificationFailure("synthetic merge SHA is malformed")
+    if not SHA_PATTERN.fullmatch(event.base_sha):
+        raise ClassificationFailure("pull request base SHA is malformed")
+    if not SHA_PATTERN.fullmatch(event.head_sha):
+        raise ClassificationFailure("pull request head SHA is malformed")
+    if event.ref != f"refs/pull/{event.pr_number}/merge":
+        raise ClassificationFailure("synthetic merge ref is malformed")
+
+    parents = git.parents(event.current_sha)
+    if parents != (event.base_sha, event.head_sha):
+        raise ClassificationFailure(
+            "synthetic merge parents do not match pull request base and head"
+        )
+
+    changed_paths = git.changed_paths(event.base_sha, event.head_sha)
+    if not changed_paths:
+        raise ClassificationFailure("pull request change set is empty")
+    governance_paths = tuple(
+        path for path in changed_paths if is_governance_path(path)
+    )
+    if governance_paths:
+        return _full(
+            f"governance path requires full CI: {governance_paths[0]}",
+            comparison_base=event.base_sha,
+        )
+    if all(is_docs_only_path(path) for path in changed_paths):
+        return Classification(
+            "docs-only",
+            "all pull request paths are documentation-only",
+            comparison_base=event.base_sha,
+        )
+    return _full(
+        "main pull request contains an application or unknown path",
+        comparison_base=event.base_sha,
+    )
+
+
 def _full(reason: str, *, comparison_base: str = "") -> Classification:
     return Classification("full", reason, comparison_base=comparison_base)
 
@@ -714,7 +769,16 @@ def classify_ci_mode(
     if event.ref in FINAL_FULL_REFS or event.ref.startswith(FINAL_FULL_PREFIXES):
         return _full("final, release, or production branch always runs full CI")
     if event.event_name == "pull_request" and event.base_ref == "main":
-        return _full("main pull request candidates always run full CI")
+        try:
+            return classify_main_pull_request(event=event, git=git)
+        except (
+            ClassificationFailure,
+            subprocess.SubprocessError,
+            OSError,
+            TypeError,
+            ValueError,
+        ) as error:
+            return _full(f"main pull request validation failed closed: {error}")
 
     if governance is None:
         try:
