@@ -226,6 +226,7 @@ async def test_discussion_ws_accepts_padded_message_within_limit(
         f"/courses/{course_id}/archives/{archive_id}/discussion/ws"
     ) as ws:
         ws.receive_json()  # history
+        ws.send_text("{")
         ws.send_text(json.dumps({"type": "send", "content": raw}))
         msg = ws.receive_json()
 

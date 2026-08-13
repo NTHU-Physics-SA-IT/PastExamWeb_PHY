@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 
 from fastapi import (
@@ -95,9 +96,11 @@ from app.utils.course_text import (
     normalize_course_search_text,
     normalized_course_text_expr,
 )
+from app.utils.exception_logging import redacted_exc_info
 from app.utils.storage import get_minio_client, presigned_get_url
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # In-memory connection registry (single-process broadcast).
 _discussion_connections_by_archive: dict[int, set[WebSocket]] = {}
@@ -900,7 +903,11 @@ async def _broadcast_discussion(archive_id: int, payload: dict):
     for ws in list(sockets):
         try:
             await ws.send_json(payload)
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Discussion WebSocket send failed; removing dead connection",
+                exc_info=redacted_exc_info(exc),
+            )
             dead.append(ws)
 
     if dead:
@@ -1160,7 +1167,7 @@ async def archive_discussion_ws(
                 return
             try:
                 data = json.loads(raw)
-            except Exception:
+            except json.JSONDecodeError:
                 continue
 
             if not isinstance(data, dict):

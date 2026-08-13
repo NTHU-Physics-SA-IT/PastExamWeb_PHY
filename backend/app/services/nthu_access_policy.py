@@ -23,7 +23,10 @@ if TYPE_CHECKING:
 
 NTHU_ACCESS_POLICY_SETTING_KEY = "nthu_access_policy"
 NTHU_STAFF_USERID_MAX_LENGTH = 255
-LEGACY_SPECIAL_AFFILIATIONS_KEY = "".join(("allowed_special_", "affiliations"))
+# The retired key is constructed so it is not represented as an active config key.
+LEGACY_SPECIAL_AFFILIATIONS_KEY = "".join(  # noqa: FLY002
+    ("allowed_special_", "affiliations")
+)
 
 
 class NthuAccessMode(str, Enum):

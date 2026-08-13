@@ -1,4 +1,5 @@
 import hmac
+import logging
 import secrets
 import uuid
 from datetime import UTC, datetime
@@ -39,9 +40,11 @@ from app.services.nthu_oauth import (
     resolve_nthu_user,
 )
 from app.utils.auth import authenticate_user, blacklist_token, get_current_user
+from app.utils.exception_logging import redacted_exc_info
 from app.utils.jwt import jwt
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 NTHU_OAUTH_STATE_SESSION_KEY = "nthu_oauth_state"
 
 
@@ -187,13 +190,21 @@ async def nthu_callback(
     except IntegrityError:
         await db.rollback()
         return _frontend_oauth_error("oauth_identity_conflict")
-    except Exception:
+    except Exception as exc:
         await db.rollback()
+        logger.error(
+            "Unexpected OAuth callback failure",
+            exc_info=redacted_exc_info(exc),
+        )
         return _frontend_oauth_error("oauth_login_failed")
 
     try:
         handoff_code = create_login_handoff(user.id)
-    except Exception:
+    except Exception as exc:
+        logger.error(
+            "Unexpected login handoff creation failure",
+            exc_info=redacted_exc_info(exc),
+        )
         return _frontend_oauth_error("oauth_login_failed")
     return _no_store_redirect(_frontend_callback_url(code=handoff_code))
 

@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -24,7 +25,10 @@ from app.services.archive_submission_links import ArchiveSubmissionLinkOperation
 from app.services.archive_submission_status import (
     resolve_archive_submission_delete_source_status,
 )
+from app.utils.exception_logging import redacted_exc_info
 from app.utils.storage import get_minio_client
+
+logger = logging.getLogger(__name__)
 
 LIFECYCLE_ARCHIVE_TRASHED = "archive_trashed"
 LIFECYCLE_COURSE_TRASHED = "course_trashed"
@@ -678,6 +682,10 @@ async def _remove_storage_object_if_unreferenced(
         warnings.append(f"Storage object delete warning for {object_name}: {exc}")
         return 0
     except Exception as exc:
+        logger.warning(
+            "Unexpected storage deletion failure; preserving best-effort cleanup",
+            exc_info=redacted_exc_info(exc),
+        )
         warnings.append(f"Storage object delete warning for {object_name}: {exc}")
         return 0
 

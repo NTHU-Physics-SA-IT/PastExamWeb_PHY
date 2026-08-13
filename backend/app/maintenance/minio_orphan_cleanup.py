@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,7 +18,10 @@ from app.core.config import settings
 from app.db.init_db import validate_database_ready
 from app.db.session import AsyncSessionLocal
 from app.models.models import Archive, ArchiveSubmission, SubmissionStatus
+from app.utils.exception_logging import redacted_exc_info
 from app.utils.storage import get_minio_client
+
+logger = logging.getLogger(__name__)
 
 KNOWN_PREFIXES = ("archives/", "archive-submissions/")
 SIZE_1GB = 1024 * 1024 * 1024
@@ -243,6 +247,10 @@ async def run_cleanup(
                 manifest["deletions"].append({"key": key, "status": "warning", "error": str(exc)})
                 manifest["warnings"].append(str(exc))
         except Exception as exc:
+            logger.warning(
+                "Unexpected MinIO cleanup failure; continuing with remaining objects",
+                exc_info=redacted_exc_info(exc),
+            )
             manifest["deletions"].append({"key": key, "status": "warning", "error": str(exc)})
             manifest["warnings"].append(str(exc))
 

@@ -396,7 +396,7 @@ def _marked_json(output: str, marker: str) -> dict[str, Any] | None:
         return None
     value = json.loads(matches[0])
     if not isinstance(value, dict):
-        raise ValueError("marker payload must be an object")
+        raise TypeError("marker payload must be an object")
     return value
 
 

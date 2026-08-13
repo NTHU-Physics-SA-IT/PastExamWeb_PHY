@@ -57,6 +57,7 @@ from app.services.archive_submission_links import (
 )
 from app.services.course_lifecycle_locks import CourseLifecycleOperation
 from app.utils.auth import get_current_user
+from app.utils.exception_logging import redacted_exc_info
 from app.utils.storage import get_minio_client
 
 router = APIRouter()
@@ -658,7 +659,11 @@ def _is_created_archive_id_nullable() -> bool:
         if column is None:
             return True
         return bool(column.nullable)
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Unable to inspect archive-link nullability; using conservative fallback",
+            exc_info=redacted_exc_info(exc),
+        )
         return True
 
 
@@ -847,6 +852,10 @@ async def _remove_storage_object_if_unreferenced(
         warnings.append(f"Storage object delete warning for {object_name}: {exc}")
         return 0
     except Exception as exc:
+        logger.warning(
+            "Unexpected storage deletion failure; preserving best-effort cleanup",
+            exc_info=redacted_exc_info(exc),
+        )
         warnings.append(f"Storage object delete warning for {object_name}: {exc}")
         return 0
 
@@ -1285,9 +1294,9 @@ async def list_trash_items(
                 )
             except Exception as exc:
                 logger.warning(
-                    "Failed to build trashed course category item (id=%s): %s",
+                    "Failed to build trashed course category item (id=%s)",
                     getattr(category, "id", None),
-                    exc,
+                    exc_info=redacted_exc_info(exc),
                 )
 
     if normalized_item_type in (None, TrashEntityType.COURSE):
@@ -1333,9 +1342,9 @@ async def list_trash_items(
                 )
             except Exception as exc:
                 logger.warning(
-                    "Failed to build trashed course item (id=%s): %s",
+                    "Failed to build trashed course item (id=%s)",
                     getattr(course, "id", None),
-                    exc,
+                    exc_info=redacted_exc_info(exc),
                 )
 
     if normalized_item_type in (None, TrashEntityType.ARCHIVE):
@@ -1444,9 +1453,9 @@ async def list_trash_items(
                 )
             except Exception as exc:
                 logger.warning(
-                    "Failed to build trashed archive item (id=%s): %s",
+                    "Failed to build trashed archive item (id=%s)",
                     getattr(archive, "id", None),
-                    exc,
+                    exc_info=redacted_exc_info(exc),
                 )
 
     if normalized_item_type in (None, TrashEntityType.NOTIFICATION):
@@ -1475,9 +1484,9 @@ async def list_trash_items(
                 )
             except Exception as exc:
                 logger.warning(
-                    "Failed to build trashed notification item (id=%s): %s",
+                    "Failed to build trashed notification item (id=%s)",
                     getattr(notification, "id", None),
-                    exc,
+                    exc_info=redacted_exc_info(exc),
                 )
 
     if normalized_item_type in (None, TrashEntityType.USER):
@@ -1503,9 +1512,9 @@ async def list_trash_items(
                 )
             except Exception as exc:
                 logger.warning(
-                    "Failed to build trashed user item (id=%s): %s",
+                    "Failed to build trashed user item (id=%s)",
                     getattr(user, "id", None),
-                    exc,
+                    exc_info=redacted_exc_info(exc),
                 )
 
     if normalized_item_type in (None, TrashEntityType.ARCHIVE_SUBMISSION):
@@ -1632,9 +1641,9 @@ async def list_trash_items(
                 )
             except Exception as exc:
                 logger.warning(
-                    "Failed to build trashed archive submission item (id=%s): %s",
+                    "Failed to build trashed archive submission item (id=%s)",
                     getattr(submission, "id", None),
-                    exc,
+                    exc_info=redacted_exc_info(exc),
                 )
 
     return sorted(_dedupe_trash_items(items), key=lambda item: item.deleted_at, reverse=True)
@@ -2065,8 +2074,14 @@ async def bulk_permanently_delete_trash_items(
                     "blockingDependencies": detail.get("blockingDependencies", []),
                 }
             )
-        except Exception:
+        except Exception as exc:
             await db.rollback()
+            logger.error(
+                "Unexpected permanent-delete failure for %s/%s",
+                trash_type.value,
+                item.id,
+                exc_info=redacted_exc_info(exc),
+            )
             failures.append(
                 {
                     "type": trash_type.value,

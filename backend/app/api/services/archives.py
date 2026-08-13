@@ -87,6 +87,7 @@ from app.utils.course_text import (
     normalize_first_course_search_text,
     normalized_course_text_expr,
 )
+from app.utils.exception_logging import redacted_exc_info
 from app.utils.storage import get_minio_client
 
 router = APIRouter()
@@ -898,6 +899,10 @@ async def upload_archive(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(
+            "Unexpected archive upload failure",
+            exc_info=redacted_exc_info(e),
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to upload file: {e!s}",
@@ -1099,9 +1104,9 @@ async def list_archive_submissions_for_admin(
         except Exception as exc:
             skipped_submission_count += 1
             logger.warning(
-                "Skipping archive submission %s due to invalid payload: %s",
+                "Skipping archive submission %s due to invalid payload",
                 row_dict.get("id"),
-                exc,
+                exc_info=redacted_exc_info(exc),
             )
 
     if skipped_submission_count:

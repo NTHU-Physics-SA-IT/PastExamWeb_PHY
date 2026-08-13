@@ -238,6 +238,21 @@ def test_output_schema_rejects_unknown_labels_and_unsafe_fields() -> None:
         )
 
 
+def test_output_schema_normalizes_non_object_marker_payload() -> None:
+    output = "\n".join(
+        "__PASTEXAM_AUDIT_RESULT__[]"
+        if line.startswith("__PASTEXAM_AUDIT_RESULT__")
+        else line
+        for line in completed_output().splitlines()
+    )
+
+    with pytest.raises(AuditExecutionError, match="result_schema_invalid"):
+        parse_process_output(
+            request(),
+            CompletedProcess(args=["psql"], returncode=0, stdout=output, stderr=""),
+        )
+
+
 def test_output_schema_rejects_unregistered_combination_flags() -> None:
     output = completed_output().replace(
         '"combinations": []',
