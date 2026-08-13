@@ -224,17 +224,45 @@ jobs:
           fi
 
       - name: Revalidate documentation-only scope
-        run: >-
-          python3 scripts/ci/classify_ci_mode.py
-          --event-name '${{ github.event_name }}'
-          --before-sha '${{ github.event.before }}'
-          --current-sha '${{ github.sha }}'
-          --ref '${{ github.ref }}'
-          --forced '${{ github.event.forced }}'
-          --repository '${{ github.repository }}'
-          --repository-id '${{ github.repository_id }}'
-          --api-url '${{ github.api_url }}'
-          --expect-mode docs-only
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_BEFORE_SHA: ${{ github.event.before }}
+          EVENT_CURRENT_SHA: ${{ github.sha }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_FORCED: ${{ github.event.forced || false }}
+          EVENT_REPOSITORY: ${{ github.repository }}
+          EVENT_REPOSITORY_ID: ${{ github.repository_id }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number || 0 }}
+          EVENT_PR_DRAFT: ${{ github.event.pull_request.draft || false }}
+          EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_HEAD_REPOSITORY: >-
+            ${{ github.event.pull_request.head.repo.full_name }}
+          EVENT_HEAD_REPOSITORY_ID: >-
+            ${{ github.event.pull_request.head.repo.id || 0 }}
+        run: |
+          python3 scripts/ci/classify_ci_mode.py \
+            --event-name "$EVENT_NAME" \
+            --action "$EVENT_ACTION" \
+            --before-sha "$EVENT_BEFORE_SHA" \
+            --current-sha "$EVENT_CURRENT_SHA" \
+            --ref "$EVENT_REF" \
+            --forced "$EVENT_FORCED" \
+            --repository "$EVENT_REPOSITORY" \
+            --repository-id "$EVENT_REPOSITORY_ID" \
+            --pr-number "$EVENT_PR_NUMBER" \
+            --draft "$EVENT_PR_DRAFT" \
+            --base-ref "$EVENT_BASE_REF" \
+            --base-sha "$EVENT_BASE_SHA" \
+            --head-ref "$EVENT_HEAD_REF" \
+            --head-sha "$EVENT_HEAD_SHA" \
+            --head-repository "$EVENT_HEAD_REPOSITORY" \
+            --head-repository-id "$EVENT_HEAD_REPOSITORY_ID" \
+            --api-url '${{ github.api_url }}' \
+            --expect-mode docs-only
 
   full_attestation:
     name: Full CI Attestation
