@@ -161,6 +161,62 @@ def test_one_to_one_audit_is_revision_bounded_and_aggregate_only() -> None:
     assert "UPDATE ARCHIVE_SUBMISSIONS" not in adapter.summary_sql.upper()
 
 
+def test_bilingual_head_audit_is_new_version_and_preserves_lifecycle_classifier() -> (
+    None
+):
+    adapter = get_audit_adapter(ELIGIBILITY_AUDIT_ID, 4)
+
+    assert adapter.accepted_source_revisions == frozenset(
+        {
+            "c2a8e4f6b9d1",
+            "d4b7e2a9c6f1",
+        }
+    )
+    previous = get_audit_adapter(ELIGIBILITY_AUDIT_ID, 3)
+    assert adapter.summary_sql == previous.summary_sql
+    assert adapter.combinations_sql == previous.combinations_sql
+    assert "UPDATE ARCHIVE_SUBMISSIONS" not in adapter.summary_sql.upper()
+
+
+def test_bilingual_head_continuity_requires_all_nullable_english_columns() -> None:
+    bilingual_request = AuditRequest(
+        audit_id=ELIGIBILITY_AUDIT_ID,
+        audit_version=4,
+        mode=AuditMode.PERSISTENT_LOCAL,
+        expected_ledger="d4b7e2a9c6f1",
+        repository_revision="a" * 40,
+    )
+    sql = build_transaction_sql(
+        bilingual_request,
+        get_audit_adapter(ELIGIBILITY_AUDIT_ID, 4),
+    )
+
+    for column in (
+        "name_en",
+        "label_en",
+        "requested_course_name_en",
+        "requested_category_name_en",
+        "requested_category_label_en",
+    ):
+        assert column in sql
+    assert "is_nullable = 'YES'" in sql
+    assert "data_type = 'character varying'" in sql
+
+
+def test_cli_defaults_to_current_bilingual_audit_version() -> None:
+    arguments = audit.parser().parse_args(
+        [
+            "run",
+            "--audit",
+            ELIGIBILITY_AUDIT_ID,
+            "--mode",
+            AuditMode.PERSISTENT_LOCAL.value,
+        ]
+    )
+
+    assert arguments.version == 4
+
+
 def test_transaction_is_noninteractive_read_only_and_explicitly_rolled_back() -> None:
     sql = build_transaction_sql(request(), get_audit_adapter(ELIGIBILITY_AUDIT_ID, 1))
 

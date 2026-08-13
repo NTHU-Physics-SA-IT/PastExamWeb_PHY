@@ -241,19 +241,22 @@ def _metadata_for_variant(variant: str) -> MetaData:
     }:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
 
-    if variant == "pre_bilingual_course_catalog":
+    if variant in {
+        "pre_bilingual_course_catalog",
+        "pre_bilingual_submission_snapshots",
+    }:
+        submissions = metadata.tables["archive_submissions"]
+        submissions._columns.remove(submissions.c.requested_course_name_en)
+        submissions._columns.remove(submissions.c.requested_category_name_en)
+        submissions._columns.remove(submissions.c.requested_category_label_en)
+        if variant == "pre_bilingual_submission_snapshots":
+            return metadata
+
         courses = metadata.tables["courses"]
         courses._columns.remove(courses.c.name_en)
         categories = metadata.tables["course_category_configs"]
         categories._columns.remove(categories.c.name_en)
         categories._columns.remove(categories.c.label_en)
-        return metadata
-
-    if variant == "pre_bilingual_submission_snapshots":
-        submissions = metadata.tables["archive_submissions"]
-        submissions._columns.remove(submissions.c.requested_course_name_en)
-        submissions._columns.remove(submissions.c.requested_category_name_en)
-        submissions._columns.remove(submissions.c.requested_category_label_en)
         return metadata
 
     users = metadata.tables["users"]

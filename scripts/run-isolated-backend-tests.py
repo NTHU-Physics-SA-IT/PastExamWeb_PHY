@@ -16,6 +16,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 from typing import Any, Sequence
@@ -24,6 +25,10 @@ from urllib.parse import quote
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
+sys.path.insert(0, str(BACKEND_ROOT))
+
+from app.db.schema_manifests import HEAD_SCHEMA_REVISION  # noqa: E402
+
 BACKEND_PYTHON = (
     BACKEND_ROOT / ".venv" / "Scripts" / "python.exe"
     if os.name == "nt"
@@ -31,7 +36,7 @@ BACKEND_PYTHON = (
 )
 DEV_COMPOSE = REPOSITORY_ROOT / "scripts" / "dev-compose.sh"
 POSTGRES_IMAGE = "postgres:15.14-alpine3.22"
-EXPECTED_ALEMBIC_HEAD = "b7e3d9a1c5f2"
+EXPECTED_ALEMBIC_HEAD = HEAD_SCHEMA_REVISION
 NAME_PREFIX = "pastexam-test-postgres-s5a-"
 ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SAFE_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,62}$")

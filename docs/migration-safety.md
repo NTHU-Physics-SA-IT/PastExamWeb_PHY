@@ -225,6 +225,13 @@ focused parity tests keep a migration-specific adapter aligned with its
 reviewed migration classifier. Adding a classifier requires a new registered
 version and synthetic PostgreSQL evidence.
 
+Adapter version 4 supports the reviewed bilingual revisions
+`c2a8e4f6b9d1` and `d4b7e2a9c6f1`. It preserves the version 3
+ArchiveSubmission lifecycle classifier and aggregate fingerprints, while its
+continuity gate additionally requires the revision-appropriate nullable
+English catalog and submission-snapshot columns. Versions 1 through 3 retain
+their historical revision bounds.
+
 Every execution sends one complete input stream to non-interactive `psql` and
 uses `ON_ERROR_STOP`, `REPEATABLE READ READ ONLY`, statement/lock/idle
 timeouts, environment identity checks, a one-row ledger check, targeted schema
