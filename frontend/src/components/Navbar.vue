@@ -12,15 +12,15 @@
             class="sidebar-toggle"
             @click="$emit('toggle-sidebar')"
           />
-          <button class="brand-lockup clickable-title" type="button" @click="handleTitleClick">
+          <RouterLink to="/" class="brand-lockup clickable-title" aria-label="回到首頁">
             <span class="brand-mark-frame">
               <img :src="'/physics-symbol.png'" alt="清大物理考古系統" class="brand-mark" />
             </span>
             <span class="brand-wordmark">
               <span class="brand-title-main">清大物理考古系統</span>
-              <span class="brand-title-sub">Physics Archive · NTHU</span>
+              <span class="brand-title-sub">PHYSICS ARCHIVE · NTHU</span>
             </span>
-          </button>
+          </RouterLink>
         </div>
       </template>
       <template #end>
@@ -773,13 +773,6 @@ export default {
       await this.$router.push('/')
     },
 
-    handleTitleClick() {
-      if (this.isAuthenticated) {
-        trackEvent(EVENTS.NAVIGATE_ARCHIVE, { from: 'title-click' })
-        this.$router.push('/archive')
-      }
-    },
-
     handleNavigateAdmin() {
       trackEvent(EVENTS.NAVIGATE_ADMIN, { from: 'navbar' })
       this.$router.push('/admin')
@@ -1193,6 +1186,7 @@ export default {
   color: inherit;
   background: transparent;
   font: inherit;
+  text-decoration: none;
 }
 
 .brand-lockup:hover {
