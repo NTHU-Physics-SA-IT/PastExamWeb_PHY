@@ -1,18 +1,22 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import delete, func, or_, update
+from sqlalchemy import and_, delete, func, or_, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import aliased
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.api.services.courses import _public_archive_conditions
 from app.db.session import get_session
 from app.models.models import (
     AnnouncementReadReceipt,
     AnnouncementWithRead,
+    Archive,
     ArchiveDiscussionMessage,
     ArchiveReport,
-    CommentReport,
+    ArchiveSubmission,
+    Course,
     Notification,
     NotificationCenterRead,
     NotificationCreate,
@@ -22,6 +26,7 @@ from app.models.models import (
     NotificationUpdate,
     PersonalNotification,
     PersonalNotificationRead,
+    SubmissionStatus,
     User,
     UserRoles,
 )
@@ -109,42 +114,28 @@ async def _list_personal_notifications(
     if unread_only:
         statement = statement.where(PersonalNotification.read_at.is_(None))
     items = list((await db.execute(statement)).scalars().all())
-    source_message_ids = {
-        item.source_message_id for item in items if item.source_message_id is not None
-    }
-    available_source_ids: set[int] = set()
-    if source_message_ids:
-        available_source_ids = set(
-            (
-                await db.execute(
-                    select(ArchiveDiscussionMessage.id).where(
-                        ArchiveDiscussionMessage.id.in_(source_message_ids),
-                        ArchiveDiscussionMessage.deleted_at.is_(None),
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-    comment_report_source_ids = {
+
+    archive_submission_source_ids = {
         item.source_id
         for item in items
-        if item.source_type == "comment_report" and item.source_id is not None
+        if item.source_type == "archive_submission" and item.source_id is not None
     }
-    available_comment_report_ids: set[int] = set()
-    if comment_report_source_ids:
-        available_comment_report_ids = set(
+    available_archive_submission_ids: set[int] = set()
+    if archive_submission_source_ids:
+        available_archive_submission_ids = set(
             (
                 await db.execute(
-                    select(CommentReport.id).where(
-                        CommentReport.id.in_(comment_report_source_ids)
+                    select(ArchiveSubmission.id).where(
+                        ArchiveSubmission.id.in_(archive_submission_source_ids),
+                        ArchiveSubmission.requester_id == user_id,
+                        ArchiveSubmission.deleted_at.is_(None),
+                        ArchiveSubmission.status != SubmissionStatus.DELETED,
                     )
                 )
             )
             .scalars()
             .all()
         )
-
     archive_report_source_ids = {
         item.source_id
         for item in items
@@ -155,9 +146,21 @@ async def _list_personal_notifications(
         available_archive_report_ids = set(
             (
                 await db.execute(
-                    select(ArchiveReport.id).where(
+                    select(ArchiveReport.id)
+                    .join(Archive, Archive.id == ArchiveReport.archive_id)
+                    .join(
+                        Course,
+                        and_(
+                            Course.id == ArchiveReport.course_id,
+                            Course.id == Archive.course_id,
+                        ),
+                    )
+                    .where(
                         ArchiveReport.id.in_(archive_report_source_ids),
                         ArchiveReport.deleted_at.is_(None),
+                        ArchiveReport.reporter_user_id == user_id,
+                        Course.deleted_at.is_(None),
+                        *_public_archive_conditions(),
                     )
                 )
             )
@@ -165,20 +168,62 @@ async def _list_personal_notifications(
             .all()
         )
 
-    def source_is_available(item: PersonalNotification) -> bool:
-        if item.source_type == "comment_report":
-            return bool(
-                item.source_id in available_comment_report_ids
-                and (
-                    item.source_message_id is None
-                    or item.source_message_id in available_source_ids
+    discussion_source_pairs = {
+        (item.source_id, item.source_message_id)
+        for item in items
+        if item.source_type == "archive_discussion_thread"
+        and item.source_id is not None
+        and item.source_message_id is not None
+    }
+    available_discussion_source_pairs: set[tuple[int, int]] = set()
+    if discussion_source_pairs:
+        root = aliased(ArchiveDiscussionMessage)
+        message = aliased(ArchiveDiscussionMessage)
+        available_discussion_source_pairs = set(
+            (
+                await db.execute(
+                    select(root.id, message.id)
+                    .join(message, message.archive_id == root.archive_id)
+                    .join(Archive, Archive.id == root.archive_id)
+                    .join(Course, Course.id == Archive.course_id)
+                    .where(
+                        tuple_(root.id, message.id).in_(discussion_source_pairs),
+                        root.parent_id.is_(None),
+                        root.deleted_at.is_(None),
+                        message.deleted_at.is_(None),
+                        or_(message.id == root.id, message.parent_id == root.id),
+                        Course.deleted_at.is_(None),
+                        *_public_archive_conditions(),
+                    )
                 )
+            ).all()
+        )
+
+    def source_is_available(item: PersonalNotification) -> bool:
+        if item.source_type is None:
+            return item.source_id is None and item.source_message_id is None
+        if item.source_type == "archive_submission":
+            return (
+                item.source_id is not None
+                and item.source_message_id is None
+                and item.source_id in available_archive_submission_ids
             )
         if item.source_type == "archive_report":
-            return item.source_id in available_archive_report_ids
-        if item.source_message_id is not None:
-            return item.source_message_id in available_source_ids
-        return item.source_type in {None, "archive_submission"}
+            return (
+                item.source_id is not None
+                and item.source_message_id is None
+                and item.source_id in available_archive_report_ids
+            )
+        if item.source_type == "comment_report":
+            return False
+        if item.source_type == "archive_discussion_thread":
+            return (
+                item.source_id is not None
+                and item.source_message_id is not None
+                and (item.source_id, item.source_message_id)
+                in available_discussion_source_pairs
+            )
+        return False
 
     return [
         PersonalNotificationRead(
