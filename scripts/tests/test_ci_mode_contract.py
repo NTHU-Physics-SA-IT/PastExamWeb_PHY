@@ -540,9 +540,8 @@ def test_live_push_governance_merge_falls_back_to_full(
     )
 
     assert result.ci_mode == "full"
-    assert result.reason.startswith(
-        "equivalent validation failed closed: source modifies governance path:"
-    )
+    assert result.reason.startswith("equivalent validation failed closed:")
+    assert "Case-B" in result.reason
 
 
 def test_pr_governance_change_requires_full_before_allowlist(
@@ -655,9 +654,7 @@ def test_main_pr_incomplete_identity_fails_closed(
     if "parents" in adjusted:
         parents = adjusted["parents"]
         adjusted["parents"] = (
-            (fixture["base"],)
-            if len(parents) == 1
-            else (fixture["base"], "2" * 40)
+            (fixture["base"],) if len(parents) == 1 else (fixture["base"], "2" * 40)
         )
 
     result = _classify_pr_equivalent(
