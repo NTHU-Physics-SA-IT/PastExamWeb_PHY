@@ -9,10 +9,13 @@ from sqlmodel import select
 from app.main import app
 from app.models.models import (
     AnnouncementReadReceipt,
+    ArchiveSubmission,
+    ArchiveType,
     Notification,
     NotificationCreate,
     NotificationSeverity,
     PersonalNotification,
+    SubmissionStatus,
     UserRoles,
 )
 from app.utils.auth import get_current_user
@@ -346,6 +349,65 @@ async def test_personal_notifications_are_owned_and_can_be_marked_read(
         async with session_maker() as session:
             await session.execute(
                 delete(PersonalNotification).where(PersonalNotification.id == item.id)
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_archive_submission_notification_fails_closed_for_wrong_owner(
+    client: AsyncClient, session_maker, make_user
+):
+    recipient = await make_user()
+    other = await make_user()
+    async with session_maker() as session:
+        submission = ArchiveSubmission(
+            subject="Authorization-safe notification source",
+            category="freshman",
+            name="Final",
+            academic_year=2026,
+            archive_type=ArchiveType.FINAL,
+            professor="Professor",
+            object_name=f"submissions/{uuid.uuid4().hex}.pdf",
+            status=SubmissionStatus.PENDING,
+            requester_id=other.id,
+        )
+        session.add(submission)
+        await session.flush()
+        item = PersonalNotification(
+            user_id=recipient.id,
+            notification_type="archive_submission_approved",
+            title="投稿審核結果",
+            message="Historical notification content",
+            source_type="archive_submission",
+            source_id=submission.id,
+            dedupe_key=f"test-source-authorization:{uuid.uuid4().hex}",
+        )
+        session.add(item)
+        await session.commit()
+        await session.refresh(item)
+
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(
+            {"id": recipient.id, "is_admin": False}
+        )
+        center = (await client.get("/notifications/center")).json()
+        projected = next(
+            notification
+            for notification in center["personal_notifications"]
+            if notification["id"] == item.id
+        )
+        assert projected["message"] == "Historical notification content"
+        assert projected["source_available"] is False
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(PersonalNotification).where(PersonalNotification.id == item.id)
+            )
+            await session.execute(
+                delete(ArchiveSubmission).where(
+                    ArchiveSubmission.id == submission.id
+                )
             )
             await session.commit()
 
