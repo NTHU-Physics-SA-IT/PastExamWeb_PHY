@@ -14,9 +14,12 @@
   - [Project governance configuration](../../.github/project-governance.json)
 - Related PR / issue: None known
 - Supersedes: None
-- Superseded by: [ADR-0005](0005-main-pr-docs-only-exception.md), only for
-  the blanket Full-CI requirement on main-target documentation-only pull
-  requests
+- Superseded by:
+  - [ADR-0005](0005-main-pr-docs-only-exception.md), only for the blanket
+    Full-CI requirement on main-target documentation-only pull requests
+  - [ADR-0006](0006-coordination-postmerge-full-evidence-reuse.md), only for
+    the exact final Case-B coordination postmerge push after both Source Full
+    and formal PR Full evidence and all required provenance proofs succeed
 
 ## Context
 
@@ -35,10 +38,12 @@ uses Full CI. Main never uses Equivalent evidence.
 An ordinary eligible pull request or merge involving the exact machine-resolved
 coordination branch may use the existing Equivalent provenance path only when
 current repository contracts permit it. Governance-sensitive coordination
-changes fall back to Full. Documentation-only source changes may use docs-only
-when the classifier's current path and event rules permit. Unknown, malformed,
-stale, unavailable, or otherwise unsafe evidence fails closed according to the
-current implementation.
+changes fall back to Full except for ADR-0006's exact final Case-B postmerge
+reuse after both Source Full and formal PR Full evidence and every topology,
+freshness, content, and identity proof succeeds. Documentation-only source
+changes may use docs-only when the classifier's current path and event rules
+permit. Unknown, malformed, stale, unavailable, or otherwise unsafe evidence
+fails closed according to the current implementation.
 
 The exact `.github/CODEOWNERS` path is allowlisted as lightweight repository
 metadata and uses the existing docs-only mode when every changed path is
@@ -82,7 +87,8 @@ missing or ambiguous evidence from silently weakening a formal gate.
 - Main never uses Equivalent evidence.
 - Coordination can use Equivalent only when the current machine contracts
   prove eligibility and exact provenance.
-- Governance-sensitive coordination falls back to Full.
+- Governance-sensitive coordination falls back to Full except for ADR-0006's
+  exact dual-Full Case-B postmerge evidence-reuse contract.
 - Docs-only applies only when current classifier rules permit.
 - Unknown or unsafe evidence fails closed.
 - Source success never weakens a later formal gate.
