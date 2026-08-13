@@ -160,6 +160,77 @@ async def test_republish_restores_approved_and_notifies_requester_once(
 
 
 @pytest.mark.asyncio
+async def test_republish_notifies_each_later_genuine_cycle(
+    client, session_maker, make_user
+):
+    requester = await make_user(name="repeated-republish-requester")
+    admin = await make_user(name="repeated-republish-admin", is_admin=True)
+    course, archive, submission = await _create_submission_context(
+        session_maker,
+        requester_id=requester.id,
+        status=SubmissionStatus.TAKEDOWN,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        transitions = [
+            ("republish", SubmissionStatus.TAKEDOWN, SubmissionStatus.APPROVED),
+            ("takedown", SubmissionStatus.APPROVED, SubmissionStatus.TAKEDOWN),
+            ("republish", SubmissionStatus.TAKEDOWN, SubmissionStatus.APPROVED),
+        ]
+        for action, expected_status, resulting_status in transitions:
+            response = await client.post(
+                f"/archives/admin/submissions/{submission.id}/{action}",
+                json={
+                    "note": f"cycle {action}",
+                    "expected_status": expected_status.value,
+                },
+            )
+
+            assert response.status_code == 200
+            assert response.json()["changed"] is True
+            assert response.json()["status"] == resulting_status.value
+
+        async with session_maker() as session:
+            notifications = list(
+                (
+                    await session.execute(
+                        select(PersonalNotification)
+                        .where(
+                            PersonalNotification.user_id == requester.id,
+                            PersonalNotification.source_type
+                            == "archive_submission",
+                            PersonalNotification.source_id == submission.id,
+                            PersonalNotification.notification_type
+                            == "archive_submission_republished",
+                        )
+                        .order_by(PersonalNotification.id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        assert len(notifications) == 2
+        assert len({notification.dedupe_key for notification in notifications}) == 2
+        assert all(
+            notification.metadata_json["status"] == SubmissionStatus.APPROVED.value
+            for notification in notifications
+        )
+        assert all(
+            notification.metadata_json["destination"] == "my_submission_status"
+            for notification in notifications
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup(
+            session_maker,
+            course_id=course.id,
+            archive_id=archive.id,
+            submission_id=submission.id,
+        )
+
+
+@pytest.mark.asyncio
 async def test_republish_no_op_and_rolls_back_notification_failure(
     client, session_maker, make_user, monkeypatch
 ):
