@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 
 from fastapi import HTTPException, status
@@ -377,7 +377,7 @@ async def take_down_archive_submission(
     submission.status = SubmissionStatus.TAKEDOWN
     submission.reviewer_id = reviewer_id
     submission.review_note = note if note is not None else submission.review_note
-    submission.reviewed_at = datetime.now(timezone.utc)
+    submission.reviewed_at = datetime.now(UTC)
     await enqueue_submission_status_notification(
         db, submission, SubmissionStatus.TAKEDOWN
     )
@@ -412,7 +412,7 @@ async def republish_archive_submission(
     submission.lifecycle_reason = None
     submission.reviewer_id = reviewer_id
     submission.review_note = note if note is not None else submission.review_note
-    submission.reviewed_at = datetime.now(timezone.utc)
+    submission.reviewed_at = datetime.now(UTC)
     await enqueue_personal_notification(
         db,
         user_id=submission.requester_id,

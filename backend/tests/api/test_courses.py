@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
@@ -47,12 +47,12 @@ from app.models.models import (
     SubmissionStatus,
     UserRoles,
 )
+from app.services.archive_mutation import ArchiveMoveTargetInvariantError
 from app.utils.auth import get_current_user
 from app.utils.course_text import (
     normalize_course_search_text,
     normalized_course_text_expr,
 )
-from app.services.archive_mutation import ArchiveMoveTargetInvariantError
 
 
 async def _create_course(
@@ -109,7 +109,7 @@ async def _create_archive(
             uploader_id=uploader_id,
         )
         if deleted:
-            archive.deleted_at = datetime.now(timezone.utc)
+            archive.deleted_at = datetime.now(UTC)
         session.add(archive)
         await session.commit()
         await session.refresh(archive)
@@ -1088,7 +1088,7 @@ async def test_update_archive_course_name_uses_unique_active_with_trashed_duplic
     async with session_maker() as session:
         for course in trashed:
             stored = await session.get(Course, course.id)
-            stored.deleted_at = datetime.now(timezone.utc)
+            stored.deleted_at = datetime.now(UTC)
         await session.commit()
     archive = await _create_archive(
         session_maker,
@@ -1155,7 +1155,7 @@ async def test_update_archive_course_trashed_targets_return_exact_contract(
     async with session_maker() as session:
         for course in trashed:
             stored = await session.get(Course, course.id)
-            stored.deleted_at = datetime.now(timezone.utc)
+            stored.deleted_at = datetime.now(UTC)
         await session.commit()
     archive = await _create_archive(
         session_maker,
@@ -1224,21 +1224,23 @@ async def test_update_archive_course_multiple_active_matches_fail_closed_and_log
 
     try:
         async with session_maker() as session:
-            with caplog.at_level("ERROR"):
-                with pytest.raises(ArchiveMoveTargetInvariantError):
-                    await update_archive_course(
-                        course_id=original.id,
-                        archive_id=archive.id,
-                        course_update=ArchiveUpdateCourse(
-                            course_name=f"Ambiguous ({marker})",
-                            course_category=CourseCategory.FRESHMAN.value,
-                        ),
-                        current_user=UserRoles(
-                            user_id=admin.id,
-                            is_admin=True,
-                        ),
-                        db=session,
-                    )
+            with (
+                caplog.at_level("ERROR"),
+                pytest.raises(ArchiveMoveTargetInvariantError),
+            ):
+                await update_archive_course(
+                    course_id=original.id,
+                    archive_id=archive.id,
+                    course_update=ArchiveUpdateCourse(
+                        course_name=f"Ambiguous ({marker})",
+                        course_category=CourseCategory.FRESHMAN.value,
+                    ),
+                    current_user=UserRoles(
+                        user_id=admin.id,
+                        is_admin=True,
+                    ),
+                    db=session,
+                )
             await session.rollback()
         assert "archive_move_target_course_invariant_violation" in caplog.messages
         async with session_maker() as session:

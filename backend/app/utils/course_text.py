@@ -4,7 +4,6 @@ import re
 
 from sqlalchemy import func
 
-
 COURSE_PARENTHESIS_HALF_TO_FULL = str.maketrans({"(": "（", ")": "）"})
 COURSE_PARENTHESIS_FULL_TO_HALF = str.maketrans({"（": "(", "）": ")"})
 

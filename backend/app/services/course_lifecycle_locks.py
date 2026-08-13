@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import StrEnum
 import hashlib
 import json
-from typing import Iterable
+from collections.abc import Iterable
+from dataclasses import dataclass
+from enum import StrEnum
 
 from sqlalchemy import and_, func, or_
 from sqlmodel import select

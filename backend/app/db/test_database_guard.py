@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from sqlalchemy.engine import URL, make_url
-
 
 TEST_DATABASE_PREFIX = "pastexam_test_"
 TEST_ROLE_PREFIX = "pastexam_test_"

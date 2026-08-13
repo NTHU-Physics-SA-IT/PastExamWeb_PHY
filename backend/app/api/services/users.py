@@ -1,5 +1,4 @@
-from datetime import date, datetime, time, timedelta, timezone
-from typing import List
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -7,28 +6,6 @@ from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.core.config import settings
-from app.db.session import get_session
-from app.models.models import (
-    ArchiveSubmission,
-    AdminUserRead,
-    SubmissionStatus,
-    User,
-    UserCreate,
-    UserPasswordResetRequest,
-    UserNicknameUpdate,
-    UserRead,
-    UserRoles,
-    UserSubmissionStatsRead,
-    UserSubmissionRecordRead,
-    UserSubmissionStatusCounts,
-    UserUpdate,
-    UserPresenceSession,
-    UserOnlineDurationPoint,
-    UserOnlineDurationRead,
-    OnlineStatisticsPoint,
-    OnlineStatisticsRead,
-)
 from app.api.services.presence import (
     ONLINE_TIMEOUT_SECONDS,
     allocate_interval_durations,
@@ -36,11 +13,33 @@ from app.api.services.presence import (
     load_presence_sessions,
     merge_presence_intervals,
 )
-from app.utils.auth import get_current_user, get_password_hash
+from app.core.config import settings
+from app.db.session import get_session
+from app.models.models import (
+    AdminUserRead,
+    ArchiveSubmission,
+    OnlineStatisticsPoint,
+    OnlineStatisticsRead,
+    SubmissionStatus,
+    User,
+    UserCreate,
+    UserNicknameUpdate,
+    UserOnlineDurationPoint,
+    UserOnlineDurationRead,
+    UserPasswordResetRequest,
+    UserPresenceSession,
+    UserRead,
+    UserRoles,
+    UserSubmissionRecordRead,
+    UserSubmissionStatsRead,
+    UserSubmissionStatusCounts,
+    UserUpdate,
+)
 from app.services.nthu_affiliation import (
     classify_nthu_affiliation,
     parse_nthu_student_affiliation,
 )
+from app.utils.auth import get_current_user, get_password_hash
 
 router = APIRouter()
 
@@ -61,7 +60,7 @@ def _normalize_timestamp(dt: datetime | None) -> datetime | None:
     if not dt:
         return None
     if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
+        return dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -122,7 +121,7 @@ def _to_admin_user_read(
     )
 
 
-@router.get("/admin/users", response_model=List[AdminUserRead])
+@router.get("/admin/users", response_model=list[AdminUserRead])
 async def get_users(
     current_user: UserRoles = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
@@ -150,7 +149,7 @@ async def get_users(
         requester_id: int(experience)
         for requester_id, experience in experience_result.all()
     }
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     active_sessions = await load_presence_sessions(
         db,
         range_start=now_utc,
@@ -168,7 +167,7 @@ async def get_users(
 
 
 def _align_utc_bucket(value: datetime, bucket_minutes: int) -> datetime:
-    value_utc = _normalize_timestamp(value).astimezone(timezone.utc)
+    value_utc = _normalize_timestamp(value).astimezone(UTC)
     minutes = value_utc.hour * 60 + value_utc.minute
     aligned = (minutes // bucket_minutes) * bucket_minutes
     return value_utc.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
@@ -184,12 +183,12 @@ def build_online_statistics(
     history_started_at: datetime | None,
 ) -> OnlineStatisticsRead:
     bucket_minutes, bucket_count = ONLINE_RANGE_CONFIG[range_key]
-    now_utc = _normalize_timestamp(now).astimezone(timezone.utc)
+    now_utc = _normalize_timestamp(now).astimezone(UTC)
     current_start = _align_utc_bucket(now_utc, bucket_minutes)
     first_start = current_start - timedelta(minutes=(bucket_count - 1) * bucket_minutes)
     points = []
     normalized_history_start = (
-        _normalize_timestamp(history_started_at).astimezone(timezone.utc)
+        _normalize_timestamp(history_started_at).astimezone(UTC)
         if history_started_at
         else None
     )
@@ -241,7 +240,7 @@ async def get_online_statistics(
             status_code=422, detail="Unsupported online statistics range"
         )
 
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     bucket_minutes, bucket_count = ONLINE_RANGE_CONFIG[range_key]
     current_start = _align_utc_bucket(now_utc, bucket_minutes)
     range_start = current_start - timedelta(minutes=(bucket_count - 1) * bucket_minutes)
@@ -271,8 +270,8 @@ def build_user_online_duration(
     history_started_at: datetime | None,
     display_timezone: str = settings.PRODUCT_TIMEZONE,
 ) -> UserOnlineDurationRead:
-    normalized_start = _normalize_timestamp(range_start).astimezone(timezone.utc)
-    normalized_now = _normalize_timestamp(now).astimezone(timezone.utc)
+    normalized_start = _normalize_timestamp(range_start).astimezone(UTC)
+    normalized_now = _normalize_timestamp(now).astimezone(UTC)
     buckets = [
         (
             normalized_start + index * bucket_size,
@@ -289,7 +288,7 @@ def build_user_online_duration(
     )
     durations = allocate_interval_durations(intervals, buckets)
     normalized_history_start = (
-        _normalize_timestamp(history_started_at).astimezone(timezone.utc)
+        _normalize_timestamp(history_started_at).astimezone(UTC)
         if history_started_at
         else None
     )
@@ -323,7 +322,7 @@ def _product_date(value: datetime) -> date:
 
 def _product_midnight_utc(value: date) -> datetime:
     return datetime.combine(value, time.min, tzinfo=PRODUCT_TIMEZONE).astimezone(
-        timezone.utc
+        UTC
     )
 
 
@@ -354,7 +353,7 @@ async def get_user_online_duration(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     today = _product_date(now_utc)
     if mode == "hourly":
         target_date = selected_date or today
@@ -713,7 +712,7 @@ async def delete_user(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    user.deleted_at = datetime.now(timezone.utc)
+    user.deleted_at = datetime.now(UTC)
     user.deleted_by_id = current_user.user_id
     await db.commit()
 

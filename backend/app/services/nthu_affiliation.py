@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
-import re
-
 
 NTHU_STUDENT_ID_LENGTH = 9
 NTHU_DEPARTMENT_CATALOG_SOURCE = (

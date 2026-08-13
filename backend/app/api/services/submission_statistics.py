@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta, timezone
+from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from app.core.config import settings
@@ -9,7 +9,6 @@ from app.models.models import (
     SubmissionStatisticsRead,
     SubmissionStatisticsSummary,
 )
-
 
 SUBMISSION_RANGE_CONFIG = {
     "24h": ("time", 10, 144),
@@ -39,8 +38,8 @@ async def record_submission_event(db, submission: ArchiveSubmission) -> None:
 
 def normalize_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def align_product_bucket(value: datetime, bucket_minutes: int) -> datetime:
@@ -48,7 +47,7 @@ def align_product_bucket(value: datetime, bucket_minutes: int) -> datetime:
     local_midnight = datetime.combine(value_local.date(), time.min, tzinfo=PRODUCT_TIMEZONE)
     elapsed_minutes = value_local.hour * 60 + value_local.minute
     aligned_minutes = (elapsed_minutes // bucket_minutes) * bucket_minutes
-    return (local_midnight + timedelta(minutes=aligned_minutes)).astimezone(timezone.utc)
+    return (local_midnight + timedelta(minutes=aligned_minutes)).astimezone(UTC)
 
 
 def get_submission_statistics_window(range_key: str, now: datetime):

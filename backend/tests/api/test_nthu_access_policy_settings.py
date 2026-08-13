@@ -10,7 +10,6 @@ from app.services.nthu_access_policy import (
 )
 from app.utils.auth import get_current_user
 
-
 PATH = "/settings/nthu-access-policy"
 
 

@@ -11,7 +11,6 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.models import ArchiveSubmission
 
-
 logger = logging.getLogger(__name__)
 
 ARCHIVE_SUBMISSION_LINK_UNIQUE_CONSTRAINT = "uq_archive_submissions_created_archive_id"

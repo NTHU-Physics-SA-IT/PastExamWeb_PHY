@@ -3,19 +3,19 @@ from __future__ import annotations
 import os
 import uuid
 
-from alembic import command
 import pytest
-from sqlalchemy import create_engine, inspect as sa_inspect, text
+from sqlalchemy import create_engine, text
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import IntegrityError
 
+from alembic import command
 from app.core.config import settings
 from app.db.migration_safety import alembic_config
 from app.db.test_database_guard import (
     validate_connected_test_database,
     validate_test_database_target,
 )
-
 
 PREVIOUS_REVISION = "6f3a9c2d8e41"
 NEW_REVISION = "9f1c2a7e4b63"

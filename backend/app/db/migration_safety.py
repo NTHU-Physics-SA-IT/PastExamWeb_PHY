@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -32,7 +33,9 @@ from app.db.schema_manifests import (
     reviewed_manifest_revisions,
 )
 from app.models import models as models_module
+from app.utils.exception_logging import redacted_exc_info
 
+logger = logging.getLogger(__name__)
 
 LEDGER_TABLE = "alembic_version"
 MIGRATION_LOCK_CLASS_ID = 1_438_970_421
@@ -945,6 +948,10 @@ def inspect_database(
                     "history cannot be proven. No stamp or repair is available."
                 )
     except Exception as exc:
+        logger.error(
+            "Database inspection failed closed",
+            exc_info=redacted_exc_info(exc),
+        )
         report.errors.append(f"Database inspection failed: {safe_error(exc)}")
     finally:
         if owned_engine:
