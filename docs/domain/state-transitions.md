@@ -499,6 +499,12 @@ Focused PostgreSQL coverage protects exact pending, approved, rejected, and
 takedown restoration, the null-to-pending compatibility fallback, linked
 Archive visibility, owner-eligibility preservation, exact one-to-one
 membership, canonical lock order, and delete-versus-restore serialization.
+Two same-metadata approved-pair scenarios protect the public boundary during
+reversible soft lifecycle. Submission A trash/restore mutates only Submission A
+and its exact Archive A; Archive A trash/restore temporarily takes down and
+restores only its exact Submission A. In both paths pair B's persisted
+lifecycle, link, and object identity remain unchanged, Archive B stays public,
+and no lifecycle notification is emitted.
 
 Deterministic independent-session PostgreSQL coverage closes the remaining
 submission lifecycle races. Direct review and owner/admin deletion, direct
@@ -747,7 +753,7 @@ frontend handling, and tests.
 
 ## Required follow-up
 
-The public sibling-visibility safety net is characterized. Follow-up slices
-should characterize the remaining submission matrix, pending-report trash
-uniqueness, category delete/restore behavior, and lifecycle grouping before
-implementation changes.
+The public sibling-visibility and exact-pair reversible soft-lifecycle safety
+nets are characterized. Follow-up slices should characterize the remaining
+submission matrix, pending-report trash uniqueness, and category delete/restore
+behavior before implementation changes.
