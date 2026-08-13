@@ -157,12 +157,22 @@ test evidence.
   (`changed=true`).
 - A dedupe key distinguishes a retry of one event from a later real cycle.
 
-### Implementation gap
+### Current implementation and safety net
 
-`enqueue_submission_status_notification` currently uses a permanent
-`submission_id + target status` dedupe key for approve/reject/takedown. It can
-suppress a legitimate later cycle. Republish includes transition-time context,
-so the strategies are inconsistent.
+Approve, reject, and takedown capture the persisted source-state generation
+before transition mutation: the prior `reviewed_at`, or stable `created_at` for
+the initial generation. Their versioned v2 dedupe key combines the Submission,
+target status, and UTC-normalized source-state generation. A retry of the same
+logical transition therefore keeps one identity, while leaving and later
+returning to the same target uses a new identity and creates another durable
+notification. Historical v1 rows coexist without backfill or migration.
+
+Focused pure-key and PostgreSQL API coverage protects deterministic identity,
+target separation, initial-generation fallback, repeated leave-and-return
+cycles, metadata preservation, and same-target silence. No-op, stale, illegal,
+concurrent-loser, and rolled-back requests retain their existing
+notification-free behavior. Republish keeps its existing pre-republish
+takedown-transition identity and has separate repeated-cycle characterization.
 
 ## Report notifications
 
