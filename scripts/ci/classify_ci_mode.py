@@ -144,13 +144,25 @@ class Classification:
 
 
 class ActionsEvidence(Protocol):
-    def workflow_runs(self, source_sha: str) -> list[dict[str, Any]]: ...
+    def workflow_runs(
+        self,
+        source_sha: str,
+        event: str | None = "push",
+    ) -> list[dict[str, Any]]: ...
 
     def run_jobs(self, run_id: int) -> list[dict[str, Any]]: ...
+
+    def run_attempt_jobs(
+        self,
+        run_id: int,
+        run_attempt: int,
+    ) -> list[dict[str, Any]]: ...
 
     def ref_sha(self, ref_name: str) -> str: ...
 
     def pull_request(self, number: int) -> dict[str, Any]: ...
+
+    def pull_requests_for_commit(self, commit: str) -> list[dict[str, Any]]: ...
 
 
 class GitRepository:
@@ -229,6 +241,33 @@ class GitRepository:
 
     def blob_sha(self, commit: str, path: str) -> str:
         return self._run("rev-parse", f"{commit}:{path}").stdout.strip()
+
+    def tracked_paths(self, commit: str) -> tuple[str, ...]:
+        output = self._run(
+            "ls-tree",
+            "-r",
+            "--name-only",
+            "-z",
+            commit,
+        ).stdout
+        return tuple(path for path in output.split("\0") if path)
+
+    def path_identity(self, commit: str, path: str) -> tuple[str, str, str]:
+        output = self._run("ls-tree", "-z", commit, "--", path).stdout
+        entries = tuple(entry for entry in output.split("\0") if entry)
+        if len(entries) != 1 or "\t" not in entries[0]:
+            raise ClassificationFailure("governance path identity is unavailable")
+        metadata, observed_path = entries[0].split("\t", 1)
+        fields = metadata.split()
+        if (
+            len(fields) != 3
+            or observed_path != path
+            or not re.fullmatch(r"[0-7]{6}", fields[0])
+            or fields[1] not in {"blob", "commit"}
+            or not SHA_PATTERN.fullmatch(fields[2])
+        ):
+            raise ClassificationFailure("governance path identity is malformed")
+        return fields[0], fields[1], fields[2]
 
 
 class GitHubActionsAPI:
@@ -333,16 +372,22 @@ class GitHubActionsAPI:
             raise ClassificationFailure("GitHub API pagination is incomplete")
         return items
 
-    def workflow_runs(self, source_sha: str) -> list[dict[str, Any]]:
+    def workflow_runs(
+        self,
+        source_sha: str,
+        event: str | None = "push",
+    ) -> list[dict[str, Any]]:
         repository = quote(self.repository, safe="/")
+        parameters = {
+            "head_sha": source_sha,
+            "per_page": "100",
+        }
+        if event is not None:
+            parameters["event"] = event
         return self._paged_list(
             path=f"/repos/{repository}/actions/runs",
             key="workflow_runs",
-            parameters={
-                "head_sha": source_sha,
-                "event": "push",
-                "per_page": "100",
-            },
+            parameters=parameters,
         )
 
     def workflow_run(self, run_id: int) -> dict[str, Any]:
@@ -407,6 +452,39 @@ class GitHubActionsAPI:
         if not isinstance(payload, dict):
             raise ClassificationFailure("GitHub pull request response is malformed")
         return payload
+
+    def pull_requests_for_commit(self, commit: str) -> list[dict[str, Any]]:
+        if not isinstance(commit, str) or not SHA_PATTERN.fullmatch(commit):
+            raise ClassificationFailure("commit identity is malformed")
+        repository = quote(self.repository, safe="/")
+        url: str | None = self._url(
+            f"/repos/{repository}/commits/{commit}/pulls",
+            {"per_page": "100"},
+        )
+        pull_requests: list[dict[str, Any]] = []
+        visited: set[str] = set()
+        while url is not None:
+            if not url.startswith(f"{self.api_url}/"):
+                raise ClassificationFailure(
+                    "GitHub API pagination left the approved API origin"
+                )
+            if url in visited:
+                raise ClassificationFailure("GitHub API pagination loop detected")
+            if len(visited) >= 100:
+                raise ClassificationFailure(
+                    "GitHub API pagination exceeded safety bound"
+                )
+            visited.add(url)
+            payload, link = self._get(url)
+            if not isinstance(payload, list) or not all(
+                isinstance(item, dict) for item in payload
+            ):
+                raise ClassificationFailure(
+                    "GitHub commit pull-request response is malformed"
+                )
+            pull_requests.extend(payload)
+            url = self._next_link(link)
+        return pull_requests
 
 
 def is_governance_path(path: str) -> bool:
@@ -473,9 +551,7 @@ def classify_main_pull_request(
     changed_paths = git.changed_paths(event.base_sha, event.head_sha)
     if not changed_paths:
         raise ClassificationFailure("pull request change set is empty")
-    governance_paths = tuple(
-        path for path in changed_paths if is_governance_path(path)
-    )
+    governance_paths = tuple(path for path in changed_paths if is_governance_path(path))
     if governance_paths:
         return _full(
             f"governance path requires full CI: {governance_paths[0]}",
@@ -497,18 +573,20 @@ def _full(reason: str, *, comparison_base: str = "") -> Classification:
     return Classification("full", reason, comparison_base=comparison_base)
 
 
-def _parse_timestamp(value: Any) -> datetime:
+def _parse_named_timestamp(value: Any, label: str) -> datetime:
     if not isinstance(value, str):
-        raise ClassificationFailure("source run completion time is missing")
+        raise ClassificationFailure(f"{label} is missing")
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as error:
-        raise ClassificationFailure(
-            "source run completion time is malformed"
-        ) from error
+        raise ClassificationFailure(f"{label} is malformed") from error
     if parsed.tzinfo is None:
-        raise ClassificationFailure("source run completion time lacks timezone")
+        raise ClassificationFailure(f"{label} lacks timezone")
     return parsed.astimezone(timezone.utc)
+
+
+def _parse_timestamp(value: Any) -> datetime:
+    return _parse_named_timestamp(value, "source run completion time")
 
 
 def _require_source_ci(
@@ -570,11 +648,310 @@ def _require_source_ci(
     return run_id, source_revision
 
 
+def _require_main_derived_governance(
+    *,
+    git: GitRepository,
+    source_sha: str,
+    main_sha: str,
+) -> None:
+    source_paths = frozenset(
+        path for path in git.tracked_paths(source_sha) if is_governance_path(path)
+    )
+    main_paths = frozenset(
+        path for path in git.tracked_paths(main_sha) if is_governance_path(path)
+    )
+    if source_paths != main_paths:
+        raise ClassificationFailure(
+            "source governance path inventory differs from main authority"
+        )
+    for path in sorted(main_paths):
+        if git.path_identity(source_sha, path) != git.path_identity(main_sha, path):
+            raise ClassificationFailure(
+                f"source governance identity differs from main authority: {path}"
+            )
+
+
+def _require_merged_pull_request(
+    *,
+    event: CIEvent,
+    api: ActionsEvidence,
+    coordination_branch: str,
+    base_sha: str,
+    source_sha: str,
+    now: datetime,
+) -> tuple[str, int, datetime, datetime]:
+    merge_associations = api.pull_requests_for_commit(event.current_sha)
+    source_associations = api.pull_requests_for_commit(source_sha)
+
+    def is_exact_association(pull_request: dict[str, Any]) -> bool:
+        base = pull_request.get("base")
+        head = pull_request.get("head")
+        return (
+            pull_request.get("merge_commit_sha") == event.current_sha
+            and isinstance(base, dict)
+            and base.get("ref") == coordination_branch
+            and base.get("sha") == base_sha
+            and isinstance(head, dict)
+            and head.get("sha") == source_sha
+        )
+
+    exact_merge_associations = tuple(
+        pull_request
+        for pull_request in merge_associations
+        if is_exact_association(pull_request)
+    )
+    exact_source_associations = tuple(
+        pull_request
+        for pull_request in source_associations
+        if is_exact_association(pull_request)
+    )
+    if len(exact_merge_associations) != 1 or len(exact_source_associations) != 1:
+        raise ClassificationFailure("merged pull request association is ambiguous")
+
+    pull_request = exact_merge_associations[0]
+    source_pull_request = exact_source_associations[0]
+    number = pull_request.get("number")
+    if (
+        isinstance(number, bool)
+        or not isinstance(number, int)
+        or number < 1
+        or source_pull_request.get("number") != number
+    ):
+        raise ClassificationFailure("merged pull request identity is malformed")
+    if (
+        pull_request.get("state") != "closed"
+        or pull_request.get("merge_commit_sha") != event.current_sha
+    ):
+        raise ClassificationFailure("pull request is not the exact merged commit")
+
+    created_at = _parse_named_timestamp(
+        pull_request.get("created_at"),
+        "pull request creation time",
+    )
+    merged_at = _parse_named_timestamp(
+        pull_request.get("merged_at"),
+        "pull request merge time",
+    )
+    if created_at > merged_at:
+        raise ClassificationFailure("pull request merge predates its creation time")
+    if merged_at > now + timedelta(minutes=5):
+        raise ClassificationFailure("pull request merge time is in the future")
+    if now - merged_at > SOURCE_CI_FRESHNESS:
+        raise ClassificationFailure(
+            "merged pull request evidence is older than 72 hours"
+        )
+
+    base = pull_request.get("base")
+    head = pull_request.get("head")
+    if not isinstance(base, dict) or not isinstance(head, dict):
+        raise ClassificationFailure("merged pull request refs are malformed")
+    if base.get("ref") != coordination_branch or base.get("sha") != base_sha:
+        raise ClassificationFailure("merged pull request base does not match")
+    head_ref = head.get("ref")
+    if not isinstance(head_ref, str) or not head_ref or head.get("sha") != source_sha:
+        raise ClassificationFailure("merged pull request head does not match")
+    expected_repository = (event.repository, event.repository_id)
+    if _pr_repository_identity(base) != expected_repository:
+        raise ClassificationFailure(
+            "merged pull request base repository does not match"
+        )
+    if _pr_repository_identity(head) != expected_repository:
+        raise ClassificationFailure(
+            "merged pull request head repository does not match"
+        )
+    return head_ref, number, created_at, merged_at
+
+
+def _require_exact_full_run(
+    *,
+    event: CIEvent,
+    api: ActionsEvidence,
+    runs: list[dict[str, Any]],
+    source_sha: str,
+    source_ref: str,
+    run_event: str,
+    pull_request_number: int | None,
+    not_before: datetime | None,
+    merged_at: datetime,
+    now: datetime,
+) -> int:
+    candidates: list[dict[str, Any]] = []
+    for run in runs:
+        repository = run.get("repository")
+        if (
+            run.get("head_sha") == source_sha
+            and run.get("head_branch") == source_ref
+            and run.get("event") == run_event
+            and run.get("status") == "completed"
+            and run.get("conclusion") == "success"
+            and run.get("path") == APPROVED_WORKFLOW_PATH
+            and run.get("workflow_id") == APPROVED_WORKFLOW_ID
+            and isinstance(repository, dict)
+            and repository.get("id") == event.repository_id
+            and repository.get("full_name") == event.repository
+        ):
+            candidates.append(run)
+    if len(candidates) != 1:
+        raise ClassificationFailure(f"{run_event} full-CI run is missing or ambiguous")
+
+    run = candidates[0]
+    run_id = run.get("id")
+    attempt = run.get("run_attempt")
+    if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1:
+        raise ClassificationFailure(f"{run_event} run ID is malformed")
+    if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
+        raise ClassificationFailure(f"{run_event} run attempt is malformed")
+    created_at = _parse_named_timestamp(
+        run.get("created_at"),
+        f"{run_event} run creation time",
+    )
+    completed_at = _parse_named_timestamp(
+        run.get("updated_at"),
+        f"{run_event} run completion time",
+    )
+    if created_at > completed_at:
+        raise ClassificationFailure(f"{run_event} full-CI predates its creation time")
+    if not_before is not None and created_at < not_before:
+        raise ClassificationFailure(
+            f"{run_event} full-CI started before the exact pull request existed"
+        )
+    if completed_at > now + timedelta(minutes=5):
+        raise ClassificationFailure(f"{run_event} run completion time is in the future")
+    if now - completed_at > SOURCE_CI_FRESHNESS:
+        raise ClassificationFailure(
+            f"{run_event} full-CI evidence is older than 72 hours"
+        )
+    if completed_at > merged_at:
+        raise ClassificationFailure(f"{run_event} full-CI completed after the merge")
+    if pull_request_number is not None:
+        pull_requests = run.get("pull_requests")
+        if not isinstance(pull_requests, list) or not all(
+            isinstance(pull_request, dict) for pull_request in pull_requests
+        ):
+            raise ClassificationFailure("pull_request run association is malformed")
+        if pull_requests and [
+            pull_request.get("number") for pull_request in pull_requests
+        ] != [pull_request_number]:
+            raise ClassificationFailure("pull_request run association does not match")
+
+    conclusions: dict[str, list[tuple[Any, ...]]] = {}
+    for job in api.run_attempt_jobs(run_id, attempt):
+        name = job.get("name")
+        if isinstance(name, str):
+            conclusions.setdefault(name, []).append(
+                (
+                    job.get("status"),
+                    job.get("conclusion"),
+                    job.get("run_id"),
+                    job.get("run_attempt"),
+                    job.get("head_sha"),
+                )
+            )
+    expected = [("completed", "success", run_id, attempt, source_sha)]
+    for name in REQUIRED_SOURCE_JOBS:
+        if conclusions.get(name, []) != expected:
+            raise ClassificationFailure(
+                f"{run_event} required job is not uniquely successful: {name}"
+            )
+    return run_id
+
+
+def validate_coordination_postmerge_full_reuse(
+    *,
+    event: CIEvent,
+    git: GitRepository,
+    api: ActionsEvidence,
+    coordination_branch: str,
+    default_branch: str,
+    base_sha: str,
+    source_sha: str,
+    now: datetime,
+) -> Classification:
+    if event.ref != f"refs/heads/{coordination_branch}":
+        raise ClassificationFailure(
+            "governance postmerge reuse requires the exact coordination ref"
+        )
+    if not event.repository or event.repository_id < 1:
+        raise ClassificationFailure("repository identity is malformed")
+
+    source_parents = git.parents(source_sha)
+    if len(source_parents) != 2 or source_parents[0] != base_sha:
+        raise ClassificationFailure("source is not the exact Case-B merge shape")
+    main_sha = source_parents[1]
+    _require_main_derived_governance(
+        git=git,
+        source_sha=source_sha,
+        main_sha=main_sha,
+    )
+
+    # All candidate and governance checks above are local. Network evidence is
+    # deliberately reached only after the exact Case-B shape is plausible.
+    if api.ref_sha(coordination_branch) != event.current_sha:
+        raise ClassificationFailure("remote coordination ref advanced")
+    if api.ref_sha(default_branch) != main_sha:
+        raise ClassificationFailure(
+            "current main advanced beyond the refresh authority"
+        )
+
+    (
+        source_ref,
+        pull_request_number,
+        pull_request_created_at,
+        merged_at,
+    ) = _require_merged_pull_request(
+        event=event,
+        api=api,
+        coordination_branch=coordination_branch,
+        base_sha=base_sha,
+        source_sha=source_sha,
+        now=now,
+    )
+    runs = api.workflow_runs(source_sha, event=None)
+    source_run_id = _require_exact_full_run(
+        event=event,
+        api=api,
+        runs=runs,
+        source_sha=source_sha,
+        source_ref=source_ref,
+        run_event="push",
+        pull_request_number=None,
+        not_before=None,
+        merged_at=merged_at,
+        now=now,
+    )
+    pr_run_id = _require_exact_full_run(
+        event=event,
+        api=api,
+        runs=runs,
+        source_sha=source_sha,
+        source_ref=source_ref,
+        run_event="pull_request",
+        pull_request_number=pull_request_number,
+        not_before=pull_request_created_at,
+        merged_at=merged_at,
+        now=now,
+    )
+    if source_run_id == pr_run_id:
+        raise ClassificationFailure("source and PR Full evidence reused one run ID")
+
+    return Classification(
+        "equivalent-merge",
+        "exact Case-B coordination merge reuses successful Source Full and PR Full",
+        comparison_base=base_sha,
+        source_sha=source_sha,
+        source_run_id=str(source_run_id),
+        source_tree=git.tree_sha(source_sha),
+        workflow_revision=git.blob_sha(source_sha, APPROVED_WORKFLOW_PATH),
+    )
+
+
 def validate_equivalent_merge(
     *,
     event: CIEvent,
     git: GitRepository,
     api: ActionsEvidence,
+    coordination_branch: str,
+    default_branch: str,
     now: datetime,
 ) -> Classification:
     if event.event_name != "push":
@@ -597,13 +974,6 @@ def validate_equivalent_merge(
     if not git.is_ancestor(parent1, parent2):
         raise ClassificationFailure("target parent is not an ancestor of source")
 
-    ref_prefix = "refs/heads/"
-    if not event.ref.startswith(ref_prefix):
-        raise ClassificationFailure("target ref is not a branch")
-    ref_name = event.ref.removeprefix(ref_prefix)
-    if api.ref_sha(ref_name) != event.current_sha:
-        raise ClassificationFailure("remote target ref advanced during validation")
-
     if not git.trees_are_equal(event.current_sha, parent2):
         raise ClassificationFailure("merge tree differs from source tree")
     if not git.diff_is_empty(parent2, event.current_sha):
@@ -614,9 +984,23 @@ def validate_equivalent_merge(
         raise ClassificationFailure("source change set is empty")
     governance_paths = tuple(path for path in source_paths if is_governance_path(path))
     if governance_paths:
-        raise ClassificationFailure(
-            f"source modifies governance path: {governance_paths[0]}"
+        return validate_coordination_postmerge_full_reuse(
+            event=event,
+            git=git,
+            api=api,
+            coordination_branch=coordination_branch,
+            default_branch=default_branch,
+            base_sha=parent1,
+            source_sha=parent2,
+            now=now,
         )
+
+    ref_prefix = "refs/heads/"
+    if not event.ref.startswith(ref_prefix):
+        raise ClassificationFailure("target ref is not a branch")
+    ref_name = event.ref.removeprefix(ref_prefix)
+    if api.ref_sha(ref_name) != event.current_sha:
+        raise ClassificationFailure("remote target ref advanced during validation")
 
     run_id, workflow_revision = _require_source_ci(
         event=event,
@@ -853,12 +1237,15 @@ def classify_ci_mode(
                 event=event,
                 git=git,
                 api=api,
+                coordination_branch=coordination_branch or "",
+                default_branch=governance.default_development_base,
                 now=(now or datetime.now(timezone.utc)),
             )
         except (
             ClassificationFailure,
             subprocess.SubprocessError,
             OSError,
+            TypeError,
             ValueError,
         ) as error:
             return _full(f"equivalent validation failed closed: {error}")
