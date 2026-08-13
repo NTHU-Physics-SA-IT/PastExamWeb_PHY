@@ -180,9 +180,13 @@ The bilingual course-catalog migration adds only nullable `courses.name_en`
 and nullable `course_category_configs.name_en` / `label_en`. It preserves the
 canonical Chinese fields, category keys, course identities, ordering, archive
 relationships, and custom rows. The reviewed upgrade backfills exactly the 71
-canonical course mappings and six canonical category mappings; a missing
-canonical source row aborts without partial application. Downgrade drops only
-the three additive English display columns.
+canonical course mappings when the source Course table is non-empty, and
+always backfills the six canonical category mappings. A non-empty Course table
+with a missing canonical source row, or a missing canonical category row,
+aborts without partial application. A fresh database with an empty Course
+table remains migration-safe because course creation belongs to the explicit
+bootstrap boundary. Downgrade drops only the three additive English display
+columns.
 
 The bilingual ArchiveSubmission snapshot migration adds only nullable
 `requested_course_name_en`, `requested_category_name_en`, and

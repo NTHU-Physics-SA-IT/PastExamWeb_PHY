@@ -95,7 +95,11 @@ COURSE_TRANSLATIONS = (
     ("math-department", "統計學", "Statistics"),
     ("math-department", "離散數學", "Discrete Mathematics"),
     ("math-department", "微分方程", "Differential Equations"),
-    ("math-department", "偏微分方程導論", "Introduction to Partial Differential Equations"),
+    (
+        "math-department",
+        "偏微分方程導論",
+        "Introduction to Partial Differential Equations",
+    ),
     ("math-department", "拓撲學導論", "Introduction to Topology"),
     ("math-department", "高等線性代數", "Advanced Linear Algebra"),
     ("math-department", "微分幾何", "Differential Geometry"),
@@ -118,11 +122,12 @@ def _verify_source_schema(connection: sa.Connection) -> None:
     }
     for table, required_columns in expected.items():
         columns = {
-            column["name"]
-            for column in inspector.get_columns(table, schema="public")
+            column["name"] for column in inspector.get_columns(table, schema="public")
         }
         if not required_columns.issubset(columns):
-            raise RuntimeError(f"Bilingual catalog migration source {table} is incomplete")
+            raise RuntimeError(
+                f"Bilingual catalog migration source {table} is incomplete"
+            )
         if {"name_en", "label_en"} & columns:
             raise RuntimeError(f"Bilingual catalog fields already exist on {table}")
 
@@ -144,6 +149,7 @@ def _validate_postflight(connection: sa.Connection) -> None:
         for name in names:
             if name not in columns or columns[name]["nullable"] is not True:
                 raise RuntimeError(f"Bilingual catalog column {name} must be nullable")
+
 
 def upgrade() -> None:
     connection = op.get_bind()
@@ -171,19 +177,21 @@ def upgrade() -> None:
             raise RuntimeError(
                 f"Bilingual catalog backfill expected one canonical category for {key}"
             )
-    for category, name, name_en in COURSE_TRANSLATIONS:
-        result = connection.execute(
-            sa.text(
-                "UPDATE courses SET name_en = :name_en "
-                "WHERE category = :category AND name = :name"
-            ),
-            {"category": category, "name": name, "name_en": name_en},
-        )
-        if result.rowcount < 1:
-            raise RuntimeError(
-                "Bilingual catalog backfill is missing canonical course "
-                f"{category}/{name}"
+    course_count = connection.scalar(sa.text("SELECT count(*) FROM courses"))
+    if course_count:
+        for category, name, name_en in COURSE_TRANSLATIONS:
+            result = connection.execute(
+                sa.text(
+                    "UPDATE courses SET name_en = :name_en "
+                    "WHERE category = :category AND name = :name"
+                ),
+                {"category": category, "name": name, "name_en": name_en},
             )
+            if result.rowcount < 1:
+                raise RuntimeError(
+                    "Bilingual catalog backfill is missing canonical course "
+                    f"{category}/{name}"
+                )
 
     _validate_postflight(connection)
 
