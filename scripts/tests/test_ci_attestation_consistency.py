@@ -268,6 +268,39 @@ def test_workflow_run_uses_exact_run_endpoint() -> None:
     ]
 
 
+def test_commit_object_uses_exact_repository_and_commit_endpoint() -> None:
+    api = ci.GitHubActionsAPI(
+        api_url="https://api.github.invalid",
+        repository="NTHU-Physics-SA-IT/PastExamWeb_PHY",
+        token="fixture-token",
+    )
+    calls: list[str] = []
+
+    def get(url: str) -> tuple[dict[str, Any], str]:
+        calls.append(url)
+        return {"sha": ATTESTED_SHA}, ""
+
+    api._get = get  # type: ignore[method-assign]
+
+    assert api.commit_object(ATTESTED_SHA) == {"sha": ATTESTED_SHA}
+    assert calls == [
+        "https://api.github.invalid/repos/NTHU-Physics-SA-IT/"
+        f"PastExamWeb_PHY/git/commits/{ATTESTED_SHA}"
+    ]
+
+
+@pytest.mark.parametrize("commit", (None, "", "f" * 39, "g" * 40))
+def test_commit_object_rejects_malformed_identity(commit: Any) -> None:
+    api = ci.GitHubActionsAPI(
+        api_url="https://api.github.invalid",
+        repository="NTHU-Physics-SA-IT/PastExamWeb_PHY",
+        token="fixture-token",
+    )
+
+    with pytest.raises(ci.ClassificationFailure, match="commit identity"):
+        api.commit_object(commit)
+
+
 @pytest.mark.parametrize("run_id", (0, -1, True))
 def test_workflow_run_rejects_malformed_identity(run_id: Any) -> None:
     api = ci.GitHubActionsAPI(
@@ -355,6 +388,7 @@ class _AttestationAPI:
         pull_request: dict[str, Any] | None = None,
         run_overrides: dict[str, Any] | None = None,
         jobs: list[dict[str, Any]] | None = None,
+        commit_objects: dict[str, dict[str, Any] | Exception] | None = None,
     ) -> None:
         self.run = {
             "id": RUN_ID,
@@ -368,6 +402,8 @@ class _AttestationAPI:
             for name in sorted(gate.REQUIRED_EXECUTION_JOBS)
         ]
         self.pull_request_payload = pull_request
+        self.commit_objects = commit_objects or {}
+        self.commit_object_calls: list[str] = []
 
     def workflow_run(self, run_id: int) -> dict[str, Any]:
         assert run_id == RUN_ID
@@ -387,10 +423,23 @@ class _AttestationAPI:
         assert self.pull_request_payload is not None
         return deepcopy(self.pull_request_payload)
 
+    def commit_object(self, commit: str) -> dict[str, Any]:
+        self.commit_object_calls.append(commit)
+        response = self.commit_objects[commit]
+        if isinstance(response, Exception):
+            raise response
+        return deepcopy(response)
+
 
 class _AttestationGit:
-    def __init__(self, parents: tuple[str, ...]) -> None:
+    def __init__(
+        self,
+        parents: tuple[str, ...],
+        *,
+        tree_sha: str = "d" * 40,
+    ) -> None:
         self.parents = parents
+        self._tree_sha = tree_sha
         self.tree_calls: list[str] = []
         self.blob_calls: list[tuple[str, str]] = []
 
@@ -400,7 +449,7 @@ class _AttestationGit:
 
     def tree_sha(self, commit: str) -> str:
         self.tree_calls.append(commit)
-        return "d" * 40
+        return self._tree_sha
 
     def blob_sha(self, commit: str, path: str) -> str:
         self.blob_calls.append((commit, path))
@@ -445,7 +494,23 @@ def _pull_request_payload() -> dict[str, Any]:
             "sha": BASE_SHA,
             "repo": {"full_name": "NTHU-Physics-SA-IT/PastExamWeb_PHY"},
         },
-        "head": {"sha": EXECUTION_HEAD_SHA},
+        "head": {
+            "sha": EXECUTION_HEAD_SHA,
+            "repo": {"full_name": "NTHU-Physics-SA-IT/PastExamWeb_PHY"},
+        },
+    }
+
+
+def _commit_object(
+    sha: str,
+    *,
+    parents: tuple[str, ...] = (BASE_SHA, EXECUTION_HEAD_SHA),
+    tree_sha: str = "d" * 40,
+) -> dict[str, Any]:
+    return {
+        "sha": sha,
+        "parents": [{"sha": parent} for parent in parents],
+        "tree": {"sha": tree_sha},
     }
 
 
@@ -511,6 +576,142 @@ def test_pull_request_separates_tested_merge_from_execution_head(
     assert EXECUTION_HEAD_SHA not in evidence
     assert git.tree_calls == [ATTESTED_SHA]
     assert git.blob_calls == [(ATTESTED_SHA, ci.APPROVED_WORKFLOW_PATH)]
+    assert api.commit_object_calls == []
+
+
+def test_pull_request_accepts_regenerated_merge_with_same_parents_and_tree(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    regenerated_sha = "f" * 40
+    pull_request = _pull_request_payload()
+    pull_request["merge_commit_sha"] = regenerated_sha
+    api = _AttestationAPI(
+        event_name="pull_request",
+        execution_head_sha=EXECUTION_HEAD_SHA,
+        pull_request=pull_request,
+        commit_objects={regenerated_sha: _commit_object(regenerated_sha)},
+    )
+    git = _AttestationGit((BASE_SHA, EXECUTION_HEAD_SHA))
+    _install_attestation_fakes(monkeypatch, api=api, git=git)
+    arguments = _attestation_arguments(
+        tmp_path,
+        event_name="pull_request",
+        attested_sha=ATTESTED_SHA,
+        execution_head_sha=EXECUTION_HEAD_SHA,
+        pr_number=68,
+        base_sha=BASE_SHA,
+    )
+
+    gate.attest_full_ci(arguments)
+
+    assert api.commit_object_calls == [regenerated_sha]
+    assert git.tree_calls == [ATTESTED_SHA, ATTESTED_SHA]
+
+
+@pytest.mark.parametrize(
+    ("commit_payload", "message"),
+    (
+        (_commit_object("f" * 40, tree_sha="e" * 40), "tree does not match"),
+        (
+            _commit_object("f" * 40, parents=("e" * 40, EXECUTION_HEAD_SHA)),
+            "merge parents do not match",
+        ),
+        (
+            _commit_object("f" * 40, parents=(BASE_SHA, "e" * 40)),
+            "merge parents do not match",
+        ),
+        (
+            _commit_object("f" * 40, parents=(EXECUTION_HEAD_SHA, BASE_SHA)),
+            "merge parents do not match",
+        ),
+        (
+            _commit_object("f" * 40, parents=(BASE_SHA,)),
+            "merge parents do not match",
+        ),
+        (
+            _commit_object(
+                "f" * 40,
+                parents=(BASE_SHA, EXECUTION_HEAD_SHA, "e" * 40),
+            ),
+            "merge parents do not match",
+        ),
+        ({"sha": "e" * 40}, "commit identity does not match"),
+        ({"sha": "f" * 40, "parents": None}, "parents are malformed"),
+        (
+            {
+                "sha": "f" * 40,
+                "parents": [{"sha": BASE_SHA}, {"sha": EXECUTION_HEAD_SHA}],
+                "tree": None,
+            },
+            "tree is malformed",
+        ),
+    ),
+)
+def test_regenerated_pull_request_merge_mismatch_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    commit_payload: dict[str, Any],
+    message: str,
+) -> None:
+    regenerated_sha = "f" * 40
+    pull_request = _pull_request_payload()
+    pull_request["merge_commit_sha"] = regenerated_sha
+    api = _AttestationAPI(
+        event_name="pull_request",
+        execution_head_sha=EXECUTION_HEAD_SHA,
+        pull_request=pull_request,
+        commit_objects={regenerated_sha: commit_payload},
+    )
+    _install_attestation_fakes(
+        monkeypatch,
+        api=api,
+        git=_AttestationGit((BASE_SHA, EXECUTION_HEAD_SHA)),
+    )
+    arguments = _attestation_arguments(
+        tmp_path,
+        event_name="pull_request",
+        attested_sha=ATTESTED_SHA,
+        execution_head_sha=EXECUTION_HEAD_SHA,
+        pr_number=68,
+        base_sha=BASE_SHA,
+    )
+
+    with pytest.raises(RuntimeError, match=message):
+        gate.attest_full_ci(arguments)
+
+
+def test_regenerated_pull_request_merge_lookup_failure_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    regenerated_sha = "f" * 40
+    pull_request = _pull_request_payload()
+    pull_request["merge_commit_sha"] = regenerated_sha
+    api = _AttestationAPI(
+        event_name="pull_request",
+        execution_head_sha=EXECUTION_HEAD_SHA,
+        pull_request=pull_request,
+        commit_objects={
+            regenerated_sha: ci.ClassificationFailure("GitHub API evidence unavailable")
+        },
+    )
+    _install_attestation_fakes(
+        monkeypatch,
+        api=api,
+        git=_AttestationGit((BASE_SHA, EXECUTION_HEAD_SHA)),
+    )
+    arguments = _attestation_arguments(
+        tmp_path,
+        event_name="pull_request",
+        attested_sha=ATTESTED_SHA,
+        execution_head_sha=EXECUTION_HEAD_SHA,
+        pr_number=68,
+        base_sha=BASE_SHA,
+    )
+
+    with pytest.raises(ci.ClassificationFailure, match="unavailable"):
+        gate.attest_full_ci(arguments)
 
 
 def test_workflow_run_execution_head_mismatch_fails(
@@ -565,7 +766,7 @@ def test_workflow_run_identity_mismatch_fails(
         gate.attest_full_ci(arguments)
 
 
-@pytest.mark.parametrize("stale_authority", ("base", "head", "merge"))
+@pytest.mark.parametrize("stale_authority", ("base", "head"))
 def test_stale_pull_request_authority_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -574,10 +775,8 @@ def test_stale_pull_request_authority_fails(
     pull_request = _pull_request_payload()
     if stale_authority == "base":
         pull_request["base"]["sha"] = "f" * 40
-    elif stale_authority == "head":
-        pull_request["head"]["sha"] = "f" * 40
     else:
-        pull_request["merge_commit_sha"] = "f" * 40
+        pull_request["head"]["sha"] = "f" * 40
     api = _AttestationAPI(
         event_name="pull_request",
         execution_head_sha=EXECUTION_HEAD_SHA,
@@ -599,6 +798,77 @@ def test_stale_pull_request_authority_fails(
 
     with pytest.raises(RuntimeError, match=f"pull request {stale_authority} SHA"):
         gate.attest_full_ci(arguments)
+
+
+@pytest.mark.parametrize("merge_sha", (None, "", "f" * 39, "g" * 40))
+def test_current_pull_request_merge_sha_must_be_well_formed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    merge_sha: Any,
+) -> None:
+    pull_request = _pull_request_payload()
+    pull_request["merge_commit_sha"] = merge_sha
+    api = _AttestationAPI(
+        event_name="pull_request",
+        execution_head_sha=EXECUTION_HEAD_SHA,
+        pull_request=pull_request,
+    )
+    _install_attestation_fakes(
+        monkeypatch,
+        api=api,
+        git=_AttestationGit((BASE_SHA, EXECUTION_HEAD_SHA)),
+    )
+    arguments = _attestation_arguments(
+        tmp_path,
+        event_name="pull_request",
+        attested_sha=ATTESTED_SHA,
+        execution_head_sha=EXECUTION_HEAD_SHA,
+        pr_number=68,
+        base_sha=BASE_SHA,
+    )
+
+    with pytest.raises(RuntimeError, match="current pull request merge SHA.*malformed"):
+        gate.attest_full_ci(arguments)
+    assert api.commit_object_calls == []
+
+
+@pytest.mark.parametrize("authority", ("number", "state", "base-repo", "head-repo"))
+def test_current_pull_request_identity_mismatch_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    authority: str,
+) -> None:
+    pull_request = _pull_request_payload()
+    if authority == "number":
+        pull_request["number"] = 69
+    elif authority == "state":
+        pull_request["state"] = "closed"
+    elif authority == "base-repo":
+        pull_request["base"]["repo"]["full_name"] = "other/repository"
+    else:
+        pull_request["head"]["repo"]["full_name"] = "other/repository"
+    api = _AttestationAPI(
+        event_name="pull_request",
+        execution_head_sha=EXECUTION_HEAD_SHA,
+        pull_request=pull_request,
+    )
+    _install_attestation_fakes(
+        monkeypatch,
+        api=api,
+        git=_AttestationGit((BASE_SHA, EXECUTION_HEAD_SHA)),
+    )
+    arguments = _attestation_arguments(
+        tmp_path,
+        event_name="pull_request",
+        attested_sha=ATTESTED_SHA,
+        execution_head_sha=EXECUTION_HEAD_SHA,
+        pr_number=68,
+        base_sha=BASE_SHA,
+    )
+
+    with pytest.raises(RuntimeError):
+        gate.attest_full_ci(arguments)
+    assert api.commit_object_calls == []
 
 
 @pytest.mark.parametrize(
@@ -651,6 +921,7 @@ def test_push_rejects_different_attested_and_execution_head_shas(
 
     with pytest.raises(RuntimeError, match="push attested SHA"):
         gate.attest_full_ci(arguments)
+    assert api.commit_object_calls == []
 
 
 @pytest.mark.parametrize(
