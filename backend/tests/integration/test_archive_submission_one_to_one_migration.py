@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import UniqueConstraint, create_engine, text

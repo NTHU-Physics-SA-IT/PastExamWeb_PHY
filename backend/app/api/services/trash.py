@@ -1,7 +1,6 @@
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from minio.error import S3Error

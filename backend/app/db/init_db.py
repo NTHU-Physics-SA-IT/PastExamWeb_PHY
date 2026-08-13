@@ -1,6 +1,6 @@
 import asyncio
 from collections import defaultdict
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlsplit

@@ -1,6 +1,6 @@
 import io
 import uuid
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio

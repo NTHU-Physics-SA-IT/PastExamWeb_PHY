@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, or_
 from sqlmodel import select

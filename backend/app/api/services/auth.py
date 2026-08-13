@@ -1,7 +1,7 @@
 import hmac
 import secrets
 import uuid
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status

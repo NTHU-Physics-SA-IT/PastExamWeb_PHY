@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 from contextvars import ContextVar
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import delete, func

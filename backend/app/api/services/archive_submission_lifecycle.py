@@ -1,7 +1,6 @@
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
 from minio.error import S3Error
