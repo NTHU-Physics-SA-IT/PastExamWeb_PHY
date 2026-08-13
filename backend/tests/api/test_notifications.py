@@ -585,6 +585,16 @@ async def test_supported_notification_sources_fail_closed_when_missing(
 ):
     recipient = await make_user()
     async with session_maker() as session:
+        _, archive = await _add_public_archive(
+            session, owner_id=recipient.id, label=uuid.uuid4().hex
+        )
+        message = ArchiveDiscussionMessage(
+            archive_id=archive.id,
+            user_id=recipient.id,
+            content="C2 message with missing referenced root",
+        )
+        session.add(message)
+        await session.flush()
         notifications = [
             _personal_notification(
                 user_id=recipient.id,
@@ -600,7 +610,7 @@ async def test_supported_notification_sources_fail_closed_when_missing(
                 user_id=recipient.id,
                 source_type="archive_discussion_thread",
                 source_id=2_000_000_003,
-                source_message_id=2_000_000_004,
+                source_message_id=message.id,
             ),
         ]
         session.add_all(notifications)
