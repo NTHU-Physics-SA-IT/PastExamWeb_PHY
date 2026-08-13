@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
@@ -755,7 +755,7 @@ async def test_user_trash_records_authenticated_deleter(
 
     async with session_maker() as session:
         legacy_record = await session.get(User, legacy.id)
-        legacy_record.deleted_at = datetime.now(timezone.utc)
+        legacy_record.deleted_at = datetime.now(UTC)
         session.add(legacy_record)
         await session.commit()
 

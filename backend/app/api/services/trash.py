@@ -1,7 +1,6 @@
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import logging
-from typing import List, Optional
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from minio.error import S3Error
@@ -9,6 +8,24 @@ from pydantic import BaseModel
 from sqlalchemy import String, and_, cast, func, or_, select
 from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
+from app.api.services.archive_submission_lifecycle import (
+    LIFECYCLE_ARCHIVE_TRASHED,
+    LIFECYCLE_COURSE_TRASHED,
+    LIFECYCLE_LINKED_ARCHIVE_PERMANENTLY_DELETED,
+    acquire_stable_submission_lifecycle_locks,
+    archive_lifecycle_conflict_error,
+    collect_archive_submission_group,
+    course_lifecycle_conflict_error,
+    delete_archive_submission_events,
+    get_course_trash_course_id,
+    get_course_trash_previous_status,
+    hard_delete_archive_submission_group,
+    is_archive_submission_trashed,
+    is_course_trash_lifecycle_reason,
+    mark_linked_submissions_archive_permanently_deleted,
+    restore_archive_submission_group,
+    restore_archive_with_temporary_submissions,
+)
 from app.core.config import settings
 from app.db.session import get_session
 from app.models.models import (
@@ -27,39 +44,21 @@ from app.models.models import (
     TrashItem,
     User,
 )
-from app.api.services.archive_submission_lifecycle import (
-    archive_lifecycle_conflict_error,
-    course_lifecycle_conflict_error,
-    acquire_stable_submission_lifecycle_locks,
-    LIFECYCLE_ARCHIVE_TRASHED,
-    LIFECYCLE_COURSE_TRASHED,
-    LIFECYCLE_LINKED_ARCHIVE_PERMANENTLY_DELETED,
-    get_course_trash_course_id,
-    get_course_trash_previous_status,
-    is_course_trash_lifecycle_reason,
-    collect_archive_submission_group,
-    hard_delete_archive_submission_group,
-    is_archive_submission_trashed,
-    delete_archive_submission_events,
-    mark_linked_submissions_archive_permanently_deleted,
-    restore_archive_with_temporary_submissions,
-    restore_archive_submission_group,
-)
-from app.utils.auth import get_current_user
-from app.utils.storage import get_minio_client
-from app.services.archive_submission_links import (
-    ensure_archive_submission_link_available,
-)
-from app.services.archive_report_lifecycle_locks import (
-    acquire_stable_archive_report_locks,
-)
-from app.services import archive_lifecycle_locks
-from app.services import course_lifecycle_locks
+from app.services import archive_lifecycle_locks, course_lifecycle_locks
 from app.services.archive_lifecycle_locks import (
     LifecyclePlanRetryExhausted,
     PlanRebuildBudget,
 )
+from app.services.archive_report_lifecycle_locks import (
+    acquire_stable_archive_report_locks,
+)
+from app.services.archive_submission_links import (
+    ensure_archive_submission_link_available,
+)
 from app.services.course_lifecycle_locks import CourseLifecycleOperation
+from app.utils.auth import get_current_user
+from app.utils.exception_logging import redacted_exc_info
+from app.utils.storage import get_minio_client
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -112,42 +111,42 @@ def _to_trash_item(
     item_type: TrashEntityType,
     item_id: int,
     display_name: str,
-    display_name_en: Optional[str] = None,
+    display_name_en: str | None = None,
     deleted_at,
-    deleted_by_id: Optional[int],
-    deleted_by_name: Optional[str] = None,
-    user_email: Optional[str] = None,
-    status: Optional[str] = None,
-    academic_year: Optional[int] = None,
-    academic_term: Optional[str] = None,
-    parent_type: Optional[str] = None,
-    parent_id: Optional[int] = None,
-    parent_name: Optional[str] = None,
-    parent_name_en: Optional[str] = None,
-    created_archive_id: Optional[int] = None,
-    source_submission_id: Optional[int] = None,
-    course_id: Optional[int] = None,
-    course_name: Optional[str] = None,
-    course_name_en: Optional[str] = None,
-    requested_course_name: Optional[str] = None,
-    requested_course_name_en: Optional[str] = None,
-    requested_category_name: Optional[str] = None,
-    requested_category_name_en: Optional[str] = None,
-    requested_category_label: Optional[str] = None,
-    requested_category_label_en: Optional[str] = None,
-    reason: Optional[str] = None,
-    created_at: Optional[datetime] = None,
-    reporter_name: Optional[str] = None,
-    report_type: Optional[str] = None,
-    github_issue_number: Optional[int] = None,
-    github_issue_url: Optional[str] = None,
-    comment_author_name: Optional[str] = None,
-    comment_snapshot: Optional[str] = None,
-    archive_name: Optional[str] = None,
-    dependencies: Optional[list[str]] = None,
+    deleted_by_id: int | None,
+    deleted_by_name: str | None = None,
+    user_email: str | None = None,
+    status: str | None = None,
+    academic_year: int | None = None,
+    academic_term: str | None = None,
+    parent_type: str | None = None,
+    parent_id: int | None = None,
+    parent_name: str | None = None,
+    parent_name_en: str | None = None,
+    created_archive_id: int | None = None,
+    source_submission_id: int | None = None,
+    course_id: int | None = None,
+    course_name: str | None = None,
+    course_name_en: str | None = None,
+    requested_course_name: str | None = None,
+    requested_course_name_en: str | None = None,
+    requested_category_name: str | None = None,
+    requested_category_name_en: str | None = None,
+    requested_category_label: str | None = None,
+    requested_category_label_en: str | None = None,
+    reason: str | None = None,
+    created_at: datetime | None = None,
+    reporter_name: str | None = None,
+    report_type: str | None = None,
+    github_issue_number: int | None = None,
+    github_issue_url: str | None = None,
+    comment_author_name: str | None = None,
+    comment_snapshot: str | None = None,
+    archive_name: str | None = None,
+    dependencies: list[str] | None = None,
     can_restore: bool = True,
     can_permanent_delete: bool = True,
-    action_authority: Optional[TrashActionAuthority] = None,
+    action_authority: TrashActionAuthority | None = None,
 ) -> TrashItem:
     if action_authority is not None:
         dependencies = list(action_authority.dependencies)
@@ -223,7 +222,7 @@ def _dedupe_trash_items(items: list[TrashItem]) -> list[TrashItem]:
     return [*deduped.values(), *passthrough]
 
 
-def _format_academic_term(value: Optional[int]) -> Optional[str]:
+def _format_academic_term(value: int | None) -> str | None:
     if not value:
         return None
     if 1000 <= value < 2000:
@@ -233,7 +232,7 @@ def _format_academic_term(value: Optional[int]) -> Optional[str]:
     return f"{value} 年"
 
 
-def _format_deleted_by(users_by_id: dict[int, User], user_id: Optional[int]) -> Optional[str]:
+def _format_deleted_by(users_by_id: dict[int, User], user_id: int | None) -> str | None:
     if not user_id:
         return None
     user = users_by_id.get(user_id)
@@ -242,7 +241,7 @@ def _format_deleted_by(users_by_id: dict[int, User], user_id: Optional[int]) -> 
     return user.nickname or user.name or user.email or f"使用者 #{user_id}"
 
 
-def _dependency_count(count: int, unit: str, singular_unit: Optional[str] = None) -> str:
+def _dependency_count(count: int, unit: str, singular_unit: str | None = None) -> str:
     if count == 1 and singular_unit:
         return f"1 {singular_unit}"
     return f"{count} {unit}"
@@ -256,7 +255,7 @@ def _is_course_trash_temporary_submission(submission: ArchiveSubmission) -> bool
     )
 
 
-def _format_submission_status_label(status_value: Optional[SubmissionStatus]) -> str:
+def _format_submission_status_label(status_value: SubmissionStatus | None) -> str:
     return {
         SubmissionStatus.PENDING: "待審核",
         SubmissionStatus.APPROVED: "已通過",
@@ -365,8 +364,8 @@ async def _get_course_action_authority(
 async def _get_archive_action_authority(
     db: SQLModelAsyncSession,
     archive: Archive,
-    source_submission: Optional[ArchiveSubmission] = None,
-    restore_parent_submission: Optional[ArchiveSubmission] = None,
+    source_submission: ArchiveSubmission | None = None,
+    restore_parent_submission: ArchiveSubmission | None = None,
 ) -> TrashActionAuthority:
     course_is_trashed = await _count_rows(
         db,
@@ -519,7 +518,7 @@ async def _get_user_action_authority(
 async def _resolve_submission_linked_archive(
     db: SQLModelAsyncSession,
     submission: ArchiveSubmission,
-) -> tuple[Optional[Archive], list[str]]:
+) -> tuple[Archive | None, list[str]]:
     if submission.created_archive_id:
         linked_archive = await db.get(Archive, submission.created_archive_id)
         if linked_archive:
@@ -664,7 +663,7 @@ def _blocker_with_reason(
     name: str,
     status_value: str = "active",
     *,
-    reason: Optional[str] = None,
+    reason: str | None = None,
 ) -> dict:
     blocker = _blocker(item_type, item_id, name, status_value)
     if reason:
@@ -678,7 +677,11 @@ def _is_created_archive_id_nullable() -> bool:
         if column is None:
             return True
         return bool(column.nullable)
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Unable to inspect archive-link nullability; using conservative fallback",
+            exc_info=redacted_exc_info(exc),
+        )
         return True
 
 
@@ -702,8 +705,8 @@ def _delete_result(
     item_id: int,
     name: str,
     deleted: int,
-    details: Optional[list[dict]] = None,
-    warnings: Optional[list[str]] = None,
+    details: list[dict] | None = None,
+    warnings: list[str] | None = None,
 ) -> dict:
     return {
         "success": True,
@@ -814,11 +817,11 @@ async def _get_active_user_blockers(db: SQLModelAsyncSession, user: User) -> lis
 
 async def _remove_storage_object_if_unreferenced(
     db: SQLModelAsyncSession,
-    object_name: Optional[str],
+    object_name: str | None,
     warnings: list[str],
     *,
-    exclude_archive_id: Optional[int] = None,
-    exclude_submission_ids: Optional[list[int]] = None,
+    exclude_archive_id: int | None = None,
+    exclude_submission_ids: list[int] | None = None,
 ) -> int:
     if not object_name:
         return 0
@@ -867,6 +870,10 @@ async def _remove_storage_object_if_unreferenced(
         warnings.append(f"Storage object delete warning for {object_name}: {exc}")
         return 0
     except Exception as exc:
+        logger.warning(
+            "Unexpected storage deletion failure; preserving best-effort cleanup",
+            exc_info=redacted_exc_info(exc),
+        )
         warnings.append(f"Storage object delete warning for {object_name}: {exc}")
         return 0
 
@@ -931,7 +938,7 @@ async def _hard_delete_submission(
 async def _get_deleted_submission_parent_for_archive(
     db: SQLModelAsyncSession,
     archive_id: int | None,
-) -> Optional[ArchiveSubmission]:
+) -> ArchiveSubmission | None:
     if archive_id is None:
         return None
     return (
@@ -959,7 +966,7 @@ async def _hard_delete_submission_archive_pair(
     archive: Archive,
     warnings: list[str],
 ) -> dict:
-    timestamp = datetime.now(timezone.utc)
+    timestamp = datetime.now(UTC)
     linked_submissions = (
         await db.execute(
             select(ArchiveSubmission).where(ArchiveSubmission.created_archive_id == archive.id)
@@ -1160,9 +1167,9 @@ async def _hard_delete_user(
     }
 
 
-@router.get("", response_model=List[TrashItem])
+@router.get("", response_model=list[TrashItem])
 async def list_trash_items(
-    item_type: Optional[str] = Query(default=None),
+    item_type: str | None = Query(default=None),
     current_user=Depends(get_current_user),
     db: SQLModelAsyncSession = Depends(get_session),
 ):
@@ -1310,9 +1317,9 @@ async def list_trash_items(
                 )
             except Exception as exc:
                 logger.warning(
-                    "Failed to build trashed course category item (id=%s): %s",
+                    "Failed to build trashed course category item (id=%s)",
                     getattr(category, "id", None),
-                    exc,
+                    exc_info=redacted_exc_info(exc),
                 )
 
     if normalized_item_type in (None, TrashEntityType.COURSE):
@@ -1368,9 +1375,9 @@ async def list_trash_items(
                 )
             except Exception as exc:
                 logger.warning(
-                    "Failed to build trashed course item (id=%s): %s",
+                    "Failed to build trashed course item (id=%s)",
                     getattr(course, "id", None),
-                    exc,
+                    exc_info=redacted_exc_info(exc),
                 )
 
     if normalized_item_type in (None, TrashEntityType.ARCHIVE):
@@ -1506,9 +1513,9 @@ async def list_trash_items(
                 )
             except Exception as exc:
                 logger.warning(
-                    "Failed to build trashed archive item (id=%s): %s",
+                    "Failed to build trashed archive item (id=%s)",
                     getattr(archive, "id", None),
-                    exc,
+                    exc_info=redacted_exc_info(exc),
                 )
 
     if normalized_item_type in (None, TrashEntityType.NOTIFICATION):
@@ -1537,9 +1544,9 @@ async def list_trash_items(
                 )
             except Exception as exc:
                 logger.warning(
-                    "Failed to build trashed notification item (id=%s): %s",
+                    "Failed to build trashed notification item (id=%s)",
                     getattr(notification, "id", None),
-                    exc,
+                    exc_info=redacted_exc_info(exc),
                 )
 
     if normalized_item_type in (None, TrashEntityType.USER):
@@ -1565,9 +1572,9 @@ async def list_trash_items(
                 )
             except Exception as exc:
                 logger.warning(
-                    "Failed to build trashed user item (id=%s): %s",
+                    "Failed to build trashed user item (id=%s)",
                     getattr(user, "id", None),
-                    exc,
+                    exc_info=redacted_exc_info(exc),
                 )
 
     if normalized_item_type in (None, TrashEntityType.ARCHIVE_SUBMISSION):
@@ -1615,7 +1622,7 @@ async def list_trash_items(
             ).scalars().all()
             archive_map = {archive.id: archive for archive in archive_rows if archive.id is not None}
 
-        submission_linked_archive_map: dict[int, Optional[Archive]] = {}
+        submission_linked_archive_map: dict[int, Archive | None] = {}
         for submission in submissions:
             is_course_trash_temporary = _is_course_trash_temporary_submission(submission)
             linked_archive = (
@@ -1728,9 +1735,9 @@ async def list_trash_items(
                 )
             except Exception as exc:
                 logger.warning(
-                    "Failed to build trashed archive submission item (id=%s): %s",
+                    "Failed to build trashed archive submission item (id=%s)",
                     getattr(submission, "id", None),
-                    exc,
+                    exc_info=redacted_exc_info(exc),
                 )
 
     return sorted(_dedupe_trash_items(items), key=lambda item: item.deleted_at, reverse=True)
@@ -1745,7 +1752,7 @@ async def restore_trash_item(
     if not getattr(current_user, "is_admin", False):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     if payload.item_type == TrashEntityType.SYSTEM_ISSUE_REPORT:
         report = await db.get(SystemIssueReport, payload.item_id)
@@ -2105,7 +2112,7 @@ async def restore_trash_item(
 
 @router.delete("/bulk")
 async def bulk_permanently_delete_trash_items(
-    item_type: Optional[TrashEntityType] = Query(default=None),
+    item_type: TrashEntityType | None = Query(default=None),
     current_user=Depends(get_current_user),
     db: SQLModelAsyncSession = Depends(get_session),
 ):
@@ -2161,8 +2168,14 @@ async def bulk_permanently_delete_trash_items(
                     "blockingDependencies": detail.get("blockingDependencies", []),
                 }
             )
-        except Exception:
+        except Exception as exc:
             await db.rollback()
+            logger.error(
+                "Unexpected permanent-delete failure for %s/%s",
+                trash_type.value,
+                item.id,
+                exc_info=redacted_exc_info(exc),
+            )
             failures.append(
                 {
                     "type": trash_type.value,

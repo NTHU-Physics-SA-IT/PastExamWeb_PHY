@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
@@ -16,7 +16,7 @@ from app.api.services.users import (
 )
 from app.models.models import User, UserPresenceSession, UserRoles
 
-NOW = datetime(2026, 7, 15, 15, 30, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 15, 15, 30, tzinfo=UTC)
 
 
 def session(
@@ -89,15 +89,15 @@ def test_clamps_open_expired_future_and_partially_overlapping_sessions():
 
 
 def test_splits_session_across_hours_midnight_month_and_range_edges():
-    range_start = datetime(2026, 6, 30, 23, 0, tzinfo=timezone.utc)
+    range_start = datetime(2026, 6, 30, 23, 0, tzinfo=UTC)
     buckets = [
         (range_start, range_start + timedelta(hours=1)),
         (range_start + timedelta(hours=1), range_start + timedelta(hours=2)),
     ]
     intervals = [
         (
-            datetime(2026, 6, 30, 23, 45, tzinfo=timezone.utc),
-            datetime(2026, 7, 1, 0, 20, tzinfo=timezone.utc),
+            datetime(2026, 6, 30, 23, 45, tzinfo=UTC),
+            datetime(2026, 7, 1, 0, 20, tzinfo=UTC),
         )
     ]
 
@@ -106,7 +106,7 @@ def test_splits_session_across_hours_midnight_month_and_range_edges():
 
 @pytest.mark.parametrize(("days", "point_count"), [(7, 7), (30, 30), (90, 90)])
 def test_daily_contract_has_fixed_points_and_never_exceeds_bucket(days, point_count):
-    range_start = datetime(2026, 7, 15, tzinfo=timezone.utc) - timedelta(days=days - 1)
+    range_start = datetime(2026, 7, 15, tzinfo=UTC) - timedelta(days=days - 1)
     result = build_user_online_duration(
         user_id=7,
         mode="daily",
@@ -125,7 +125,7 @@ def test_daily_contract_has_fixed_points_and_never_exceeds_bucket(days, point_co
 
 
 def test_hourly_contract_has_24_points_and_expected_split():
-    range_start = datetime(2026, 7, 15, tzinfo=timezone.utc)
+    range_start = datetime(2026, 7, 15, tzinfo=UTC)
     result = build_user_online_duration(
         user_id=7,
         mode="hourly",
@@ -150,11 +150,11 @@ def test_hourly_contract_has_24_points_and_expected_split():
 
 
 def test_product_date_and_midnight_use_taipei_calendar_boundaries():
-    utc_previous_day = datetime(2026, 7, 14, 16, 5, tzinfo=timezone.utc)
+    utc_previous_day = datetime(2026, 7, 14, 16, 5, tzinfo=UTC)
 
     assert _product_date(utc_previous_day) == date(2026, 7, 15)
     assert _product_midnight_utc(date(2026, 7, 15)) == datetime(
-        2026, 7, 14, 16, tzinfo=timezone.utc
+        2026, 7, 14, 16, tzinfo=UTC
     )
 
 
@@ -180,8 +180,8 @@ def test_incomplete_product_day_keeps_24_points_partial_hour_and_future_zeroes()
 
     assert result.timezone == "Asia/Taipei"
     assert len(result.points) == 24
-    assert result.points[0].start == datetime(2026, 7, 14, 16, tzinfo=timezone.utc)
-    assert result.points[-1].end == datetime(2026, 7, 15, 16, tzinfo=timezone.utc)
+    assert result.points[0].start == datetime(2026, 7, 14, 16, tzinfo=UTC)
+    assert result.points[-1].end == datetime(2026, 7, 15, 16, tzinfo=UTC)
     assert result.points[4].duration_seconds == 1200
     assert all(point.duration_seconds == 0 for point in result.points[5:])
     assert all(point.has_data is False for point in result.points[5:])
@@ -284,7 +284,7 @@ async def test_endpoint_permissions_not_found_and_validation():
         )
     assert bad_days.value.status_code == 422
 
-    product_today = _product_date(datetime.now(timezone.utc))
+    product_today = _product_date(datetime.now(UTC))
     for invalid_date in (
         product_today + timedelta(days=1),
         product_today - timedelta(days=7),

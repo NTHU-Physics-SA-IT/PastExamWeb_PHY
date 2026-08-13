@@ -6,12 +6,12 @@ from sqlalchemy import UniqueConstraint
 from sqlalchemy.dialects.sqlite import dialect as sqlite_dialect
 from sqlalchemy.schema import CreateTable
 
+from app.db.migration_safety import metadata_for_revision
 from app.db.schema_manifests import (
     HEAD_SCHEMA_REVISION,
     get_manifest_spec,
     reviewed_manifest_revisions,
 )
-from app.db.migration_safety import metadata_for_revision
 from app.models.models import ArchiveSubmission, User
 
 

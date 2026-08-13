@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from subprocess import CompletedProcess, TimeoutExpired
-import sys
 
 import pytest
 
@@ -24,7 +24,6 @@ from app.db.audit.runner import (
     run_with_command,
     validate_adapter_sql,
 )
-
 
 EXPECTED_LEDGER = "f5e1d8c3a7b2"
 
@@ -288,6 +287,21 @@ def test_output_schema_rejects_unknown_labels_and_unsafe_fields() -> None:
         '"difference": 0',
         '"difference": 0, "row_id": 123',
     )
+    with pytest.raises(AuditExecutionError, match="result_schema_invalid"):
+        parse_process_output(
+            request(),
+            CompletedProcess(args=["psql"], returncode=0, stdout=output, stderr=""),
+        )
+
+
+def test_output_schema_normalizes_non_object_marker_payload() -> None:
+    output = "\n".join(
+        "__PASTEXAM_AUDIT_RESULT__[]"
+        if line.startswith("__PASTEXAM_AUDIT_RESULT__")
+        else line
+        for line in completed_output().splitlines()
+    )
+
     with pytest.raises(AuditExecutionError, match="result_schema_invalid"):
         parse_process_output(
             request(),

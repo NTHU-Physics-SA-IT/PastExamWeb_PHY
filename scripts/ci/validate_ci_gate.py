@@ -144,24 +144,59 @@ def _require_pull_request_authority(
     if not isinstance(base, dict) or not isinstance(head, dict):
         raise RuntimeError("current pull request base or head is malformed")
     base_repository = base.get("repo")
+    head_repository = head.get("repo")
     if (
         not isinstance(base_repository, dict)
         or base_repository.get("full_name") != repository
+        or not isinstance(head_repository, dict)
+        or head_repository.get("full_name") != repository
     ):
         raise RuntimeError("current pull request repository does not match")
     if base.get("sha") != base_sha:
         raise RuntimeError("current pull request base SHA does not match")
     if head.get("sha") != execution_head_sha:
         raise RuntimeError("current pull request head SHA does not match")
-    if pull_request.get("merge_commit_sha") != attested_sha:
-        raise RuntimeError("current pull request merge SHA does not match")
 
-    parents = git.commit_object_parents(attested_sha)
     expected_parents = (base_sha, execution_head_sha)
-    if parents != expected_parents:
+    attested_parents = git.commit_object_parents(attested_sha)
+    if attested_parents != expected_parents:
         raise RuntimeError(
             "attested pull request merge parents do not match: "
-            f"observed {parents!r}, expected {expected_parents!r}"
+            f"observed {attested_parents!r}, expected {expected_parents!r}"
+        )
+
+    current_merge_sha = _require_sha(
+        pull_request.get("merge_commit_sha"),
+        "current pull request merge SHA",
+    )
+    if current_merge_sha == attested_sha:
+        return
+
+    current_merge = api.commit_object(current_merge_sha)
+    if current_merge.get("sha") != current_merge_sha:
+        raise RuntimeError("current pull request merge commit identity does not match")
+    current_parents_payload = current_merge.get("parents")
+    if not isinstance(current_parents_payload, list) or not all(
+        isinstance(parent, dict) for parent in current_parents_payload
+    ):
+        raise RuntimeError("current pull request merge parents are malformed")
+    current_parents = tuple(parent.get("sha") for parent in current_parents_payload)
+    if current_parents != expected_parents:
+        raise RuntimeError(
+            "current pull request merge parents do not match: "
+            f"observed {current_parents!r}, expected {expected_parents!r}"
+        )
+
+    current_tree = current_merge.get("tree")
+    if not isinstance(current_tree, dict):
+        raise RuntimeError("current pull request merge tree is malformed")
+    current_tree_sha = _require_sha(
+        current_tree.get("sha"),
+        "current pull request merge tree SHA",
+    )
+    if current_tree_sha != git.tree_sha(attested_sha):
+        raise RuntimeError(
+            "current pull request merge tree does not match attested tree"
         )
 
 

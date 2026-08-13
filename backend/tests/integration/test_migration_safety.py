@@ -6,17 +6,14 @@ from pathlib import Path
 from urllib.parse import quote, quote_plus
 
 import pytest
-from alembic import command
-from sqlalchemy import create_engine, inspect as sa_inspect, text
+from sqlalchemy import create_engine, text
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.engine import Engine, make_url
 import yaml
 
 import migrate
+from alembic import command
 from app.core.config import settings
-from app.db.test_database_guard import (
-    validate_connected_test_database,
-    validate_test_database_target,
-)
 from app.db.migration_safety import (
     alembic_config,
     database_url,
@@ -24,6 +21,10 @@ from app.db.migration_safety import (
     migration_advisory_lock,
     revision_graph,
     safe_error,
+)
+from app.db.test_database_guard import (
+    validate_connected_test_database,
+    validate_test_database_target,
 )
 
 
@@ -589,10 +590,12 @@ def test_concurrent_migration_advisory_lock_fails_closed(
 ) -> None:
     second_engine = create_engine(alembic_config().get_main_option("sqlalchemy.url"))
     try:
-        with migration_advisory_lock(clean_public_schema):
-            with pytest.raises(RuntimeError, match="advisory lock"):
-                with migration_advisory_lock(second_engine):
-                    pass
+        with (
+            migration_advisory_lock(clean_public_schema),
+            pytest.raises(RuntimeError, match="advisory lock"),
+            migration_advisory_lock(second_engine),
+        ):
+            pass
     finally:
         second_engine.dispose()
 
@@ -618,8 +621,10 @@ def test_multiple_repository_heads_fail_closed(
         ("DROP TABLE announcement_read_receipts", "tables"),
         ("ALTER TABLE users DROP COLUMN nickname", "users.columns"),
         (
-            "ALTER TABLE users ALTER COLUMN show_level_title TYPE text "
-            "USING show_level_title::text",
+            (
+                "ALTER TABLE users ALTER COLUMN show_level_title TYPE text "
+                "USING show_level_title::text"
+            ),
             "users.show_level_title.type",
         ),
         (
@@ -627,8 +632,10 @@ def test_multiple_repository_heads_fail_closed(
             "users.email.nullability",
         ),
         (
-            "ALTER TABLE system_issue_reports "
-            "ALTER COLUMN github_sync_status DROP DEFAULT",
+            (
+                "ALTER TABLE system_issue_reports "
+                "ALTER COLUMN github_sync_status DROP DEFAULT"
+            ),
             "system_issue_reports.github_sync_status.server_default",
         ),
         (
@@ -636,8 +643,10 @@ def test_multiple_repository_heads_fail_closed(
             "users.foreign_keys",
         ),
         (
-            "ALTER TABLE announcement_read_receipts "
-            "DROP CONSTRAINT uq_announcement_read_receipts_notification_user",
+            (
+                "ALTER TABLE announcement_read_receipts "
+                "DROP CONSTRAINT uq_announcement_read_receipts_notification_user"
+            ),
             "announcement_read_receipts.unique_constraints",
         ),
         (

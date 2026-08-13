@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-
 HEAD_SCHEMA_REVISION = "d4b7e2a9c6f1"
 
 

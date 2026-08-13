@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from httpx import AsyncClient
@@ -22,7 +22,7 @@ async def _create_course(session_maker, *, name: str, deleted: bool = False) -> 
     async with session_maker() as session:
         course = Course(name=name, category=CourseCategory.FRESHMAN.value)
         if deleted:
-            course.deleted_at = datetime.now(timezone.utc)
+            course.deleted_at = datetime.now(UTC)
         session.add(course)
         await session.commit()
         await session.refresh(course)
@@ -48,7 +48,7 @@ async def _create_archive(
             uploader_id=uploader_id,
         )
         if deleted:
-            archive.deleted_at = datetime.now(timezone.utc)
+            archive.deleted_at = datetime.now(UTC)
         session.add(archive)
         await session.commit()
         await session.refresh(archive)

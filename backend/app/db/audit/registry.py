@@ -12,7 +12,6 @@ from app.db.audit.models import (
     PreviousStatusAggregateCounts,
 )
 
-
 ELIGIBILITY_AUDIT_ID = "archive-submission-self-delete-eligibility"
 PREVIOUS_STATUS_REVISION = "d8f2a6c1b4e7"
 ONE_TO_ONE_REVISION = "6f3a9c2d8e41"

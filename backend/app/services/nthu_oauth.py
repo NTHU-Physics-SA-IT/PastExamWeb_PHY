@@ -15,7 +15,6 @@ from app.services.nthu_access_policy import (
     load_nthu_access_policy,
 )
 
-
 NTHU_PROVIDER = "nthu"
 NTHU_APPROVED_SCOPES = ("uuid", "inschool", "userid", "name", "email")
 _MAX_IDENTITY_LENGTH = 255

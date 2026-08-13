@@ -7,7 +7,6 @@ from app.db.test_database_guard import (
     validate_test_database_target,
 )
 
-
 RUNTIME_URL = "postgresql+asyncpg://runtime:secret@db:5432/archive_db"
 VALID_TEST_URL = (
     "postgresql+asyncpg://pastexam_test_runner:secret@"

@@ -7,7 +7,6 @@ import secrets
 from app.core.config import settings
 from app.utils.auth import redis_client
 
-
 LOGIN_HANDOFF_TTL_SECONDS = settings.OAUTH_HANDOFF_TTL_SECONDS
 _KEY_PREFIX = "auth:login-handoff:"
 _MAX_CODE_LENGTH = 256
