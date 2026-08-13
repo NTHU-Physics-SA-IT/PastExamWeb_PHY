@@ -17,7 +17,10 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getContributorLevelPalette } from '../utils/submissionLevel'
+
+const { t } = useI18n()
 
 const props = defineProps({
   level: {
@@ -63,8 +66,8 @@ const emblemMark = computed(() => {
 })
 const accessibleLabel = computed(() =>
   props.title
-    ? `投稿者等級 Lv. ${validLevel.value} ${props.title}`
-    : `投稿者等級 Lv. ${validLevel.value}`
+    ? t('投稿者等級 Lv. {level} {title}', { level: validLevel.value, title: props.title })
+    : t('投稿者等級 Lv. {level}', { level: validLevel.value })
 )
 </script>
 

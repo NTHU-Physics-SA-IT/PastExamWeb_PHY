@@ -8,12 +8,12 @@
       :draggable="false"
       :blockScroll="true"
       class="notification-center-dialog"
-      :pt="{ root: { 'aria-label': '公告與通知', 'aria-labelledby': null } }"
+      :pt="{ root: { 'aria-label': $t('公告與通知'), 'aria-labelledby': null } }"
     >
       <template #header>
         <div class="notification-dialog-header">
           <i class="pi pi-bell text-2xl" />
-          <span class="notification-dialog-header__title">公告與通知</span>
+          <span class="notification-dialog-header__title">{{ $t('公告與通知') }}</span>
           <Badge v-if="counts.total" :value="counts.total" severity="danger" />
         </div>
       </template>
@@ -23,9 +23,9 @@
       </div>
       <Tabs v-else v-model:value="activeTab" class="notification-center-tabs">
         <TabList>
-          <Tab value="announcements"><i class="pi pi-megaphone mr-2" />公告</Tab>
+          <Tab value="announcements"><i class="pi pi-megaphone mr-2" />{{ $t('公告') }}</Tab>
           <Tab value="personal">
-            <i class="pi pi-bell mr-2" />個人通知
+            <i class="pi pi-bell mr-2" />{{ $t('個人通知') }}
             <Badge
               v-if="counts.personal_notifications"
               :value="counts.personal_notifications"
@@ -37,7 +37,7 @@
         <TabPanels>
           <TabPanel value="announcements">
             <div v-if="announcements.length === 0" class="notification-empty">
-              <i class="pi pi-megaphone text-4xl" /><span>目前沒有公告</span>
+              <i class="pi pi-megaphone text-4xl" /><span>{{ $t('目前沒有公告') }}</span>
             </div>
             <div v-else class="notification-groups notification-announcement-groups">
               <section
@@ -59,10 +59,10 @@
                     <div class="notification-card__heading">
                       <span class="notification-card__type">
                         <i class="pi pi-megaphone notification-card__icon" aria-hidden="true" />
-                        <span>公告</span>
+                        <span>{{ $t('公告') }}</span>
                       </span>
                       <Tag :severity="item.is_read ? 'secondary' : 'warn'">{{
-                        item.is_read ? '已讀' : '未讀'
+                        item.is_read ? $t('已讀') : $t('未讀')
                       }}</Tag>
                     </div>
                     <strong class="notification-card__title">{{ item.title }}</strong>
@@ -72,11 +72,11 @@
                       }}</Tag>
                     </div>
                     <div class="notification-card__footer">
-                      <small class="text-500"
-                        >最近更新：{{ formatTimestamp(item.updated_at) }}</small
-                      >
+                      <small class="text-500">{{
+                        $t('最近更新：{time}', { time: formatTimestamp(item.updated_at) })
+                      }}</small>
                       <Button
-                        label="檢視"
+                        :label="$t('檢視')"
                         size="small"
                         outlined
                         class="notification-view-button"
@@ -91,10 +91,12 @@
 
           <TabPanel value="personal">
             <div class="personal-toolbar">
-              <span class="text-sm text-500">{{ counts.personal_notifications }} 則未讀</span>
+              <span class="text-sm text-500">{{
+                $t('{count} 則未讀', { count: counts.personal_notifications })
+              }}</span>
               <div class="personal-toolbar__actions">
                 <Button
-                  label="全部標記為已讀"
+                  :label="$t('全部標記為已讀')"
                   icon="pi pi-check-circle"
                   size="small"
                   outlined
@@ -103,7 +105,7 @@
                   @click="$emit('mark-all-personal-read')"
                 />
                 <Button
-                  label="全部刪除"
+                  :label="$t('全部刪除')"
                   icon="pi pi-trash"
                   severity="danger"
                   size="small"
@@ -116,7 +118,7 @@
               </div>
             </div>
             <div v-if="personalNotifications.length === 0" class="notification-empty">
-              <i class="pi pi-bell text-4xl" /><span>目前沒有個人通知</span>
+              <i class="pi pi-bell text-4xl" /><span>{{ $t('目前沒有個人通知') }}</span>
             </div>
             <div v-else class="notification-groups notification-personal-groups">
               <section
@@ -138,20 +140,22 @@
                     <div class="notification-card__heading">
                       <span class="notification-card__type">
                         <i :class="notificationIcon(item.notification_type)" aria-hidden="true" />
-                        <span>個人通知</span>
+                        <span>{{ $t('個人通知') }}</span>
                       </span>
                       <Tag :severity="item.read_at ? 'secondary' : 'warn'">{{
-                        item.read_at ? '已讀' : '未讀'
+                        item.read_at ? $t('已讀') : $t('未讀')
                       }}</Tag>
                     </div>
                     <strong class="notification-card__title">{{ item.title }}</strong>
                     <p class="notification-card__summary">{{ item.message }}</p>
-                    <small v-if="!item.source_available" class="text-500">來源已不存在</small>
+                    <small v-if="!item.source_available" class="text-500">{{
+                      $t('來源已不存在')
+                    }}</small>
                     <div class="notification-card__footer">
                       <small class="text-500">{{ formatTimestamp(item.created_at) }}</small>
                       <div class="notification-card__actions">
                         <Button
-                          label="檢視"
+                          :label="$t('檢視')"
                           size="small"
                           outlined
                           class="notification-view-button"
@@ -164,8 +168,8 @@
                           size="small"
                           outlined
                           class="notification-delete-button"
-                          aria-label="刪除通知"
-                          title="刪除通知"
+                          :aria-label="$t('刪除通知')"
+                          :title="$t('刪除通知')"
                           :loading="deletingPersonalId === item.id"
                           :disabled="deletingPersonalId === item.id || deletingAllPersonal"
                           @click="$emit('delete-personal', item)"
@@ -187,7 +191,7 @@
       modal
       :style="{ width: '520px', maxWidth: '90vw' }"
       :draggable="false"
-      :header="selectedType === 'announcement' ? '公告內容' : '個人通知'"
+      :header="selectedType === 'announcement' ? $t('公告內容') : $t('個人通知')"
     >
       <div v-if="selectedItem" class="notification-detail">
         <h3>{{ selectedItem.title }}</h3>
@@ -200,8 +204,10 @@
           v-html="renderedBody"
         />
         <p v-else>{{ selectedItem.message }}</p>
-        <small v-if="selectedType === 'personal' && !selectedItem.source_available" class="text-500"
-          >來源已不存在，無法開啟原留言。</small
+        <small
+          v-if="selectedType === 'personal' && !selectedItem.source_available"
+          class="text-500"
+          >{{ $t('來源已不存在，無法開啟原留言。') }}</small
         >
       </div>
     </Dialog>
@@ -210,8 +216,12 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { renderMarkdown } from '@/utils/markdown'
+import { localizedPersonalNotification } from '@/utils/personalNotificationPresentation'
 import { formatExactDateTime24h } from '@/utils/time'
+
+const { t, locale } = useI18n()
 
 const props = defineProps({
   visible: Boolean,
@@ -239,11 +249,17 @@ const selectedItem = ref(null)
 const selectedType = ref('announcement')
 const renderedBody = computed(() => renderMarkdown(selectedItem.value?.body || ''))
 const groupedAnnouncements = computed(() => groupItemsByMonth(props.announcements, 'updated_at'))
+const localizedPersonalNotifications = computed(() =>
+  props.personalNotifications.map((item) => ({
+    ...item,
+    ...localizedPersonalNotification(item),
+  }))
+)
 const groupedPersonalNotifications = computed(() =>
-  groupItemsByMonth(props.personalNotifications, 'created_at')
+  groupItemsByMonth(localizedPersonalNotifications.value, 'created_at')
 )
 const severity = (value) => (value === 'danger' ? 'danger' : 'info')
-const severityLabel = (value) => (value === 'danger' ? '重要' : '一般')
+const severityLabel = (value) => (value === 'danger' ? t('重要') : t('一般'))
 
 function groupItemsByMonth(items, dateField) {
   const groups = new Map()
@@ -263,7 +279,9 @@ function groupItemsByMonth(items, dateField) {
   sortedItems.forEach(({ item, date, timestamp }) => {
     const key = timestamp === null ? 'unknown' : `${date.getFullYear()}-${date.getMonth() + 1}`
     const label =
-      timestamp === null ? '日期未明' : `${date.getFullYear()}年${date.getMonth() + 1}月`
+      timestamp === null
+        ? t('日期未明')
+        : new Intl.DateTimeFormat(locale.value, { year: 'numeric', month: 'long' }).format(date)
     if (!groups.has(key)) groups.set(key, { key, label, items: [] })
     groups.get(key).items.push(item)
   })
@@ -329,7 +347,7 @@ watch(
   () => [props.visible, props.focusType, props.focusId, props.loading],
   ([visible, type, id, loading]) => {
     if (!visible || !id || loading) return
-    const items = type === 'personal' ? props.personalNotifications : props.announcements
+    const items = type === 'personal' ? localizedPersonalNotifications.value : props.announcements
     const item = items.find((candidate) => candidate.id === id)
     if (!item) return
     activeTab.value = type === 'personal' ? 'personal' : 'announcements'

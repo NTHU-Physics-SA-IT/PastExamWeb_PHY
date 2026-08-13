@@ -58,7 +58,11 @@ Reviewed manifests currently cover:
 - `6f3a9c2d8e41`: the reviewed schema before NTHU OAuth provider-identity
   uniqueness;
 - `9f1c2a7e4b63`: the reviewed schema before persisted NTHU student ID; and
-- `b7e3d9a1c5f2`: the current repository head and SQLModel metadata contract.
+- `b7e3d9a1c5f2`: the reviewed schema before bilingual course catalog fields;
+  and
+- `c2a8e4f6b9d1`: the reviewed schema before bilingual ArchiveSubmission
+  presentation snapshots; and
+- `d4b7e2a9c6f1`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,
@@ -171,6 +175,21 @@ unchanged. Upgrade verifies the exact reviewed source revision and source
 columns before DDL, then validates the new type and nullability. Downgrade
 removes only this attribute column and preserves all User rows and provider
 identity values.
+
+The bilingual course-catalog migration adds only nullable `courses.name_en`
+and nullable `course_category_configs.name_en` / `label_en`. It preserves the
+canonical Chinese fields, category keys, course identities, ordering, archive
+relationships, and custom rows. The reviewed upgrade backfills exactly the 71
+canonical course mappings and six canonical category mappings; a missing
+canonical source row aborts without partial application. Downgrade drops only
+the three additive English display columns.
+
+The bilingual ArchiveSubmission snapshot migration adds only nullable
+`requested_course_name_en`, `requested_category_name_en`, and
+`requested_category_label_en` columns. Existing rows remain null and retain
+their existing Chinese snapshots. New submissions copy English metadata only
+from the canonical Course and CourseCategory records selected at submission
+time; missing English metadata remains null.
 
 On the first bootstrap, one missing canonical key or any extra custom category
 is evidence that the database is not the expected clean initialized target,

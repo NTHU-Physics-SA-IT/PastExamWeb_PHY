@@ -47,7 +47,7 @@
 
     <section class="hero-shell">
       <div class="hero-copy">
-        <p class="eyebrow">PHY Archive</p>
+        <p class="eyebrow">PHY ARCHIVE</p>
         <div class="hero-title-lockup">
           <h1><span class="title-line">清大物理</span><span class="title-line">考古系統</span></h1>
           <p class="title-campus"><span></span>NTHU PHYSICS<span></span></p>
@@ -56,14 +56,19 @@
         <div class="hero-actions">
           <Button
             icon="pi pi-building-columns"
-            label="清華校務系統登入"
+            :label="$t('清華校務系統登入')"
             size="large"
             @click="startNthuLogin"
           />
-          <Button icon="pi pi-sign-in" label="本地帳號登入" size="large" @click="openLogin" />
+          <Button
+            icon="pi pi-sign-in"
+            :label="$t('本地帳號登入')"
+            size="large"
+            @click="openLogin"
+          />
           <Button
             icon="pi pi-book"
-            label="瀏覽公開課程目錄"
+            :label="$t('瀏覽公開課程目錄')"
             size="large"
             severity="secondary"
             outlined
@@ -99,6 +104,7 @@ defineOptions({
 })
 
 import { ref, onMounted, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useTheme } from '../utils/useTheme'
 import { statisticsService } from '../api'
@@ -108,6 +114,7 @@ import { DEFAULT_DESCRIPTION, SITE_URL, setSeo } from '../utils/seo'
 import 'katex/dist/katex.min.css'
 
 const { isDarkTheme } = useTheme()
+const { t, locale } = useI18n()
 const router = useRouter()
 const formulaCloud = ref(null)
 
@@ -136,32 +143,32 @@ const statsLoaded = ref(false)
 const statistics = computed(() => [
   {
     key: 'totalArchives',
-    label: '考古題',
+    label: t('考古題'),
     icon: 'pi pi-file-pdf',
   },
   {
     key: 'totalCourses',
-    label: '課程',
+    label: t('課程'),
     icon: 'pi pi-book',
   },
   {
     key: 'totalDownloads',
-    label: '下載',
+    label: t('下載'),
     icon: 'pi pi-download',
   },
   {
     key: 'totalUsers',
-    label: '使用者',
+    label: t('使用者'),
     icon: 'pi pi-users',
   },
   {
     key: 'activeToday',
-    label: '今日活躍',
+    label: t('今日活躍'),
     icon: 'pi pi-chart-line',
   },
   {
     key: 'onlineUsers',
-    label: '在線',
+    label: t('在線'),
     icon: 'pi pi-circle-fill',
   },
 ])
@@ -306,7 +313,7 @@ function applyHomeSeo() {
         name: '清大物理考古系統',
         alternateName: 'PhysArchive',
         url: `${SITE_URL}/`,
-        inLanguage: 'zh-TW',
+        inLanguage: locale.value,
         publisher: { '@id': `${SITE_URL}/#organization` },
       },
       {
@@ -360,7 +367,7 @@ function formatNumber(num) {
   if (Number.isNaN(num) || num === null || num === undefined) {
     return '--'
   }
-  return Number(num).toLocaleString('zh-TW')
+  return Number(num).toLocaleString(locale.value)
 }
 </script>
 

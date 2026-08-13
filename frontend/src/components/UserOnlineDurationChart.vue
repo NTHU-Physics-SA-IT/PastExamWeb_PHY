@@ -2,17 +2,17 @@
   <section class="user-duration-card" aria-labelledby="user-duration-title">
     <div class="user-duration-heading">
       <div>
-        <h3 id="user-duration-title">在線時長統計</h3>
+        <h3 id="user-duration-title">{{ $t('在線時長統計') }}</h3>
         <p>{{ description }}</p>
       </div>
-      <div class="user-duration-switch" role="group" aria-label="切換在線時長統計模式">
+      <div class="user-duration-switch" role="group" :aria-label="$t('切換在線時長統計模式')">
         <button
           type="button"
           :class="{ 'is-active': mode === 'hourly' }"
           :aria-pressed="mode === 'hourly'"
           @click="setMode('hourly')"
         >
-          當日在線時長紀錄
+          {{ $t('當日在線時長紀錄') }}
         </button>
         <button
           type="button"
@@ -20,7 +20,7 @@
           :aria-pressed="mode === 'daily'"
           @click="setMode('daily')"
         >
-          每日在線時長紀錄
+          {{ $t('每日在線時長紀錄') }}
         </button>
       </div>
     </div>
@@ -29,7 +29,7 @@
       <div
         v-if="durationSummary && !loading"
         class="chart-summary-group"
-        :aria-label="mode === 'hourly' ? '當日在線時長摘要' : '每日在線時長摘要'"
+        :aria-label="mode === 'hourly' ? $t('當日在線時長摘要') : $t('每日在線時長摘要')"
       >
         <span v-for="item in durationSummary" :key="item.label" class="chart-summary-item">
           <span>{{ item.label }}</span>
@@ -43,11 +43,11 @@
           :options="recentDateOptions"
           optionLabel="label"
           optionValue="value"
-          aria-label="選擇最近七日日期"
+          :aria-label="$t('選擇最近七日日期')"
           class="user-duration-date-select"
           @change="loadDuration"
         />
-        <div v-else class="user-duration-range" role="group" aria-label="每日在線時長範圍">
+        <div v-else class="user-duration-range" role="group" :aria-label="$t('每日在線時長範圍')">
           <button
             v-for="option in DAILY_OPTIONS"
             :key="option"
@@ -56,28 +56,36 @@
             :aria-pressed="days === option"
             @click="setDays(option)"
           >
-            {{ option }} 日
+            {{ $t('{count} 日', { count: option }) }}
           </button>
         </div>
-        <span class="chart-timezone-label"> 統計時區：{{ PRODUCT_TIME_ZONE_LABEL }} </span>
+        <span class="chart-timezone-label">{{
+          $t('統計時區：{zone}', { zone: PRODUCT_TIME_ZONE_LABEL })
+        }}</span>
       </div>
     </div>
 
     <div v-if="loading" class="user-duration-state" role="status">
       <ProgressSpinner strokeWidth="4" />
-      <span>載入在線時長紀錄…</span>
+      <span>{{ $t('載入在線時長紀錄…') }}</span>
     </div>
     <Message v-else-if="error" severity="error" :closable="false">
       <div class="user-duration-error">
         <span>{{ error }}</span>
-        <Button label="重新載入" icon="pi pi-refresh" size="small" outlined @click="loadDuration" />
+        <Button
+          :label="$t('重新載入')"
+          icon="pi pi-refresh"
+          size="small"
+          outlined
+          @click="loadDuration"
+        />
       </div>
     </Message>
     <div v-else-if="!durationData?.history_started_at" class="user-duration-state" role="status">
-      在線歷史資料自功能啟用後開始累積，目前尚無紀錄。
+      {{ $t('在線歷史資料自功能啟用後開始累積，目前尚無紀錄。') }}
     </div>
     <div v-else-if="!hasAvailableHistory" class="user-duration-state" role="status">
-      此日期範圍尚無在線時長紀錄。
+      {{ $t('此日期範圍尚無在線時長紀錄。') }}
     </div>
     <div v-else class="user-duration-chart" role="img" :aria-label="chartAriaLabel">
       <div class="user-duration-chart__y-axis" aria-hidden="true">
@@ -102,7 +110,12 @@
             :key="bucket.start"
             class="user-duration-chart__item"
             tabindex="0"
-            :aria-label="`${bucket.fullLabel}，在線時長 ${formatDuration(bucket.duration_seconds)}`"
+            :aria-label="
+              $t('{label}，在線時長 {duration}', {
+                label: bucket.fullLabel,
+                duration: formatDuration(bucket.duration_seconds),
+              })
+            "
           >
             <span
               class="user-duration-chart__bar"
@@ -111,7 +124,9 @@
             ></span>
             <span class="user-duration-chart__tooltip" role="tooltip">
               <strong>{{ bucket.fullLabel }}</strong>
-              <span>在線時長：{{ formatDuration(bucket.duration_seconds) }}</span>
+              <span>{{
+                $t('在線時長：{duration}', { duration: formatDuration(bucket.duration_seconds) })
+              }}</span>
             </span>
           </div>
         </div>
@@ -137,6 +152,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getUserOnlineDuration } from '../api'
 import {
   PRODUCT_TIME_ZONE,
@@ -154,6 +170,7 @@ const props = defineProps({
   userId: { type: Number, default: null },
   active: { type: Boolean, default: false },
 })
+const { t, locale } = useI18n()
 
 const DAILY_OPTIONS = [7, 30, 90]
 const mode = ref('hourly')
@@ -170,7 +187,7 @@ const recentDateOptions = computed(() => {
     const value = addCalendarDays(todayDate.value, -index)
     return {
       value,
-      label: new Intl.DateTimeFormat('zh-TW', {
+      label: new Intl.DateTimeFormat(locale.value, {
         timeZone: 'UTC',
         year: 'numeric',
         month: '2-digit',
@@ -182,8 +199,12 @@ const recentDateOptions = computed(() => {
 
 const description = computed(() =>
   mode.value === 'hourly'
-    ? `統計 ${recentDateOptions.value.find(({ value }) => value === selectedDate.value)?.label || selectedDate.value} 每小時的在線使用時長。`
-    : `統計最近 ${days.value} 個日曆日的每日在線使用時長。`
+    ? t('統計 {date} 每小時的在線使用時長。', {
+        date:
+          recentDateOptions.value.find(({ value }) => value === selectedDate.value)?.label ||
+          selectedDate.value,
+      })
+    : t('統計最近 {count} 個日曆日的每日在線使用時長。', { count: days.value })
 )
 
 const chartData = computed(() => {
@@ -227,21 +248,21 @@ const durationSummary = computed(() => {
   })
   if (mode.value === 'daily') {
     return [
-      { label: '區間總時長', value: formatDuration(totalSeconds) },
-      { label: '每日平均', value: formatDuration(averageSeconds) },
-      { label: '單日峰值', value: formatDuration(peakSeconds) },
+      { label: t('區間總時長'), value: formatDuration(totalSeconds) },
+      { label: t('每日平均'), value: formatDuration(averageSeconds) },
+      { label: t('單日峰值'), value: formatDuration(peakSeconds) },
     ]
   }
   return [
-    { label: '當日總時長', value: formatDuration(totalSeconds) },
-    { label: '每小時平均', value: formatDuration(averageSeconds) },
-    { label: '單小時峰值', value: formatDuration(peakSeconds) },
+    { label: t('當日總時長'), value: formatDuration(totalSeconds) },
+    { label: t('每小時平均'), value: formatDuration(averageSeconds) },
+    { label: t('單小時峰值'), value: formatDuration(peakSeconds) },
   ]
 })
 const chartAriaLabel = computed(() =>
   mode.value === 'hourly'
-    ? `統計 ${selectedDate.value} 的二十四小時在線時長分布`
-    : `統計最近 ${days.value} 個日曆日的每日在線時長分布`
+    ? t('統計 {date} 的二十四小時在線時長分布', { date: selectedDate.value })
+    : t('統計最近 {count} 個日曆日的每日在線時長分布', { count: days.value })
 )
 const formatAxisTick = (value) =>
   formatDurationAxisTick(value, mode.value === 'hourly' ? 'minutes' : 'hours')
@@ -286,7 +307,7 @@ const loadDuration = async () => {
   } catch (requestError) {
     if (requestError?.code === 'ERR_CANCELED' || requestController !== controller) return
     durationData.value = null
-    error.value = '在線時長載入失敗，請稍後再試。'
+    error.value = t('在線時長載入失敗，請稍後再試。')
   } finally {
     if (requestController === controller) {
       loading.value = false

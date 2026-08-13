@@ -6,18 +6,18 @@
     :style="{ width: '620px', maxWidth: '92vw' }"
     :draggable="false"
     :blockScroll="true"
-    :pt="{ root: { 'aria-label': '系統公告與通知', 'aria-labelledby': null } }"
+    :pt="{ root: { 'aria-label': $t('系統公告與通知'), 'aria-labelledby': null } }"
   >
     <template #header>
       <div class="flex align-items-center gap-2">
         <i class="pi pi-bell text-2xl" />
-        <span class="text-xl font-semibold">系統公告與通知</span>
+        <span class="text-xl font-semibold">{{ $t('系統公告與通知') }}</span>
         <Badge :value="total" severity="danger" />
       </div>
     </template>
     <div class="summary-list">
       <section v-if="summary.announcements?.length">
-        <h3><i class="pi pi-megaphone mr-2" />公告</h3>
+        <h3><i class="pi pi-megaphone mr-2" />{{ $t('公告') }}</h3>
         <article
           v-for="(item, itemIndex) in summary.announcements"
           :key="`a-${item.id}`"
@@ -29,13 +29,18 @@
             <small>{{ formatTimestamp(item.updated_at || item.created_at) }}</small>
             <p>{{ excerpt(item.body) }}</p>
           </div>
-          <Button label="檢視" size="small" outlined @click="$emit('view-announcement', item.id)" />
+          <Button
+            :label="$t('檢視')"
+            size="small"
+            outlined
+            @click="$emit('view-announcement', item.id)"
+          />
         </article>
       </section>
       <section v-if="summary.personal_notifications?.length">
-        <h3><i class="pi pi-bell mr-2" />個人通知</h3>
+        <h3><i class="pi pi-bell mr-2" />{{ $t('個人通知') }}</h3>
         <article
-          v-for="(item, itemIndex) in summary.personal_notifications"
+          v-for="(item, itemIndex) in localizedPersonalNotifications"
           :key="`p-${item.id}`"
           class="summary-item"
           :class="{ 'summary-item--divided': itemIndex > 0 }"
@@ -45,20 +50,34 @@
             <small>{{ formatTimestamp(item.created_at) }}</small>
             <p>{{ excerpt(item.message) }}</p>
           </div>
-          <Button label="檢視" size="small" outlined @click="$emit('view-personal', item.id)" />
+          <Button
+            :label="$t('檢視')"
+            size="small"
+            outlined
+            @click="$emit('view-personal', item.id)"
+          />
         </article>
       </section>
     </div>
     <template #footer>
       <div class="summary-actions">
         <Button
-          label="稍後再看"
+          :label="$t('稍後再看')"
           severity="secondary"
           text
           @click="$emit('update:visible', false)"
         />
-        <Button label="查看全部" severity="secondary" outlined @click="$emit('open-center')" />
-        <Button label="全部標記為已讀" icon="pi pi-check-circle" @click="$emit('mark-all-read')" />
+        <Button
+          :label="$t('查看全部')"
+          severity="secondary"
+          outlined
+          @click="$emit('open-center')"
+        />
+        <Button
+          :label="$t('全部標記為已讀')"
+          icon="pi pi-check-circle"
+          @click="$emit('mark-all-read')"
+        />
       </div>
     </template>
   </Dialog>
@@ -66,6 +85,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { localizedPersonalNotification } from '@/utils/personalNotificationPresentation'
 import { formatExactDateTime24h } from '@/utils/time'
 const props = defineProps({ visible: Boolean, summary: { type: Object, required: true } })
 defineEmits([
@@ -76,6 +96,12 @@ defineEmits([
   'view-personal',
 ])
 const total = computed(() => Number(props.summary?.counts?.total || 0))
+const localizedPersonalNotifications = computed(() =>
+  (props.summary?.personal_notifications || []).map((item) => ({
+    ...item,
+    ...localizedPersonalNotification(item),
+  }))
+)
 const excerpt = (value) =>
   String(value || '')
     .replace(/[#*_`>\n]/g, ' ')

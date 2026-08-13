@@ -8,20 +8,20 @@
       :closeOnEscape="false"
       :style="{ width: '700px', maxWidth: '90vw' }"
       :autoFocus="false"
-      :pt="{ root: { 'aria-label': '上傳考古題', 'aria-labelledby': null } }"
+      :pt="{ root: { 'aria-label': $t('上傳考古題'), 'aria-labelledby': null } }"
     >
       <template #header>
         <div class="flex align-items-center gap-2.5">
           <i class="pi pi-cloud-upload text-2xl" />
-          <div class="text-xl leading-tight font-semibold">上傳考古題</div>
+          <div class="text-xl leading-tight font-semibold">{{ $t('上傳考古題') }}</div>
         </div>
       </template>
       <Stepper :value="uploadStep" @update:value="uploadStep = $event" linear>
         <StepList>
-          <Step value="1">選擇課程</Step>
-          <Step value="2">考試資訊</Step>
-          <Step value="3">上傳檔案</Step>
-          <Step value="4">確認資訊</Step>
+          <Step value="1">{{ $t('選擇課程') }}</Step>
+          <Step value="2">{{ $t('考試資訊') }}</Step>
+          <Step value="3">{{ $t('上傳檔案') }}</Step>
+          <Step value="4">{{ $t('確認資訊') }}</Step>
         </StepList>
 
         <StepPanels>
@@ -37,12 +37,16 @@
                     :disabled="form.requestNewCategory"
                   />
                   <div>
-                    <label for="request-new-course" class="font-semibold">申請新增課程</label>
+                    <label for="request-new-course" class="font-semibold">{{
+                      $t('申請新增課程')
+                    }}</label>
                     <div class="text-sm text-500 mt-1">
-                      勾選後，這份考古會先進入審核；管理者通過後才建立新課程並公開考古題。
+                      {{
+                        $t('勾選後，這份考古會先進入審核；管理者通過後才建立新課程並公開考古題。')
+                      }}
                     </div>
                     <div v-if="form.requestNewCategory" class="text-sm text-500 mt-1">
-                      新增分類必須同時申請新增課程。
+                      {{ $t('新增分類必須同時申請新增課程。') }}
                     </div>
                   </div>
                 </div>
@@ -54,11 +58,11 @@
                     name="request-new-category"
                   />
                   <div>
-                    <label for="request-new-category" class="font-semibold"
-                      >同時申請新增課程分類</label
-                    >
+                    <label for="request-new-category" class="font-semibold">{{
+                      $t('同時申請新增課程分類')
+                    }}</label>
                     <div class="text-sm text-500 mt-1">
-                      適合現有分類都不合用的課程；勾選後會自動視為新增課程申請。
+                      {{ $t('適合現有分類都不合用的課程；勾選後會自動視為新增課程申請。') }}
                     </div>
                   </div>
                 </div>
@@ -66,12 +70,12 @@
 
               <div v-if="form.requestNewCategory" class="new-category-grid">
                 <div class="flex flex-column gap-2">
-                  <label>新分類 Key</label>
+                  <label>{{ $t('新分類 Key') }}</label>
                   <InputText
                     id="requested-category-key"
                     name="requested-category-key"
                     v-model="form.requestedCategoryKey"
-                    placeholder="例如 astrophysics"
+                    :placeholder="$t('例如 astrophysics')"
                     class="w-full"
                     :class="{ 'p-invalid': form.requestedCategoryKey && !isCategoryKeyValid }"
                   />
@@ -80,33 +84,53 @@
                       form.requestedCategoryKey && !isCategoryKeyValid ? 'p-error' : 'text-gray-500'
                     "
                   >
-                    請使用小寫英文字母、數字或連字號，2 到 40 字。
+                    {{ $t('請使用小寫英文字母、數字或連字號，2 到 40 字。') }}
                   </small>
                 </div>
                 <div class="flex flex-column gap-2">
-                  <label>新分類名稱</label>
+                  <label for="requested-category-name">{{ $t('分類中文名稱') }}</label>
                   <InputText
                     id="requested-category-name"
                     name="requested-category-name"
                     v-model="form.requestedCategoryName"
-                    placeholder="例如 天文物理"
+                    :placeholder="$t('例如 天文物理')"
                     class="w-full"
                   />
                 </div>
                 <div class="flex flex-column gap-2">
-                  <label>科目旁小標籤</label>
+                  <label for="requested-category-name-en">{{ $t('英文分類名稱') }}</label>
+                  <InputText
+                    id="requested-category-name-en"
+                    name="requested-category-name-en"
+                    v-model="form.requestedCategoryNameEn"
+                    :placeholder="$t('例如 Astrophysics')"
+                    class="w-full"
+                  />
+                </div>
+                <div class="flex flex-column gap-2">
+                  <label for="requested-category-label">{{ $t('中文短標籤') }}</label>
                   <InputText
                     id="requested-category-label"
                     name="requested-category-label"
                     v-model="form.requestedCategoryLabel"
-                    placeholder="例如 天文"
+                    :placeholder="$t('例如 天文')"
+                    class="w-full"
+                  />
+                </div>
+                <div class="flex flex-column gap-2">
+                  <label for="requested-category-label-en">{{ $t('英文短標籤') }}</label>
+                  <InputText
+                    id="requested-category-label-en"
+                    name="requested-category-label-en"
+                    v-model="form.requestedCategoryLabelEn"
+                    :placeholder="$t('例如 Astro')"
                     class="w-full"
                   />
                 </div>
               </div>
 
               <div class="flex flex-column gap-2">
-                <label>課程類別</label>
+                <label>{{ $t('課程類別') }}</label>
                 <Select
                   inputId="upload-category"
                   name="upload-category"
@@ -114,35 +138,50 @@
                   :options="categoryOptions"
                   optionLabel="name"
                   optionValue="value"
-                  placeholder="選擇課程類別"
+                  :placeholder="$t('選擇課程類別')"
                   class="w-full"
                   :disabled="form.requestNewCategory"
                 />
                 <small v-if="form.requestNewCategory" class="text-gray-500">
-                  已改為申請新分類，這份考古會歸到上方的新分類。
+                  {{ $t('已改為申請新分類，這份考古會歸到上方的新分類。') }}
                 </small>
               </div>
 
               <div v-if="form.requestNewCourse" class="flex flex-column gap-2">
-                <label>新課程名稱</label>
+                <label for="requested-course-name">{{
+                  $t('課程中文名稱 / Course Name (Chinese)')
+                }}</label>
                 <InputText
                   id="requested-course-name"
                   name="requested-course-name"
                   v-model="form.requestedCourseName"
-                  placeholder="輸入要申請的課程名稱"
+                  :placeholder="$t('輸入課程中文名稱')"
+                  class="w-full"
+                />
+              </div>
+
+              <div v-if="form.requestNewCourse" class="flex flex-column gap-2">
+                <label for="requested-course-name-en">{{
+                  $t('課程英文名稱 / Course Name (English)')
+                }}</label>
+                <InputText
+                  id="requested-course-name-en"
+                  name="requested-course-name-en"
+                  v-model="form.requestedCourseNameEn"
+                  :placeholder="$t('輸入課程英文名稱')"
                   class="w-full"
                 />
               </div>
 
               <div v-else class="flex flex-column gap-2">
-                <label>課程名稱</label>
+                <label>{{ $t('課程名稱') }}</label>
                 <Select
                   inputId="upload-subject"
                   name="upload-subject"
                   v-model="form.subject"
                   :options="subjectOptions"
                   optionLabel="name"
-                  placeholder="選擇課程名稱"
+                  :placeholder="$t('選擇課程名稱')"
                   class="w-full"
                   :disabled="!form.category"
                   filter
@@ -152,11 +191,13 @@
                     <div>{{ item.name }}</div>
                   </template>
                 </Select>
-                <small class="text-gray-500">若課程不在列表上，請勾選「申請新增課程」。</small>
+                <small class="text-gray-500">{{
+                  $t('若課程不在列表上，請勾選「申請新增課程」。')
+                }}</small>
               </div>
 
               <div class="flex flex-column gap-2">
-                <label>授課教授</label>
+                <label>{{ $t('授課教授') }}</label>
                 <AutoComplete
                   inputId="upload-professor"
                   name="upload-professor"
@@ -168,7 +209,7 @@
                   @focus="() => searchProfessor({ query: '' })"
                   @click="() => searchProfessor({ query: '' })"
                   optionLabel="name"
-                  placeholder="搜尋或輸入授課教授"
+                  :placeholder="$t('搜尋或輸入授課教授')"
                   class="w-full"
                   :disabled="!effectiveSubject"
                   dropdown
@@ -180,12 +221,14 @@
                     <div>{{ item.name }}</div>
                   </template>
                 </AutoComplete>
-                <small class="text-gray-500">如果授課教授不在列表上，可自行輸入新增</small>
+                <small class="text-gray-500">{{
+                  $t('如果授課教授不在列表上，可自行輸入新增')
+                }}</small>
               </div>
             </div>
             <div class="flex pt-6 justify-end">
               <Button
-                label="下一步"
+                :label="$t('下一步')"
                 icon="pi pi-arrow-right"
                 @click="activateCallback('2')"
                 :disabled="!canGoToStep2"
@@ -196,12 +239,12 @@
           <StepPanel v-slot="{ activateCallback }" value="2">
             <div class="flex flex-column gap-4">
               <div class="flex flex-column gap-2">
-                <label>考試學期</label>
+                <label>{{ $t('考試學期') }}</label>
                 <div class="semester-picker">
                   <div class="semester-picker-value">
-                    {{ formatSemester(form.academicYear) || '選擇考試學期' }}
+                    {{ formatSemester(form.academicYear) || $t('選擇考試學期') }}
                   </div>
-                  <div class="semester-grid" role="listbox" aria-label="選擇考試學期">
+                  <div class="semester-grid" role="listbox" :aria-label="$t('選擇考試學期')">
                     <div v-for="group in semesterGroups" :key="group.year" class="semester-row">
                       <div class="semester-year">{{ group.year }}</div>
                       <button
@@ -220,26 +263,26 @@
               </div>
 
               <div class="flex flex-column gap-2">
-                <label>考試類型</label>
+                <label>{{ $t('考試類型') }}</label>
                 <Select
                   inputId="upload-exam-type"
                   name="upload-exam-type"
                   v-model="form.type"
                   :options="[
-                    { name: '期中考', value: 'midterm' },
-                    { name: '期末考', value: 'final' },
-                    { name: '小考', value: 'quiz' },
-                    { name: '其他', value: 'other' },
+                    { name: $t('期中考'), value: 'midterm' },
+                    { name: $t('期末考'), value: 'final' },
+                    { name: $t('小考'), value: 'quiz' },
+                    { name: $t('其他'), value: 'other' },
                   ]"
                   optionLabel="name"
                   optionValue="value"
-                  placeholder="選擇考試類型"
+                  :placeholder="$t('選擇考試類型')"
                   class="w-full"
                 />
               </div>
 
               <div v-if="requiresExamNumber" class="flex flex-column gap-2">
-                <label>{{ form.type === 'midterm' ? '第幾次期中考' : '第幾次小考' }}</label>
+                <label>{{ form.type === 'midterm' ? $t('第幾次期中考') : $t('第幾次小考') }}</label>
                 <Select
                   inputId="upload-exam-number"
                   name="upload-exam-number"
@@ -247,22 +290,26 @@
                   :options="examNumberOptions"
                   optionLabel="name"
                   optionValue="value"
-                  placeholder="選擇次數"
+                  :placeholder="$t('選擇次數')"
                   class="w-full"
                 />
                 <small class="text-gray-500">
-                  系統會自動建立名稱：{{ generatedFilename || '請先選擇次數' }}
+                  {{
+                    $t('系統會自動建立名稱：{name}', {
+                      name: generatedFilename || $t('請先選擇次數'),
+                    })
+                  }}
                 </small>
               </div>
 
               <div v-if="form.type === 'other'" class="flex flex-column gap-2">
-                <label for="filename-input">其他考試名稱</label>
+                <label for="filename-input">{{ $t('其他考試名稱') }}</label>
                 <div class="relative w-full">
                   <InputText
                     id="filename-input"
                     name="filename-input"
                     v-model="form.otherName"
-                    placeholder="例如 retake1"
+                    :placeholder="$t('例如 retake1')"
                     class="w-full pr-8"
                     :class="{
                       'p-invalid': form.otherName && !isFilenameValid,
@@ -280,15 +327,15 @@
                   />
                 </div>
                 <small v-if="form.otherName && !isFilenameValid" class="p-error">
-                  名稱格式必須是小寫英文字母和阿拉伯數字，數字需放在結尾（如：makeup1）
+                  {{ $t('名稱格式必須是小寫英文字母和阿拉伯數字，數字需放在結尾（如：makeup1）') }}
                 </small>
                 <small v-else class="text-gray-500">
-                  請輸入小寫英文字母和阿拉伯數字，數字需放在結尾（如：makeup1）
+                  {{ $t('請輸入小寫英文字母和阿拉伯數字，數字需放在結尾（如：makeup1）') }}
                 </small>
               </div>
 
               <div v-if="form.type === 'final'" class="flex flex-column gap-2">
-                <label>考試名稱</label>
+                <label>{{ $t('考試名稱') }}</label>
                 <InputText
                   id="generated-filename"
                   name="generated-filename"
@@ -305,18 +352,18 @@
                   v-model="form.hasAnswers"
                   :binary="true"
                 />
-                <label for="upload-has-answers">附解答</label>
+                <label for="upload-has-answers">{{ $t('附解答') }}</label>
               </div>
             </div>
             <div class="flex pt-6 justify-between">
               <Button
-                label="上一步"
+                :label="$t('上一步')"
                 icon="pi pi-arrow-left"
                 severity="secondary"
                 @click="activateCallback('1')"
               />
               <Button
-                label="下一步"
+                :label="$t('下一步')"
                 icon="pi pi-arrow-right"
                 @click="activateCallback('3')"
                 :disabled="!canGoToStep3"
@@ -344,7 +391,7 @@
                         rounded
                         outlined
                         severity="secondary"
-                        label="選擇檔案"
+                        :label="$t('選擇檔案')"
                       ></Button>
                     </div>
                     <div v-if="form.file" class="text-sm text-500">
@@ -368,6 +415,8 @@
                         </div>
                         <Button
                           icon="pi pi-times"
+                          :aria-label="$t('移除已選檔案')"
+                          :title="$t('移除已選檔案')"
                           @click="clearSelectedFile(removeFileCallback)"
                           outlined
                           rounded
@@ -387,21 +436,23 @@
                     <i
                       class="pi pi-cloud-upload border-2 border-round p-5 text-4xl text-500 mb-3"
                     ></i>
-                    <p class="m-0 text-600">將 PDF 檔案拖放至此處以上傳</p>
-                    <p class="m-0 text-sm text-500 mt-2">僅接受 PDF 檔案，檔案大小最大 10MB</p>
+                    <p class="m-0 text-600">{{ $t('將 PDF 檔案拖放至此處以上傳') }}</p>
+                    <p class="m-0 text-sm text-500 mt-2">
+                      {{ $t('僅接受 PDF 檔案，檔案大小最大 10MB') }}
+                    </p>
                   </div>
                 </template>
               </FileUpload>
             </div>
             <div class="flex pt-6 justify-between">
               <Button
-                label="上一步"
+                :label="$t('上一步')"
                 icon="pi pi-arrow-left"
                 severity="secondary"
                 @click="activateCallback('2')"
               />
               <Button
-                label="下一步"
+                :label="$t('下一步')"
                 icon="pi pi-arrow-right"
                 @click="activateCallback('4')"
                 :disabled="!form.file"
@@ -413,40 +464,58 @@
             <div class="flex flex-column gap-4">
               <div class="flex flex-column gap-2 p-3 surface-ground border-round">
                 <div>
-                  <strong>投稿類型：</strong>
+                  <strong>{{ $t('投稿類型：') }}</strong>
                   {{ submissionKindLabel }}
                 </div>
                 <div v-if="form.requestNewCategory">
-                  <strong>申請分類：</strong>
+                  <strong>{{ $t('申請分類中文名稱：') }}</strong>
                   {{ form.requestedCategoryName }}（{{ form.requestedCategoryKey }}）
                 </div>
+                <div v-if="form.requestNewCategory">
+                  <strong>{{ $t('申請分類英文名稱：') }}</strong>
+                  {{ form.requestedCategoryNameEn }}
+                </div>
+                <div v-if="form.requestNewCategory">
+                  <strong>{{ $t('申請分類短標籤：') }}</strong>
+                  {{ form.requestedCategoryLabel }} / {{ form.requestedCategoryLabelEn }}
+                </div>
                 <div>
-                  <strong>課程類別：</strong>
+                  <strong>{{ $t('課程類別：') }}</strong>
                   {{ effectiveCategoryName }}
                 </div>
                 <div>
-                  <strong>課程名稱：</strong>
+                  <strong>{{
+                    form.requestNewCourse ? $t('課程中文名稱：') : $t('課程名稱：')
+                  }}</strong>
                   {{ effectiveSubject || '' }}
                 </div>
-                <div><strong>授課教授：</strong> {{ form.professor }}</div>
+                <div v-if="form.requestNewCourse">
+                  <strong>{{ $t('課程英文名稱：') }}</strong>
+                  {{ effectiveSubjectEn }}
+                </div>
                 <div>
-                  <strong>考試學期：</strong>
+                  <strong>{{ $t('授課教授：') }}</strong> {{ form.professor }}
+                </div>
+                <div>
+                  <strong>{{ $t('考試學期：') }}</strong>
                   {{ formatSemester(form.academicYear) }}
                 </div>
                 <div>
-                  <strong>考試類型：</strong>
+                  <strong>{{ $t('考試類型：') }}</strong>
                   {{ getTypeName(form.type) }}
                 </div>
-                <div><strong>考試名稱：</strong> {{ generatedFilename }}</div>
                 <div>
-                  <strong>附解答：</strong>
-                  {{ form.hasAnswers ? '是' : '否' }}
+                  <strong>{{ $t('考試名稱：') }}</strong> {{ generatedFilename }}
+                </div>
+                <div>
+                  <strong>{{ $t('附解答：') }}</strong>
+                  {{ form.hasAnswers ? $t('是') : $t('否') }}
                 </div>
               </div>
             </div>
             <div class="flex pt-6 justify-between">
               <Button
-                label="上一步"
+                :label="$t('上一步')"
                 icon="pi pi-arrow-left"
                 severity="secondary"
                 @click="activateCallback('3')"
@@ -454,12 +523,12 @@
               <div class="flex gap-2.5">
                 <Button
                   icon="pi pi-eye"
-                  label="預覽"
+                  :label="$t('預覽')"
                   severity="secondary"
                   @click="previewUploadFile"
                 />
                 <Button
-                  label="上傳"
+                  :label="$t('上傳')"
                   icon="pi pi-upload"
                   severity="success"
                   @click="handleUpload"
@@ -495,6 +564,7 @@
 
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useToast } from 'primevue/usetoast'
 import { courseService, archiveService } from '../api'
 import PdfPreviewModal from './PdfPreviewModal.vue'
@@ -502,6 +572,7 @@ import { PDFDocument } from 'pdf-lib'
 import { trackEvent, EVENTS } from '../utils/analytics'
 import { isUnauthorizedError } from '../utils/http'
 import { formatCourseDisplayName } from '../utils/courseText'
+import { localizedCategoryName, localizedCourseName } from '../utils/localizedCatalog'
 
 const props = defineProps({
   modelValue: {
@@ -521,6 +592,7 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'upload-success'])
 
 const toast = useToast()
+const { t } = useI18n()
 const NEW_CATEGORY_REQUIRES_COURSE_MESSAGE = '新增分類必須同時申請新增課程。'
 
 const form = ref({
@@ -529,10 +601,13 @@ const form = ref({
   subjectId: null,
   requestNewCourse: false,
   requestedCourseName: '',
+  requestedCourseNameEn: '',
   requestNewCategory: false,
   requestedCategoryKey: '',
   requestedCategoryName: '',
+  requestedCategoryNameEn: '',
   requestedCategoryLabel: '',
+  requestedCategoryLabelEn: '',
   professor: null,
   filename: '',
   examNumber: null,
@@ -564,7 +639,7 @@ const categoryOptions = computed(() =>
       return (a.id ?? 0) - (b.id ?? 0)
     })
     .map((category) => ({
-      name: category.name,
+      name: localizedCategoryName(category),
       value: category.key,
     }))
 )
@@ -578,15 +653,18 @@ const subjectOptions = computed(() =>
       return (a.id ?? 0) - (b.id ?? 0)
     })
     .map((course) => ({
-      name: formatCourseDisplayName(course.name),
+      name: localizedCourseName(course),
+      canonicalName: course.name,
       code: course.id,
     }))
 )
 
-const examNumberOptions = Array.from({ length: 20 }, (_, index) => ({
-  name: `第 ${index + 1} 次`,
-  value: index + 1,
-}))
+const examNumberOptions = computed(() =>
+  Array.from({ length: 20 }, (_, index) => ({
+    name: t('第 {count} 次', { count: index + 1 }),
+    value: index + 1,
+  }))
+)
 
 const currentSemesterCode = (() => {
   const now = new Date()
@@ -607,7 +685,7 @@ const semesterGroups = computed(() => {
     for (const semester of [1, 2]) {
       if (year === currentRocYear && semester > currentSemester) continue
       semesters.push({
-        label: `${semester === 1 ? '上' : '下'}學期`,
+        label: t(semester === 1 ? '上學期' : '下學期'),
         code: year * 10 + semester,
       })
     }
@@ -631,6 +709,16 @@ const effectiveSubject = computed(() => {
   return formatCourseDisplayName(form.value.subject?.name)
 })
 
+const canonicalSubject = computed(() => {
+  if (form.value.requestNewCourse) return effectiveSubject.value
+  if (typeof form.value.subject === 'string') return formatCourseDisplayName(form.value.subject)
+  return formatCourseDisplayName(form.value.subject?.canonicalName || form.value.subject?.name)
+})
+
+const effectiveSubjectEn = computed(() =>
+  form.value.requestNewCourse ? form.value.requestedCourseNameEn.trim() : ''
+)
+
 const effectiveCategory = computed(() => {
   if (form.value.requestNewCategory)
     return (form.value.requestedCategoryKey || '').trim().toLowerCase()
@@ -643,9 +731,9 @@ const effectiveCategoryName = computed(() => {
 })
 
 const submissionKindLabel = computed(() => {
-  if (form.value.requestNewCategory) return '新分類與新課程申請'
-  if (form.value.requestNewCourse) return '新課程申請'
-  return '既有課程投稿'
+  if (form.value.requestNewCategory) return t('新分類與新課程申請')
+  if (form.value.requestNewCourse) return t('新課程申請')
+  return t('既有課程投稿')
 })
 
 const generatedFilename = computed(() => {
@@ -663,9 +751,16 @@ const generatedFilename = computed(() => {
 const canGoToStep2 = computed(() => {
   if (form.value.requestNewCategory && !form.value.requestNewCourse) return false
   const hasCategory = form.value.requestNewCategory
-    ? isCategoryKeyValid.value && form.value.requestedCategoryName.trim()
+    ? isCategoryKeyValid.value &&
+      form.value.requestedCategoryName.trim() &&
+      form.value.requestedCategoryNameEn.trim() &&
+      form.value.requestedCategoryLabel.trim() &&
+      form.value.requestedCategoryLabelEn.trim()
     : form.value.category
-  return hasCategory && effectiveSubject.value && form.value.professor
+  const hasCourseNames = form.value.requestNewCourse
+    ? effectiveSubject.value && effectiveSubjectEn.value
+    : effectiveSubject.value
+  return hasCategory && hasCourseNames && form.value.professor
 })
 
 const canGoToStep3 = computed(() => {
@@ -679,6 +774,11 @@ const canUpload = computed(() => {
     form.value.file &&
     effectiveCategory.value &&
     effectiveSubject.value &&
+    (!form.value.requestNewCourse || effectiveSubjectEn.value) &&
+    (!form.value.requestNewCategory ||
+      (form.value.requestedCategoryNameEn.trim() &&
+        form.value.requestedCategoryLabel.trim() &&
+        form.value.requestedCategoryLabelEn.trim())) &&
     form.value.professor &&
     form.value.academicYear &&
     form.value.type &&
@@ -697,21 +797,23 @@ function formatSemester(value) {
   if (numericValue >= 1000 && numericValue < 2000) {
     const year = Math.floor(numericValue / 10)
     const semester = numericValue % 10
-    return `${year}${semester === 1 ? '上' : '下'}學期`
+    return t(semester === 1 ? '{year}上學期' : '{year}下學期', { year })
   }
   return `${numericValue}`
 }
 
 function getCategoryName(code) {
-  return props.courseCategories.find((category) => category.key === code)?.name || code
+  return (
+    localizedCategoryName(props.courseCategories.find((category) => category.key === code)) || code
+  )
 }
 
 function getTypeName(code) {
   const types = {
-    midterm: '期中考',
-    final: '期末考',
-    quiz: '小考',
-    other: '其他',
+    midterm: t('期中考'),
+    final: t('期末考'),
+    quiz: t('小考'),
+    other: t('其他'),
   }
   return types[code] || code
 }
@@ -754,8 +856,8 @@ const handleUpload = async () => {
   if (form.value.requestNewCategory && !form.value.requestNewCourse) {
     toast.add({
       severity: 'error',
-      summary: '無法送出',
-      detail: NEW_CATEGORY_REQUIRES_COURSE_MESSAGE,
+      summary: t('無法送出'),
+      detail: t(NEW_CATEGORY_REQUIRES_COURSE_MESSAGE),
       life: 3000,
     })
     return
@@ -783,7 +885,10 @@ const handleUpload = async () => {
 
     const formData = new FormData()
     formData.append('file', cleanFileWithName)
-    formData.append('subject', effectiveSubject.value)
+    formData.append('subject', canonicalSubject.value)
+    if (!form.value.requestNewCourse && form.value.subjectId) {
+      formData.append('course_id', form.value.subjectId)
+    }
     formData.append('category', effectiveCategory.value)
     formData.append('professor', form.value.professor)
     formData.append('archive_type', form.value.type)
@@ -794,14 +899,14 @@ const handleUpload = async () => {
     formData.append('request_new_category', form.value.requestNewCategory)
     if (form.value.requestNewCourse) {
       formData.append('requested_course_name', effectiveSubject.value)
+      formData.append('requested_course_name_en', effectiveSubjectEn.value)
     }
     if (form.value.requestNewCategory) {
       formData.append('requested_category_key', effectiveCategory.value)
       formData.append('requested_category_name', form.value.requestedCategoryName.trim())
-      formData.append(
-        'requested_category_label',
-        (form.value.requestedCategoryLabel || form.value.requestedCategoryName).trim()
-      )
+      formData.append('requested_category_name_en', form.value.requestedCategoryNameEn.trim())
+      formData.append('requested_category_label', form.value.requestedCategoryLabel.trim())
+      formData.append('requested_category_label_en', form.value.requestedCategoryLabelEn.trim())
       formData.append('requested_category_icon', 'pi pi-fw pi-book')
     }
 
@@ -816,10 +921,10 @@ const handleUpload = async () => {
 
     toast.add({
       severity: 'success',
-      summary: isAdminUpload ? '管理員投稿成功' : '已送出審核',
+      summary: isAdminUpload ? t('管理員投稿成功') : t('已送出審核'),
       detail: isAdminUpload
-        ? '考古題已直接建立，不需再經審核。'
-        : '考古題投稿已送至管理者審核，通過後才會公開',
+        ? t('考古題已直接建立，不需再經審核。')
+        : t('考古題投稿已送至管理者審核，通過後才會公開'),
       life: 3000,
     })
   } catch (error) {
@@ -828,10 +933,11 @@ const handleUpload = async () => {
       return
     }
 
+    const responseDetail = error?.response?.data?.detail
     toast.add({
       severity: 'error',
-      summary: '上傳失敗',
-      detail: '發生錯誤，請稍後再試',
+      summary: t('上傳失敗'),
+      detail: typeof responseDetail === 'string' ? t(responseDetail) : t('發生錯誤，請稍後再試'),
       life: 3000,
     })
   } finally {
@@ -881,8 +987,8 @@ function previewUploadFile() {
     uploadPreviewError.value = true
     toast.add({
       severity: 'error',
-      summary: '預覽失敗',
-      detail: '無法預覽檔案',
+      summary: t('預覽失敗'),
+      detail: t('無法預覽檔案'),
       life: 3000,
     })
   } finally {
@@ -958,7 +1064,9 @@ watch(
     } else {
       form.value.requestedCategoryKey = ''
       form.value.requestedCategoryName = ''
+      form.value.requestedCategoryNameEn = ''
       form.value.requestedCategoryLabel = ''
+      form.value.requestedCategoryLabelEn = ''
     }
   }
 )
@@ -973,6 +1081,7 @@ watch(
     form.value.subject = null
     form.value.subjectId = null
     form.value.requestedCourseName = ''
+    form.value.requestedCourseNameEn = ''
     form.value.professor = null
   }
 )
@@ -1012,10 +1121,13 @@ function resetForm() {
     subjectId: null,
     requestNewCourse: false,
     requestedCourseName: '',
+    requestedCourseNameEn: '',
     requestNewCategory: false,
     requestedCategoryKey: '',
     requestedCategoryName: '',
+    requestedCategoryNameEn: '',
     requestedCategoryLabel: '',
+    requestedCategoryLabelEn: '',
     professor: null,
     filename: '',
     examNumber: null,

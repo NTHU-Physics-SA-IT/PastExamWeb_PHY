@@ -100,7 +100,9 @@ ARCHIVE_SUBMISSION_EDIT_FORBIDDEN_DETAIL = {
 }
 
 
-async def _ensure_category(db: AsyncSession, category_key: str) -> None:
+async def _ensure_category(
+    db: AsyncSession, category_key: str
+) -> CourseCategoryConfig:
     category_key = canonicalize_course_category_key(category_key)
     result = await db.execute(
         select(CourseCategoryConfig).where(
@@ -108,11 +110,13 @@ async def _ensure_category(db: AsyncSession, category_key: str) -> None:
             CourseCategoryConfig.is_active.is_(True),
         )
     )
-    if not result.scalar_one_or_none():
+    category = result.scalar_one_or_none()
+    if not category:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Course category does not exist",
         )
+    return category
 
 
 def _normalize_category_key(value: str) -> str:
@@ -539,7 +543,9 @@ async def _ensure_or_create_requested_category(
     db: AsyncSession,
     key: str,
     name: str | None,
+    name_en: str | None,
     label: str | None,
+    label_en: str | None,
     icon: str | None,
     *,
     commit: bool,
@@ -560,7 +566,9 @@ async def _ensure_or_create_requested_category(
     category = CourseCategoryConfig(
         key=category_key,
         name=(name or category_key).strip(),
+        name_en=(name_en or "").strip() or None,
         label=(label or name or category_key).strip(),
+        label_en=(label_en or "").strip() or None,
         icon=(icon or "pi pi-fw pi-book").strip(),
         order_index=(max_order or 0) + 1,
         is_active=True,
@@ -578,7 +586,9 @@ async def _ensure_or_create_requested_category_for_approval(
     db: AsyncSession,
     key: str,
     name: str | None,
+    name_en: str | None,
     label: str | None,
+    label_en: str | None,
     icon: str | None,
 ) -> CourseCategoryConfig:
     category_key = _normalize_category_key(key)
@@ -598,7 +608,9 @@ async def _ensure_or_create_requested_category_for_approval(
         db,
         key=key,
         name=name,
+        name_en=name_en,
         label=label,
+        label_en=label_en,
         icon=icon,
         commit=False,
     )
@@ -621,6 +633,7 @@ async def upload_archive(
     file: UploadFile,
     subject: str = Form(...),
     category: str = Form(...),
+    course_id: int | None = Form(None),
     professor: str = Form(...),
     archive_type: str = Form(...),
     has_answers: bool = Form(False),
@@ -629,9 +642,12 @@ async def upload_archive(
     request_new_course: bool = Form(False),
     request_new_category: bool = Form(False),
     requested_course_name: str | None = Form(None),
+    requested_course_name_en: str | None = Form(None),
     requested_category_key: str | None = Form(None),
     requested_category_name: str | None = Form(None),
+    requested_category_name_en: str | None = Form(None),
     requested_category_label: str | None = Form(None),
+    requested_category_label_en: str | None = Form(None),
     requested_category_icon: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
@@ -652,10 +668,14 @@ async def upload_archive(
 
     request_new_course = bool(_unwrap_form_default(request_new_course, False))
     request_new_category = bool(_unwrap_form_default(request_new_category, False))
+    course_id = _unwrap_form_default(course_id)
     requested_course_name = _unwrap_form_default(requested_course_name)
+    requested_course_name_en = _unwrap_form_default(requested_course_name_en)
     requested_category_key = _unwrap_form_default(requested_category_key)
     requested_category_name = _unwrap_form_default(requested_category_name)
+    requested_category_name_en = _unwrap_form_default(requested_category_name_en)
     requested_category_label = _unwrap_form_default(requested_category_label)
+    requested_category_label_en = _unwrap_form_default(requested_category_label_en)
     requested_category_icon = _unwrap_form_default(requested_category_icon)
 
     subject = format_course_display_name(subject)
@@ -666,9 +686,12 @@ async def upload_archive(
         if requested_course_name
         else None
     )
+    requested_course_name_en = (requested_course_name_en or "").strip() or None
     requested_category_key = (requested_category_key or "").strip() or None
     requested_category_name = (requested_category_name or "").strip() or None
+    requested_category_name_en = (requested_category_name_en or "").strip() or None
     requested_category_label = (requested_category_label or "").strip() or None
+    requested_category_label_en = (requested_category_label_en or "").strip() or None
     requested_category_icon = (requested_category_icon or "").strip() or None
 
     if request_new_category and not request_new_course:
@@ -677,11 +700,20 @@ async def upload_archive(
             detail="新增分類必須同時申請新增課程。",
         )
 
+    category_config = None
     if request_new_category:
-        if not requested_category_key or not requested_category_name:
+        if not all(
+            (
+                requested_category_key,
+                requested_category_name,
+                requested_category_name_en,
+                requested_category_label,
+                requested_category_label_en,
+            )
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="New category key and name are required",
+                detail="New category key, bilingual names, and bilingual labels are required",
             )
         requested_key = normalize_course_category_key(requested_category_key)
         if requested_key in RESERVED_LEGACY_COURSE_CATEGORY_KEYS:
@@ -695,17 +727,50 @@ async def upload_archive(
             requested_course_name = subject
         request_new_course = True
     else:
-        await _ensure_category(db, category)
+        category_config = await _ensure_category(db, category)
 
     if request_new_course:
-        if not requested_course_name:
+        if not requested_course_name or not requested_course_name_en:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="New course name is required",
+                detail="New course Chinese and English names are required",
             )
         subject = requested_course_name
     else:
         subject = format_course_display_name(subject)
+
+    snapshot_course_name_en = requested_course_name_en if request_new_course else None
+    snapshot_category_name_en = (
+        requested_category_name_en
+        if request_new_category
+        else ((category_config.name_en or "").strip() or None if category_config else None)
+    )
+    snapshot_category_label_en = (
+        requested_category_label_en
+        if request_new_category
+        else ((category_config.label_en or "").strip() or None if category_config else None)
+    )
+    if not request_new_course:
+        course_conditions = [
+            Course.category == category,
+            Course.deleted_at.is_(None),
+        ]
+        if course_id is not None:
+            course_conditions.append(Course.id == course_id)
+        else:
+            course_conditions.append(
+                normalized_course_text_expr(Course.name)
+                == normalize_course_search_text(subject)
+            )
+        course_result = await db.execute(select(Course).where(*course_conditions))
+        canonical_course = course_result.scalar_one_or_none()
+        if not canonical_course:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Course does not exist",
+            )
+        subject = canonical_course.name
+        snapshot_course_name_en = (canonical_course.name_en or "").strip() or None
 
     course = None
     if current_user.is_admin:
@@ -714,7 +779,9 @@ async def upload_archive(
                 db,
                 requested_category_key,
                 requested_category_name,
+                requested_category_name_en,
                 requested_category_label,
+                requested_category_label_en,
                 requested_category_icon,
                 commit=True,
             )
@@ -730,6 +797,7 @@ async def upload_archive(
         if not course:
             course = Course(
                 name=subject,
+                name_en=requested_course_name_en,
                 category=category,
                 order_index=await _next_course_order_index(db, category),
             )
@@ -784,15 +852,18 @@ async def upload_archive(
                 requested_course_name=requested_course_name
                 if request_new_course
                 else None,
+                requested_course_name_en=snapshot_course_name_en,
                 requested_category_key=requested_category_key
                 if request_new_category
                 else None,
                 requested_category_name=requested_category_name
                 if request_new_category
                 else None,
+                requested_category_name_en=snapshot_category_name_en,
                 requested_category_label=requested_category_label
                 if request_new_category
                 else None,
+                requested_category_label_en=snapshot_category_label_en,
                 requested_category_icon=requested_category_icon
                 if request_new_category
                 else None,
@@ -845,15 +916,18 @@ async def upload_archive(
             object_name=object_name,
             academic_year=academic_year,
             requested_course_name=requested_course_name if request_new_course else None,
+            requested_course_name_en=snapshot_course_name_en,
             requested_category_key=requested_category_key
             if request_new_category
             else None,
             requested_category_name=requested_category_name
             if request_new_category
             else None,
+            requested_category_name_en=snapshot_category_name_en,
             requested_category_label=requested_category_label
             if request_new_category
             else None,
+            requested_category_label_en=snapshot_category_label_en,
             requested_category_icon=requested_category_icon
             if request_new_category
             else None,
@@ -1027,9 +1101,12 @@ async def list_archive_submissions_for_admin(
                 archive_submissions.professor,
                 archive_submissions.has_answers,
                 archive_submissions.requested_course_name,
+                archive_submissions.requested_course_name_en,
                 archive_submissions.requested_category_key,
                 archive_submissions.requested_category_name,
+                archive_submissions.requested_category_name_en,
                 archive_submissions.requested_category_label,
+                archive_submissions.requested_category_label_en,
                 archive_submissions.requested_category_icon,
                 LOWER(CAST(archive_submissions.status AS TEXT)) AS status,
                 archive_submissions.requester_id,
@@ -1406,6 +1483,10 @@ async def update_archive_submission_for_admin(
                 format_course_display_name(submission_data.requested_course_name)
                 or None
             )
+        if submission_data.requested_course_name_en is not None:
+            submission.requested_course_name_en = (
+                submission_data.requested_course_name_en.strip() or None
+            )
         if submission_data.requested_category_key is not None:
             key = submission_data.requested_category_key.strip()
             submission.requested_category_key = (
@@ -1415,9 +1496,17 @@ async def update_archive_submission_for_admin(
             submission.requested_category_name = (
                 submission_data.requested_category_name.strip() or None
             )
+        if submission_data.requested_category_name_en is not None:
+            submission.requested_category_name_en = (
+                submission_data.requested_category_name_en.strip() or None
+            )
         if submission_data.requested_category_label is not None:
             submission.requested_category_label = (
                 submission_data.requested_category_label.strip() or None
+            )
+        if submission_data.requested_category_label_en is not None:
+            submission.requested_category_label_en = (
+                submission_data.requested_category_label_en.strip() or None
             )
         if submission_data.requested_category_icon is not None:
             submission.requested_category_icon = (
@@ -1479,7 +1568,9 @@ async def approve_archive_submission(
                 db,
                 submission.requested_category_key,
                 submission.requested_category_name,
+                submission.requested_category_name_en,
                 submission.requested_category_label,
+                submission.requested_category_label_en,
                 submission.requested_category_icon,
             )
         else:
@@ -1514,6 +1605,7 @@ async def approve_archive_submission(
             order_index = await _next_course_order_index(db, category_key)
             course = Course(
                 name=formatted_course_name,
+                name_en=(submission.requested_course_name_en or "").strip() or None,
                 category=category_key,
                 order_index=order_index,
             )

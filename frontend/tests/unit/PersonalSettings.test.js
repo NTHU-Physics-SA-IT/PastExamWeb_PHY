@@ -88,18 +88,27 @@ describe('PersonalSettings account visibility', () => {
     [100, 90],
     [150, 135],
   ])('maps internal font preference %i to display-only %i%%', (internal, displayed) => {
-    expect(
-      PersonalSettings.computed.fontSizePercent.call({ fontSizeScale: internal })
-    ).toBe(displayed)
+    expect(PersonalSettings.computed.fontSizePercent.call({ fontSizeScale: internal })).toBe(
+      displayed
+    )
   })
 
   it('labels the internal default as 90% without changing the stored preference', () => {
-    const tone = PersonalSettings.computed.fontSizeToneLabel.call({ fontSizePercent: 90 })
+    const translate = (key, values = {}) =>
+      Object.entries(values).reduce(
+        (message, [name, value]) => message.replace(`{${name}}`, value),
+        key
+      )
+    const tone = PersonalSettings.computed.fontSizeToneLabel.call({
+      fontSizePercent: 90,
+      $t: translate,
+    })
     expect(tone).toBe('預設')
     expect(
       PersonalSettings.computed.fontSizeDisplayText.call({
         fontSizePercent: 90,
         fontSizeToneLabel: tone,
+        $t: translate,
       })
     ).toBe('目前大小：90%（預設）')
   })

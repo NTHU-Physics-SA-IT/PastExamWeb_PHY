@@ -112,6 +112,7 @@ def _to_trash_item(
     item_type: TrashEntityType,
     item_id: int,
     display_name: str,
+    display_name_en: Optional[str] = None,
     deleted_at,
     deleted_by_id: Optional[int],
     deleted_by_name: Optional[str] = None,
@@ -122,10 +123,18 @@ def _to_trash_item(
     parent_type: Optional[str] = None,
     parent_id: Optional[int] = None,
     parent_name: Optional[str] = None,
+    parent_name_en: Optional[str] = None,
     created_archive_id: Optional[int] = None,
     source_submission_id: Optional[int] = None,
     course_id: Optional[int] = None,
     course_name: Optional[str] = None,
+    course_name_en: Optional[str] = None,
+    requested_course_name: Optional[str] = None,
+    requested_course_name_en: Optional[str] = None,
+    requested_category_name: Optional[str] = None,
+    requested_category_name_en: Optional[str] = None,
+    requested_category_label: Optional[str] = None,
+    requested_category_label_en: Optional[str] = None,
     reason: Optional[str] = None,
     created_at: Optional[datetime] = None,
     reporter_name: Optional[str] = None,
@@ -148,6 +157,7 @@ def _to_trash_item(
         item_type=item_type,
         id=item_id,
         display_name=display_name,
+        display_name_en=display_name_en,
         academic_year=academic_year,
         academic_term=academic_term,
         deleted_at=deleted_at,
@@ -158,10 +168,18 @@ def _to_trash_item(
         parent_type=parent_type,
         parent_id=parent_id,
         parent_name=parent_name,
+        parent_name_en=parent_name_en,
         created_archive_id=created_archive_id,
         source_submission_id=source_submission_id,
         course_id=course_id,
         course_name=course_name,
+        course_name_en=course_name_en,
+        requested_course_name=requested_course_name,
+        requested_course_name_en=requested_course_name_en,
+        requested_category_name=requested_category_name,
+        requested_category_name_en=requested_category_name_en,
+        requested_category_label=requested_category_label,
+        requested_category_label_en=requested_category_label_en,
         reason=reason,
         created_at=created_at,
         reporter_name=reporter_name,
@@ -1278,6 +1296,11 @@ async def list_trash_items(
                         item_type=TrashEntityType.COURSE_CATEGORY,
                         item_id=category.id,
                         display_name=f"{category.name} ({category.key})",
+                        display_name_en=(
+                            f"{category.name_en.strip()} ({category.key})"
+                            if category.name_en and category.name_en.strip()
+                            else None
+                        ),
                         deleted_at=category.deleted_at,
                         deleted_by_id=category.deleted_by_id,
                         deleted_by_name=_format_deleted_by(users_by_id, category.deleted_by_id),
@@ -1323,6 +1346,11 @@ async def list_trash_items(
                         item_type=TrashEntityType.COURSE,
                         item_id=course.id,
                         display_name=f"{course.name} ({course.category})",
+                        display_name_en=(
+                            f"{course.name_en.strip()} ({course.category})"
+                            if course.name_en and course.name_en.strip()
+                            else None
+                        ),
                         deleted_at=course.deleted_at,
                         deleted_by_id=course.deleted_by_id,
                         deleted_by_name=_format_deleted_by(users_by_id, course.deleted_by_id),
@@ -1330,6 +1358,11 @@ async def list_trash_items(
                         parent_type="course_category",
                         parent_id=category.id if category else None,
                         parent_name=category.name if category else course.category,
+                        parent_name_en=(
+                            category.name_en.strip()
+                            if category and category.name_en and category.name_en.strip()
+                            else None
+                        ),
                         action_authority=await _get_course_action_authority(db, course),
                     )
                 )
@@ -1415,6 +1448,22 @@ async def list_trash_items(
                 else None
             )
             course = archive_courses.get(course_trash_parent_course_id or archive.course_id)
+            snapshot_course_name = (
+                source_submission.requested_course_name
+                if source_submission and source_submission.requested_course_name
+                else course.name if course else None
+            )
+            snapshot_course_name_en = (
+                source_submission.requested_course_name_en.strip()
+                if source_submission
+                and source_submission.requested_course_name_en
+                and source_submission.requested_course_name_en.strip()
+                else None
+                if source_submission and source_submission.requested_course_name
+                else course.name_en.strip()
+                if course and course.name_en and course.name_en.strip()
+                else None
+            )
             try:
                 items.append(
                     _to_trash_item(
@@ -1433,8 +1482,19 @@ async def list_trash_items(
                             f"{parent_submission.subject} / {parent_submission.name}"
                             if parent_submission else course.name if course else None
                         ),
+                        parent_name_en=(
+                            f"{snapshot_course_name_en} / {parent_submission.name}"
+                            if parent_submission and snapshot_course_name_en
+                            else course.name_en.strip()
+                            if not parent_submission
+                            and course
+                            and course.name_en
+                            and course.name_en.strip()
+                            else None
+                        ),
                         course_id=archive.course_id,
-                        course_name=course.name if course else None,
+                        course_name=snapshot_course_name,
+                        course_name_en=snapshot_course_name_en,
                         source_submission_id=source_submission.id if source_submission else None,
                         action_authority=await _get_archive_action_authority(
                             db,
@@ -1600,12 +1660,35 @@ async def list_trash_items(
                 if parent_type == "course"
                 else linked_archive.name if linked_archive else None
             )
+            snapshot_course_name = (
+                submission.requested_course_name
+                or (parent_course.name if parent_course else None)
+                or (linked_course.name if linked_course else None)
+                or submission.subject
+            )
+            snapshot_course_name_en = (
+                submission.requested_course_name_en.strip()
+                if submission.requested_course_name_en
+                and submission.requested_course_name_en.strip()
+                else None
+                if submission.requested_course_name
+                else parent_course.name_en.strip()
+                if parent_course and parent_course.name_en and parent_course.name_en.strip()
+                else linked_course.name_en.strip()
+                if linked_course and linked_course.name_en and linked_course.name_en.strip()
+                else None
+            )
             try:
                 items.append(
                     _to_trash_item(
                         item_type=TrashEntityType.ARCHIVE_SUBMISSION,
                         item_id=submission.id,
                         display_name=f"{submission.subject} / {submission.name}",
+                        display_name_en=(
+                            f"{snapshot_course_name_en} / {submission.name}"
+                            if snapshot_course_name_en
+                            else None
+                        ),
                         academic_year=submission.academic_year,
                         academic_term=_format_academic_term(submission.academic_year),
                         deleted_at=deleted_at,
@@ -1615,6 +1698,14 @@ async def list_trash_items(
                         parent_type=parent_type,
                         parent_id=parent_id,
                         parent_name=parent_name,
+                        parent_name_en=(
+                            parent_course.name_en.strip()
+                            if parent_type == "course"
+                            and parent_course
+                            and parent_course.name_en
+                            and parent_course.name_en.strip()
+                            else None
+                        ),
                         created_archive_id=linked_archive_id,
                         source_submission_id=submission.id,
                         course_id=(
@@ -1622,11 +1713,14 @@ async def list_trash_items(
                             if parent_course
                             else linked_archive.course_id if linked_archive else None
                         ),
-                        course_name=(
-                            parent_course.name
-                            if parent_course
-                            else linked_course.name if linked_course else submission.requested_course_name
-                        ),
+                        course_name=snapshot_course_name,
+                        course_name_en=snapshot_course_name_en,
+                        requested_course_name=submission.requested_course_name,
+                        requested_course_name_en=submission.requested_course_name_en,
+                        requested_category_name=submission.requested_category_name,
+                        requested_category_name_en=submission.requested_category_name_en,
+                        requested_category_label=submission.requested_category_label,
+                        requested_category_label_en=submission.requested_category_label_en,
                         action_authority=await _get_submission_action_authority(
                             db, submission
                         ),

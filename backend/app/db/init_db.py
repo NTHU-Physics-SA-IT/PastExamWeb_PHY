@@ -62,6 +62,7 @@ async def sync_course_catalog(session, *, commit: bool = True):
         (
             course["category"],
             format_course_display_name(course["name"]),
+            (course.get("name_en") or "").strip() or None,
         )
         for course in load_seed_data().get("courses", [])
     ]
@@ -79,7 +80,7 @@ async def sync_course_catalog(session, *, commit: bool = True):
         courses_by_key.setdefault(_seed_course_key(course), []).append(course)
     seed_order_by_key = {}
     category_positions = defaultdict(int)
-    for category_name, course_name in seed_courses:
+    for category_name, course_name, _course_name_en in seed_courses:
         category = CourseCategory[category_name]
         seed_order_by_key[(category.value, course_name)] = category_positions[category.value]
         category_positions[category.value] += 1
@@ -95,12 +96,15 @@ async def sync_course_catalog(session, *, commit: bool = True):
         for category, courses in active_courses_by_category.items()
     }
 
-    for category_name, course_name in seed_courses:
+    for category_name, course_name, course_name_en in seed_courses:
         category = CourseCategory[category_name]
         key = (category.value, course_name)
         matching_courses = courses_by_key.get(key, [])
         if matching_courses:
             primary, *duplicates = matching_courses
+            if primary.name_en != course_name_en:
+                primary.name_en = course_name_en
+                changed = True
             if primary.deleted_at is not None:
                 primary.deleted_at = None
                 changed = True
@@ -118,6 +122,7 @@ async def sync_course_catalog(session, *, commit: bool = True):
         session.add(
             Course(
                 name=course_name,
+                name_en=course_name_en,
                 category=category.value,
                 order_index=seed_order_by_key[key],
             )
@@ -166,7 +171,9 @@ async def sync_course_categories(session, *, commit: bool = True):
             CourseCategoryConfig(
                 key=definition.key,
                 name=definition.name,
+                name_en=definition.name_en,
                 label=definition.label,
+                label_en=definition.label_en,
                 icon=definition.icon,
                 badge_color=definition.badge_color,
                 order_index=definition.order_index,

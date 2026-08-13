@@ -1,10 +1,10 @@
 <template>
-  <section class="report-management" aria-label="回報管理">
+  <section class="report-management" :aria-label="$t('回報管理')">
     <section class="report-section" aria-labelledby="system-report-heading">
       <div class="report-section__header report-section__header--system">
         <div class="report-section__copy">
-          <h4 id="system-report-heading">系統問題回報</h4>
-          <p>檢視使用者提交至本站的系統問題摘要。</p>
+          <h4 id="system-report-heading">{{ $t('系統問題回報') }}</h4>
+          <p>{{ $t('檢視使用者提交至本站的系統問題摘要。') }}</p>
         </div>
         <div class="report-section__actions">
           <Button
@@ -12,14 +12,14 @@
             href="https://github.com/NTHU-Physics-SA-IT/PastExamWeb_PHY/issues"
             target="_blank"
             rel="noopener noreferrer"
-            label="前往專案 Issues"
+            :label="$t('前往專案 Issues')"
             icon="pi pi-github"
             outlined
             size="small"
           />
           <Button
             icon="pi pi-refresh"
-            label="重新整理"
+            :label="$t('重新整理')"
             outlined
             :loading="loading"
             @click="refreshAll"
@@ -30,7 +30,7 @@
         <InputText
           v-model="systemFilters.search"
           class="report-filter-search"
-          placeholder="搜尋標題、回報者或內容摘要"
+          :placeholder="$t('搜尋標題、回報者或內容摘要')"
           @keyup.enter="applySystemFilters"
         />
         <Select
@@ -39,7 +39,7 @@
           :options="systemTypeOptions"
           optionLabel="label"
           optionValue="value"
-          placeholder="全部類型"
+          :placeholder="$t('全部類型')"
           showClear
           @change="applySystemFilters"
         />
@@ -49,12 +49,12 @@
           :options="systemReadStateOptions"
           optionLabel="label"
           optionValue="value"
-          aria-label="系統問題回報閱讀狀態"
+          :aria-label="$t('系統問題回報閱讀狀態')"
           @change="applySystemFilters"
         />
         <Button
           class="report-filter-submit"
-          label="搜尋"
+          :label="$t('搜尋')"
           icon="pi pi-search"
           outlined
           @click="applySystemFilters"
@@ -72,7 +72,7 @@
         :totalRecords="systemTotal"
         :rowsPerPageOptions="ADMIN_PAGE_SIZE_OPTIONS"
         paginatorTemplate="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown CurrentPageReport"
-        currentPageReportTemplate="第 {currentPage} / {totalPages} 頁，共 {totalRecords} 筆"
+        :currentPageReportTemplate="paginationReportTemplate"
         :sortField="systemPage.sortField"
         :sortOrder="systemPage.sortOrder"
         responsiveLayout="stack"
@@ -82,11 +82,11 @@
         @page="onSystemPage"
         @sort="onSystemSort"
       >
-        <template #empty>目前沒有系統問題回報</template>
+        <template #empty>{{ $t('目前沒有系統問題回報') }}</template>
         <Column
           field="created_at"
           sortField="created_at"
-          header="回報"
+          :header="$t('回報')"
           sortable
           headerClass="report-person-time-column"
           bodyClass="report-person-time-column"
@@ -105,50 +105,50 @@
         <Column
           field="title"
           sortField="title"
-          header="標題與內容"
+          :header="$t('標題與內容')"
           sortable
           headerClass="system-report-column"
           bodyClass="system-report-column"
           style="width: clamp(15rem, 22vw, 21.25rem)"
           ><template #body="{ data }"
             ><div v-if="!isCardLayout" class="system-report-summary">
-              <strong class="system-report-summary__title" :title="data.title || '未命名回報'">
-                {{ data.title || '未命名回報' }}
+              <strong class="system-report-summary__title" :title="data.title || $t('未命名回報')">
+                {{ data.title || $t('未命名回報') }}
               </strong>
               <span class="system-report-summary__body">{{ data.description || '—' }}</span>
             </div>
             <article v-else class="report-mobile-card report-mobile-card-content">
               <header class="report-mobile-card__header report-mobile-card-header">
-                <strong class="report-mobile-card-title" :title="data.title || '未命名回報'">
-                  {{ data.title || '未命名回報' }}
+                <strong class="report-mobile-card-title" :title="data.title || $t('未命名回報')">
+                  {{ data.title || $t('未命名回報') }}
                 </strong>
                 <Tag
                   class="system-read-state-tag report-mobile-card-status"
                   :severity="data.is_read ? 'secondary' : 'warn'"
-                  :value="data.is_read ? '已讀' : '未讀'"
+                  :value="data.is_read ? $t('已讀') : $t('未讀')"
                 />
                 <div class="report-mobile-card-badges">
                   <Tag :value="issueTypeLabel(data.report_type)" />
-                  <Tag severity="secondary" value="本地摘要" />
+                  <Tag severity="secondary" :value="$t('本地摘要')" />
                 </div>
               </header>
               <div class="report-mobile-card__body">
                 <section
                   class="report-mobile-card__summary report-mobile-summary-preview"
-                  aria-label="內容摘要"
+                  :aria-label="$t('內容摘要')"
                 >
-                  <span class="report-mobile-summary-preview__label">內容摘要</span>
+                  <span class="report-mobile-summary-preview__label">{{ $t('內容摘要') }}</span>
                   <p class="report-mobile-summary-preview__text">
-                    {{ data.description || '未提供詳細描述' }}
+                    {{ data.description || $t('未提供詳細描述') }}
                   </p>
                 </section>
                 <dl class="report-mobile-card__metadata report-mobile-info-grid">
                   <div class="report-mobile-info-item">
-                    <dt>回報者</dt>
+                    <dt>{{ $t('回報者') }}</dt>
                     <dd>{{ data.reporter_name }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
-                    <dt>回報時間</dt>
+                    <dt>{{ $t('回報時間') }}</dt>
                     <dd>
                       <time :datetime="data.created_at">{{
                         formatDateTime(data.created_at, true)
@@ -160,10 +160,10 @@
               <footer class="report-mobile-card__footer">
                 <div class="report-row-actions">
                   <Button
-                    label="檢視"
+                    :label="$t('檢視')"
                     icon="pi pi-search"
-                    aria-label="檢視系統問題回報"
-                    title="檢視系統問題回報"
+                    :aria-label="$t('檢視系統問題回報')"
+                    :title="$t('檢視系統問題回報')"
                     size="small"
                     outlined
                     :loading="loadingSystemDetailId === data.id"
@@ -171,11 +171,11 @@
                     @click="openSystemReport(data)"
                   />
                   <Button
-                    label="刪除"
+                    :label="$t('刪除')"
                     icon="pi pi-trash"
                     severity="danger"
-                    aria-label="刪除系統問題回報"
-                    title="刪除系統問題回報"
+                    :aria-label="$t('刪除系統問題回報')"
+                    :title="$t('刪除系統問題回報')"
                     size="small"
                     outlined
                     :loading="deletingSystemId === data.id"
@@ -188,26 +188,31 @@
         <Column
           field="report_type"
           sortField="report_type"
-          header="類型"
+          :header="$t('類型')"
           sortable
           style="width: 8rem"
           ><template #body="{ data }"
             ><Tag v-if="!isCardLayout" :value="issueTypeLabel(data.report_type)" /></template
         ></Column>
-        <Column header="說明" style="width: 8rem"
+        <Column :header="$t('說明')" style="width: 8rem"
           ><template #body
-            ><Tag v-if="!isCardLayout" severity="secondary" value="本地摘要" /></template
+            ><Tag v-if="!isCardLayout" severity="secondary" :value="$t('本地摘要')" /></template
         ></Column>
-        <Column field="read_state" sortField="read_state" header="狀態" sortable style="width: 7rem"
+        <Column
+          field="read_state"
+          sortField="read_state"
+          :header="$t('狀態')"
+          sortable
+          style="width: 7rem"
           ><template #body="{ data }"
             ><Tag
               v-if="!isCardLayout"
               class="system-read-state-tag"
               :severity="data.is_read ? 'secondary' : 'warn'"
-              :value="data.is_read ? '已讀' : '未讀'" /></template
+              :value="data.is_read ? $t('已讀') : $t('未讀')" /></template
         ></Column>
         <Column
-          header="操作"
+          :header="$t('操作')"
           headerClass="report-actions-column report-actions-column--system"
           bodyClass="report-actions-column report-actions-column--system"
           style="width: 12rem; min-width: 12rem"
@@ -215,10 +220,10 @@
             ><footer v-if="!isCardLayout" class="report-desktop-actions">
               <div class="report-row-actions">
                 <Button
-                  label="檢視"
+                  :label="$t('檢視')"
                   icon="pi pi-search"
-                  aria-label="檢視系統問題回報"
-                  title="檢視系統問題回報"
+                  :aria-label="$t('檢視系統問題回報')"
+                  :title="$t('檢視系統問題回報')"
                   size="small"
                   outlined
                   :loading="loadingSystemDetailId === data.id"
@@ -226,11 +231,11 @@
                   @click="openSystemReport(data)"
                 />
                 <Button
-                  label="刪除"
+                  :label="$t('刪除')"
                   icon="pi pi-trash"
                   severity="danger"
-                  aria-label="刪除系統問題回報"
-                  title="刪除系統問題回報"
+                  :aria-label="$t('刪除系統問題回報')"
+                  :title="$t('刪除系統問題回報')"
                   size="small"
                   outlined
                   :loading="deletingSystemId === data.id"
@@ -245,7 +250,7 @@
         v-model:visible="systemDetailVisible"
         class="report-management-dialog"
         modal
-        header="系統問題回報詳情"
+        :header="$t('系統問題回報詳情')"
         :style="{ width: '680px', maxWidth: '94vw' }"
         :contentStyle="{ maxHeight: '70vh', overflowY: 'auto' }"
         :draggable="false"
@@ -253,54 +258,54 @@
         <div v-if="selectedSystemReport" class="system-report-detail">
           <dl class="report-review__meta">
             <div>
-              <dt>回報者</dt>
+              <dt>{{ $t('回報者') }}</dt>
               <dd>{{ selectedSystemReport.reporter_name }}</dd>
             </div>
             <div>
-              <dt>回報時間</dt>
+              <dt>{{ $t('回報時間') }}</dt>
               <dd>{{ formatDateTime(selectedSystemReport.created_at, true) }}</dd>
             </div>
             <div>
-              <dt>問題類型</dt>
+              <dt>{{ $t('問題類型') }}</dt>
               <dd>{{ issueTypeLabel(selectedSystemReport.report_type) }}</dd>
             </div>
             <div>
-              <dt>聯絡方式</dt>
-              <dd>{{ selectedSystemReport.contact || '未提供' }}</dd>
+              <dt>{{ $t('聯絡方式') }}</dt>
+              <dd>{{ selectedSystemReport.contact || $t('未提供') }}</dd>
             </div>
           </dl>
           <section class="report-review__content-field system-report-detail__content">
-            <strong class="report-review__content-label">問題標題</strong>
+            <strong class="report-review__content-label">{{ $t('問題標題') }}</strong>
             <div class="report-review__content-block">
-              <p>{{ selectedSystemReport.title || '未命名回報' }}</p>
+              <p>{{ selectedSystemReport.title || $t('未命名回報') }}</p>
             </div>
           </section>
           <section class="report-review__content-field system-report-detail__content">
-            <strong class="report-review__content-label">完整詳細描述</strong>
+            <strong class="report-review__content-label">{{ $t('完整詳細描述') }}</strong>
             <div class="report-review__content-block">
               <p>{{ selectedSystemReport.description || '—' }}</p>
             </div>
           </section>
           <section class="system-report-detail__note">
-            <Tag severity="secondary" value="本地摘要" />
-            <p>此紀錄保存在本站，無法確認使用者是否已在 GitHub 正式建立 Issue。</p>
+            <Tag severity="secondary" :value="$t('本地摘要')" />
+            <p>{{ $t('此紀錄保存在本站，無法確認使用者是否已在 GitHub 正式建立 Issue。') }}</p>
           </section>
           <section class="system-report-detail__read-state">
             <div class="system-report-detail__read-heading">
-              <strong>已讀狀態</strong>
+              <strong>{{ $t('已讀狀態') }}</strong>
               <Tag
                 class="system-read-state-tag"
                 :severity="selectedSystemReport.is_read ? 'secondary' : 'warn'"
-                :value="selectedSystemReport.is_read ? '已讀' : '未讀'"
+                :value="selectedSystemReport.is_read ? $t('已讀') : $t('未讀')"
               />
             </div>
             <label class="system-report-detail__read-option">
               <Checkbox v-model="systemReadForm" binary :disabled="systemReadSaving" />
-              標記為已讀
+              {{ $t('標記為已讀') }}
             </label>
-            <small>閱讀狀態由管理員手動維護，開啟此視窗不會自動標記已讀。</small>
+            <small>{{ $t('閱讀狀態由管理員手動維護，開啟此視窗不會自動標記已讀。') }}</small>
             <small v-if="selectedSystemReport.read_at">
-              最後標記：{{ selectedSystemReport.read_by_username || '管理員' }}，{{
+              {{ $t('最後標記：') }}{{ selectedSystemReport.read_by_username || $t('管理員') }}，{{
                 formatDateTime(selectedSystemReport.read_at, true)
               }}
             </small>
@@ -308,13 +313,13 @@
           <div class="report-review__actions">
             <span class="report-review__spacer" />
             <Button
-              label="關閉"
+              :label="$t('關閉')"
               severity="secondary"
               outlined
               @click="systemDetailVisible = false"
             />
             <Button
-              label="儲存"
+              :label="$t('儲存')"
               icon="pi pi-save"
               :loading="systemReadSaving"
               :disabled="systemReadSaving"
@@ -328,15 +333,15 @@
     <section class="report-section" aria-labelledby="comment-report-heading">
       <div class="report-section__header">
         <div>
-          <h4 id="comment-report-heading">留言回報</h4>
-          <p>依狀態、原因與內容搜尋留言回報，並開啟詳情完成審核。</p>
+          <h4 id="comment-report-heading">{{ $t('留言回報') }}</h4>
+          <p>{{ $t('依狀態、原因與內容搜尋留言回報，並開啟詳情完成審核。') }}</p>
         </div>
       </div>
       <div class="report-management__filters">
         <InputText
           v-model="commentFilters.search"
           class="report-filter-search"
-          placeholder="搜尋留言、課程或使用者"
+          :placeholder="$t('搜尋留言、課程或使用者')"
           @keyup.enter="applyCommentFilters"
         />
         <Select
@@ -345,7 +350,7 @@
           :options="statusOptions"
           optionLabel="label"
           optionValue="value"
-          placeholder="全部狀態"
+          :placeholder="$t('全部狀態')"
           showClear
           @change="applyCommentFilters"
         />
@@ -355,13 +360,13 @@
           :options="reasonOptions"
           optionLabel="label"
           optionValue="value"
-          placeholder="全部原因"
+          :placeholder="$t('全部原因')"
           showClear
           @change="applyCommentFilters"
         />
         <Button
           class="report-filter-submit"
-          label="搜尋"
+          :label="$t('搜尋')"
           icon="pi pi-search"
           outlined
           @click="applyCommentFilters"
@@ -379,7 +384,7 @@
         :totalRecords="commentTotal"
         :rowsPerPageOptions="ADMIN_PAGE_SIZE_OPTIONS"
         paginatorTemplate="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown CurrentPageReport"
-        currentPageReportTemplate="第 {currentPage} / {totalPages} 頁，共 {totalRecords} 筆"
+        :currentPageReportTemplate="paginationReportTemplate"
         :sortField="commentPage.sortField"
         :sortOrder="commentPage.sortOrder"
         responsiveLayout="stack"
@@ -389,11 +394,11 @@
         @page="onCommentPage"
         @sort="onCommentSort"
       >
-        <template #empty>目前沒有符合條件的留言回報</template>
+        <template #empty>{{ $t('目前沒有符合條件的留言回報') }}</template>
         <Column
           field="created_at"
           sortField="created_at"
-          header="回報"
+          :header="$t('回報')"
           sortable
           headerClass="report-person-time-column"
           bodyClass="report-person-time-column"
@@ -412,7 +417,7 @@
         <Column
           field="reason"
           sortField="reason"
-          header="原因與留言摘要"
+          :header="$t('原因與留言摘要')"
           sortable
           headerClass="comment-report-content-column"
           bodyClass="comment-report-content-column"
@@ -444,22 +449,22 @@
               <div class="report-mobile-card__body">
                 <section
                   class="report-mobile-card__summary report-mobile-summary-preview"
-                  aria-label="留言摘要"
+                  :aria-label="$t('留言摘要')"
                 >
-                  <span class="report-mobile-summary-preview__label">留言摘要</span>
+                  <span class="report-mobile-summary-preview__label">{{ $t('留言摘要') }}</span>
                   <p class="report-mobile-summary-preview__text">
-                    {{ data.comment_content_snapshot || '無留言摘要' }}
+                    {{ data.comment_content_snapshot || $t('無留言摘要') }}
                   </p>
                 </section>
                 <dl
                   class="report-mobile-card__metadata report-mobile-info-grid report-mobile-info-grid--comment"
                 >
                   <div class="report-mobile-info-item">
-                    <dt>回報者</dt>
+                    <dt>{{ $t('回報者') }}</dt>
                     <dd>{{ data.reporter_name }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
-                    <dt>回報時間</dt>
+                    <dt>{{ $t('回報時間') }}</dt>
                     <dd>
                       <time :datetime="data.created_at">{{
                         formatDateTime(data.created_at, true)
@@ -467,19 +472,19 @@
                     </dd>
                   </div>
                   <div class="report-mobile-info-item">
-                    <dt>留言者</dt>
+                    <dt>{{ $t('留言者') }}</dt>
                     <dd>{{ data.comment_author_name }}</dd>
                   </div>
                   <div class="report-mobile-info-item report-mobile-info-item--wide">
-                    <dt>課程／考古題</dt>
-                    <dd>{{ data.course_name }} · {{ data.archive_name }}</dd>
+                    <dt>{{ $t('課程／考古題') }}</dt>
+                    <dd>{{ localizedCourseSnapshotName(data) }} · {{ data.archive_name }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
-                    <dt>審核</dt>
-                    <dd>{{ data.reviewer_name || '尚未審核' }}</dd>
+                    <dt>{{ $t('審核') }}</dt>
+                    <dd>{{ data.reviewer_name || $t('尚未審核') }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
-                    <dt>審核時間</dt>
+                    <dt>{{ $t('審核時間') }}</dt>
                     <dd>{{ formatReviewTime(data.reviewed_at) }}</dd>
                   </div>
                 </dl>
@@ -487,20 +492,20 @@
               <footer class="report-mobile-card__footer">
                 <div class="report-row-actions">
                   <Button
-                    :label="isFinal(data.status) ? '檢視' : '檢視／審核'"
+                    :label="isFinal(data.status) ? $t('檢視') : $t('檢視／審核')"
                     icon="pi pi-search"
-                    aria-label="檢視或審核留言回報"
-                    title="檢視或審核留言回報"
+                    :aria-label="$t('檢視或審核留言回報')"
+                    :title="$t('檢視或審核留言回報')"
                     size="small"
                     outlined
                     @click="openCommentReport(data.id)"
                   />
                   <Button
-                    label="刪除"
+                    :label="$t('刪除')"
                     icon="pi pi-trash"
                     severity="danger"
-                    aria-label="刪除留言回報"
-                    title="刪除留言回報"
+                    :aria-label="$t('刪除留言回報')"
+                    :title="$t('刪除留言回報')"
                     size="small"
                     outlined
                     :loading="deletingCommentId === data.id"
@@ -515,7 +520,7 @@
         <Column
           field="comment_author_name"
           sortField="comment_author"
-          header="留言者"
+          :header="$t('留言者')"
           sortable
           headerClass="report-user-column"
           bodyClass="report-user-column"
@@ -529,15 +534,19 @@
             ></template
           ></Column
         >
-        <Column sortField="course_archive" header="課程／考古題" sortable style="width: 11rem"
+        <Column
+          sortField="course_archive"
+          :header="$t('課程／考古題')"
+          sortable
+          style="width: 11rem"
           ><template #body="{ data }"
             ><div v-if="!isCardLayout" class="report-management__summary">
-              <span>{{ data.course_name }}</span
+              <span>{{ localizedCourseSnapshotName(data) }}</span
               ><small>{{ data.archive_name }}</small>
             </div></template
           ></Column
         >
-        <Column field="status" sortField="status" header="狀態" sortable style="width: 8rem"
+        <Column field="status" sortField="status" :header="$t('狀態')" sortable style="width: 8rem"
           ><template #body="{ data }"
             ><Tag
               v-if="!isCardLayout"
@@ -548,7 +557,7 @@
         <Column
           field="reviewed_at"
           sortField="reviewed_at"
-          header="審核"
+          :header="$t('審核')"
           sortable
           headerClass="report-review-column"
           bodyClass="report-review-column"
@@ -558,9 +567,9 @@
               <span
                 class="report-person-time__name"
                 :class="{ 'report-person-time__name--empty': !data.reviewer_name }"
-                :title="data.reviewer_name || '尚未審核'"
+                :title="data.reviewer_name || $t('尚未審核')"
               >
-                {{ data.reviewer_name || '尚未審核' }}
+                {{ data.reviewer_name || $t('尚未審核') }}
               </span>
               <time
                 v-if="data.reviewed_at"
@@ -574,7 +583,7 @@
           </template>
         </Column>
         <Column
-          header="操作"
+          :header="$t('操作')"
           headerClass="report-actions-column"
           bodyClass="report-actions-column"
           style="width: 17rem; min-width: 17rem"
@@ -582,20 +591,20 @@
             ><footer v-if="!isCardLayout" class="report-desktop-actions">
               <div class="report-row-actions">
                 <Button
-                  :label="isFinal(data.status) ? '檢視' : '檢視／審核'"
+                  :label="isFinal(data.status) ? $t('檢視') : $t('檢視／審核')"
                   icon="pi pi-search"
-                  aria-label="檢視或審核留言回報"
-                  title="檢視或審核留言回報"
+                  :aria-label="$t('檢視或審核留言回報')"
+                  :title="$t('檢視或審核留言回報')"
                   size="small"
                   outlined
                   @click="openCommentReport(data.id)"
                 />
                 <Button
-                  label="刪除"
+                  :label="$t('刪除')"
                   icon="pi pi-trash"
                   severity="danger"
-                  aria-label="刪除留言回報"
-                  title="刪除留言回報"
+                  :aria-label="$t('刪除留言回報')"
+                  :title="$t('刪除留言回報')"
                   size="small"
                   outlined
                   :loading="deletingCommentId === data.id"
@@ -614,15 +623,15 @@
     >
       <div class="report-section__header">
         <div>
-          <h4 id="archive-report-heading">考古題回報</h4>
-          <p>依課程、考古題、回報者、原因與狀態搜尋，並完成審核。</p>
+          <h4 id="archive-report-heading">{{ $t('考古題回報') }}</h4>
+          <p>{{ $t('依課程、考古題、回報者、原因與狀態搜尋，並完成審核。') }}</p>
         </div>
       </div>
       <div class="report-management__filters">
         <InputText
           v-model="archiveFilters.search"
           class="report-filter-search"
-          placeholder="搜尋回報者、課程、考試、教師或編號"
+          :placeholder="$t('搜尋回報者、課程、考試、教師或編號')"
           @keyup.enter="applyArchiveFilters"
         />
         <Select
@@ -631,7 +640,7 @@
           :options="statusOptions"
           optionLabel="label"
           optionValue="value"
-          placeholder="全部狀態"
+          :placeholder="$t('全部狀態')"
           showClear
           @change="applyArchiveFilters"
         />
@@ -641,13 +650,13 @@
           :options="archiveReasonOptions"
           optionLabel="label"
           optionValue="value"
-          placeholder="全部原因"
+          :placeholder="$t('全部原因')"
           showClear
           @change="applyArchiveFilters"
         />
         <Button
           class="report-filter-submit"
-          label="搜尋"
+          :label="$t('搜尋')"
           icon="pi pi-search"
           outlined
           @click="applyArchiveFilters"
@@ -666,6 +675,8 @@
         :rows="archiveListState.rows"
         :totalRecords="archiveListState.total"
         :rowsPerPageOptions="ADMIN_PAGE_SIZE_OPTIONS"
+        paginatorTemplate="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown CurrentPageReport"
+        :currentPageReportTemplate="paginationReportTemplate"
         :sortField="archiveListState.sortField"
         :sortOrder="archiveListState.sortOrder"
         responsiveLayout="stack"
@@ -675,11 +686,11 @@
         @page="onArchivePage"
         @sort="onArchiveSort"
       >
-        <template #empty>目前沒有符合條件的考古題回報</template>
+        <template #empty>{{ $t('目前沒有符合條件的考古題回報') }}</template>
         <Column
           field="created_at"
           sortField="created_at"
-          header="回報"
+          :header="$t('回報')"
           sortable
           style="width: 10rem"
         >
@@ -692,14 +703,20 @@
             </div>
           </template>
         </Column>
-        <Column field="reason" sortField="reason" header="原因與摘要" sortable style="width: 20rem">
+        <Column
+          field="reason"
+          sortField="reason"
+          :header="$t('原因與摘要')"
+          sortable
+          style="width: 20rem"
+        >
           <template #body="{ data }">
             <div v-if="!isCardLayout" class="comment-report-content">
               <strong class="comment-report-content__reason">{{
                 archiveReasonLabel(data.reason)
               }}</strong>
               <span class="comment-report-content__summary">{{
-                data.supplementary_detail || '未提供補充說明'
+                data.supplementary_detail || $t('未提供補充說明')
               }}</span>
             </div>
             <article v-else class="report-mobile-card report-mobile-card-content">
@@ -715,38 +732,38 @@
               </header>
               <div class="report-mobile-card__body">
                 <section class="report-mobile-card__summary report-mobile-summary-preview">
-                  <span class="report-mobile-summary-preview__label">補充說明</span>
+                  <span class="report-mobile-summary-preview__label">{{ $t('補充說明') }}</span>
                   <p class="report-mobile-summary-preview__text">
-                    {{ data.supplementary_detail || '未提供補充說明' }}
+                    {{ data.supplementary_detail || $t('未提供補充說明') }}
                   </p>
                 </section>
                 <dl class="report-mobile-card__metadata report-mobile-info-grid">
                   <div class="report-mobile-info-item">
-                    <dt>回報者</dt>
+                    <dt>{{ $t('回報者') }}</dt>
                     <dd>{{ data.reporter_name }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
-                    <dt>回報時間</dt>
+                    <dt>{{ $t('回報時間') }}</dt>
                     <dd>{{ formatDateTime(data.created_at, true) }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
-                    <dt>課程名稱</dt>
-                    <dd>{{ data.course_name }}</dd>
+                    <dt>{{ $t('課程名稱') }}</dt>
+                    <dd>{{ localizedCourseSnapshotName(data) }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
-                    <dt>考試名稱</dt>
+                    <dt>{{ $t('考試名稱') }}</dt>
                     <dd>{{ data.archive_name }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
-                    <dt>考古題編號</dt>
+                    <dt>{{ $t('考古題編號') }}</dt>
                     <dd>#{{ data.archive_id_snapshot }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
-                    <dt>審核人</dt>
-                    <dd>{{ data.reviewer_name || '尚未審核' }}</dd>
+                    <dt>{{ $t('審核人') }}</dt>
+                    <dd>{{ data.reviewer_name || $t('尚未審核') }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
-                    <dt>審核時間</dt>
+                    <dt>{{ $t('審核時間') }}</dt>
                     <dd>{{ formatReviewTime(data.reviewed_at) }}</dd>
                   </div>
                 </dl>
@@ -754,20 +771,20 @@
               <footer class="report-mobile-card__footer">
                 <div class="report-row-actions">
                   <Button
-                    :label="isFinal(data.status) ? '檢視' : '檢視／審核'"
+                    :label="isFinal(data.status) ? $t('檢視') : $t('檢視／審核')"
                     icon="pi pi-search"
-                    aria-label="檢視或審核考古題回報"
-                    title="檢視或審核考古題回報"
+                    :aria-label="$t('檢視或審核考古題回報')"
+                    :title="$t('檢視或審核考古題回報')"
                     size="small"
                     outlined
                     @click="openArchiveReport(data.id)"
                   />
                   <Button
-                    label="刪除"
+                    :label="$t('刪除')"
                     icon="pi pi-trash"
                     severity="danger"
-                    aria-label="刪除考古題回報"
-                    title="刪除考古題回報"
+                    :aria-label="$t('刪除考古題回報')"
+                    :title="$t('刪除考古題回報')"
                     size="small"
                     outlined
                     :loading="deletingArchiveId === data.id"
@@ -778,10 +795,15 @@
             </article>
           </template>
         </Column>
-        <Column sortField="course_archive" header="課程／考古題" sortable style="width: 14rem">
+        <Column
+          sortField="course_archive"
+          :header="$t('課程／考古題')"
+          sortable
+          style="width: 14rem"
+        >
           <template #body="{ data }">
             <div v-if="!isCardLayout" class="report-management__summary">
-              <span>{{ data.course_name }}</span>
+              <span>{{ localizedCourseSnapshotName(data) }}</span>
               <small
                 >{{ data.archive_name }} · #{{ data.archive_id_snapshot }} ·
                 {{ data.professor }}</small
@@ -789,7 +811,7 @@
             </div>
           </template>
         </Column>
-        <Column field="status" sortField="status" header="狀態" sortable style="width: 8rem">
+        <Column field="status" sortField="status" :header="$t('狀態')" sortable style="width: 8rem">
           <template #body="{ data }">
             <Tag
               v-if="!isCardLayout"
@@ -801,13 +823,15 @@
         <Column
           field="reviewed_at"
           sortField="reviewed_at"
-          header="審核"
+          :header="$t('審核')"
           sortable
           style="width: 10rem"
         >
           <template #body="{ data }">
             <div v-if="!isCardLayout" class="report-person-time">
-              <span class="report-person-time__name">{{ data.reviewer_name || '尚未審核' }}</span>
+              <span class="report-person-time__name">{{
+                data.reviewer_name || $t('尚未審核')
+              }}</span>
               <time
                 v-if="data.reviewed_at"
                 class="report-person-time__time"
@@ -819,24 +843,24 @@
             </div>
           </template>
         </Column>
-        <Column header="操作" style="width: 16rem">
+        <Column :header="$t('操作')" style="width: 16rem">
           <template #body="{ data }">
             <div v-if="!isCardLayout" class="report-row-actions">
               <Button
-                :label="isFinal(data.status) ? '檢視' : '檢視／審核'"
+                :label="isFinal(data.status) ? $t('檢視') : $t('檢視／審核')"
                 icon="pi pi-search"
-                aria-label="檢視或審核考古題回報"
-                title="檢視或審核考古題回報"
+                :aria-label="$t('檢視或審核考古題回報')"
+                :title="$t('檢視或審核考古題回報')"
                 size="small"
                 outlined
                 @click="openArchiveReport(data.id)"
               />
               <Button
-                label="刪除"
+                :label="$t('刪除')"
                 icon="pi pi-trash"
                 severity="danger"
-                aria-label="刪除考古題回報"
-                title="刪除考古題回報"
+                :aria-label="$t('刪除考古題回報')"
+                :title="$t('刪除考古題回報')"
                 size="small"
                 outlined
                 :loading="deletingArchiveId === data.id"
@@ -852,14 +876,14 @@
       v-model:visible="reviewVisible"
       class="report-management-dialog"
       modal
-      header="留言回報審核"
+      :header="$t('留言回報審核')"
       :style="{ width: '720px', maxWidth: '94vw' }"
       :draggable="false"
     >
       <div v-if="selectedReport" class="report-review">
         <div class="report-review__title">
           <div>
-            <strong>留言回報</strong>
+            <strong>{{ $t('留言回報') }}</strong>
             <small>{{ formatDateTime(selectedReport.created_at) }}</small>
           </div>
           <Tag
@@ -869,24 +893,26 @@
         </div>
         <dl class="report-review__meta">
           <div>
-            <dt>回報者</dt>
+            <dt>{{ $t('回報者') }}</dt>
             <dd>{{ selectedReport.reporter_name }}</dd>
           </div>
           <div>
-            <dt>留言作者</dt>
+            <dt>{{ $t('留言作者') }}</dt>
             <dd>{{ selectedReport.comment_author_name }}</dd>
           </div>
           <div>
-            <dt>回報原因</dt>
+            <dt>{{ $t('回報原因') }}</dt>
             <dd>{{ reasonLabel(selectedReport.reason) }}</dd>
           </div>
           <div>
-            <dt>建立時間</dt>
+            <dt>{{ $t('建立時間') }}</dt>
             <dd>{{ formatDateTime(selectedReport.created_at) }}</dd>
           </div>
           <div>
-            <dt>所屬考古題</dt>
-            <dd>{{ selectedReport.course_name }} · {{ selectedReport.archive_name }}</dd>
+            <dt>{{ $t('所屬考古題') }}</dt>
+            <dd>
+              {{ localizedCourseSnapshotName(selectedReport) }} · {{ selectedReport.archive_name }}
+            </dd>
           </div>
           <div class="report-review__thread">
             <dt>Thread</dt>
@@ -895,13 +921,13 @@
                 selectedReport.thread_id ? `#${selectedReport.thread_id}` : '—'
               }}</span>
               <div class="report-review__thread-hint">
-                此識別碼代表該回覆串的第一則留言，用於定位討論串。
+                {{ $t('此識別碼代表該回覆串的第一則留言，用於定位討論串。') }}
               </div>
             </dd>
           </div>
         </dl>
         <section class="report-review__content-field">
-          <strong class="report-review__content-label">留言內容快照</strong>
+          <strong class="report-review__content-label">{{ $t('留言內容快照') }}</strong>
           <div class="report-review__content-block">
             <p>{{ selectedReport.comment_content_snapshot }}</p>
             <small>{{ formatDateTime(selectedReport.comment_created_at_snapshot) }}</small>
@@ -913,16 +939,17 @@
           severity="warn"
           :closable="false"
         >
-          來源留言已不存在；仍可根據快照完成審核。
+          {{ $t('來源留言已不存在；仍可根據快照完成審核。') }}
         </Message>
         <section class="report-review__content-field">
-          <strong class="report-review__content-label">回報者補充</strong>
+          <strong class="report-review__content-label">{{ $t('回報者補充') }}</strong>
           <div class="report-review__content-block">
-            <p>{{ selectedReport.custom_message || '未提供補充' }}</p>
+            <p>{{ selectedReport.custom_message || $t('未提供補充') }}</p>
           </div>
         </section>
         <p v-if="isFinal(selectedReport.status)" class="report-review__response">
-          <strong>管理員答覆：</strong>{{ selectedReport.admin_response || '未提供答覆' }}
+          <strong>{{ $t('管理員答覆：') }}</strong
+          >{{ selectedReport.admin_response || $t('未提供答覆') }}
         </p>
         <Message
           v-if="isFinal(selectedReport.status)"
@@ -930,10 +957,10 @@
           severity="info"
           :closable="false"
         >
-          審核結果已送出，無法修改。
+          {{ $t('審核結果已送出，無法修改。') }}
         </Message>
         <div v-if="!isFinal(selectedReport.status)" class="report-review__field">
-          <label for="report-review-status">審核結果</label>
+          <label for="report-review-status">{{ $t('審核結果') }}</label>
           <Select
             inputId="report-review-status"
             v-model="reviewForm.status"
@@ -944,13 +971,13 @@
           />
         </div>
         <div v-if="!isFinal(selectedReport.status)" class="report-review__field">
-          <label for="report-admin-response">給回報者的答覆</label>
+          <label for="report-admin-response">{{ $t('給回報者的答覆') }}</label>
           <Textarea
             id="report-admin-response"
             v-model="reviewForm.admin_response"
             rows="4"
             maxlength="1000"
-            placeholder="可留空；若未提供答覆，通知中將顯示「未提供答覆」。"
+            :placeholder="$t('可留空；若未提供答覆，通知中將顯示「未提供答覆」。')"
             :disabled="reviewSaving"
           />
           <small>{{ reviewForm.admin_response.length }}/1000</small>
@@ -964,11 +991,11 @@
             binary
             :disabled="!selectedReport.source_exists"
           />
-          同時刪除來源留言（使用既有留言刪除政策）
+          {{ $t('同時刪除來源留言（使用既有留言刪除政策）') }}
         </label>
         <div class="report-review__actions">
           <Button
-            label="前往來源"
+            :label="$t('前往來源')"
             icon="pi pi-external-link"
             severity="secondary"
             text
@@ -976,10 +1003,15 @@
             @click="openReportSource"
           />
           <span class="report-review__spacer" />
-          <Button label="關閉" severity="secondary" outlined @click="reviewVisible = false" />
+          <Button
+            :label="$t('關閉')"
+            severity="secondary"
+            outlined
+            @click="reviewVisible = false"
+          />
           <Button
             v-if="!isFinal(selectedReport.status)"
-            label="儲存審核"
+            :label="$t('儲存審核')"
             icon="pi pi-check"
             :loading="reviewSaving"
             :disabled="!canSaveReview"
@@ -993,7 +1025,7 @@
       v-model:visible="archiveReviewVisible"
       class="report-management-dialog"
       modal
-      header="考古題回報審核"
+      :header="$t('考古題回報審核')"
       :style="{ width: '760px', maxWidth: '94vw' }"
       :contentStyle="{ maxHeight: '76vh', overflowY: 'auto' }"
       :draggable="false"
@@ -1002,10 +1034,10 @@
         <div class="report-review__title">
           <div>
             <strong
-              >{{ selectedArchiveReport.course_name }} ·
+              >{{ localizedCourseSnapshotName(selectedArchiveReport) }} ·
               {{ selectedArchiveReport.archive_name }}</strong
             >
-            <small>考古題 #{{ selectedArchiveReport.archive_id_snapshot }}</small>
+            <small>{{ $t('考古題') }} #{{ selectedArchiveReport.archive_id_snapshot }}</small>
           </div>
           <Tag
             :severity="statusSeverity(selectedArchiveReport.status)"
@@ -1014,61 +1046,61 @@
         </div>
         <dl class="report-review__meta">
           <div>
-            <dt>回報者</dt>
+            <dt>{{ $t('回報者') }}</dt>
             <dd>{{ selectedArchiveReport.reporter_name }}</dd>
           </div>
           <div>
-            <dt>建立時間</dt>
+            <dt>{{ $t('建立時間') }}</dt>
             <dd>{{ formatDateTime(selectedArchiveReport.created_at) }}</dd>
           </div>
           <div>
-            <dt>回報原因</dt>
+            <dt>{{ $t('回報原因') }}</dt>
             <dd>{{ archiveReasonLabel(selectedArchiveReport.reason) }}</dd>
           </div>
           <div>
-            <dt>學期／年度</dt>
+            <dt>{{ $t('學期／年度') }}</dt>
             <dd>{{ selectedArchiveReport.academic_year }}</dd>
           </div>
           <div>
-            <dt>授課教師</dt>
+            <dt>{{ $t('授課教師') }}</dt>
             <dd>{{ selectedArchiveReport.professor || '—' }}</dd>
           </div>
           <div>
-            <dt>考試名稱</dt>
+            <dt>{{ $t('考試名稱') }}</dt>
             <dd>{{ selectedArchiveReport.archive_name }}</dd>
           </div>
           <div>
-            <dt>目前狀態</dt>
+            <dt>{{ $t('目前狀態') }}</dt>
             <dd>{{ archiveSourceStateLabel(selectedArchiveReport.source_state) }}</dd>
           </div>
           <div>
-            <dt>審核人</dt>
-            <dd>{{ selectedArchiveReport.reviewer_name || '尚未審核' }}</dd>
+            <dt>{{ $t('審核人') }}</dt>
+            <dd>{{ selectedArchiveReport.reviewer_name || $t('尚未審核') }}</dd>
           </div>
           <div>
-            <dt>審核時間</dt>
+            <dt>{{ $t('審核時間') }}</dt>
             <dd>{{ formatReviewTime(selectedArchiveReport.reviewed_at) }}</dd>
           </div>
         </dl>
         <section class="report-review__content-field">
-          <strong class="report-review__content-label">補充說明</strong>
+          <strong class="report-review__content-label">{{ $t('補充說明') }}</strong>
           <div class="report-review__content-block">
-            <p>{{ selectedArchiveReport.supplementary_detail || '未提供補充說明' }}</p>
+            <p>{{ selectedArchiveReport.supplementary_detail || $t('未提供補充說明') }}</p>
           </div>
         </section>
         <p v-if="isFinal(selectedArchiveReport.status)" class="report-review__response">
-          <strong>管理員答覆：</strong>{{ selectedArchiveReport.admin_response || '未提供答覆' }}
+          <strong>{{ $t('管理員答覆：') }}</strong
+          >{{ selectedArchiveReport.admin_response || $t('未提供答覆') }}
         </p>
         <Message v-if="isFinal(selectedArchiveReport.status)" severity="info" :closable="false">
-          審核結果已送出，無法修改。{{
-            selectedArchiveReport.archive_taken_down ? '本次審核已將考古題下架。' : ''
-          }}
+          {{ $t('審核結果已送出，無法修改。')
+          }}{{ selectedArchiveReport.archive_taken_down ? $t('本次審核已將考古題下架。') : '' }}
         </Message>
         <Message v-else-if="!selectedArchiveReport.can_take_down" severity="warn" :closable="false">
           {{ archiveTakedownUnavailableMessage(selectedArchiveReport.source_state) }}
         </Message>
         <div v-if="!isFinal(selectedArchiveReport.status)" class="report-review__field">
-          <label for="archive-review-status">審核結果</label>
+          <label for="archive-review-status">{{ $t('審核結果') }}</label>
           <Select
             inputId="archive-review-status"
             v-model="archiveReviewForm.status"
@@ -1079,13 +1111,13 @@
           />
         </div>
         <div v-if="!isFinal(selectedArchiveReport.status)" class="report-review__field">
-          <label for="archive-admin-response">給回報者的答覆</label>
+          <label for="archive-admin-response">{{ $t('給回報者的答覆') }}</label>
           <Textarea
             id="archive-admin-response"
             v-model="archiveReviewForm.admin_response"
             rows="4"
             maxlength="1000"
-            placeholder="可留空；若未提供答覆，通知中將顯示「未提供答覆」。"
+            :placeholder="$t('可留空；若未提供答覆，通知中將顯示「未提供答覆」。')"
             :disabled="archiveReviewSaving"
           />
           <small>{{ archiveReviewForm.admin_response.length }}/1000</small>
@@ -1099,11 +1131,11 @@
             binary
             :disabled="!selectedArchiveReport.can_take_down || archiveReviewSaving"
           />
-          同時將此考古題下架
+          {{ $t('同時將此考古題下架') }}
         </label>
         <div class="report-review__actions">
           <Button
-            label="前往來源"
+            :label="$t('前往來源')"
             icon="pi pi-external-link"
             severity="secondary"
             text
@@ -1112,14 +1144,14 @@
           />
           <span class="report-review__spacer" />
           <Button
-            label="關閉"
+            :label="$t('關閉')"
             severity="secondary"
             outlined
             @click="archiveReviewVisible = false"
           />
           <Button
             v-if="!isFinal(selectedArchiveReport.status)"
-            label="儲存審核"
+            :label="$t('儲存審核')"
             icon="pi pi-check"
             :loading="archiveReviewSaving"
             :disabled="!canSaveArchiveReview"
@@ -1136,15 +1168,22 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { reportService } from '@/api'
 import { ADMIN_PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import { ARCHIVE_REPORT_REASONS } from '@/constants/archiveReport'
+import { getMessageTemplate } from '@/i18n'
 import { getCurrentUser } from '@/utils/auth'
+import { localizedCourseSnapshotName } from '@/utils/localizedCatalog'
 import { formatRelativeOrAbsoluteDateTime } from '@/utils/time'
 
 const confirm = useConfirm()
 const toast = useToast()
 const router = useRouter()
+const { t } = useI18n()
+const paginationReportTemplate = computed(() =>
+  getMessageTemplate('第 {currentPage} / {totalPages} 頁，共 {totalRecords} 筆')
+)
 const REPORT_CARD_MEDIA_QUERY = '(max-width: 1399.98px)'
 let reportCardMediaQuery = null
 const isCardLayout = ref(false)
@@ -1195,36 +1234,38 @@ const loading = computed(
   () => loadingSystem.value || loadingComments.value || archiveListState.value.loading
 )
 
-const reasonOptions = [
-  { label: '垃圾訊息或重複洗版', value: 'spam_or_duplicate' },
-  { label: '攻擊、騷擾或不友善內容', value: 'harassment_or_hostility' },
-  { label: '不當或違法內容', value: 'inappropriate_or_illegal' },
-  { label: '洩漏個人資料或隱私', value: 'privacy_violation' },
-  { label: '錯誤或誤導資訊', value: 'misinformation' },
-  { label: '其他', value: 'other' },
-]
-const archiveReasonOptions = ARCHIVE_REPORT_REASONS
-const systemTypeOptions = [
-  { label: '程式錯誤', value: 'bug' },
-  { label: '功能建議', value: 'enhancement' },
-  { label: '效能問題', value: 'performance' },
+const reasonOptions = computed(() => [
+  { label: t('垃圾訊息或重複洗版'), value: 'spam_or_duplicate' },
+  { label: t('攻擊、騷擾或不友善內容'), value: 'harassment_or_hostility' },
+  { label: t('不當或違法內容'), value: 'inappropriate_or_illegal' },
+  { label: t('洩漏個人資料或隱私'), value: 'privacy_violation' },
+  { label: t('錯誤或誤導資訊'), value: 'misinformation' },
+  { label: t('其他'), value: 'other' },
+])
+const archiveReasonOptions = computed(() =>
+  ARCHIVE_REPORT_REASONS.map((item) => ({ ...item, label: t(item.label) }))
+)
+const systemTypeOptions = computed(() => [
+  { label: t('程式錯誤'), value: 'bug' },
+  { label: t('功能建議'), value: 'enhancement' },
+  { label: t('效能問題'), value: 'performance' },
   { label: 'UI/UX', value: 'ui-ux' },
-  { label: '其他', value: 'question' },
-]
-const systemReadStateOptions = [
-  { label: '全部狀態', value: 'all' },
-  { label: '未讀', value: 'unread' },
-  { label: '已讀', value: 'read' },
-]
-const statusOptions = [
-  { label: '待審核', value: 'pending' },
-  { label: '回報成立', value: 'upheld' },
-  { label: '回報不成立', value: 'dismissed' },
-]
+  { label: t('其他'), value: 'question' },
+])
+const systemReadStateOptions = computed(() => [
+  { label: t('全部狀態'), value: 'all' },
+  { label: t('未讀'), value: 'unread' },
+  { label: t('已讀'), value: 'read' },
+])
+const statusOptions = computed(() => [
+  { label: t('待審核'), value: 'pending' },
+  { label: t('回報成立'), value: 'upheld' },
+  { label: t('回報不成立'), value: 'dismissed' },
+])
 const reviewStatusOptions = computed(() =>
   isFinal(selectedReport.value?.status)
-    ? statusOptions.filter((item) => item.value !== 'pending')
-    : statusOptions
+    ? statusOptions.value.filter((item) => item.value !== 'pending')
+    : statusOptions.value
 )
 const canSaveReview = computed(() => {
   if (!['upheld', 'dismissed'].includes(reviewForm.value.status)) return false
@@ -1268,11 +1309,11 @@ async function loadSystemIssues() {
     systemTotal.value = Number(data.total || 0)
   } catch (error) {
     console.error('Load system issue reports error:', error)
-    systemError.value = '無法載入系統問題回報，請重新整理後再試。'
+    systemError.value = t('無法載入系統問題回報，請重新整理後再試。')
     toast.add({
       severity: 'error',
-      summary: '載入失敗',
-      detail: '無法載入系統問題回報',
+      summary: t('載入失敗'),
+      detail: t('無法載入系統問題回報'),
       life: 3000,
     })
   } finally {
@@ -1297,8 +1338,13 @@ async function loadCommentReports() {
     commentTotal.value = Number(data.total || 0)
   } catch (error) {
     console.error('Load comment reports error:', error)
-    commentError.value = '無法載入留言回報，請重新整理後再試。'
-    toast.add({ severity: 'error', summary: '載入失敗', detail: '無法載入留言回報', life: 3000 })
+    commentError.value = t('無法載入留言回報，請重新整理後再試。')
+    toast.add({
+      severity: 'error',
+      summary: t('載入失敗'),
+      detail: t('無法載入留言回報'),
+      life: 3000,
+    })
   } finally {
     loadingComments.value = false
   }
@@ -1321,7 +1367,7 @@ async function loadArchiveReports() {
     archiveListState.value.total = Number(data.total || 0)
   } catch (error) {
     console.error('Load archive reports error:', error)
-    archiveListState.value.error = '無法載入考古題回報，請重新整理後再試。'
+    archiveListState.value.error = t('無法載入考古題回報，請重新整理後再試。')
   } finally {
     archiveListState.value.loading = false
   }
@@ -1395,11 +1441,11 @@ function clampReportPageAfterDelete(page, total) {
 function confirmDeleteSystemIssue(item) {
   if (!item?.id || deletingSystemId.value !== null) return
   confirm.require({
-    header: '刪除這筆回報？',
-    message: '回報會移至垃圾桶，可由管理員在垃圾桶中還原或永久刪除。',
+    header: t('刪除這筆回報？'),
+    message: t('回報會移至垃圾桶，可由管理員在垃圾桶中還原或永久刪除。'),
     icon: 'pi pi-exclamation-triangle',
-    rejectLabel: '取消',
-    acceptLabel: '刪除',
+    rejectLabel: t('取消'),
+    acceptLabel: t('刪除'),
     acceptClass: 'p-button-danger',
     accept: () => deleteSystemIssue(item),
   })
@@ -1414,7 +1460,12 @@ async function openSystemReport(item) {
     systemDetailVisible.value = true
   } catch (error) {
     console.error('Load system issue report detail error:', error)
-    toast.add({ severity: 'error', summary: '載入失敗', detail: '無法載入回報詳情', life: 3000 })
+    toast.add({
+      severity: 'error',
+      summary: t('載入失敗'),
+      detail: t('無法載入回報詳情'),
+      life: 3000,
+    })
   } finally {
     loadingSystemDetailId.value = null
   }
@@ -1432,14 +1483,19 @@ async function saveSystemReadState() {
     systemIssues.value = systemIssues.value.map((item) => (item.id === data.id ? data : item))
     toast.add({
       severity: 'success',
-      summary: '閱讀狀態已更新',
-      detail: data.is_read ? '已標記為已讀' : '已標記為未讀',
+      summary: t('閱讀狀態已更新'),
+      detail: data.is_read ? t('已標記為已讀') : t('已標記為未讀'),
       life: 3000,
     })
   } catch (error) {
     console.error('Update system issue report read state error:', error)
     systemReadForm.value = Boolean(selectedSystemReport.value.is_read)
-    toast.add({ severity: 'error', summary: '更新失敗', detail: '閱讀狀態未變更', life: 3000 })
+    toast.add({
+      severity: 'error',
+      summary: t('更新失敗'),
+      detail: t('閱讀狀態未變更'),
+      life: 3000,
+    })
   } finally {
     systemReadSaving.value = false
   }
@@ -1453,14 +1509,19 @@ async function deleteSystemIssue(item) {
     systemTotal.value = clampReportPageAfterDelete(systemPage.value, systemTotal.value)
     toast.add({
       severity: 'success',
-      summary: '回報已移至垃圾桶',
-      detail: '系統問題回報可在垃圾桶中還原或永久刪除',
+      summary: t('回報已移至垃圾桶'),
+      detail: t('系統問題回報可在垃圾桶中還原或永久刪除'),
       life: 3000,
     })
     await loadSystemIssues()
   } catch (error) {
     console.error('Delete system issue report error:', error)
-    toast.add({ severity: 'error', summary: '刪除失敗', detail: '系統問題回報未變更', life: 3000 })
+    toast.add({
+      severity: 'error',
+      summary: t('刪除失敗'),
+      detail: t('系統問題回報未變更'),
+      life: 3000,
+    })
   } finally {
     deletingSystemId.value = null
   }
@@ -1468,11 +1529,11 @@ async function deleteSystemIssue(item) {
 function confirmDeleteCommentReport(item) {
   if (!item?.id || deletingCommentId.value !== null) return
   confirm.require({
-    header: '刪除這筆回報？',
-    message: '回報會移至垃圾桶，可由管理員在垃圾桶中還原或永久刪除。',
+    header: t('刪除這筆回報？'),
+    message: t('回報會移至垃圾桶，可由管理員在垃圾桶中還原或永久刪除。'),
     icon: 'pi pi-exclamation-triangle',
-    rejectLabel: '取消',
-    acceptLabel: '刪除',
+    rejectLabel: t('取消'),
+    acceptLabel: t('刪除'),
     acceptClass: 'p-button-danger',
     accept: () => deleteCommentReport(item),
   })
@@ -1487,14 +1548,19 @@ async function deleteCommentReport(item) {
     if (selectedReport.value?.id === item.id) reviewVisible.value = false
     toast.add({
       severity: 'success',
-      summary: '回報已移至垃圾桶',
-      detail: '留言回報可在垃圾桶中還原或永久刪除',
+      summary: t('回報已移至垃圾桶'),
+      detail: t('留言回報可在垃圾桶中還原或永久刪除'),
       life: 3000,
     })
     await loadCommentReports()
   } catch (error) {
     console.error('Delete comment report error:', error)
-    toast.add({ severity: 'error', summary: '刪除失敗', detail: '留言回報未變更', life: 3000 })
+    toast.add({
+      severity: 'error',
+      summary: t('刪除失敗'),
+      detail: t('留言回報未變更'),
+      life: 3000,
+    })
   } finally {
     deletingCommentId.value = null
   }
@@ -1511,7 +1577,12 @@ async function openCommentReport(id) {
     reviewVisible.value = true
   } catch (error) {
     console.error('Load comment report detail error:', error)
-    toast.add({ severity: 'error', summary: '載入失敗', detail: '無法載入回報詳情', life: 3000 })
+    toast.add({
+      severity: 'error',
+      summary: t('載入失敗'),
+      detail: t('無法載入回報詳情'),
+      life: 3000,
+    })
   }
 }
 function confirmSaveReview() {
@@ -1523,16 +1594,16 @@ function confirmSaveReview() {
   )
     return
   const deletesComment = reviewForm.value.status === 'upheld' && reviewForm.value.delete_comment
-  const message = ['送出後將通知回報者。', '審核結果與管理員答覆送出後將無法修改。']
+  const message = [t('送出後將通知回報者。'), t('審核結果與管理員答覆送出後將無法修改。')]
   if (deletesComment) {
-    message.push('被回報留言將永久刪除，無法復原，也不會進入垃圾桶。')
+    message.push(t('被回報留言將永久刪除，無法復原，也不會進入垃圾桶。'))
   }
   confirm.require({
-    header: '確認送出審核結果',
+    header: t('確認送出審核結果'),
     message: message.join('\n'),
     icon: deletesComment ? 'pi pi-exclamation-triangle' : 'pi pi-question-circle',
-    rejectLabel: '取消',
-    acceptLabel: '確認送出',
+    rejectLabel: t('取消'),
+    acceptLabel: t('確認送出'),
     acceptClass: deletesComment ? 'p-button-danger' : 'p-button-primary',
     defaultFocus: 'reject',
     accept: saveReview,
@@ -1556,14 +1627,19 @@ async function saveReview() {
     selectedReport.value = data
     toast.add({
       severity: 'success',
-      summary: '審核已更新',
-      detail: '留言回報審核狀態已更新',
+      summary: t('審核已更新'),
+      detail: t('留言回報審核狀態已更新'),
       life: 3000,
     })
     await loadCommentReports()
   } catch (error) {
     console.error('Review comment report error:', error)
-    toast.add({ severity: 'error', summary: '更新失敗', detail: '回報狀態未變更', life: 3000 })
+    toast.add({
+      severity: 'error',
+      summary: t('更新失敗'),
+      detail: t('回報狀態未變更'),
+      life: 3000,
+    })
   } finally {
     reviewSaving.value = false
   }
@@ -1585,11 +1661,11 @@ function openReportSource() {
 function confirmDeleteArchiveReport(item) {
   if (!item?.id || deletingArchiveId.value !== null) return
   confirm.require({
-    header: '刪除這筆考古題回報？',
-    message: '回報會移至垃圾桶；考古題、投稿與 PDF 不會受到影響。',
+    header: t('刪除這筆考古題回報？'),
+    message: t('回報會移至垃圾桶；考古題、投稿與 PDF 不會受到影響。'),
     icon: 'pi pi-exclamation-triangle',
-    rejectLabel: '取消',
-    acceptLabel: '刪除',
+    rejectLabel: t('取消'),
+    acceptLabel: t('刪除'),
     acceptClass: 'p-button-danger',
     accept: () => deleteArchiveReport(item),
   })
@@ -1608,14 +1684,14 @@ async function deleteArchiveReport(item) {
     }
     toast.add({
       severity: 'success',
-      summary: '回報已移至垃圾桶',
-      detail: '考古題與投稿未變更',
+      summary: t('回報已移至垃圾桶'),
+      detail: t('考古題與投稿未變更'),
       life: 3000,
     })
     await loadArchiveReports()
   } catch (error) {
     console.error('Delete archive report error:', error)
-    toast.add({ severity: 'error', summary: '刪除失敗', detail: '回報未變更', life: 3000 })
+    toast.add({ severity: 'error', summary: t('刪除失敗'), detail: t('回報未變更'), life: 3000 })
   } finally {
     deletingArchiveId.value = null
   }
@@ -1632,7 +1708,12 @@ async function openArchiveReport(id) {
     archiveReviewVisible.value = true
   } catch (error) {
     console.error('Load archive report detail error:', error)
-    toast.add({ severity: 'error', summary: '載入失敗', detail: '無法載入回報詳情', life: 3000 })
+    toast.add({
+      severity: 'error',
+      summary: t('載入失敗'),
+      detail: t('無法載入回報詳情'),
+      life: 3000,
+    })
   }
 }
 function confirmSaveArchiveReview() {
@@ -1646,13 +1727,13 @@ function confirmSaveArchiveReview() {
   const takesDown =
     archiveReviewForm.value.status === 'upheld' && archiveReviewForm.value.take_down_archive
   confirm.require({
-    header: '確認送出考古題回報審核',
+    header: t('確認送出考古題回報審核'),
     message: takesDown
-      ? '送出後將通知回報者，並以既有流程下架考古題；不會刪除考古題、投稿或 PDF。'
-      : '送出後將通知回報者，審核結果無法修改。',
+      ? t('送出後將通知回報者，並以既有流程下架考古題；不會刪除考古題、投稿或 PDF。')
+      : t('送出後將通知回報者，審核結果無法修改。'),
     icon: takesDown ? 'pi pi-exclamation-triangle' : 'pi pi-question-circle',
-    rejectLabel: '取消',
-    acceptLabel: '確認送出',
+    rejectLabel: t('取消'),
+    acceptLabel: t('確認送出'),
     defaultFocus: 'reject',
     accept: saveArchiveReview,
   })
@@ -1671,8 +1752,8 @@ async function saveArchiveReview() {
     archiveReviewForm.value.take_down_archive = false
     toast.add({
       severity: 'success',
-      summary: '審核已完成',
-      detail: data.archive_taken_down ? '回報成立，考古題已下架' : '考古題回報審核已更新',
+      summary: t('審核已完成'),
+      detail: data.archive_taken_down ? t('回報成立，考古題已下架') : t('考古題回報審核已更新'),
       life: 3500,
     })
     await loadArchiveReports()
@@ -1681,8 +1762,8 @@ async function saveArchiveReview() {
     const conflict = error?.response?.status === 409
     toast.add({
       severity: 'error',
-      summary: conflict ? '資料狀態已變更' : '更新失敗',
-      detail: conflict ? '請重新開啟回報確認最新狀態' : '回報狀態未變更',
+      summary: conflict ? t('資料狀態已變更') : t('更新失敗'),
+      detail: conflict ? t('請重新開啟回報確認最新狀態') : t('回報狀態未變更'),
       life: 3500,
     })
   } finally {
@@ -1699,38 +1780,38 @@ function openArchiveReportSource() {
   })
 }
 function archiveReasonLabel(value) {
-  return archiveReasonOptions.find((item) => item.value === value)?.label || value
+  return archiveReasonOptions.value.find((item) => item.value === value)?.label || value
 }
 function archiveSourceStateLabel(value) {
   return (
     {
-      available: '公開中',
-      taken_down: '已下架',
-      trashed: '已在垃圾桶',
-      deleted: '投稿已刪除',
-      missing: '來源已不存在',
-      unavailable: '目前不可公開',
-      not_managed: '無投稿紀錄可供下架',
+      available: t('公開中'),
+      taken_down: t('已下架'),
+      trashed: t('已在垃圾桶'),
+      deleted: t('投稿已刪除'),
+      missing: t('來源已不存在'),
+      unavailable: t('目前不可公開'),
+      not_managed: t('無投稿紀錄可供下架'),
     }[value] || value
   )
 }
 function archiveTakedownUnavailableMessage(value) {
   return (
     {
-      taken_down: '此考古題已下架，不能重複執行。',
-      trashed: '此考古題或課程已在垃圾桶，不能執行下架。',
-      deleted: '對應投稿已刪除，不能執行下架。',
-      missing: '來源已不存在，仍可完成審核但不能執行下架。',
-      unavailable: '此考古題目前不是公開狀態，不能執行下架。',
-      not_managed: '此考古題沒有可供既有下架 service 管理的投稿紀錄。',
-    }[value] || '目前不能執行下架。'
+      taken_down: t('此考古題已下架，不能重複執行。'),
+      trashed: t('此考古題或課程已在垃圾桶，不能執行下架。'),
+      deleted: t('對應投稿已刪除，不能執行下架。'),
+      missing: t('來源已不存在，仍可完成審核但不能執行下架。'),
+      unavailable: t('此考古題目前不是公開狀態，不能執行下架。'),
+      not_managed: t('此考古題沒有可供既有下架 service 管理的投稿紀錄。'),
+    }[value] || t('目前不能執行下架。')
   )
 }
 function reasonLabel(value) {
-  return reasonOptions.find((item) => item.value === value)?.label || value
+  return reasonOptions.value.find((item) => item.value === value)?.label || value
 }
 function statusLabel(value) {
-  return statusOptions.find((item) => item.value === value)?.label || value
+  return statusOptions.value.find((item) => item.value === value)?.label || value
 }
 function statusSeverity(value) {
   return { pending: 'warn', upheld: 'success', dismissed: 'danger' }[value] || 'secondary'
@@ -1738,11 +1819,11 @@ function statusSeverity(value) {
 function issueTypeLabel(value) {
   return (
     {
-      bug: '程式錯誤',
-      enhancement: '功能建議',
-      performance: '效能問題',
+      bug: t('程式錯誤'),
+      enhancement: t('功能建議'),
+      performance: t('效能問題'),
       'ui-ux': 'UI/UX',
-      question: '其他',
+      question: t('其他'),
     }[value] || value
   )
 }

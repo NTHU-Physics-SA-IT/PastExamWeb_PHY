@@ -102,6 +102,36 @@ async def test_admin_create_rejects_password_over_server_limit(client, make_user
 
 
 @pytest.mark.asyncio
+async def test_admin_create_rejects_password_below_server_minimum(client, make_user):
+    admin = await make_user(is_admin=True)
+    app.dependency_overrides[get_current_user] = lambda: UserRoles(
+        user_id=admin.id,
+        is_admin=True,
+    )
+
+    try:
+        response = await client.post(
+            ADMIN_PATH,
+            json={
+                "name": "too-short-password",
+                "email": "too-short-password@example.com",
+                "password": "short",
+                "is_admin": False,
+            },
+        )
+
+        assert response.status_code == 422
+        password_error = next(
+            error
+            for error in response.json()["detail"]
+            if error["loc"][-1] == "password"
+        )
+        assert "at least 8 characters" in password_error["msg"]
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
 async def test_non_admin_cannot_access_admin_user_routes(client):
     app.dependency_overrides[get_current_user] = lambda: UserRoles(
         user_id=2,

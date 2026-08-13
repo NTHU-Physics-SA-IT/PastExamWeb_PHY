@@ -27,22 +27,28 @@ CONTRIBUTOR_LEVEL_COUNT = 10
 CONTRIBUTOR_LEVEL_NAME_MAX_LENGTH = 30
 
 DEFAULT_CONTRIBUTOR_LEVEL_SETTINGS = [
-    {"level": 1, "name": "新手投稿者", "min_exp": 0},
-    {"level": 2, "name": "初階整理者", "min_exp": 2},
-    {"level": 3, "name": "穩定投稿者", "min_exp": 5},
-    {"level": 4, "name": "認真貢獻者", "min_exp": 9},
-    {"level": 5, "name": "經典整理師", "min_exp": 14},
-    {"level": 6, "name": "題庫建設者", "min_exp": 20},
-    {"level": 7, "name": "資源探索者", "min_exp": 27},
-    {"level": 8, "name": "校園收藏家", "min_exp": 35},
-    {"level": 9, "name": "傳奇貢獻者", "min_exp": 44},
-    {"level": 10, "name": "題庫宗師", "min_exp": 54},
+    {"level": 1, "name": "新手投稿者", "name_en": "Novice Contributor", "min_exp": 0},
+    {"level": 2, "name": "初階整理者", "name_en": "Junior Curator", "min_exp": 2},
+    {"level": 3, "name": "穩定投稿者", "name_en": "Regular Contributor", "min_exp": 5},
+    {"level": 4, "name": "認真貢獻者", "name_en": "Dedicated Contributor", "min_exp": 9},
+    {"level": 5, "name": "經典整理師", "name_en": "Archive Curator", "min_exp": 14},
+    {"level": 6, "name": "題庫建設者", "name_en": "Archive Builder", "min_exp": 20},
+    {"level": 7, "name": "資源探索者", "name_en": "Resource Explorer", "min_exp": 27},
+    {"level": 8, "name": "校園收藏家", "name_en": "Campus Collector", "min_exp": 35},
+    {"level": 9, "name": "傳奇貢獻者", "name_en": "Legendary Contributor", "min_exp": 44},
+    {"level": 10, "name": "題庫宗師", "name_en": "Archive Grandmaster", "min_exp": 54},
 ]
+
+DEFAULT_CONTRIBUTOR_LEVEL_ENGLISH_NAMES = {
+    (item["level"], item["name"]): item["name_en"]
+    for item in DEFAULT_CONTRIBUTOR_LEVEL_SETTINGS
+}
 
 
 class ContributorLevelSettingRead(BaseModel):
     level: int
     name: str
+    name_en: str | None = None
     min_exp: int
 
     class Config:
@@ -99,13 +105,17 @@ def validate_contributor_level_settings(value: Any) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     names: set[str] = set()
     previous_min_exp: int | None = None
-    expected_keys = {"level", "name", "min_exp"}
+    required_keys = {"level", "name", "min_exp"}
+    expected_keys = required_keys | {"name_en"}
 
     for expected_level, item in enumerate(value, start=1):
         if not isinstance(item, dict):
             raise ValueError(f"Lv.{expected_level} 設定格式錯誤")
-        if set(item) != expected_keys:
-            raise ValueError(f"Lv.{expected_level} 只能包含 level、name、min_exp")
+        item_keys = set(item)
+        if not required_keys.issubset(item_keys) or not item_keys.issubset(expected_keys):
+            raise ValueError(
+                f"Lv.{expected_level} 只能包含 level、name、name_en、min_exp"
+            )
 
         level = item["level"]
         if type(level) is not int or level != expected_level:
@@ -124,6 +134,23 @@ def validate_contributor_level_settings(value: Any) -> list[dict[str, Any]]:
         if name in names:
             raise ValueError("投稿等級名稱不可重複")
 
+        raw_name_en = item.get("name_en")
+        if raw_name_en is not None and not isinstance(raw_name_en, str):
+            raise ValueError(f"Lv.{level} 英文名稱必須是文字或 null")
+        name_en = raw_name_en.strip() if isinstance(raw_name_en, str) else None
+        if name_en == "":
+            name_en = None
+        if name_en is not None:
+            if not _contains_visible_character(name_en):
+                name_en = None
+            elif len(name_en) > CONTRIBUTOR_LEVEL_NAME_MAX_LENGTH:
+                raise ValueError(
+                    f"Lv.{level} 英文名稱不可超過 "
+                    f"{CONTRIBUTOR_LEVEL_NAME_MAX_LENGTH} 個字元"
+                )
+        if name_en is None:
+            name_en = DEFAULT_CONTRIBUTOR_LEVEL_ENGLISH_NAMES.get((level, name))
+
         min_exp = item["min_exp"]
         if type(min_exp) is not int:
             raise ValueError(f"Lv.{level} 累積 EXP 必須是整數")
@@ -136,7 +163,9 @@ def validate_contributor_level_settings(value: Any) -> list[dict[str, Any]]:
 
         names.add(name)
         previous_min_exp = min_exp
-        normalized.append({"level": level, "name": name, "min_exp": min_exp})
+        normalized.append(
+            {"level": level, "name": name, "name_en": name_en, "min_exp": min_exp}
+        )
 
     return normalized
 

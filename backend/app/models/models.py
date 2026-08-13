@@ -219,9 +219,17 @@ class CourseCategoryConfig(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     key: str = Field(sa_column=Column(String, nullable=False))
     name: str = Field(index=True)
+    name_en: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String, nullable=True),
+    )
     label: str = Field(
         default="",
         sa_column=Column(String, nullable=False, server_default=text("''")),
+    )
+    label_en: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String, nullable=True),
     )
     icon: str = Field(
         default="pi pi-fw pi-book",
@@ -318,6 +326,10 @@ class Course(SQLModel, table=True):
     __tablename__ = "courses"
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(index=True)
+    name_en: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String, nullable=True),
+    )
     category: str = Field(index=True)
     order_index: int = Field(default=0, index=True)
     deleted_at: Optional[datetime] = Field(
@@ -433,13 +445,22 @@ class ArchiveSubmission(SQLModel, table=True):
     requested_course_name: Optional[str] = Field(
         default=None, sa_column=Column(String, nullable=True)
     )
+    requested_course_name_en: Optional[str] = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
     requested_category_key: Optional[str] = Field(
         default=None, sa_column=Column(String, nullable=True)
     )
     requested_category_name: Optional[str] = Field(
         default=None, sa_column=Column(String, nullable=True)
     )
+    requested_category_name_en: Optional[str] = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
     requested_category_label: Optional[str] = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
+    requested_category_label_en: Optional[str] = Field(
         default=None, sa_column=Column(String, nullable=True)
     )
     requested_category_icon: Optional[str] = Field(
@@ -1228,11 +1249,13 @@ class UserSubmissionRecordRead(BaseModel):
     status: SubmissionStatus
     archive_type: ArchiveType
     course_name: str
+    course_name_en: Optional[str] = None
     exam_name: str
     academic_year: int
     professor: str
     has_answers: bool = False
     requested_course_name: Optional[str] = None
+    requested_course_name_en: Optional[str] = None
     requested_category_key: Optional[str] = None
     is_admin_upload: bool = False
     submitted_at: datetime
@@ -1375,6 +1398,7 @@ class CommentReportRead(BaseModel):
     comment_created_at_snapshot: datetime
     archive_name: str
     course_name: str
+    course_name_en: Optional[str] = None
     status: str
     admin_response: Optional[str]
     reviewed_by: Optional[int]
@@ -1416,6 +1440,7 @@ class ArchiveReportRead(BaseModel):
     supplementary_detail: Optional[str]
     archive_name: str
     course_name: str
+    course_name_en: Optional[str] = None
     academic_year: int
     archive_type: str
     professor: str
@@ -1493,6 +1518,7 @@ class NotificationUnreadSummary(NotificationCenterRead):
 class CourseInfo(BaseModel):
     id: int
     name: str
+    name_en: Optional[str] = None
     order_index: int = 0
 
     class Config:
@@ -1560,12 +1586,14 @@ class ArchiveDiscussionMessageRead(BaseModel):
 
 class CourseCreate(BaseModel):
     name: str
+    name_en: Optional[str] = None
     category: str
     order_index: Optional[int] = None
 
 
 class CourseUpdate(BaseModel):
     name: Optional[str] = None
+    name_en: Optional[str] = None
     category: Optional[str] = None
     order_index: Optional[int] = None
 
@@ -1578,6 +1606,7 @@ class CourseReorder(BaseModel):
 class CourseRead(BaseModel):
     id: int
     name: str
+    name_en: Optional[str] = None
     category: str
     order_index: int = 0
 
@@ -1599,7 +1628,9 @@ class CourseSubmissionCreate(BaseModel):
 class CourseCategoryCreate(BaseModel):
     key: str
     name: str
+    name_en: Optional[str] = None
     label: str = ""
+    label_en: Optional[str] = None
     icon: str = "pi pi-fw pi-book"
     badge_color: Optional[str] = None
     order_index: Optional[int] = None
@@ -1608,7 +1639,9 @@ class CourseCategoryCreate(BaseModel):
 class CourseCategoryUpdate(BaseModel):
     key: Optional[str] = None
     name: Optional[str] = None
+    name_en: Optional[str] = None
     label: Optional[str] = None
+    label_en: Optional[str] = None
     icon: Optional[str] = None
     badge_color: Optional[str] = None
     order_index: Optional[int] = None
@@ -1623,7 +1656,9 @@ class CourseCategoryRead(BaseModel):
     id: int
     key: str
     name: str
+    name_en: Optional[str] = None
     label: str
+    label_en: Optional[str] = None
     icon: str
     badge_color: str = "blue"
     order_index: int
@@ -1664,9 +1699,12 @@ class ArchiveSubmissionRead(BaseModel):
     professor: str
     has_answers: bool
     requested_course_name: Optional[str] = None
+    requested_course_name_en: Optional[str] = None
     requested_category_key: Optional[str] = None
     requested_category_name: Optional[str] = None
+    requested_category_name_en: Optional[str] = None
     requested_category_label: Optional[str] = None
+    requested_category_label_en: Optional[str] = None
     requested_category_icon: Optional[str] = None
     status: SubmissionStatus
     requester_id: int
@@ -1714,9 +1752,12 @@ class ArchiveSubmissionUpdate(BaseModel):
     professor: Optional[str] = None
     has_answers: Optional[bool] = None
     requested_course_name: Optional[str] = None
+    requested_course_name_en: Optional[str] = None
     requested_category_key: Optional[str] = None
     requested_category_name: Optional[str] = None
+    requested_category_name_en: Optional[str] = None
     requested_category_label: Optional[str] = None
+    requested_category_label_en: Optional[str] = None
     requested_category_icon: Optional[str] = None
 
 
@@ -1724,6 +1765,7 @@ class TrashItem(BaseModel):
     item_type: TrashEntityType
     id: int
     display_name: str
+    display_name_en: Optional[str] = None
     academic_year: Optional[int] = None
     academic_term: Optional[str] = None
     deleted_at: datetime
@@ -1734,10 +1776,18 @@ class TrashItem(BaseModel):
     parent_type: Optional[str] = None
     parent_id: Optional[int] = None
     parent_name: Optional[str] = None
+    parent_name_en: Optional[str] = None
     created_archive_id: Optional[int] = None
     source_submission_id: Optional[int] = None
     course_id: Optional[int] = None
     course_name: Optional[str] = None
+    course_name_en: Optional[str] = None
+    requested_course_name: Optional[str] = None
+    requested_course_name_en: Optional[str] = None
+    requested_category_name: Optional[str] = None
+    requested_category_name_en: Optional[str] = None
+    requested_category_label: Optional[str] = None
+    requested_category_label_en: Optional[str] = None
     reason: Optional[str] = None
     created_at: Optional[datetime] = None
     reporter_name: Optional[str] = None

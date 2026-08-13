@@ -367,6 +367,7 @@ describe('AdminView', () => {
 
     expect(createCourseMock).toHaveBeenCalledWith({
       name: '量子物理',
+      name_en: '',
       category: 'freshman',
     })
     expect(trackEventMock).toHaveBeenCalledWith('create-course', expect.any(Object))
@@ -382,13 +383,13 @@ describe('AdminView', () => {
     wrapper.vm.openCreateUserDialog()
     wrapper.vm.userForm.name = 'Charlie'
     wrapper.vm.userForm.email = 'charlie@example.com'
-    wrapper.vm.userForm.password = 'secret'
+    wrapper.vm.userForm.password = 'StrongPass123'
     wrapper.vm.userForm.is_admin = true
     await wrapper.vm.saveUser()
     expect(createUserMock).toHaveBeenCalledWith({
       name: 'Charlie',
       email: 'charlie@example.com',
-      password: 'secret',
+      password: 'StrongPass123',
       is_admin: true,
     })
 
@@ -504,7 +505,7 @@ describe('AdminView', () => {
     expect(adminTemplateSource).toContain('設定哪些清大學生可以透過 NTHU OAuth 登入網站')
     expect(adminTemplateSource).toContain("user.student_id || '—'")
     expect(adminTemplateSource).toContain('getNthuIdentitySecondaryLine(user)')
-    expect(adminTemplateSource).toContain('filterPlaceholder="搜尋中文系所名稱或代碼"')
+    expect(adminTemplateSource).toContain(':filterPlaceholder="$t(\'搜尋中文系所名稱或代碼\')"')
 
     wrapper.unmount()
   })
@@ -612,8 +613,8 @@ describe('AdminView', () => {
     wrapper.vm.userSearchQuery = '未解析'
     expect(wrapper.vm.filteredUsers.map((user) => user.name)).toEqual(['Unresolved'])
 
-    expect(adminTemplateSource).toContain('<Tab value="local">本地帳號</Tab>')
-    expect(adminTemplateSource).toContain('<Tab value="nthu">清大 OAuth</Tab>')
+    expect(adminTemplateSource).toContain('<Tab value="local">{{ $t(\'本地帳號\') }}</Tab>')
+    expect(adminTemplateSource).toContain('<Tab value="nthu">{{ $t(\'清大 OAuth\') }}</Tab>')
     expect(adminTemplateSource).not.toContain('admin-user-source-filter')
     expect(adminTemplateSource).not.toContain('header="學號 / 員工編號"')
     expect(adminTemplateSource).not.toContain('header="系所 / 類別"')
@@ -899,10 +900,14 @@ describe('AdminView', () => {
     expect(adminViewSource).not.toContain("toggleTrashSort('deleted_by')")
     expect(adminViewSource).not.toContain('<span class="review-mobile-info-label">申請人</span>')
     expect(adminViewSource).not.toContain('<span class="review-mobile-info-label">投稿人</span>')
-    expect(adminViewSource.match(/review-mobile-info-label">審核人/g)).toHaveLength(2)
-    expect(adminViewSource.match(/review-mobile-info-label">審核時間/g)).toHaveLength(2)
-    expect(adminViewSource.match(/label: '刪除者'/g)).toHaveLength(1)
-    expect(adminViewSource.match(/label: '刪除時間'/g)).toHaveLength(1)
+    expect(
+      adminViewSource.match(/review-mobile-info-label">\{\{ \$t\('審核人'\) \}\}/g)
+    ).toHaveLength(2)
+    expect(
+      adminViewSource.match(/review-mobile-info-label">\{\{ \$t\('審核時間'\) \}\}/g)
+    ).toHaveLength(2)
+    expect(adminViewSource.match(/label: t\('刪除者'\)/g)).toHaveLength(1)
+    expect(adminViewSource.match(/label: t\('刪除時間'\)/g)).toHaveLength(1)
     expect(adminViewSource).not.toContain('admin-actor-time--mobile')
     expect(adminViewSource).toContain('admin-actor-time--notification')
     expect(adminViewSource).toContain('notification-mobile-update__value')
@@ -923,9 +928,9 @@ describe('AdminView', () => {
     expect(adminViewSource).not.toContain('writing-mode: vertical-rl')
     expect(adminViewSource).not.toContain('min-inline-size: 4.75rem')
     expect(adminViewSource).toContain('inline-size: fit-content')
-    expect(adminViewSource).toContain('@container admin-status-cell (max-width: 3.75rem)')
+    expect(adminViewSource).not.toContain('@container admin-status-cell')
     expect(adminViewSource).toMatch(
-      /admin-desktop-status-label[\s\S]*?flex-direction: row[\s\S]*?@container admin-status-cell[\s\S]*?flex-direction: column/
+      /admin-desktop-status-tag\.soft-badge[\s\S]*?min-height:\s*1\.9rem[\s\S]*?padding:\s*0\.32rem 0\.74rem/
     )
     expect(adminTemplateSource.match(/class="review-submission-type-cell"/g)).toHaveLength(1)
     expect(adminTemplateSource.match(/'review-desktop-submission-type-tag'/g)).toHaveLength(1)
@@ -958,9 +963,9 @@ describe('AdminView', () => {
     expect(adminTemplateSource).toContain('getTrashNameIndent(data)')
     expect(adminViewSource).toContain('headerClass="trash-dependencies-column"')
     expect(adminViewSource).toContain('width: clamp(17rem, 22vw, 23rem)')
-    expect(adminViewSource).toContain("{ label: '系統問題回報', value: 'system_issue_report' }")
-    expect(adminViewSource).toContain("{ label: '留言回報', value: 'comment_report' }")
-    expect(adminViewSource).toContain("{ label: '考古題回報', value: 'archive_report' }")
+    expect(adminViewSource).toContain("{ label: t('系統問題回報'), value: 'system_issue_report' }")
+    expect(adminViewSource).toContain("{ label: t('留言回報'), value: 'comment_report' }")
+    expect(adminViewSource).toContain("{ label: t('考古題回報'), value: 'archive_report' }")
     expect(wrapper.vm.trashFilterOptions.map((option) => option.value)).toEqual([
       'archive',
       'archive_submission',
@@ -1169,6 +1174,13 @@ describe('AdminView', () => {
       password: '密碼是必填欄位',
     })
 
+    wrapper.vm.userForm.name = 'Short Password'
+    wrapper.vm.userForm.email = 'short-password@example.com'
+    wrapper.vm.userForm.password = 'secret'
+    await wrapper.vm.saveUser()
+    expect(createUserMock).not.toHaveBeenCalled()
+    expect(wrapper.vm.userFormErrors.password).toBe('密碼至少 8 字')
+
     wrapper.vm.openNotificationCreateDialog()
     wrapper.vm.notificationForm.title = ' '
     wrapper.vm.notificationForm.body = ''
@@ -1260,6 +1272,29 @@ describe('AdminView', () => {
 
     await flushPromises()
     expect(notificationGetAllMock).toHaveBeenCalledTimes(1)
+
+    wrapper.unmount()
+  })
+
+  it('submits Add User only once while a request is in flight', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    createUserMock.mockClear()
+
+    let resolveCreate
+    createUserMock.mockImplementationOnce(() => new Promise((resolve) => (resolveCreate = resolve)))
+    wrapper.vm.openCreateUserDialog()
+    wrapper.vm.userForm.name = 'Single Request'
+    wrapper.vm.userForm.email = 'single-request@example.com'
+    wrapper.vm.userForm.password = 'StrongPass123'
+
+    const firstRequest = wrapper.vm.saveUser()
+    const duplicateRequest = wrapper.vm.saveUser()
+    expect(createUserMock).toHaveBeenCalledTimes(1)
+
+    resolveCreate({ data: { id: 101 } })
+    await Promise.all([firstRequest, duplicateRequest])
+    expect(toastAddMock).toHaveBeenCalledTimes(1)
 
     wrapper.unmount()
   })
@@ -1457,11 +1492,15 @@ describe('AdminView', () => {
     wrapper.vm.openCreateUserDialog()
     wrapper.vm.userForm.name = 'Dave'
     wrapper.vm.userForm.email = 'dave@example.com'
-    wrapper.vm.userForm.password = 'secret'
-    createUserMock.mockRejectedValueOnce(new Error('user-fail'))
+    wrapper.vm.userForm.password = 'StrongPass123'
+    createUserMock.mockRejectedValueOnce({
+      response: { status: 400, data: { detail: 'User with this email already exists' } },
+    })
     isUnauthorizedErrorMock.mockReturnValueOnce(false)
     await wrapper.vm.saveUser()
-    expect(toastAddMock).toHaveBeenCalledWith(expect.objectContaining({ detail: '使用者新增失敗' }))
+    expect(toastAddMock).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: '此電子郵件已被其他帳號使用' })
+    )
 
     toastAddMock.mockClear()
     createUserMock.mockRejectedValueOnce(new Error('unauthorized'))
