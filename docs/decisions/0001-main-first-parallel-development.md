@@ -14,7 +14,9 @@
   - [Validation policy](../development/validation.md)
 - Related PR / issue: None known
 - Supersedes: None
-- Superseded by: None
+- Superseded by: [ADR-0005](0005-main-pr-docs-only-exception.md), only for
+  the blanket Full-CI requirement on main-target documentation-only pull
+  requests
 
 ## Context
 
@@ -43,8 +45,8 @@ integration. Git conflict markers and commit history alone are insufficient.
 
 Target refresh does not by itself create an extra Full CI gate. Verification
 remains risk-proportional until the repository's formal source, PR, main, and
-merge-commit gates apply. Main-target PRs remain Full under the current CI
-contract.
+merge-commit gates apply. Main-target PRs remain Full by default; the narrow
+docs-only exception is defined by ADR-0005.
 
 Shared, published, external, bot, analytics, backup, and recovery work must not
 be silently rebased, reset, retargeted, or rewritten.
@@ -80,7 +82,8 @@ history system.
   reviewed in addition to commits and diffs.
 - Textual cleanliness is not semantic compatibility evidence.
 - Target refresh does not weaken or invent formal CI authority.
-- Main-target PRs use Full CI.
+- Main-target PRs use Full CI except when ADR-0005 conclusively classifies the
+  entire change as docs-only.
 - Shared or external history is not silently rewritten.
 
 ## Consequences

@@ -138,17 +138,20 @@ resolve its exact name from canonical project governance rather than historical
 prose or visible remote branches.
 
 Before opening or updating a pull request, refresh the intended base and
-incorporate it safely. Pull requests to `main` always use Full CI. For the
-configured coordination branch, the Repository classifier applies its existing
-exact-ref, provenance, governance-path, and fail-closed rules.
+incorporate it safely. Pull requests to `main` use Full CI by default, except
+when the centralized classifier conclusively identifies every changed path as
+docs-only. For the configured coordination branch, the Repository classifier
+applies its existing exact-ref, provenance, governance-path, and fail-closed
+rules.
 
 Returning a coordinated milestone to main uses a separately authorized
 immutable candidate based on fresh `main`. The final coordination SHA is
 true-merged into that candidate,
 the candidate completes exact-SHA Full CI, and a candidate pull request targets
-`main`. Pull requests targeting `main` always run Full CI and never use
-Equivalent evidence. Merging that pull request is a separate owner-authorized
-operation.
+`main`. Pull requests targeting `main` never use Equivalent evidence;
+governance, CI, configuration, application, mixed, and unknown changes run Full
+CI, while only conclusively docs-only changes use the narrow lightweight path.
+Merging that pull request is a separate owner-authorized operation.
 
 Before merge, the pushed final commit must reach a terminal successful CI
 result for the checks selected by the repository workflows. A pull request
