@@ -42,11 +42,12 @@ The four concepts above remain distinct even if the current model names and
 tables do not yet express that separation. Multiple approved files may belong
 to one logical exam group without sharing review or delete outcomes.
 
-### Known gap
+### Current safety-net status
 
-The current data model and lifecycle code do not consistently preserve
-independent public items for sibling submissions. The contract is documented
-before the safety tests and conformance changes planned for later stages.
+Focused public-catalog, authenticated source-projection, file-action, and
+frontend tests now protect independent Archive identities when exam metadata
+matches. Lifecycle grouping remains a separate gap for later safety-net and
+conformance work.
 
 ## Evidence and status labels
 

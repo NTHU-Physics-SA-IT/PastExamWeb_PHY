@@ -94,6 +94,12 @@ submission IDs. `archive_submission_lifecycle.py` resolves exact
 `created_archive_id` links during delete/restore. Report-source resolution in
 `reports.py` also considers the linked submission.
 
+`test_public_catalog_keeps_same_metadata_approved_sibling_independent` protects
+the effective-public query across approved, pending, rejected, takedown, and
+soft-deleted same-metadata siblings. Authenticated coverage confirms exact
+`source_submission_ids` and exact preview, preview-file, and download object
+resolution for two independent one-to-one pairs.
+
 ### Known gap
 
 Historical data with multiple submissions pointing to one Archive is an
@@ -160,8 +166,9 @@ and two independent approvals reusing one concurrently created Course.
 `renders_each_archive_when_exam_metadata_matches_but_ids_differ` confirms that,
 when the Archive list response contains two records with matching exam
 metadata but different Archive identities, the frontend preserves two cards
-and two identity-specific download operations. This test does not protect the
-backend sibling-visibility query or object-storage availability.
+and identity-specific preview and download operations. Backend tests separately
+protect sibling visibility and exact object-name resolution; object-storage
+availability remains outside this repository safety net.
 
 ## ArchiveSubmission comparison candidates
 
@@ -345,6 +352,7 @@ transaction.
 
 ## Required follow-up
 
-Add characterization tests for sibling visibility and lifecycle grouping before
-schema or service refactoring. Any schema change must follow
+Public sibling visibility and exact file-action identity are characterized.
+Add lifecycle-grouping characterization before schema or service refactoring.
+Any schema change must follow
 [Migration safety](../migration-safety.md).
