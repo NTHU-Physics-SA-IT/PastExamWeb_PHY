@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
@@ -19,7 +19,7 @@ from app.utils.auth import get_current_user
 
 
 async def _create_notification(session_maker, **overrides):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     data = NotificationCreate(
         title=f"Test Notification {uuid.uuid4().hex[:6]}",
         body="Hello world",
@@ -63,8 +63,8 @@ async def test_public_notification_endpoints_return_active_only(
     await _create_notification(
         session_maker,
         is_active=False,
-        starts_at=datetime.now(timezone.utc) - timedelta(days=2),
-        ends_at=datetime.now(timezone.utc) - timedelta(days=1),
+        starts_at=datetime.now(UTC) - timedelta(days=2),
+        ends_at=datetime.now(UTC) - timedelta(days=1),
     )
 
     for path in ("/notifications", "/notifications/active"):
@@ -94,7 +94,7 @@ async def test_admin_can_crud_notifications(
     created_id = None
 
     try:
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
         end_time = start_time + timedelta(hours=1)
         payload = {
             "title": "Site maintenance",
@@ -224,7 +224,7 @@ async def test_admin_notifications_require_admin(
     )
 
     try:
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
         end_time = start_time + timedelta(hours=1)
         payload = {
             "title": "Forbidden",
@@ -281,7 +281,7 @@ async def test_announcement_reads_are_per_user_and_update_reopens_unread(
 
         async with session_maker() as session:
             stored = await session.get(Notification, announcement.id)
-            stored.updated_at = datetime.now(timezone.utc) + timedelta(seconds=1)
+            stored.updated_at = datetime.now(UTC) + timedelta(seconds=1)
             session.add(stored)
             await session.commit()
 

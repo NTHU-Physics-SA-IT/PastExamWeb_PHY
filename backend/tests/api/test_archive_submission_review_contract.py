@@ -1,5 +1,5 @@
-from datetime import datetime, timezone
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import delete, func
@@ -77,7 +77,7 @@ async def _create_review_context(
         reviewed_at = (
             None
             if submission_status == SubmissionStatus.PENDING
-            else datetime(2026, 1, 1, tzinfo=timezone.utc)
+            else datetime(2026, 1, 1, tzinfo=UTC)
         )
         submission = ArchiveSubmission(
             subject=course.name,
@@ -783,7 +783,7 @@ async def test_admin_submission_list_projects_stable_available_actions(
         contexts.append((deleted_course.id, deleted_submission.id))
         async with session_maker() as session:
             row = await session.get(ArchiveSubmission, deleted_submission.id)
-            row.deleted_at = datetime.now(timezone.utc)
+            row.deleted_at = datetime.now(UTC)
             await session.commit()
         expected_by_id[deleted_submission.id] = ("deleted", [])
 

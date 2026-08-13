@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
 
 from fastapi import HTTPException, status
 from sqlmodel import select
@@ -23,7 +23,6 @@ from app.services.archive_submission_links import (
     validate_archive_source_membership,
 )
 from app.utils.course_text import normalized_course_text_expr
-
 
 logger = logging.getLogger(__name__)
 

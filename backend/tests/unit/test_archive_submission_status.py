@@ -1,6 +1,6 @@
 from collections import Counter
 from dataclasses import FrozenInstanceError
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from inspect import iscoroutinefunction, signature
 from itertools import product
 
@@ -16,10 +16,9 @@ from app.services.archive_submission_status import (
     build_submission_status_notification_dedupe_key,
     classify_archive_submission_expected_state,
     classify_archive_submission_review_transition,
-    resolve_archive_submission_delete_source_status,
     resolve_archive_submission_actual_status,
+    resolve_archive_submission_delete_source_status,
 )
-
 
 POLICY_MATRIX = [
     (
@@ -398,19 +397,19 @@ def test_status_only_precondition_treats_aba_return_as_match():
 
 
 def test_status_notification_key_is_stable_for_same_source_generation():
-    generation = datetime(2026, 8, 13, 9, 30, tzinfo=timezone.utc)
+    generation = datetime(2026, 8, 13, 9, 30, tzinfo=UTC)
 
     first = build_submission_status_notification_dedupe_key(
         submission_id=42,
         new_status=SubmissionStatus.APPROVED,
         reviewed_at=generation,
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
     retry = build_submission_status_notification_dedupe_key(
         submission_id=42,
         new_status=SubmissionStatus.APPROVED,
         reviewed_at=generation,
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
     assert retry == first
@@ -420,39 +419,39 @@ def test_status_notification_key_changes_for_new_source_generation():
     first = build_submission_status_notification_dedupe_key(
         submission_id=42,
         new_status=SubmissionStatus.APPROVED,
-        reviewed_at=datetime(2026, 8, 13, 9, 30, tzinfo=timezone.utc),
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        reviewed_at=datetime(2026, 8, 13, 9, 30, tzinfo=UTC),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
     later_cycle = build_submission_status_notification_dedupe_key(
         submission_id=42,
         new_status=SubmissionStatus.APPROVED,
-        reviewed_at=datetime(2026, 8, 13, 9, 31, tzinfo=timezone.utc),
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        reviewed_at=datetime(2026, 8, 13, 9, 31, tzinfo=UTC),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
     assert later_cycle != first
 
 
 def test_status_notification_key_separates_target_statuses():
-    generation = datetime(2026, 8, 13, 9, 30, tzinfo=timezone.utc)
+    generation = datetime(2026, 8, 13, 9, 30, tzinfo=UTC)
     approved = build_submission_status_notification_dedupe_key(
         submission_id=42,
         new_status=SubmissionStatus.APPROVED,
         reviewed_at=generation,
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
     rejected = build_submission_status_notification_dedupe_key(
         submission_id=42,
         new_status=SubmissionStatus.REJECTED,
         reviewed_at=generation,
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
     assert rejected != approved
 
 
 def test_status_notification_key_uses_created_at_for_initial_generation():
-    created_at = datetime(2026, 1, 1, 8, 0, tzinfo=timezone.utc)
+    created_at = datetime(2026, 1, 1, 8, 0, tzinfo=UTC)
     first = build_submission_status_notification_dedupe_key(
         submission_id=42,
         new_status=SubmissionStatus.APPROVED,
@@ -470,7 +469,7 @@ def test_status_notification_key_uses_created_at_for_initial_generation():
 
 
 def test_status_notification_key_is_timezone_normalized_and_safe():
-    utc_generation = datetime(2026, 8, 13, 1, 30, tzinfo=timezone.utc)
+    utc_generation = datetime(2026, 8, 13, 1, 30, tzinfo=UTC)
     taipei_generation = datetime(
         2026,
         8,
@@ -483,13 +482,13 @@ def test_status_notification_key_is_timezone_normalized_and_safe():
         submission_id=9_223_372_036_854_775_807,
         new_status=SubmissionStatus.TAKEDOWN,
         reviewed_at=utc_generation,
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
     taipei_key = build_submission_status_notification_dedupe_key(
         submission_id=9_223_372_036_854_775_807,
         new_status=SubmissionStatus.TAKEDOWN,
         reviewed_at=taipei_generation,
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
     assert taipei_key == utc_key

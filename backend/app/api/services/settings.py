@@ -1,11 +1,11 @@
-from datetime import datetime, timezone
-from typing import Any, List
 import unicodedata
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.exc import ProgrammingError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -92,7 +92,8 @@ def _contains_visible_character(value: str) -> bool:
 
 def validate_contributor_level_settings(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
-        raise ValueError("投稿等級設定必須是陣列")
+        # ValueError is part of the existing validation and HTTP 422 contract.
+        raise ValueError("投稿等級設定必須是陣列")  # noqa: TRY004
     if len(value) != CONTRIBUTOR_LEVEL_COUNT:
         raise ValueError("投稿等級設定必須正好包含 10 個等級")
 
@@ -103,7 +104,8 @@ def validate_contributor_level_settings(value: Any) -> list[dict[str, Any]]:
 
     for expected_level, item in enumerate(value, start=1):
         if not isinstance(item, dict):
-            raise ValueError(f"Lv.{expected_level} 設定格式錯誤")
+            # ValueError is part of the existing validation and HTTP 422 contract.
+            raise ValueError(f"Lv.{expected_level} 設定格式錯誤")  # noqa: TRY004
         if set(item) != expected_keys:
             raise ValueError(f"Lv.{expected_level} 只能包含 level、name、min_exp")
 
@@ -113,7 +115,8 @@ def validate_contributor_level_settings(value: Any) -> list[dict[str, Any]]:
 
         raw_name = item["name"]
         if not isinstance(raw_name, str):
-            raise ValueError(f"Lv.{level} 名稱必須是文字")
+            # ValueError is part of the existing validation and HTTP 422 contract.
+            raise ValueError(f"Lv.{level} 名稱必須是文字")  # noqa: TRY004
         name = raw_name.strip()
         if not name or not _contains_visible_character(name):
             raise ValueError(f"Lv.{level} 名稱不可為空白")
@@ -159,7 +162,7 @@ def _default_settings() -> list[dict[str, Any]]:
     return [dict(level) for level in DEFAULT_CONTRIBUTOR_LEVEL_SETTINGS]
 
 
-@router.get("/contributor-levels", response_model=List[ContributorLevelSettingRead])
+@router.get("/contributor-levels", response_model=list[ContributorLevelSettingRead])
 async def get_contributor_level_settings(
     db: AsyncSession = Depends(get_session),
 ):
@@ -181,9 +184,9 @@ async def get_contributor_level_settings(
     return validate_contributor_level_settings(setting.value)
 
 
-@router.put("/contributor-levels", response_model=List[ContributorLevelSettingRead])
+@router.put("/contributor-levels", response_model=list[ContributorLevelSettingRead])
 async def update_contributor_level_settings(
-    payload: List[dict[str, Any]],
+    payload: list[dict[str, Any]],
     current_user: UserRoles = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
@@ -200,7 +203,7 @@ async def update_contributor_level_settings(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         ) from exc
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     statement = (
         postgresql_insert(SystemSetting)
         .values(

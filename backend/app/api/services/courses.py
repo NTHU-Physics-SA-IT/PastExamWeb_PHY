@@ -1,6 +1,6 @@
 import json
-from datetime import datetime, timedelta, timezone
-from typing import List
+import logging
+from datetime import UTC, datetime, timedelta
 
 from fastapi import (
     APIRouter,
@@ -14,14 +14,22 @@ from fastapi import (
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from minio.error import S3Error
-from sqlalchemy import and_, delete, exists, func, or_, update as sql_update
+from sqlalchemy import and_, delete, exists, func, or_
+from sqlalchemy import update as sql_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.db.session import get_session
+from app.api.services.archive_submission_lifecycle import (
+    archive_lifecycle_conflict_error,
+    course_lifecycle_conflict_error,
+    is_course_trash_lifecycle_reason,
+    make_course_trash_lifecycle_reason,
+    soft_delete_archive_with_submission_takedown,
+)
+from app.core.config import settings
 from app.db.course_categories import (
     DEFAULT_COURSE_CATEGORY_DEFINITIONS,
     LEGACY_COURSE_CATEGORY_ALIASES,
@@ -30,13 +38,7 @@ from app.db.course_categories import (
     normalize_course_category_key,
     normalize_course_category_name,
 )
-from app.api.services.archive_submission_lifecycle import (
-    archive_lifecycle_conflict_error,
-    course_lifecycle_conflict_error,
-    make_course_trash_lifecycle_reason,
-    is_course_trash_lifecycle_reason,
-    soft_delete_archive_with_submission_takedown,
-)
+from app.db.session import get_session
 from app.models.models import (
     Archive,
     ArchiveDiscussionLike,
@@ -68,21 +70,12 @@ from app.models.models import (
     User,
     UserRoles,
 )
-from app.utils.auth import get_current_user
-from app.utils.auth_ws import get_ws_token_payload
-from app.utils.storage import get_minio_client, presigned_get_url
-from app.utils.course_text import (
-    format_course_display_name,
-    normalize_course_search_text,
-    normalized_course_text_expr,
+from app.services import archive_lifecycle_locks, course_lifecycle_locks
+from app.services.archive_lifecycle_locks import (
+    LifecyclePlanRetryExhausted,
+    LockedLifecycleRows,
+    PlanRebuildBudget,
 )
-from app.core.config import settings
-from app.services.personal_notifications import enqueue_personal_notification
-from app.services.discussions import soft_delete_discussion_message
-from app.services.archive_submission_links import (
-    validate_archive_source_submission_rows,
-)
-from app.services import archive_lifecycle_locks
 from app.services.archive_mutation import (
     ArchiveMutationLifecycleConflict,
     acquire_stable_archive_mutation_locks,
@@ -90,15 +83,24 @@ from app.services.archive_mutation import (
     archive_move_target_trashed_error,
     resolve_archive_move_target,
 )
-from app.services import course_lifecycle_locks
-from app.services.archive_lifecycle_locks import (
-    LifecyclePlanRetryExhausted,
-    LockedLifecycleRows,
-    PlanRebuildBudget,
+from app.services.archive_submission_links import (
+    validate_archive_source_submission_rows,
 )
 from app.services.course_lifecycle_locks import CourseLifecycleOperation
+from app.services.discussions import soft_delete_discussion_message
+from app.services.personal_notifications import enqueue_personal_notification
+from app.utils.auth import get_current_user
+from app.utils.auth_ws import get_ws_token_payload
+from app.utils.course_text import (
+    format_course_display_name,
+    normalize_course_search_text,
+    normalized_course_text_expr,
+)
+from app.utils.exception_logging import redacted_exc_info
+from app.utils.storage import get_minio_client, presigned_get_url
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # In-memory connection registry (single-process broadcast).
 _discussion_connections_by_archive: dict[int, set[WebSocket]] = {}
@@ -367,7 +369,7 @@ async def _list_course_categories_data(db: AsyncSession) -> list[CourseCategoryR
     ]
 
 
-@router.get("/categories", response_model=List[CourseCategoryRead])
+@router.get("/categories", response_model=list[CourseCategoryRead])
 async def list_course_categories(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
@@ -375,7 +377,7 @@ async def list_course_categories(
     return await _list_course_categories_data(db)
 
 
-@router.get("/public/categories", response_model=List[CourseCategoryRead])
+@router.get("/public/categories", response_model=list[CourseCategoryRead])
 async def list_public_course_categories(db: AsyncSession = Depends(get_session)):
     return await _list_course_categories_data(db)
 
@@ -413,7 +415,7 @@ async def _get_categorized_courses_data(
     return categorized_courses
 
 
-@router.get("", response_model=dict[str, List[CourseInfo]])
+@router.get("", response_model=dict[str, list[CourseInfo]])
 async def get_categorized_courses(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
@@ -422,13 +424,13 @@ async def get_categorized_courses(
     return await _get_categorized_courses_data(db, public_only=False)
 
 
-@router.get("/public", response_model=dict[str, List[CourseInfo]])
+@router.get("/public", response_model=dict[str, list[CourseInfo]])
 async def get_public_categorized_courses(db: AsyncSession = Depends(get_session)):
     """Return canonical active courses for anonymous human discovery."""
     return await _get_categorized_courses_data(db, public_only=True)
 
 
-@router.get("/public/{course_id}/archives", response_model=List[PublicArchiveRead])
+@router.get("/public/{course_id}/archives", response_model=list[PublicArchiveRead])
 async def get_public_course_archives(
     course_id: int,
     db: AsyncSession = Depends(get_session),
@@ -522,7 +524,7 @@ async def create_course_request(
             reviewer_id=current_user.user_id,
             status=SubmissionStatus.APPROVED,
             created_course_id=course.id,
-            reviewed_at=datetime.now(timezone.utc),
+            reviewed_at=datetime.now(UTC),
         )
     else:
         submission = CourseSubmission(
@@ -537,7 +539,7 @@ async def create_course_request(
     return submission
 
 
-@router.get("/requests/me", response_model=List[CourseSubmissionRead])
+@router.get("/requests/me", response_model=list[CourseSubmissionRead])
 async def list_my_course_requests(
     current_user: UserRoles = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
@@ -550,7 +552,7 @@ async def list_my_course_requests(
     return result.scalars().all()
 
 
-@router.get("/admin/requests", response_model=List[CourseSubmissionRead])
+@router.get("/admin/requests", response_model=list[CourseSubmissionRead])
 async def list_course_requests_for_admin(
     current_user: UserRoles = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
@@ -635,7 +637,7 @@ async def approve_course_request(
     submission.reviewer_id = current_user.user_id
     submission.review_note = decision.note if decision else None
     submission.created_course_id = course.id
-    submission.reviewed_at = datetime.now(timezone.utc)
+    submission.reviewed_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(submission)
     return submission
@@ -660,13 +662,13 @@ async def reject_course_request(
     submission.status = SubmissionStatus.REJECTED
     submission.reviewer_id = current_user.user_id
     submission.review_note = decision.note if decision else None
-    submission.reviewed_at = datetime.now(timezone.utc)
+    submission.reviewed_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(submission)
     return submission
 
 
-@router.get("/{course_id}/archives", response_model=List[ArchiveRead])
+@router.get("/{course_id}/archives", response_model=list[ArchiveRead])
 async def get_course_archives(
     course_id: int,
     current_user: User = Depends(get_current_user),
@@ -901,7 +903,11 @@ async def _broadcast_discussion(archive_id: int, payload: dict):
     for ws in list(sockets):
         try:
             await ws.send_json(payload)
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Discussion WebSocket send failed; removing dead connection",
+                exc_info=redacted_exc_info(exc),
+            )
             dead.append(ws)
 
     if dead:
@@ -920,7 +926,7 @@ async def _fetch_archive_discussion_messages(
     current_user_id: int,
     limit: int = 50,
     before_id: int | None = None,
-) -> List[ArchiveDiscussionMessageRead]:
+) -> list[ArchiveDiscussionMessageRead]:
     safe_limit = max(1, min(int(limit or 50), 100))
     reply_alias = aliased(ArchiveDiscussionMessage)
     active_reply_exists = exists(
@@ -1084,7 +1090,7 @@ async def _fetch_archive_discussion_messages(
 
 @router.get(
     "/{course_id}/archives/{archive_id}/discussion/messages",
-    response_model=List[ArchiveDiscussionMessageRead],
+    response_model=list[ArchiveDiscussionMessageRead],
 )
 async def list_archive_discussion_messages(
     course_id: int,
@@ -1156,12 +1162,12 @@ async def archive_discussion_ws(
 
         while True:
             raw = await websocket.receive_text()
-            if exp_ts is not None and exp_ts < datetime.now(timezone.utc).timestamp():
+            if exp_ts is not None and exp_ts < datetime.now(UTC).timestamp():
                 await websocket.close(code=4401)
                 return
             try:
                 data = json.loads(raw)
-            except Exception:
+            except json.JSONDecodeError:
                 continue
 
             if not isinstance(data, dict):
@@ -1259,7 +1265,7 @@ async def archive_discussion_ws(
                 parent_id=parent_id,
                 reply_to_message_id=reply_to_message_id,
                 content=content,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             db.add(message)
             await db.flush()
@@ -1643,7 +1649,7 @@ async def update_archive(
     if academic_year is not None:
         archive.academic_year = academic_year
 
-    archive.updated_at = datetime.now(timezone.utc)
+    archive.updated_at = datetime.now(UTC)
 
     await db.commit()
     await db.refresh(archive)
@@ -1741,7 +1747,7 @@ async def update_archive_course(
             raise course_lifecycle_conflict_error()
 
     archive.course_id = target.course_id
-    archive.updated_at = datetime.now(timezone.utc)
+    archive.updated_at = datetime.now(UTC)
 
     await db.commit()
     await db.refresh(archive)
@@ -1955,7 +1961,7 @@ async def update_course(
     return course
 
 
-@router.post("/admin/courses/reorder", response_model=List[CourseRead])
+@router.post("/admin/courses/reorder", response_model=list[CourseRead])
 async def reorder_courses(
     reorder_data: CourseReorder,
     current_user: User = Depends(get_current_user),
@@ -2070,7 +2076,7 @@ async def delete_course(
     ]
 
     # Soft delete all associated archives and the course
-    current_time = datetime.now(timezone.utc)
+    current_time = datetime.now(UTC)
     for archive in active_archives:
         archive.deleted_at = current_time
         archive.deleted_by_id = current_user.user_id
@@ -2105,7 +2111,7 @@ async def delete_course(
     }
 
 
-@router.get("/admin/courses", response_model=List[CourseRead])
+@router.get("/admin/courses", response_model=list[CourseRead])
 async def list_all_courses(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
@@ -2127,7 +2133,7 @@ async def list_all_courses(
     return courses
 
 
-@router.get("/admin/categories", response_model=List[CourseCategoryRead])
+@router.get("/admin/categories", response_model=list[CourseCategoryRead])
 async def list_admin_course_categories(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
@@ -2249,7 +2255,7 @@ async def update_course_category(
         category.order_index = category_data.order_index
     if category_data.is_active is not None:
         category.is_active = category_data.is_active
-    category.updated_at = datetime.now(timezone.utc)
+    category.updated_at = datetime.now(UTC)
     await db.execute(
         sql_update(ArchiveSubmission)
         .where(ArchiveSubmission.requested_category_key == category.key)
@@ -2272,7 +2278,7 @@ async def update_course_category(
     return category
 
 
-@router.post("/admin/categories/reorder", response_model=List[CourseCategoryRead])
+@router.post("/admin/categories/reorder", response_model=list[CourseCategoryRead])
 async def reorder_course_categories(
     reorder_data: CourseCategoryReorder,
     current_user: User = Depends(get_current_user),
@@ -2297,7 +2303,7 @@ async def reorder_course_categories(
     )
     for index, category in enumerate([*ordered, *remaining]):
         category.order_index = index
-        category.updated_at = datetime.now(timezone.utc)
+        category.updated_at = datetime.now(UTC)
 
     await db.commit()
     result = await db.execute(
@@ -2341,7 +2347,7 @@ async def delete_course_category(
             detail=f"此分類仍有啟用中的課程，請先刪除或移動這些課程後再刪除分類。({len(active_courses)} 門，包含：{sample_names})",
         )
 
-    category.deleted_at = datetime.now(timezone.utc)
+    category.deleted_at = datetime.now(UTC)
     category.deleted_by_id = current_user.user_id
 
     await db.commit()

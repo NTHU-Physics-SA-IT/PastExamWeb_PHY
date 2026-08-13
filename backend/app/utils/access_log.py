@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 
-
 NTHU_CALLBACK_PATH = "/auth/nthu/callback"
 
 

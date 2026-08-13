@@ -9,7 +9,6 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.models import User
 from app.utils.auth import get_password_hash
 
-
 DEV_LOCAL_ADMIN_NAME = "dev-local-admin"
 DEV_LOCAL_ADMIN_EMAIL = "dev-local-admin@example.invalid"
 DEV_LOCAL_ADMIN_NICKNAME = "[DEV] Local Admin QA"

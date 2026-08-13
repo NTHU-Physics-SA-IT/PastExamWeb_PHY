@@ -1,9 +1,9 @@
 import asyncio
-from datetime import datetime, timezone
 import uuid
+from datetime import UTC, datetime
 
-from httpx import ASGITransport, AsyncClient
 import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, func
 from sqlmodel import select
 
@@ -28,15 +28,14 @@ from app.models.models import (
     SubmissionStatus,
     UserRoles,
 )
-from app.services import archive_lifecycle_locks
-from app.services import course_lifecycle_locks
+from app.services import archive_lifecycle_locks, course_lifecycle_locks
 from app.services.archive_lifecycle_locks import LifecycleResourceClass
+from app.services.archive_submission_links import (
+    validate_archive_source_membership,
+)
 from app.services.course_lifecycle_locks import (
     CourseLifecycleOperation,
     CourseLifecycleRevalidationResult,
-)
-from app.services.archive_submission_links import (
-    validate_archive_source_membership,
 )
 from app.utils.auth import get_current_user
 
@@ -1666,7 +1665,7 @@ async def test_submission_restore_uses_exact_previous_status_with_pending_fallba
         session_maker,
         requester_id=requester.id,
     )
-    deleted_at = datetime.now(timezone.utc)
+    deleted_at = datetime.now(UTC)
     async with session_maker() as session:
         stored_archive = await session.get(Archive, archive.id)
         stored_submission = await session.get(ArchiveSubmission, target.id)
@@ -1998,7 +1997,7 @@ async def test_submission_edit_and_restore_serialize_without_deadlock(
         session_maker,
         requester_id=admin.id,
     )
-    deleted_at = datetime.now(timezone.utc)
+    deleted_at = datetime.now(UTC)
     async with session_maker() as session:
         stored_archive = await session.get(Archive, archive.id)
         stored = await session.get(ArchiveSubmission, target.id)
@@ -2089,7 +2088,7 @@ async def test_submission_restore_then_edit_obeys_restored_state_contract(
         session_maker,
         requester_id=admin.id,
     )
-    deleted_at = datetime.now(timezone.utc)
+    deleted_at = datetime.now(UTC)
     async with session_maker() as session:
         stored_archive = await session.get(Archive, archive.id)
         stored = await session.get(ArchiveSubmission, target.id)

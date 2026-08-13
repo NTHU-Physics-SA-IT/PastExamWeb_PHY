@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """MinIO orphan storage audit and optional cleanup for archive/submission files."""
 
 from __future__ import annotations
@@ -6,27 +5,30 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from minio.error import S3Error
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.db.init_db import validate_database_ready
 from app.db.session import AsyncSessionLocal
 from app.models.models import Archive, ArchiveSubmission, SubmissionStatus
+from app.utils.exception_logging import redacted_exc_info
 from app.utils.storage import get_minio_client
-from sqlalchemy import select
 
+logger = logging.getLogger(__name__)
 
 KNOWN_PREFIXES = ("archives/", "archive-submissions/")
 SIZE_1GB = 1024 * 1024 * 1024
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _normalize_prefix(key: str) -> str:
@@ -38,7 +40,7 @@ def _normalize_prefix(key: str) -> str:
 
 def _is_empty_folder_marker(obj: Any) -> bool:
     return bool(getattr(obj, "is_dir", False)) or (
-        (getattr(obj, "size", None) == 0 and str(getattr(obj, "object_name", "")).endswith("/") )
+        getattr(obj, "size", None) == 0 and str(getattr(obj, "object_name", "")).endswith("/")
     )
 
 
@@ -245,6 +247,10 @@ async def run_cleanup(
                 manifest["deletions"].append({"key": key, "status": "warning", "error": str(exc)})
                 manifest["warnings"].append(str(exc))
         except Exception as exc:
+            logger.warning(
+                "Unexpected MinIO cleanup failure; continuing with remaining objects",
+                exc_info=redacted_exc_info(exc),
+            )
             manifest["deletions"].append({"key": key, "status": "warning", "error": str(exc)})
             manifest["warnings"].append(str(exc))
 

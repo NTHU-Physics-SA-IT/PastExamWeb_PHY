@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
-from enum import IntEnum
 import hashlib
 import json
-from typing import Iterable, Sequence
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field, replace
+from enum import IntEnum
 
 from sqlalchemy import text
 from sqlmodel import select
