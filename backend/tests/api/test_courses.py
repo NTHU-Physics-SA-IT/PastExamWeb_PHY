@@ -1501,13 +1501,14 @@ async def test_get_categorized_courses_direct(session_maker, make_user):
     try:
         async with session_maker() as session:
             result = await get_categorized_courses(
+                search=None,
                 current_user=UserRoles(user_id=user.id, is_admin=False),
                 db=session,
             )
         payload = result.model_dump()
         assert any(
             item["id"] == course_freshman.id
-            for item in payload["freshman"]
+            for item in payload[CourseCategory.FRESHMAN.value]
         )
         assert any(
             item["id"] == course_graduate.id
