@@ -236,11 +236,12 @@ unauthorized, deleted, inaccessible, or malformed sources:
   existing status destination, while soft-deleted and `DELETED` rows do not;
 - `archive_report` requires reporter ownership, live and coherent
   Archive/Course references, and the existing effective-public Archive
-  conditions;
+  conditions; stored route identifiers must match that destination;
 - `comment_report` remains readable notification detail but is never projected
   as an available source because no ordinary-recipient destination exists;
 - `archive_discussion_thread` requires a coherent active root/message pair on
-  an effective-public Archive and active Course; and
+  an effective-public Archive and active Course, with matching stored route
+  identifiers; and
 - a valid source-less notification has no source identifiers and remains
   available as durable detail-only history, while stray identifiers, unknown
   types, and incomplete recognized references fail closed.

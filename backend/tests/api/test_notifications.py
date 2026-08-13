@@ -58,7 +58,14 @@ def _override_user(user):
     return _get_current_user
 
 
-def _personal_notification(*, user_id: int, source_type, source_id=None, source_message_id=None):
+def _personal_notification(
+    *,
+    user_id: int,
+    source_type,
+    source_id=None,
+    source_message_id=None,
+    metadata=None,
+):
     return PersonalNotification(
         user_id=user_id,
         notification_type="c2_test",
@@ -67,6 +74,7 @@ def _personal_notification(*, user_id: int, source_type, source_id=None, source_
         source_type=source_type,
         source_id=source_id,
         source_message_id=source_message_id,
+        metadata_json=metadata or {},
         dedupe_key=f"c2:{uuid.uuid4().hex}",
     )
 
@@ -550,17 +558,29 @@ async def test_supported_notification_sources_are_available_when_authorized(
                 user_id=recipient.id,
                 source_type="archive_submission",
                 source_id=submission.id,
+                metadata={"submission_id": submission.id},
             ),
             _personal_notification(
                 user_id=recipient.id,
                 source_type="archive_report",
                 source_id=report.id,
+                metadata={
+                    "report_id": report.id,
+                    "course_id": course.id,
+                    "archive_id": archive.id,
+                },
             ),
             _personal_notification(
                 user_id=recipient.id,
                 source_type="archive_discussion_thread",
                 source_id=root.id,
                 source_message_id=reply.id,
+                metadata={
+                    "course_id": course.id,
+                    "archive_id": archive.id,
+                    "thread_id": root.id,
+                    "reply_message_id": reply.id,
+                },
             ),
         ]
         session.add_all(notifications)
@@ -903,7 +923,7 @@ async def test_malformed_and_unknown_source_references_fail_closed(
 ):
     recipient = await make_user()
     async with session_maker() as session:
-        _, archive = await _add_public_archive(
+        course, archive = await _add_public_archive(
             session, owner_id=recipient.id, label=uuid.uuid4().hex
         )
         message = ArchiveDiscussionMessage(
@@ -927,6 +947,18 @@ async def test_malformed_and_unknown_source_references_fail_closed(
                 user_id=recipient.id,
                 source_type="legacy_unknown",
                 source_message_id=message.id,
+            ),
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_discussion_thread",
+                source_id=message.id,
+                source_message_id=message.id,
+                metadata={
+                    "course_id": course.id,
+                    "archive_id": archive.id + 1,
+                    "thread_id": message.id,
+                    "message_id": message.id,
+                },
             ),
             _personal_notification(
                 user_id=recipient.id,

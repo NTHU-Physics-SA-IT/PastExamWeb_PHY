@@ -141,12 +141,13 @@ async def _list_personal_notifications(
         for item in items
         if item.source_type == "archive_report" and item.source_id is not None
     }
-    available_archive_report_ids: set[int] = set()
+    available_archive_report_destinations: dict[int, tuple[int, int]] = {}
     if archive_report_source_ids:
-        available_archive_report_ids = set(
-            (
+        available_archive_report_destinations = {
+            report_id: (course_id, archive_id)
+            for report_id, course_id, archive_id in (
                 await db.execute(
-                    select(ArchiveReport.id)
+                    select(ArchiveReport.id, Course.id, Archive.id)
                     .join(Archive, Archive.id == ArchiveReport.archive_id)
                     .join(
                         Course,
@@ -163,10 +164,8 @@ async def _list_personal_notifications(
                         *_public_archive_conditions(),
                     )
                 )
-            )
-            .scalars()
-            .all()
-        )
+            ).all()
+        }
 
     discussion_source_pairs = {
         (item.source_id, item.source_message_id)
@@ -175,14 +174,15 @@ async def _list_personal_notifications(
         and item.source_id is not None
         and item.source_message_id is not None
     }
-    available_discussion_source_pairs: set[tuple[int, int]] = set()
+    available_discussion_destinations: dict[tuple[int, int], tuple[int, int]] = {}
     if discussion_source_pairs:
         root = aliased(ArchiveDiscussionMessage)
         message = aliased(ArchiveDiscussionMessage)
-        available_discussion_source_pairs = set(
-            (
+        available_discussion_destinations = {
+            (root_id, message_id): (course_id, archive_id)
+            for root_id, message_id, course_id, archive_id in (
                 await db.execute(
-                    select(root.id, message.id)
+                    select(root.id, message.id, Course.id, Archive.id)
                     .join(message, message.archive_id == root.archive_id)
                     .join(Archive, Archive.id == root.archive_id)
                     .join(Course, Course.id == Archive.course_id)
@@ -197,7 +197,17 @@ async def _list_personal_notifications(
                     )
                 )
             ).all()
-        )
+        }
+
+    def metadata_id(item: PersonalNotification, key: str) -> int | None:
+        value = (item.metadata_json or {}).get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+    def optional_metadata_id_matches(
+        item: PersonalNotification, key: str, expected: int
+    ) -> bool:
+        value = (item.metadata_json or {}).get(key)
+        return value is None or metadata_id(item, key) == expected
 
     def source_is_available(item: PersonalNotification) -> bool:
         if item.source_type is None:
@@ -207,21 +217,37 @@ async def _list_personal_notifications(
                 item.source_id is not None
                 and item.source_message_id is None
                 and item.source_id in available_archive_submission_ids
+                and optional_metadata_id_matches(item, "submission_id", item.source_id)
             )
         if item.source_type == "archive_report":
-            return (
-                item.source_id is not None
-                and item.source_message_id is None
-                and item.source_id in available_archive_report_ids
+            if item.source_id is None or item.source_message_id is not None:
+                return False
+            destination = available_archive_report_destinations.get(item.source_id)
+            return bool(
+                destination
+                and metadata_id(item, "course_id") == destination[0]
+                and metadata_id(item, "archive_id") == destination[1]
+                and optional_metadata_id_matches(item, "report_id", item.source_id)
             )
         if item.source_type == "comment_report":
             return False
         if item.source_type == "archive_discussion_thread":
-            return (
-                item.source_id is not None
-                and item.source_message_id is not None
-                and (item.source_id, item.source_message_id)
-                in available_discussion_source_pairs
+            if item.source_id is None or item.source_message_id is None:
+                return False
+            destination = available_discussion_destinations.get(
+                (item.source_id, item.source_message_id)
+            )
+            return bool(
+                destination
+                and metadata_id(item, "course_id") == destination[0]
+                and metadata_id(item, "archive_id") == destination[1]
+                and optional_metadata_id_matches(item, "thread_id", item.source_id)
+                and optional_metadata_id_matches(
+                    item, "message_id", item.source_message_id
+                )
+                and optional_metadata_id_matches(
+                    item, "reply_message_id", item.source_message_id
+                )
             )
         return False
 
