@@ -37,6 +37,8 @@ def test_redacted_exc_info_preserves_traceback_without_exception_text() -> None:
     output = io.StringIO()
     handler = logging.StreamHandler(output)
     logger = logging.getLogger("test.redacted-exception")
+    previous_level = logger.level
+    previous_propagate = logger.propagate
     logger.addHandler(handler)
     logger.setLevel(logging.ERROR)
     logger.propagate = False
@@ -50,6 +52,8 @@ def test_redacted_exc_info_preserves_traceback_without_exception_text() -> None:
             logger.error("OAuth callback failed", exc_info=redacted_exc_info(exc))
     finally:
         logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+        logger.propagate = previous_propagate
 
     rendered = output.getvalue()
     assert "OAuth callback failed" in rendered
