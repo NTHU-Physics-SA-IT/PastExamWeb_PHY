@@ -123,3 +123,4 @@ not freeze design forever; they require intentional, reviewable replacement.
 | [ADR-0002](0002-ci-evidence-and-main-full-authority.md) | CI evidence and main Full authority | Accepted | Full, Equivalent, and docs-only CI evidence modes |
 | [ADR-0003](0003-coordination-branch-freshness.md) | Coordination-branch freshness | Accepted | Optional coordination branch selection and refresh |
 | [ADR-0004](0004-decision-record-and-semantic-conflict-authority.md) | Decision Record and semantic-conflict authority | Accepted | Design evidence, conflict classification, and supersession |
+| [ADR-0005](0005-main-pr-docs-only-exception.md) | Main pull-request docs-only exception | Accepted | Docs-only classification for pull requests targeting `main` |

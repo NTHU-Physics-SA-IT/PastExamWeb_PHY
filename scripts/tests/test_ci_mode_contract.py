@@ -566,7 +566,19 @@ def test_pr_governance_change_requires_full_before_allowlist(
     assert result.reason.startswith("governance path requires full CI:")
 
 
-def test_main_pr_candidate_always_runs_full(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "paths",
+    (
+        ("README.md",),
+        ("README.md", "CONTRIBUTING.md", "LICENSE"),
+        ("docs/guide.md", "docs/screenshots/example.png"),
+        (".github/CODEOWNERS",),
+    ),
+)
+def test_main_pr_lightweight_changes_use_docs_only(
+    tmp_path: Path,
+    paths: tuple[str, ...],
+) -> None:
     fixture = _equivalent_repository(tmp_path)
 
     result = _classify_pr_equivalent(
@@ -575,13 +587,31 @@ def test_main_pr_candidate_always_runs_full(tmp_path: Path) -> None:
             "base_ref": "main",
             "ref": "refs/pull/17/merge",
         },
+        git=GitOverrides(fixture["git"], changed_paths=paths),
     )
 
-    assert result.ci_mode == "full"
-    assert result.reason == "main pull request candidates always run full CI"
+    assert result.ci_mode == "docs-only"
+    assert result.reason == "all pull request paths are documentation-only"
+    assert result.comparison_base == fixture["base"]
 
 
-def test_main_pr_codeowners_only_always_runs_full(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "paths",
+    (
+        ("README.md", "frontend/src/main.ts"),
+        ("README.md", "backend/app/main.py"),
+        (".github/workflows/main.yml",),
+        ("scripts/ci/classify_ci_mode.py",),
+        ("frontend/pnpm-lock.yaml",),
+        ("backend/alembic/versions/example.py",),
+        ("docker/docker-compose.dev.yml",),
+        ("notes/guide.md",),
+    ),
+)
+def test_main_pr_non_lightweight_changes_remain_full(
+    tmp_path: Path,
+    paths: tuple[str, ...],
+) -> None:
     fixture = _equivalent_repository(tmp_path)
 
     result = _classify_pr_equivalent(
@@ -592,12 +622,56 @@ def test_main_pr_codeowners_only_always_runs_full(tmp_path: Path) -> None:
         },
         git=GitOverrides(
             fixture["git"],
-            changed_paths=(".github/CODEOWNERS",),
+            changed_paths=paths,
         ),
     )
 
     assert result.ci_mode == "full"
-    assert result.reason == "main pull request candidates always run full CI"
+
+
+@pytest.mark.parametrize(
+    ("event_changes", "git_overrides"),
+    (
+        ({"action": "closed"}, {}),
+        ({"pr_number": 0}, {}),
+        ({"ref": "refs/heads/source"}, {}),
+        ({"current_sha": "bad"}, {}),
+        ({"base_sha": "bad"}, {}),
+        ({"head_sha": "bad"}, {}),
+        ({"head_ref": ""}, {}),
+        ({"head_repository": ""}, {}),
+        ({"head_repository_id": 0}, {}),
+        ({}, {"parents": ("1" * 40,)}),
+        ({}, {"parents": ("1" * 40, "2" * 40)}),
+    ),
+)
+def test_main_pr_incomplete_identity_fails_closed(
+    tmp_path: Path,
+    event_changes: dict[str, Any],
+    git_overrides: dict[str, Any],
+) -> None:
+    fixture = _equivalent_repository(tmp_path)
+    adjusted = dict(git_overrides)
+    if "parents" in adjusted:
+        parents = adjusted["parents"]
+        adjusted["parents"] = (
+            (fixture["base"],)
+            if len(parents) == 1
+            else (fixture["base"], "2" * 40)
+        )
+
+    result = _classify_pr_equivalent(
+        fixture,
+        event_changes={"base_ref": "main", **event_changes},
+        git=GitOverrides(
+            fixture["git"],
+            changed_paths=("README.md",),
+            **adjusted,
+        ),
+    )
+
+    assert result.ci_mode == "full"
+    assert "failed closed" in result.reason
 
 
 @pytest.mark.parametrize(
@@ -1240,6 +1314,45 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
     assert "--base-sha" in workflow
     assert "--head-sha" in workflow
     assert "--head-repository-id" in workflow
+    docs_revalidation = next(
+        step
+        for step in parsed["jobs"]["docs_gate"]["steps"]
+        if step["name"] == "Revalidate documentation-only scope"
+    )
+    assert docs_revalidation["env"] == {
+        "EVENT_NAME": "${{ github.event_name }}",
+        "EVENT_ACTION": "${{ github.event.action }}",
+        "EVENT_BEFORE_SHA": "${{ github.event.before }}",
+        "EVENT_CURRENT_SHA": "${{ github.sha }}",
+        "EVENT_REF": "${{ github.ref }}",
+        "EVENT_FORCED": "${{ github.event.forced || false }}",
+        "EVENT_REPOSITORY": "${{ github.repository }}",
+        "EVENT_REPOSITORY_ID": "${{ github.repository_id }}",
+        "EVENT_PR_NUMBER": "${{ github.event.pull_request.number || 0 }}",
+        "EVENT_PR_DRAFT": "${{ github.event.pull_request.draft || false }}",
+        "EVENT_BASE_REF": "${{ github.event.pull_request.base.ref }}",
+        "EVENT_BASE_SHA": "${{ github.event.pull_request.base.sha }}",
+        "EVENT_HEAD_REF": "${{ github.event.pull_request.head.ref }}",
+        "EVENT_HEAD_SHA": "${{ github.event.pull_request.head.sha }}",
+        "EVENT_HEAD_REPOSITORY": (
+            "${{ github.event.pull_request.head.repo.full_name }}"
+        ),
+        "EVENT_HEAD_REPOSITORY_ID": (
+            "${{ github.event.pull_request.head.repo.id || 0 }}"
+        ),
+    }
+    for option in (
+        "--action",
+        "--pr-number",
+        "--draft",
+        "--base-ref",
+        "--base-sha",
+        "--head-ref",
+        "--head-sha",
+        "--head-repository",
+        "--head-repository-id",
+    ):
+        assert option in docs_revalidation["run"]
     assert "CI Gate" not in pr_workflow
     assert pr_parsed["name"] == "Validate PR base branch"
     assert set(pr_parsed["jobs"]) == {"check-branch"}

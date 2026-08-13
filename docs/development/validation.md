@@ -88,18 +88,21 @@ legitimately run more than the minimum local checks.
 
 Normal independent development starts from fresh `main`; coordination is used
 only when the task or milestone explicitly requires the optional coordination
-branch defined by canonical project governance. `main` pull requests and main
-pushes always use Full CI. For the exact configured coordination branch,
-ordinary eligible pull requests and merges may use Equivalent only with the
-existing exact Full-source provenance and topology evidence. Governance-path
-pull requests and merges retain their existing fail-closed Full fallback.
+branch defined by canonical project governance. `main` pull requests use Full
+CI by default, except when the centralized classifier conclusively identifies
+every changed path as docs-only. Main pushes always use Full CI. For the exact
+configured coordination branch, ordinary eligible pull requests and merges may
+use Equivalent only with the existing exact Full-source provenance and topology
+evidence. Governance-path pull requests and merges retain their existing
+fail-closed Full fallback.
 
 The stable `integration/**` workflow family only starts workflow evaluation. It
 does not approve a base or grant Equivalent eligibility; the classifier and PR
 base policy resolve the exact configured coordination branch at runtime.
 
 An immutable main candidate receives Full CI before its pull request targets
-`main`, and the main pull request itself reaches the same Full-CI workflow.
+`main`, and the main pull request reaches the same workflow; it uses Full CI
+unless its entire change is conclusively docs-only.
 After an authorized main merge, semantic-release is callable only from the
 successful exact-main-SHA CI run after `CI Gate`; it remains version authority
 but does not enable or perform production deployment. Branch-authority transfer
