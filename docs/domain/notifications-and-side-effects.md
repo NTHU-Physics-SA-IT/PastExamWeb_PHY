@@ -223,15 +223,38 @@ Permanent source deletion does not delete durable notification history. A
 replacement or historical source view may be designed later, but no operation
 may continue to navigate to the deleted source.
 
-### Current implementation and gap
+### Current implementation
 
-`backend/app/api/services/notifications.py` resolves source availability by
-notification type. Discussion, submission, and archive-report sources use
-different queries and soft-delete checks. Frontend handling in
-`NotificationCenterModal.vue` opens only selected available source types.
-Hard-delete and legacy-source behavior is not yet one consistent contract.
-The complete source-availability API and `來源已不存在` UI presentation remain
-an implementation gap and are not yet protected by a focused test.
+`backend/app/api/services/notifications.py` treats `source_available` as a
+recipient-safe live-destination projection, not raw backing-row existence. A
+bounded notification page resolves recognized source families with at most
+three batched queries and fails closed without distinguishing missing,
+unauthorized, deleted, inaccessible, or malformed sources:
+
+- `archive_submission` requires the recipient to own an active Submission;
+  rejected and takedown history remains available through the requester's
+  existing status destination, while soft-deleted and `DELETED` rows do not;
+- `archive_report` requires reporter ownership, live and coherent
+  Archive/Course references, and the existing effective-public Archive
+  conditions;
+- `comment_report` remains readable notification detail but is never projected
+  as an available source because no ordinary-recipient destination exists;
+- `archive_discussion_thread` requires a coherent active root/message pair on
+  an effective-public Archive and active Course; and
+- a valid source-less notification has no source identifiers and remains
+  available as durable detail-only history, while stray identifiers, unknown
+  types, and incomplete recognized references fail closed.
+
+The notification row and its stored historical title, message, and metadata
+remain readable after the live source disappears. The API exposes no
+missing-versus-unauthorized reason, newly queried protected metadata, or
+historical-source view. Focused notification API tests protect ownership,
+lifecycle, coherence, malformed-reference, and durability cases. This change
+requires no migration.
+
+Frontend handling in `NotificationCenterModal.vue`, including generic
+`來源已不存在` presentation and suppression of unavailable or malformed
+navigation, remains the separate Stage 5C C3 scope.
 
 ## ArchiveSubmissionEvent side effect
 
