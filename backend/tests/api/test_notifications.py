@@ -9,10 +9,18 @@ from sqlmodel import select
 from app.main import app
 from app.models.models import (
     AnnouncementReadReceipt,
+    Archive,
+    ArchiveDiscussionMessage,
+    ArchiveReport,
+    ArchiveSubmission,
+    ArchiveType,
+    CommentReport,
+    Course,
     Notification,
     NotificationCreate,
     NotificationSeverity,
     PersonalNotification,
+    SubmissionStatus,
     UserRoles,
 )
 from app.utils.auth import get_current_user
@@ -48,6 +56,92 @@ def _override_user(user):
         return UserRoles(user_id=user["id"], is_admin=user["is_admin"])
 
     return _get_current_user
+
+
+def _personal_notification(
+    *,
+    user_id: int,
+    source_type,
+    source_id=None,
+    source_message_id=None,
+    metadata=None,
+):
+    return PersonalNotification(
+        user_id=user_id,
+        notification_type="c2_test",
+        title="C2 notification",
+        message="C2 historical notification content",
+        source_type=source_type,
+        source_id=source_id,
+        source_message_id=source_message_id,
+        metadata_json=metadata or {},
+        dedupe_key=f"c2:{uuid.uuid4().hex}",
+    )
+
+
+async def _cleanup_c2_source_records(session_maker):
+    async with session_maker() as session:
+        await session.execute(
+            delete(PersonalNotification).where(
+                PersonalNotification.dedupe_key.like("c2:%")
+            )
+        )
+        await session.execute(
+            delete(CommentReport).where(
+                CommentReport.archive_name_snapshot.like("C2 %")
+            )
+        )
+        await session.execute(
+            delete(ArchiveReport).where(
+                ArchiveReport.archive_name_snapshot.like("C2 %")
+            )
+        )
+        await session.execute(
+            delete(ArchiveDiscussionMessage).where(
+                ArchiveDiscussionMessage.content.like("C2 %"),
+                ArchiveDiscussionMessage.parent_id.is_not(None),
+            )
+        )
+        await session.execute(
+            delete(ArchiveDiscussionMessage).where(
+                ArchiveDiscussionMessage.content.like("C2 %")
+            )
+        )
+        await session.execute(
+            delete(ArchiveSubmission).where(ArchiveSubmission.subject.like("C2 %"))
+        )
+        await session.execute(delete(Archive).where(Archive.name.like("C2 %")))
+        await session.execute(delete(Course).where(Course.name.like("C2 %")))
+        await session.commit()
+
+
+async def _add_public_archive(session, *, owner_id: int, label: str):
+    course = Course(name=f"C2 course {label}", category="freshman")
+    session.add(course)
+    await session.flush()
+    archive = Archive(
+        name=f"C2 archive {label}",
+        academic_year=2026,
+        archive_type=ArchiveType.FINAL,
+        professor="C2 Professor",
+        object_name=f"archives/c2-{uuid.uuid4().hex}.pdf",
+        uploader_id=owner_id,
+        course_id=course.id,
+    )
+    session.add(archive)
+    await session.flush()
+    return course, archive
+
+
+async def _notification_projection(client: AsyncClient, user_id: int):
+    app.dependency_overrides[get_current_user] = _override_user(
+        {"id": user_id, "is_admin": False}
+    )
+    response = await client.get("/notifications/center")
+    assert response.status_code == 200
+    return {
+        item["id"]: item for item in response.json()["personal_notifications"]
+    }
 
 
 @pytest.mark.asyncio
@@ -348,6 +442,585 @@ async def test_personal_notifications_are_owned_and_can_be_marked_read(
                 delete(PersonalNotification).where(PersonalNotification.id == item.id)
             )
             await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_archive_submission_notification_fails_closed_for_wrong_owner(
+    client: AsyncClient, session_maker, make_user
+):
+    recipient = await make_user()
+    other = await make_user()
+    async with session_maker() as session:
+        submission = ArchiveSubmission(
+            subject="Authorization-safe notification source",
+            category="freshman",
+            name="Final",
+            academic_year=2026,
+            archive_type=ArchiveType.FINAL,
+            professor="Professor",
+            object_name=f"submissions/{uuid.uuid4().hex}.pdf",
+            status=SubmissionStatus.PENDING,
+            requester_id=other.id,
+        )
+        session.add(submission)
+        await session.flush()
+        item = PersonalNotification(
+            user_id=recipient.id,
+            notification_type="archive_submission_approved",
+            title="投稿審核結果",
+            message="Historical notification content",
+            source_type="archive_submission",
+            source_id=submission.id,
+            dedupe_key=f"test-source-authorization:{uuid.uuid4().hex}",
+        )
+        session.add(item)
+        await session.commit()
+        await session.refresh(item)
+
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(
+            {"id": recipient.id, "is_admin": False}
+        )
+        center = (await client.get("/notifications/center")).json()
+        projected = next(
+            notification
+            for notification in center["personal_notifications"]
+            if notification["id"] == item.id
+        )
+        assert projected["message"] == "Historical notification content"
+        assert projected["source_available"] is False
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(PersonalNotification).where(PersonalNotification.id == item.id)
+            )
+            await session.execute(
+                delete(ArchiveSubmission).where(
+                    ArchiveSubmission.id == submission.id
+                )
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_supported_notification_sources_are_available_when_authorized(
+    client: AsyncClient, session_maker, make_user
+):
+    recipient = await make_user()
+    async with session_maker() as session:
+        submission = ArchiveSubmission(
+            subject="C2 authorized submission",
+            category="freshman",
+            name="Final",
+            academic_year=2026,
+            archive_type=ArchiveType.FINAL,
+            professor="C2 Professor",
+            object_name=f"submissions/{uuid.uuid4().hex}.pdf",
+            status=SubmissionStatus.REJECTED,
+            requester_id=recipient.id,
+        )
+        session.add(submission)
+        course, archive = await _add_public_archive(
+            session, owner_id=recipient.id, label=uuid.uuid4().hex
+        )
+        report = ArchiveReport(
+            reporter_user_id=recipient.id,
+            reporter_name_snapshot="C2 reporter",
+            archive_id=archive.id,
+            archive_id_snapshot=archive.id,
+            course_id=course.id,
+            reason="incorrect_metadata",
+            archive_name_snapshot=archive.name,
+            course_name_snapshot=course.name,
+            academic_year_snapshot=archive.academic_year,
+            archive_type_snapshot=archive.archive_type.value,
+            professor_snapshot=archive.professor,
+        )
+        root = ArchiveDiscussionMessage(
+            archive_id=archive.id,
+            user_id=recipient.id,
+            content="C2 authorized root",
+        )
+        session.add_all([report, root])
+        await session.flush()
+        reply = ArchiveDiscussionMessage(
+            archive_id=archive.id,
+            user_id=recipient.id,
+            parent_id=root.id,
+            reply_to_message_id=root.id,
+            content="C2 authorized reply",
+        )
+        session.add(reply)
+        await session.flush()
+        notifications = [
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_submission",
+                source_id=submission.id,
+                metadata={"submission_id": submission.id},
+            ),
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_report",
+                source_id=report.id,
+                metadata={
+                    "report_id": report.id,
+                    "course_id": course.id,
+                    "archive_id": archive.id,
+                },
+            ),
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_discussion_thread",
+                source_id=root.id,
+                source_message_id=reply.id,
+                metadata={
+                    "course_id": course.id,
+                    "archive_id": archive.id,
+                    "thread_id": root.id,
+                    "reply_message_id": reply.id,
+                },
+            ),
+        ]
+        session.add_all(notifications)
+        await session.commit()
+        notification_ids = [item.id for item in notifications]
+
+    try:
+        projected = await _notification_projection(client, recipient.id)
+        assert [projected[item_id]["source_available"] for item_id in notification_ids] == [
+            True,
+            True,
+            True,
+        ]
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_c2_source_records(session_maker)
+
+
+@pytest.mark.asyncio
+async def test_supported_notification_sources_fail_closed_when_missing(
+    client: AsyncClient, session_maker, make_user
+):
+    recipient = await make_user()
+    async with session_maker() as session:
+        _, archive = await _add_public_archive(
+            session, owner_id=recipient.id, label=uuid.uuid4().hex
+        )
+        message = ArchiveDiscussionMessage(
+            archive_id=archive.id,
+            user_id=recipient.id,
+            content="C2 message with missing referenced root",
+        )
+        session.add(message)
+        await session.flush()
+        notifications = [
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_submission",
+                source_id=2_000_000_001,
+            ),
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_report",
+                source_id=2_000_000_002,
+            ),
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_discussion_thread",
+                source_id=2_000_000_003,
+                source_message_id=message.id,
+            ),
+        ]
+        session.add_all(notifications)
+        await session.commit()
+        notification_ids = [item.id for item in notifications]
+
+    try:
+        projected = await _notification_projection(client, recipient.id)
+        assert all(
+            projected[item_id]["source_available"] is False
+            for item_id in notification_ids
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_c2_source_records(session_maker)
+
+
+@pytest.mark.asyncio
+async def test_missing_and_unauthorized_sources_have_identical_projection(
+    client: AsyncClient, session_maker, make_user
+):
+    recipient = await make_user()
+    other = await make_user()
+    async with session_maker() as session:
+        submission = ArchiveSubmission(
+            subject="C2 unauthorized submission",
+            category="freshman",
+            name="Final",
+            academic_year=2026,
+            archive_type=ArchiveType.FINAL,
+            professor="C2 Professor",
+            object_name=f"submissions/{uuid.uuid4().hex}.pdf",
+            status=SubmissionStatus.PENDING,
+            requester_id=other.id,
+        )
+        session.add(submission)
+        course, archive = await _add_public_archive(
+            session, owner_id=other.id, label=uuid.uuid4().hex
+        )
+        report = ArchiveReport(
+            reporter_user_id=other.id,
+            reporter_name_snapshot="C2 unauthorized reporter",
+            archive_id=archive.id,
+            archive_id_snapshot=archive.id,
+            course_id=course.id,
+            reason="incorrect_metadata",
+            archive_name_snapshot=archive.name,
+            course_name_snapshot=course.name,
+            academic_year_snapshot=archive.academic_year,
+            archive_type_snapshot=archive.archive_type.value,
+            professor_snapshot=archive.professor,
+        )
+        session.add(report)
+        await session.flush()
+        notifications = [
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_submission",
+                source_id=submission.id,
+            ),
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_submission",
+                source_id=2_000_000_011,
+            ),
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_report",
+                source_id=report.id,
+            ),
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_report",
+                source_id=2_000_000_012,
+            ),
+        ]
+        session.add_all(notifications)
+        await session.commit()
+        notification_ids = [item.id for item in notifications]
+
+    try:
+        projected = await _notification_projection(client, recipient.id)
+        assert {
+            projected[item_id]["source_available"] for item_id in notification_ids
+        } == {False}
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_c2_source_records(session_maker)
+
+
+@pytest.mark.asyncio
+async def test_soft_deleted_or_inactive_sources_are_unavailable(
+    client: AsyncClient, session_maker, make_user
+):
+    recipient = await make_user()
+    now = datetime.now(UTC)
+    async with session_maker() as session:
+        submission = ArchiveSubmission(
+            subject="C2 deleted submission",
+            category="freshman",
+            name="Final",
+            academic_year=2026,
+            archive_type=ArchiveType.FINAL,
+            professor="C2 Professor",
+            object_name=f"submissions/{uuid.uuid4().hex}.pdf",
+            status=SubmissionStatus.DELETED,
+            previous_status=SubmissionStatus.REJECTED,
+            requester_id=recipient.id,
+            deleted_at=now,
+        )
+        session.add(submission)
+        course, archive = await _add_public_archive(
+            session, owner_id=recipient.id, label=uuid.uuid4().hex
+        )
+        course.deleted_at = now
+        report = ArchiveReport(
+            reporter_user_id=recipient.id,
+            reporter_name_snapshot="C2 inactive destination reporter",
+            archive_id=archive.id,
+            archive_id_snapshot=archive.id,
+            course_id=course.id,
+            reason="incorrect_metadata",
+            archive_name_snapshot=archive.name,
+            course_name_snapshot=course.name,
+            academic_year_snapshot=archive.academic_year,
+            archive_type_snapshot=archive.archive_type.value,
+            professor_snapshot=archive.professor,
+        )
+        session.add(report)
+        await session.flush()
+        notifications = [
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_submission",
+                source_id=submission.id,
+            ),
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_report",
+                source_id=report.id,
+            ),
+        ]
+        session.add_all(notifications)
+        await session.commit()
+        notification_ids = [item.id for item in notifications]
+
+    try:
+        projected = await _notification_projection(client, recipient.id)
+        assert all(
+            projected[item_id]["source_available"] is False
+            for item_id in notification_ids
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_c2_source_records(session_maker)
+
+
+@pytest.mark.asyncio
+async def test_discussion_source_requires_coherent_active_root_and_message(
+    client: AsyncClient, session_maker, make_user
+):
+    recipient = await make_user()
+    now = datetime.now(UTC)
+    async with session_maker() as session:
+        course, archive = await _add_public_archive(
+            session, owner_id=recipient.id, label=uuid.uuid4().hex
+        )
+        _other_course, other_archive = await _add_public_archive(
+            session, owner_id=recipient.id, label=uuid.uuid4().hex
+        )
+        deleted_root = ArchiveDiscussionMessage(
+            archive_id=archive.id,
+            user_id=recipient.id,
+            content="C2 deleted root",
+            deleted_at=now,
+        )
+        active_root = ArchiveDiscussionMessage(
+            archive_id=archive.id,
+            user_id=recipient.id,
+            content="C2 active root",
+        )
+        other_root = ArchiveDiscussionMessage(
+            archive_id=other_archive.id,
+            user_id=recipient.id,
+            content="C2 other root",
+        )
+        session.add_all([deleted_root, active_root, other_root])
+        await session.flush()
+        child_of_deleted_root = ArchiveDiscussionMessage(
+            archive_id=archive.id,
+            user_id=recipient.id,
+            parent_id=deleted_root.id,
+            content="C2 child of deleted root",
+        )
+        deleted_child = ArchiveDiscussionMessage(
+            archive_id=archive.id,
+            user_id=recipient.id,
+            parent_id=active_root.id,
+            content="C2 deleted child",
+            deleted_at=now,
+        )
+        other_child = ArchiveDiscussionMessage(
+            archive_id=other_archive.id,
+            user_id=recipient.id,
+            parent_id=other_root.id,
+            content="C2 other child",
+        )
+        session.add_all([child_of_deleted_root, deleted_child, other_child])
+        await session.flush()
+        course.deleted_at = now
+        notifications = [
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_discussion_thread",
+                source_id=deleted_root.id,
+                source_message_id=child_of_deleted_root.id,
+            ),
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_discussion_thread",
+                source_id=active_root.id,
+                source_message_id=deleted_child.id,
+            ),
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_discussion_thread",
+                source_id=active_root.id,
+                source_message_id=other_child.id,
+            ),
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_discussion_thread",
+                source_id=active_root.id,
+                source_message_id=active_root.id,
+            ),
+        ]
+        session.add_all(notifications)
+        await session.commit()
+        notification_ids = [item.id for item in notifications]
+
+    try:
+        projected = await _notification_projection(client, recipient.id)
+        assert all(
+            projected[item_id]["source_available"] is False
+            for item_id in notification_ids
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_c2_source_records(session_maker)
+
+
+@pytest.mark.asyncio
+async def test_comment_report_notification_is_readable_but_detail_only(
+    client: AsyncClient, session_maker, make_user
+):
+    recipient = await make_user()
+    async with session_maker() as session:
+        report = CommentReport(
+            reporter_user_id=recipient.id,
+            reason="other",
+            comment_content_snapshot="C2 reported content",
+            comment_author_name_snapshot="C2 author",
+            comment_created_at_snapshot=datetime.now(UTC),
+            archive_name_snapshot="C2 comment report archive",
+            course_name_snapshot="C2 comment report course",
+        )
+        session.add(report)
+        await session.flush()
+        item = _personal_notification(
+            user_id=recipient.id,
+            source_type="comment_report",
+            source_id=report.id,
+        )
+        session.add(item)
+        await session.commit()
+        item_id = item.id
+
+    try:
+        projected = (await _notification_projection(client, recipient.id))[item_id]
+        assert projected["message"] == "C2 historical notification content"
+        assert projected["source_available"] is False
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_c2_source_records(session_maker)
+
+
+@pytest.mark.asyncio
+async def test_malformed_and_unknown_source_references_fail_closed(
+    client: AsyncClient, session_maker, make_user
+):
+    recipient = await make_user()
+    async with session_maker() as session:
+        course, archive = await _add_public_archive(
+            session, owner_id=recipient.id, label=uuid.uuid4().hex
+        )
+        message = ArchiveDiscussionMessage(
+            archive_id=archive.id,
+            user_id=recipient.id,
+            content="C2 valid message for unknown type",
+        )
+        session.add(message)
+        await session.flush()
+        notifications = [
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_submission",
+            ),
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_discussion_thread",
+                source_message_id=message.id,
+            ),
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="legacy_unknown",
+                source_message_id=message.id,
+            ),
+            _personal_notification(
+                user_id=recipient.id,
+                source_type="archive_discussion_thread",
+                source_id=message.id,
+                source_message_id=message.id,
+                metadata={
+                    "course_id": course.id,
+                    "archive_id": archive.id + 1,
+                    "thread_id": message.id,
+                    "message_id": message.id,
+                },
+            ),
+            _personal_notification(
+                user_id=recipient.id,
+                source_type=None,
+                source_id=archive.id,
+            ),
+        ]
+        session.add_all(notifications)
+        await session.commit()
+        notification_ids = [item.id for item in notifications]
+
+    try:
+        projected = await _notification_projection(client, recipient.id)
+        assert all(
+            projected[item_id]["source_available"] is False
+            for item_id in notification_ids
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_c2_source_records(session_maker)
+
+
+@pytest.mark.asyncio
+async def test_source_less_and_removed_source_notifications_remain_readable(
+    client: AsyncClient, session_maker, make_user
+):
+    recipient = await make_user()
+    async with session_maker() as session:
+        submission = ArchiveSubmission(
+            subject="C2 removed submission",
+            category="freshman",
+            name="Final",
+            academic_year=2026,
+            archive_type=ArchiveType.FINAL,
+            professor="C2 Professor",
+            object_name=f"submissions/{uuid.uuid4().hex}.pdf",
+            status=SubmissionStatus.PENDING,
+            requester_id=recipient.id,
+        )
+        session.add(submission)
+        await session.flush()
+        source_less = _personal_notification(user_id=recipient.id, source_type=None)
+        removed = _personal_notification(
+            user_id=recipient.id,
+            source_type="archive_submission",
+            source_id=submission.id,
+        )
+        session.add_all([source_less, removed])
+        await session.commit()
+        source_less_id = source_less.id
+        removed_id = removed.id
+        await session.delete(submission)
+        await session.commit()
+
+    try:
+        projected = await _notification_projection(client, recipient.id)
+        assert projected[source_less_id]["source_available"] is True
+        assert projected[removed_id]["source_available"] is False
+        assert projected[removed_id]["message"] == "C2 historical notification content"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_c2_source_records(session_maker)
 
 
 
