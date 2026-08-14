@@ -1126,7 +1126,7 @@
               >
                 <Column
                   field="contributor_level"
-                  :header="$t('投稿等級')"
+                  :header="$t('投稿等級（使用者管理欄位）')"
                   sortable
                   style="width: 7.5rem; min-width: 7.5rem; max-width: 7.5rem"
                 >
@@ -1166,7 +1166,12 @@
                     <span class="mobile-long-text admin-desktop-cell">{{ data.email }}</span>
                   </template>
                 </Column>
-                <Column field="is_admin" :header="$t('管理員權限')" sortable style="width: 15%">
+                <Column
+                  field="is_admin"
+                  :header="$t('管理員權限（使用者管理欄位）')"
+                  sortable
+                  style="width: 15%"
+                >
                   <template #body="{ data }">
                     <Tag :severity="data.is_admin ? 'success' : 'secondary'" class="text-sm">
                       {{ data.is_admin ? $t('是') : $t('否') }}
@@ -1940,17 +1945,14 @@
                             class="submission-type-combined-label"
                             :aria-label="$t('新分類＋新課程')"
                           >
-                            <span class="submission-type-combined-label__category">{{
-                              $t('新分類')
-                            }}</span>
                             <span
-                              class="submission-type-combined-label__separator"
-                              aria-hidden="true"
-                              >＋</span
+                              class="submission-type-combined-label__part submission-type-combined-label__category"
+                              >{{ $t('新分類') }}</span
                             >
-                            <span class="submission-type-combined-label__course">{{
-                              $t('新課程')
-                            }}</span>
+                            <span
+                              class="submission-type-combined-label__part submission-type-combined-label__course"
+                              >{{ $t('新課程') }}</span
+                            >
                           </span>
                           <span v-else>{{ getArchiveSubmissionKind(data) }}</span>
                         </Tag>
@@ -1987,7 +1989,7 @@
                             class="soft-badge soft-badge--admin review-admin-upload-chip review-course-cell__admin-tag"
                             severity="info"
                           >
-                            {{ $t('管理員投稿') }}
+                            {{ $t('管理員投稿（審核中心）') }}
                           </Tag>
                         </div>
                       </div>
@@ -2013,7 +2015,7 @@
                               class="soft-badge soft-badge--admin review-admin-upload-chip"
                               severity="info"
                             >
-                              {{ $t('管理員投稿') }}
+                              {{ $t('管理員投稿（審核中心）') }}
                             </Tag>
                           </div>
                         </div>
@@ -2352,7 +2354,7 @@
                             class="soft-badge soft-badge--admin review-admin-upload-chip review-course-cell__admin-tag"
                             severity="info"
                           >
-                            {{ $t('管理員投稿') }}
+                            {{ $t('管理員投稿（審核中心）') }}
                           </Tag>
                         </div>
                       </div>
@@ -2366,7 +2368,7 @@
                               class="soft-badge soft-badge--admin review-admin-upload-chip"
                               severity="info"
                             >
-                              {{ $t('管理員投稿') }}
+                              {{ $t('管理員投稿（審核中心）') }}
                             </Tag>
                           </div>
                         </div>
@@ -2552,6 +2554,7 @@
                             'review-card-chip',
                             'review-status-chip',
                             'admin-desktop-status-tag',
+                            'existing-course-status-pill',
                             getSubmissionStatusClass(data.status),
                           ]"
                           :severity="getSubmissionSeverity(data.status)"
@@ -3851,9 +3854,6 @@
                   :title="localizedSubmissionLevelName(level)"
                   size="compact"
                 />
-                <span v-if="level.level === 10" class="contributor-level-settings-max">
-                  {{ $t('最高等級') }}
-                </span>
               </div>
               <label class="contributor-level-settings-field">
                 <span class="contributor-level-settings-mobile-label">{{
@@ -10517,12 +10517,6 @@ onBeforeUnmount(() => {
   border: 0;
 }
 
-.contributor-level-settings-max {
-  color: var(--text-secondary);
-  font-size: 0.72rem;
-  white-space: nowrap;
-}
-
 .contributor-level-settings-footer {
   position: sticky;
   z-index: 3;
@@ -10747,8 +10741,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 0.35rem;
   margin: 0.15rem 0 0;
-  width: fit-content;
-  max-width: min(18rem, 100%);
+  width: max-content;
+  max-width: 100%;
   min-width: 0;
   min-height: 1.55rem;
   padding: 0.18rem 0.55rem;
@@ -11072,6 +11066,32 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+:deep(
+  .admin-desktop-status-cell
+    > .p-tag.existing-course-status-pill.soft-badge.admin-desktop-status-tag
+) {
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  inline-size: fit-content;
+  min-inline-size: 0;
+  max-inline-size: none;
+  max-width: none;
+  block-size: 1.9rem;
+  min-block-size: 1.9rem !important;
+  max-block-size: 1.9rem;
+  padding-block: 0.32rem !important;
+  padding-inline: 0.74rem !important;
+  border-radius: 999px;
+  font-size: var(--app-badge-font-size) !important;
+  font-weight: 650 !important;
+  line-height: 1.25 !important;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
 :deep(.admin-desktop-status-tag .p-tag-label) {
   white-space: inherit;
 }
@@ -11099,21 +11119,17 @@ onBeforeUnmount(() => {
 
 :deep(.submission-type-combined-label) {
   display: inline-flex;
-  flex-direction: row;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 0.08rem;
   line-height: 1.15;
+  text-align: center;
   white-space: nowrap;
 }
 
-@container review-submission-type-cell (max-width: 7.25rem) {
-  :deep(.submission-type-combined-label) {
-    flex-direction: column;
-  }
-
-  :deep(.submission-type-combined-label__separator) {
-    display: none;
-  }
+:deep(.submission-type-combined-label__part) {
+  display: block;
 }
 
 .notification-mobile-update,
@@ -12968,8 +12984,8 @@ onBeforeUnmount(() => {
   }
 
   :deep(.review-card-action-note) {
-    width: 100%;
-    max-width: min(18rem, 100%);
+    width: max-content;
+    max-width: 100%;
   }
 
   :deep(.review-card-action-note),

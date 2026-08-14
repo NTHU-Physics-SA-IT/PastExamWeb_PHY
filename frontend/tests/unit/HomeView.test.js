@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import HomeView from '@/views/Home.vue'
 import homeSource from '@/views/Home.vue?raw'
+import { setLocale } from '@/i18n'
 
 const statisticsPayload = vi.hoisted(() => ({
   totalUsers: 120,
@@ -59,6 +60,7 @@ describe('HomeView', () => {
     window.matchMedia = originalMatchMedia || matchMediaMock
     globalThis.ResizeObserver = originalResizeObserver
     HTMLElement.prototype.scrollIntoView = originalScrollIntoView
+    setLocale('zh-TW')
   })
 
   it('restores the original hero title sizes at tablet and mobile widths', () => {
@@ -95,6 +97,24 @@ describe('HomeView', () => {
     expect(statCards[0].text()).toContain(String(statisticsPayload.totalArchives))
     expect(statCards[3].text()).toContain('使用者')
     expect(statCards[3].text()).toContain(String(statisticsPayload.totalUsers))
+
+    wrapper.unmount()
+  })
+
+  it('renders compact English hero actions without changing their structure', async () => {
+    setLocale('en')
+    const wrapper = mount(HomeView)
+    await flushPromises()
+
+    const heroActions = wrapper.findAll('.hero-actions button')
+    expect(heroActions.map((button) => button.text())).toEqual([
+      'Sign in with NTHU',
+      'Local Login',
+      'Browse Course Catalog',
+    ])
+    expect(heroActions).toHaveLength(3)
+    expect(heroActions[0].classes()).toEqual(heroActions[1].classes())
+    expect(heroActions[2].classes()).toContain('p-button-secondary')
 
     wrapper.unmount()
   })
