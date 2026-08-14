@@ -6,10 +6,10 @@ from pathlib import Path
 from urllib.parse import quote, quote_plus
 
 import pytest
+import yaml
 from sqlalchemy import create_engine, text
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.engine import Engine, make_url
-import yaml
 
 import migrate
 from alembic import command

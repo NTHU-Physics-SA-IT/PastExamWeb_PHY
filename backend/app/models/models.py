@@ -219,7 +219,7 @@ class CourseCategoryConfig(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     key: str = Field(sa_column=Column(String, nullable=False))
     name: str = Field(index=True)
-    name_en: Optional[str] = Field(
+    name_en: str | None = Field(
         default=None,
         sa_column=Column(String, nullable=True),
     )
@@ -227,7 +227,7 @@ class CourseCategoryConfig(SQLModel, table=True):
         default="",
         sa_column=Column(String, nullable=False, server_default=text("''")),
     )
-    label_en: Optional[str] = Field(
+    label_en: str | None = Field(
         default=None,
         sa_column=Column(String, nullable=True),
     )
@@ -326,7 +326,7 @@ class Course(SQLModel, table=True):
     __tablename__ = "courses"
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True)
-    name_en: Optional[str] = Field(
+    name_en: str | None = Field(
         default=None,
         sa_column=Column(String, nullable=True),
     )
@@ -1249,7 +1249,7 @@ class UserSubmissionRecordRead(BaseModel):
     status: SubmissionStatus
     archive_type: ArchiveType
     course_name: str
-    course_name_en: Optional[str] = None
+    course_name_en: str | None = None
     exam_name: str
     academic_year: int
     professor: str
@@ -1398,7 +1398,7 @@ class CommentReportRead(BaseModel):
     comment_created_at_snapshot: datetime
     archive_name: str
     course_name: str
-    course_name_en: Optional[str] = None
+    course_name_en: str | None = None
     status: str
     admin_response: str | None
     reviewed_by: int | None
@@ -1440,7 +1440,7 @@ class ArchiveReportRead(BaseModel):
     supplementary_detail: str | None
     archive_name: str
     course_name: str
-    course_name_en: Optional[str] = None
+    course_name_en: str | None = None
     academic_year: int
     archive_type: str
     professor: str
@@ -1518,7 +1518,7 @@ class NotificationUnreadSummary(NotificationCenterRead):
 class CourseInfo(BaseModel):
     id: int
     name: str
-    name_en: Optional[str] = None
+    name_en: str | None = None
     order_index: int = 0
 
     class Config:
@@ -1586,7 +1586,7 @@ class ArchiveDiscussionMessageRead(BaseModel):
 
 class CourseCreate(BaseModel):
     name: str
-    name_en: Optional[str] = None
+    name_en: str | None = None
     category: str
     order_index: int | None = None
 
@@ -1606,7 +1606,7 @@ class CourseReorder(BaseModel):
 class CourseRead(BaseModel):
     id: int
     name: str
-    name_en: Optional[str] = None
+    name_en: str | None = None
     category: str
     order_index: int = 0
 
@@ -1628,9 +1628,9 @@ class CourseSubmissionCreate(BaseModel):
 class CourseCategoryCreate(BaseModel):
     key: str
     name: str
-    name_en: Optional[str] = None
+    name_en: str | None = None
     label: str = ""
-    label_en: Optional[str] = None
+    label_en: str | None = None
     icon: str = "pi pi-fw pi-book"
     badge_color: str | None = None
     order_index: int | None = None
@@ -1656,9 +1656,9 @@ class CourseCategoryRead(BaseModel):
     id: int
     key: str
     name: str
-    name_en: Optional[str] = None
+    name_en: str | None = None
     label: str
-    label_en: Optional[str] = None
+    label_en: str | None = None
     icon: str
     badge_color: str = "blue"
     order_index: int
