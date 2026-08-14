@@ -1425,14 +1425,10 @@
               >
                 <Column field="title" :header="$t('標題')" sortable style="width: 26%">
                   <template #body="{ data }">
-                    <span class="mobile-primary-text admin-desktop-cell">{{
-                      localizedAnnouncementTitle(data)
-                    }}</span>
+                    <span class="mobile-primary-text admin-desktop-cell">{{ data.title }}</span>
                     <div class="admin-mobile-card admin-announcement-mobile-card">
                       <div class="admin-card-primary">
-                        <strong class="admin-card-title">{{
-                          localizedAnnouncementTitle(data)
-                        }}</strong>
+                        <strong class="admin-card-title">{{ data.title }}</strong>
                       </div>
                       <div class="admin-card-meta">
                         <Tag :severity="getNotificationSeverity(data.severity)">
@@ -1558,7 +1554,7 @@
                   <header class="admin-tablet-card-header">
                     <div class="admin-tablet-title-group announcement-card-title-group">
                       <strong class="admin-card-title admin-tablet-card-title">{{
-                        localizedAnnouncementTitle(notification)
+                        notification.title
                       }}</strong>
                       <div class="admin-tablet-tag-group announcement-type-tag-group">
                         <Tag :severity="getNotificationSeverity(notification.severity)">
@@ -4335,7 +4331,7 @@
       >
         <div class="flex flex-column gap-4">
           <div class="flex flex-column gap-2">
-            <label>{{ $t('中文標題') }}</label>
+            <label>{{ $t('標題') }}</label>
             <InputText
               id="admin-notification-title"
               name="admin-notification-title"
@@ -4347,18 +4343,6 @@
             <small v-if="notificationFormErrors.title" class="p-error">
               {{ notificationFormErrors.title }}
             </small>
-          </div>
-
-          <div class="flex flex-column gap-2">
-            <label>{{ $t('English Title') }}</label>
-            <InputText
-              id="admin-notification-title-en"
-              name="admin-notification-title-en"
-              v-model="notificationForm.title_en"
-              :placeholder="$t('Enter an English announcement title')"
-              class="w-full"
-              maxlength="150"
-            />
           </div>
 
           <div class="flex flex-column md:flex-row gap-3">
@@ -4388,7 +4372,7 @@
           </div>
 
           <div class="flex flex-column gap-2">
-            <label>{{ $t('中文內容') }}</label>
+            <label>{{ $t('內容') }}</label>
             <Textarea
               id="admin-notification-body"
               name="admin-notification-body"
@@ -4402,19 +4386,6 @@
             <small v-if="notificationFormErrors.body" class="p-error">
               {{ notificationFormErrors.body }}
             </small>
-          </div>
-
-          <div class="flex flex-column gap-2">
-            <label>{{ $t('English Content') }}</label>
-            <Textarea
-              id="admin-notification-body-en"
-              name="admin-notification-body-en"
-              v-model="notificationForm.body_en"
-              rows="6"
-              autoResize
-              class="w-full"
-              :placeholder="$t('Enter English announcement content')"
-            />
           </div>
 
           <div class="flex flex-column gap-3">
@@ -4706,10 +4677,6 @@ import {
   localizedTrashDisplayName,
   localizedTrashParentName,
 } from '../utils/localizedCatalog'
-import {
-  announcementMatchesSearch,
-  localizedAnnouncementTitle,
-} from '../utils/localizedDomainContent'
 import { ADMIN_PAGE_SIZE_OPTIONS } from '../constants/pagination'
 import PdfPreviewModal from '../components/PdfPreviewModal.vue'
 import ContributorLevelBadge from '../components/ContributorLevelBadge.vue'
@@ -5007,9 +4974,7 @@ const editingNotification = ref(null)
 const notificationSaveLoading = ref(false)
 const notificationForm = ref({
   title: '',
-  title_en: '',
   body: '',
-  body_en: '',
   severity: 'info',
   is_active: true,
   starts_at: null,
@@ -6567,9 +6532,7 @@ const formatAcademicTerm = (value) => {
 const resetNotificationForm = () => {
   notificationForm.value = {
     title: '',
-    title_en: '',
     body: '',
-    body_en: '',
     severity: 'info',
     is_active: true,
     starts_at: null,
@@ -6799,8 +6762,11 @@ const filteredNotifications = computed(() => {
   let filtered = notifications.value
 
   if (notificationSearchQuery.value) {
-    filtered = filtered.filter((notification) =>
-      announcementMatchesSearch(notification, notificationSearchQuery.value)
+    const query = notificationSearchQuery.value.toLowerCase()
+    filtered = filtered.filter(
+      (notification) =>
+        notification.title.toLowerCase().includes(query) ||
+        notification.body.toLowerCase().includes(query)
     )
   }
 
@@ -8977,9 +8943,7 @@ const openNotificationCreateDialog = () => {
 const openNotificationEditDialog = (notification) => {
   notificationForm.value = {
     title: notification.title,
-    title_en: notification.title_en || '',
     body: notification.body,
-    body_en: notification.body_en || '',
     severity: notification.severity,
     is_active: notification.is_active,
     starts_at: toDate(notification.starts_at),
@@ -9028,9 +8992,7 @@ const saveNotification = async () => {
   notificationSaveLoading.value = true
   const payload = {
     title: notificationForm.value.title.trim(),
-    title_en: notificationForm.value.title_en.trim() || null,
     body: notificationForm.value.body.trim(),
-    body_en: notificationForm.value.body_en.trim() || null,
     severity: notificationForm.value.severity,
     is_active: notificationForm.value.is_active,
     starts_at: notificationForm.value.starts_at
@@ -11111,18 +11073,22 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-:deep(.admin-desktop-status-tag .p-tag-label) {
-  white-space: inherit;
-}
-
-:deep(.admin-desktop-status-cell .existing-course-status-pill.soft-badge) {
+:deep(
+  .admin-desktop-status-cell
+    > .p-tag.existing-course-status-pill.soft-badge.admin-desktop-status-tag
+) {
   box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   inline-size: fit-content;
+  min-inline-size: 0;
   max-inline-size: 100%;
-  block-size: 1.8rem;
-  min-height: 1.8rem !important;
-  padding-block: 0.28rem !important;
-  padding-inline: 0.68rem !important;
+  block-size: 1.9rem;
+  min-block-size: 1.9rem !important;
+  max-block-size: 1.9rem;
+  padding-block: 0.32rem !important;
+  padding-inline: 0.74rem !important;
   border-radius: 999px;
   font-size: var(--app-badge-font-size) !important;
   font-weight: 650 !important;
@@ -11131,9 +11097,8 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-:deep(.admin-desktop-status-cell .existing-course-status-pill .admin-desktop-status-label) {
-  max-inline-size: 100%;
-  line-height: inherit;
+:deep(.admin-desktop-status-tag .p-tag-label) {
+  white-space: inherit;
 }
 
 :deep(.admin-desktop-status-label) {

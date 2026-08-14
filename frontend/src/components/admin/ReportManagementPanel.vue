@@ -112,23 +112,15 @@
           style="width: clamp(15rem, 22vw, 21.25rem)"
           ><template #body="{ data }"
             ><div v-if="!isCardLayout" class="system-report-summary">
-              <strong
-                class="system-report-summary__title"
-                :title="localizedReportTitle(data) || $t('未命名回報')"
-              >
-                {{ localizedReportTitle(data) || $t('未命名回報') }}
+              <strong class="system-report-summary__title" :title="data.title || $t('未命名回報')">
+                {{ data.title || $t('未命名回報') }}
               </strong>
-              <span class="system-report-summary__body">{{
-                localizedReportDescription(data) || '—'
-              }}</span>
+              <span class="system-report-summary__body">{{ data.description || '—' }}</span>
             </div>
             <article v-else class="report-mobile-card report-mobile-card-content">
               <header class="report-mobile-card__header report-mobile-card-header">
-                <strong
-                  class="report-mobile-card-title"
-                  :title="localizedReportTitle(data) || $t('未命名回報')"
-                >
-                  {{ localizedReportTitle(data) || $t('未命名回報') }}
+                <strong class="report-mobile-card-title" :title="data.title || $t('未命名回報')">
+                  {{ data.title || $t('未命名回報') }}
                 </strong>
                 <Tag
                   class="system-read-state-tag report-mobile-card-status"
@@ -147,7 +139,7 @@
                 >
                   <span class="report-mobile-summary-preview__label">{{ $t('內容摘要') }}</span>
                   <p class="report-mobile-summary-preview__text">
-                    {{ localizedReportDescription(data) || $t('未提供詳細描述') }}
+                    {{ data.description || $t('未提供詳細描述') }}
                   </p>
                 </section>
                 <dl class="report-mobile-card__metadata report-mobile-info-grid">
@@ -285,47 +277,13 @@
           <section class="report-review__content-field system-report-detail__content">
             <strong class="report-review__content-label">{{ $t('問題標題') }}</strong>
             <div class="report-review__content-block">
-              <p>{{ localizedReportTitle(selectedSystemReport) || $t('未命名回報') }}</p>
+              <p>{{ selectedSystemReport.title || $t('未命名回報') }}</p>
             </div>
           </section>
           <section class="report-review__content-field system-report-detail__content">
             <strong class="report-review__content-label">{{ $t('完整詳細描述') }}</strong>
             <div class="report-review__content-block">
-              <p>{{ localizedReportDescription(selectedSystemReport) || '—' }}</p>
-            </div>
-          </section>
-          <section class="system-report-translation">
-            <div class="report-review__field">
-              <label for="system-report-title-en">{{ $t('English Title') }}</label>
-              <InputText
-                id="system-report-title-en"
-                v-model="systemTranslationForm.title_en"
-                maxlength="100"
-                :disabled="systemTranslationSaving"
-              />
-            </div>
-            <div class="report-review__field">
-              <label for="system-report-description-en">{{ $t('English Description') }}</label>
-              <Textarea
-                id="system-report-description-en"
-                v-model="systemTranslationForm.description_en"
-                rows="5"
-                maxlength="2000"
-                autoResize
-                :disabled="systemTranslationSaving"
-              />
-              <small>{{ systemTranslationForm.description_en.length }}/2000</small>
-            </div>
-            <div class="report-review__actions">
-              <span class="report-review__spacer" />
-              <Button
-                :label="$t('Save English Translation')"
-                icon="pi pi-language"
-                outlined
-                :loading="systemTranslationSaving"
-                :disabled="systemTranslationSaving"
-                @click="saveSystemTranslation"
-              />
+              <p>{{ selectedSystemReport.description || '—' }}</p>
             </div>
           </section>
           <section class="system-report-detail__note">
@@ -1217,7 +1175,6 @@ import { ARCHIVE_REPORT_REASONS } from '@/constants/archiveReport'
 import { getMessageTemplate } from '@/i18n'
 import { getCurrentUser } from '@/utils/auth'
 import { localizedCourseSnapshotName } from '@/utils/localizedCatalog'
-import { localizedReportDescription, localizedReportTitle } from '@/utils/localizedDomainContent'
 import { formatRelativeOrAbsoluteDateTime } from '@/utils/time'
 
 const confirm = useConfirm()
@@ -1245,8 +1202,6 @@ const systemDetailVisible = ref(false)
 const loadingSystemDetailId = ref(null)
 const systemReadSaving = ref(false)
 const systemReadForm = ref(false)
-const systemTranslationSaving = ref(false)
-const systemTranslationForm = ref({ title_en: '', description_en: '' })
 const reviewSaving = ref(false)
 const archiveReviewSaving = ref(false)
 const deletingSystemId = ref(null)
@@ -1502,10 +1457,6 @@ async function openSystemReport(item) {
     const { data } = await reportService.getSystemIssue(item.id)
     selectedSystemReport.value = data
     systemReadForm.value = Boolean(data.is_read)
-    systemTranslationForm.value = {
-      title_en: data.title_en || '',
-      description_en: data.description_en || '',
-    }
     systemDetailVisible.value = true
   } catch (error) {
     console.error('Load system issue report detail error:', error)
@@ -1517,40 +1468,6 @@ async function openSystemReport(item) {
     })
   } finally {
     loadingSystemDetailId.value = null
-  }
-}
-async function saveSystemTranslation() {
-  if (!selectedSystemReport.value?.id || systemTranslationSaving.value) return
-  systemTranslationSaving.value = true
-  try {
-    const { data } = await reportService.updateSystemIssueTranslation(
-      selectedSystemReport.value.id,
-      {
-        title_en: systemTranslationForm.value.title_en.trim() || null,
-        description_en: systemTranslationForm.value.description_en.trim() || null,
-      }
-    )
-    selectedSystemReport.value = data
-    systemTranslationForm.value = {
-      title_en: data.title_en || '',
-      description_en: data.description_en || '',
-    }
-    systemIssues.value = systemIssues.value.map((item) => (item.id === data.id ? data : item))
-    toast.add({
-      severity: 'success',
-      summary: t('English translation saved'),
-      life: 3000,
-    })
-  } catch (error) {
-    console.error('Update system issue report translation error:', error)
-    toast.add({
-      severity: 'error',
-      summary: t('儲存失敗'),
-      detail: t('Failed to save English translation'),
-      life: 3000,
-    })
-  } finally {
-    systemTranslationSaving.value = false
   }
 }
 async function saveSystemReadState() {

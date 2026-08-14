@@ -1,18 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import NotificationModal from '@/components/NotificationModal.vue'
-import { i18n } from '@/i18n'
 
 const summary = {
   announcements: [
-    {
-      id: 1,
-      title: '系統維護',
-      title_en: 'System maintenance',
-      body: '維護通知',
-      body_en: 'English maintenance notice',
-      updated_at: '2026-01-01T00:00:00Z',
-    },
+    { id: 1, title: '系統維護', body: '維護通知', updated_at: '2026-01-01T00:00:00Z' },
   ],
   personal_notifications: [
     { id: 2, title: '有人回覆', message: '回覆內容', created_at: '2026-01-02T00:00:00Z' },
@@ -22,21 +14,6 @@ const summary = {
 const slotStub = { template: '<div><slot /><slot name="footer" /></div>' }
 
 describe('NotificationModal', () => {
-  afterEach(() => {
-    i18n.global.locale.value = 'zh-TW'
-  })
-
-  it('uses the shared announcement resolver for the English summary', () => {
-    i18n.global.locale.value = 'en'
-    const wrapper = mount(NotificationModal, {
-      props: { visible: true, summary },
-      global: { stubs: { Dialog: slotStub, Button: true, Badge: true } },
-    })
-    expect(wrapper.text()).toContain('System maintenance')
-    expect(wrapper.text()).toContain('English maintenance notice')
-    expect(wrapper.text()).not.toContain('系統維護')
-    expect(wrapper.text()).not.toContain('維護通知')
-  })
   it('renders separated unread summaries and clear actions', async () => {
     const wrapper = mount(NotificationModal, {
       props: { visible: true, summary },

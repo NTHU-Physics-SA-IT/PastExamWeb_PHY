@@ -13,9 +13,6 @@ export const reportService = {
   updateSystemIssueReadState(id, isRead) {
     return api.patch(`/reports/admin/system-issues/${id}/read-state`, { is_read: isRead })
   },
-  updateSystemIssueTranslation(id, payload) {
-    return api.patch(`/reports/admin/system-issues/${id}/translation`, payload)
-  },
   deleteSystemIssue(id) {
     return api.delete(`/reports/admin/system-issues/${id}`)
   },

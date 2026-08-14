@@ -366,8 +366,6 @@ async def test_system_issue_reports_are_local_admin_only_and_filter_unsafe_githu
         created = await client.post("/reports/system-issues", json=payload)
         assert created.status_code == 201
         body = created.json()
-        assert body["title_en"] is None
-        assert body["description_en"] is None
         assert body["github_issue_number"] is None
         assert body["github_issue_url"] is None
         assert body["status"] == "local_only"
@@ -389,33 +387,6 @@ async def test_system_issue_reports_are_local_admin_only_and_filter_unsafe_githu
         item = next(item for item in listed.json()["items"] if item["id"] == body["id"])
         assert item["github_issue_number"] == 123
         assert item["github_issue_url"] is None
-
-        translated = await client.patch(
-            f"/reports/admin/system-issues/{body['id']}/translation",
-            json={
-                "title_en": "Translated system issue",
-                "description_en": "Translated reproduction steps",
-            },
-        )
-        assert translated.status_code == 200
-        assert translated.json()["title"] == payload["title"]
-        assert translated.json()["description"] == payload["description"]
-        assert translated.json()["title_en"] == "Translated system issue"
-        assert translated.json()["description_en"] == "Translated reproduction steps"
-
-        english_search = await client.get(
-            "/reports/admin/system-issues",
-            params={"search": "Translated reproduction"},
-        )
-        assert english_search.status_code == 200
-        assert any(item["id"] == body["id"] for item in english_search.json()["items"])
-
-        async with session_maker() as session:
-            stored = await session.get(SystemIssueReport, body["id"])
-            assert stored.title == payload["title"]
-            assert stored.description == payload["description"]
-            assert stored.title_en == "Translated system issue"
-            assert stored.description_en == "Translated reproduction steps"
         assert (
             await client.get(
                 "/reports/admin/system-issues", params={"sort_by": "description"}
@@ -458,12 +429,6 @@ async def test_system_issue_read_state_is_explicit_global_and_survives_restore(
             await client.patch(
                 f"/reports/admin/system-issues/{report_id}/read-state",
                 json={"is_read": True, "read_by_user_id": reporter.id},
-            )
-        ).status_code == 403
-        assert (
-            await client.patch(
-                f"/reports/admin/system-issues/{report_id}/translation",
-                json={"title_en": "Forbidden", "description_en": "Forbidden"},
             )
         ).status_code == 403
 

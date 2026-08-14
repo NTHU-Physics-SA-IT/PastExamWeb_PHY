@@ -10,6 +10,10 @@ const adminViewSource = readFileSync(
   'utf8'
 )
 const adminTemplateSource = adminViewSource.split('<script setup>')[0]
+const existingCourseStatusPillCss =
+  adminViewSource.match(
+    /\.p-tag\.existing-course-status-pill\.soft-badge\.admin-desktop-status-tag[\s\S]*?\)\s*\{[\s\S]*?\}/
+  )?.[0] ?? ''
 
 const sampleCourses = [
   { id: 1, name: '普通物理', category: 'junior' },
@@ -924,6 +928,10 @@ describe('AdminView', () => {
     expect(adminViewSource.match(/admin-desktop-status-tag/g).length).toBeGreaterThanOrEqual(3)
     expect(adminTemplateSource.match(/class="admin-desktop-status-label"/g)).toHaveLength(3)
     expect(adminTemplateSource.match(/'admin-desktop-status-tag'/g)).toHaveLength(3)
+    expect(adminTemplateSource.match(/'existing-course-status-pill'/g)).toHaveLength(1)
+    expect(adminTemplateSource).toMatch(
+      /toggleReviewSort\('existing', 'status'\)[\s\S]*?'existing-course-status-pill'[\s\S]*?getSubmissionStatusClass\(data\.status\)/
+    )
     expect(adminViewSource).toContain('Array.from(')
     expect(adminViewSource).not.toContain('writing-mode: vertical-rl')
     expect(adminViewSource).not.toContain('min-inline-size: 4.75rem')
@@ -932,6 +940,11 @@ describe('AdminView', () => {
     expect(adminViewSource).toMatch(
       /admin-desktop-status-tag\.soft-badge[\s\S]*?min-height:\s*1\.9rem[\s\S]*?padding:\s*0\.32rem 0\.74rem/
     )
+    expect(adminViewSource).toMatch(
+      /\.p-tag\.existing-course-status-pill\.soft-badge\.admin-desktop-status-tag[\s\S]*?block-size:\s*1\.9rem[\s\S]*?padding-block:\s*0\.32rem[\s\S]*?padding-inline:\s*0\.74rem[\s\S]*?border-radius:\s*999px[\s\S]*?font-size:\s*var\(--app-badge-font-size\)[\s\S]*?font-weight:\s*650[\s\S]*?line-height:\s*1\.25[\s\S]*?vertical-align:\s*middle/
+    )
+    expect(existingCourseStatusPillCss).not.toMatch(/review-status-(?:pending|approved|takedown)/)
+    expect(existingCourseStatusPillCss).not.toMatch(/(?:^|\s)width:\s*\d/)
     expect(adminTemplateSource.match(/class="review-submission-type-cell"/g)).toHaveLength(1)
     expect(adminTemplateSource.match(/'review-desktop-submission-type-tag'/g)).toHaveLength(1)
     expect(adminTemplateSource.match(/class="submission-type-combined-label"/g)).toHaveLength(1)

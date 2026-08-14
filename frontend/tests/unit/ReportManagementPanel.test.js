@@ -1,16 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { Fragment, h } from 'vue'
 import ReportManagementPanel from '@/components/admin/ReportManagementPanel.vue'
 import reportManagementSource from '@/components/admin/ReportManagementPanel.vue?raw'
 import { ADMIN_PAGE_SIZE_OPTIONS } from '@/constants/pagination'
-import { i18n } from '@/i18n'
 
 const mocks = vi.hoisted(() => ({
   listSystem: vi.fn(),
   getSystem: vi.fn(),
   updateSystemReadState: vi.fn(),
-  updateSystemTranslation: vi.fn(),
   listComments: vi.fn(),
   getComment: vi.fn(),
   reviewComment: vi.fn(),
@@ -30,7 +28,6 @@ vi.mock('@/api', () => ({
     listSystemIssues: mocks.listSystem,
     getSystemIssue: mocks.getSystem,
     updateSystemIssueReadState: mocks.updateSystemReadState,
-    updateSystemIssueTranslation: mocks.updateSystemTranslation,
     listCommentReports: mocks.listComments,
     getCommentReport: mocks.getComment,
     reviewCommentReport: mocks.reviewComment,
@@ -118,16 +115,11 @@ describe('ReportManagementPanel', () => {
     mocks.listSystem.mockResolvedValue({ data: { items: [], total: 0 } })
     mocks.getSystem.mockResolvedValue({ data: { id: 1, is_read: false } })
     mocks.updateSystemReadState.mockResolvedValue({ data: { id: 1, is_read: true } })
-    mocks.updateSystemTranslation.mockResolvedValue({ data: { id: 1, is_read: false } })
     mocks.listComments.mockResolvedValue({ data: { items: [], total: 0 } })
     mocks.listArchives.mockResolvedValue({ data: { items: [], total: 0 } })
     mocks.deleteSystem.mockResolvedValue({ data: { success: true } })
     mocks.deleteComment.mockResolvedValue({ data: { success: true } })
     mocks.confirm.mockImplementation((options) => options.accept?.())
-  })
-
-  afterEach(() => {
-    i18n.global.locale.value = 'zh-TW'
   })
 
   it('keeps the three report sources separated without per-row GitHub presentation', async () => {
@@ -367,55 +359,6 @@ describe('ReportManagementPanel', () => {
     expect(reportManagementSource).not.toContain('var(--surface-border)')
     expect(reportManagementSource).not.toContain('var(--surface-50)')
     expect(reportManagementSource).toContain('var(--app-font-size-base)')
-  })
-
-  it('renders translated system report content consistently and saves admin metadata', async () => {
-    i18n.global.locale.value = 'en'
-    const report = {
-      id: 82,
-      reporter_name: 'Reporter',
-      created_at: '2026-08-14T00:00:00Z',
-      report_type: 'bug',
-      title: '使用者原始標題',
-      title_en: 'English report title',
-      description: '使用者原始內容',
-      description_en: 'English report description',
-      is_read: false,
-    }
-    mocks.listSystem.mockResolvedValue({ data: { items: [report], total: 1 } })
-    mocks.getSystem.mockResolvedValue({ data: report })
-    mocks.updateSystemTranslation.mockResolvedValue({
-      data: {
-        ...report,
-        title_en: 'Updated English title',
-        description_en: 'Updated English description',
-      },
-    })
-
-    const desktop = mountPanel({ renderRows: true, cardLayout: false })
-    await flushPromises()
-    const desktopRow = desktop.get(`[data-report-id="${report.id}"]`)
-    expect(desktopRow.text()).toContain('English report title')
-    expect(desktopRow.text()).toContain('English report description')
-    expect(desktopRow.text()).not.toContain('使用者原始標題')
-
-    await desktop.vm.openSystemReport(report)
-    await flushPromises()
-    expect(desktop.get('.system-report-detail').text()).toContain('English report title')
-    desktop.vm.systemTranslationForm.title_en = ' Updated English title '
-    desktop.vm.systemTranslationForm.description_en = ' Updated English description '
-    await desktop.vm.saveSystemTranslation()
-    expect(mocks.updateSystemTranslation).toHaveBeenCalledWith(report.id, {
-      title_en: 'Updated English title',
-      description_en: 'Updated English description',
-    })
-
-    const mobile = mountPanel({ renderRows: true, cardLayout: true })
-    await flushPromises()
-    const mobileCard = mobile.get('.report-management__system-table .report-mobile-card')
-    expect(mobileCard.text()).toContain('English report title')
-    expect(mobileCard.text()).toContain('English report description')
-    expect(mobileCard.text()).not.toContain('使用者原始內容')
   })
 
   it('submits archive review without an admin response and renders the fallback', async () => {
@@ -977,9 +920,7 @@ describe('ReportManagementPanel', () => {
       )
     ).toHaveLength(3)
     expect(reportManagementSource).toContain('class="report-mobile-summary-preview__label"')
-    expect(reportManagementSource).toContain(
-      "localizedReportDescription(data) || $t('未提供詳細描述')"
-    )
+    expect(reportManagementSource).toContain("data.description || $t('未提供詳細描述')")
     expect(reportManagementSource).toContain("data.comment_content_snapshot || $t('無留言摘要')")
     expect(reportManagementSource).toMatch(
       /\.report-mobile-summary-preview\s*\{[\s\S]*?width:\s*100%;[\s\S]*?min-width:\s*0;[\s\S]*?background:/
