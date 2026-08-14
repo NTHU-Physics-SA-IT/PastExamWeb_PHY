@@ -879,6 +879,21 @@ describe('AdminView', () => {
     wrapper.unmount()
   })
 
+  it('uses compact Admin-context labels without changing fields or sorting', () => {
+    expect(adminTemplateSource.match(/\$t\('管理員投稿（審核中心）'\)/g)).toHaveLength(4)
+    expect(adminTemplateSource).toContain(
+      `field="contributor_level"\n                  :header="$t('投稿等級（使用者管理欄位）')"\n                  sortable`
+    )
+    expect(adminTemplateSource).toContain(
+      `field="is_admin"\n                  :header="$t('管理員權限（使用者管理欄位）')"\n                  sortable`
+    )
+    expect(adminTemplateSource).toContain(
+      `<label for="admin-user-is-admin">{{ $t('管理員權限') }}</label>`
+    )
+    expect(adminTemplateSource).not.toContain('contributor-level-settings-max')
+    expect(adminTemplateSource).not.toContain("$t('最高等級')")
+  })
+
   it('keeps the shared mobile action row breakpoint-agnostic for five actions', () => {
     expect(adminViewSource).not.toMatch(/@media\s*\(max-width:\s*337px\)/)
     expect(adminViewSource).toContain('grid-template-columns: repeat(5, minmax(2.5rem, 1fr))')
@@ -941,19 +956,24 @@ describe('AdminView', () => {
       /admin-desktop-status-tag\.soft-badge[\s\S]*?min-height:\s*1\.9rem[\s\S]*?padding:\s*0\.32rem 0\.74rem/
     )
     expect(adminViewSource).toMatch(
-      /\.p-tag\.existing-course-status-pill\.soft-badge\.admin-desktop-status-tag[\s\S]*?block-size:\s*1\.9rem[\s\S]*?padding-block:\s*0\.32rem[\s\S]*?padding-inline:\s*0\.74rem[\s\S]*?border-radius:\s*999px[\s\S]*?font-size:\s*var\(--app-badge-font-size\)[\s\S]*?font-weight:\s*650[\s\S]*?line-height:\s*1\.25[\s\S]*?vertical-align:\s*middle/
+      /\.p-tag\.existing-course-status-pill\.soft-badge\.admin-desktop-status-tag[\s\S]*?flex:\s*0 0 auto[\s\S]*?max-inline-size:\s*none[\s\S]*?max-width:\s*none[\s\S]*?block-size:\s*1\.9rem[\s\S]*?padding-block:\s*0\.32rem[\s\S]*?padding-inline:\s*0\.74rem[\s\S]*?border-radius:\s*999px[\s\S]*?font-size:\s*var\(--app-badge-font-size\)[\s\S]*?font-weight:\s*650[\s\S]*?line-height:\s*1\.25[\s\S]*?vertical-align:\s*middle/
     )
+    expect(existingCourseStatusPillCss).not.toContain('max-inline-size: 100%')
+    expect(existingCourseStatusPillCss).not.toContain('max-width: 100%')
     expect(existingCourseStatusPillCss).not.toMatch(/review-status-(?:pending|approved|takedown)/)
     expect(existingCourseStatusPillCss).not.toMatch(/(?:^|\s)width:\s*\d/)
     expect(adminTemplateSource.match(/class="review-submission-type-cell"/g)).toHaveLength(1)
     expect(adminTemplateSource.match(/'review-desktop-submission-type-tag'/g)).toHaveLength(1)
     expect(adminTemplateSource.match(/class="submission-type-combined-label"/g)).toHaveLength(1)
-    expect(adminTemplateSource).toContain('class="submission-type-combined-label__separator"')
-    expect(adminTemplateSource).toContain('＋')
-    expect(adminViewSource).toContain('@container review-submission-type-cell (max-width: 7.25rem)')
+    expect(adminTemplateSource.match(/submission-type-combined-label__part/g)).toHaveLength(2)
+    expect(adminTemplateSource).not.toContain('submission-type-combined-label__separator')
     expect(adminViewSource).toMatch(
-      /submission-type-combined-label__separator[\s\S]*?display: none/
+      /submission-type-combined-label[\s\S]*?flex-direction:\s*column[\s\S]*?text-align:\s*center[\s\S]*?white-space:\s*nowrap/
     )
+    expect(adminViewSource).toMatch(
+      /review-card-action-note[\s\S]*?width:\s*max-content[\s\S]*?max-width:\s*100%/
+    )
+    expect(adminViewSource).not.toContain('max-width: min(18rem, 100%)')
     expect(adminViewSource.match(/'review-mobile-card-status-badge'/g)).toHaveLength(2)
     expect(adminTemplateSource.match(/trash-name-column/g)).toHaveLength(2)
     expect(adminViewSource).toContain('width: clamp(14rem, 18vw, 18rem)')
