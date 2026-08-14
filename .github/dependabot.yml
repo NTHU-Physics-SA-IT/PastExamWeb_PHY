@@ -63,6 +63,21 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    # PrimeUI major releases are intentionally deferred after owner license review.
+    # Keep current-major minor/patch updates enabled; revisit if licensing changes.
+    ignore:
+      - dependency-name: "primevue"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "primeicons"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@primevue/auto-import-resolver"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@primeuix/themes"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "docker"
     directory: "/backend"
