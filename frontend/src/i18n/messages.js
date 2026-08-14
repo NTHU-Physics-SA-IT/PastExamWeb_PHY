@@ -608,11 +608,11 @@ const en = {
   '最近更新：{time}': 'Updated: {time}',
   '{count} 則未讀': '{count} unread',
   目前沒有個人通知: 'No personal notifications',
-  來源已不存在: 'Source no longer exists',
+  來源目前無法開啟: 'Source currently unavailable',
   刪除通知: 'Delete notification',
   公告內容: 'Announcement',
-  '來源已不存在，無法開啟原留言。':
-    'The source no longer exists, so the original message cannot be opened.',
+  '來源目前無法開啟，但通知內容仍可查看。':
+    'The source is currently unavailable, but the notification details remain available.',
   重要: 'Important',
   一般: 'Normal',
   日期未明: 'Unknown date',
