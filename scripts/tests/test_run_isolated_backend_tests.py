@@ -27,9 +27,9 @@ BACKEND_ID = "b" * 64
 def schema_status(*, checksum: str = "state-checksum") -> str:
     return "\n".join(
         (
-            "audit=archive-submission-self-delete-eligibility@4",
+            "audit=archive-submission-self-delete-eligibility@5",
             "status=complete",
-            "expected_ledger=d4b7e2a9c6f1",
+            "expected_ledger=f6a1c2d3e4b5",
             "explicit_rollback=true",
             "aggregates=total:30,active:26,deleted:4,"
             "created_archive_id_non_null:19,created_archive_id_null:11,"
@@ -148,7 +148,7 @@ class FakeExecutor:
         if command[:2] == ("docker", "exec") and "psql" in command:
             sql = input_text or ""
             if "SELECT version_num FROM alembic_version" in sql:
-                return runner_module.CommandResult(0, "d4b7e2a9c6f1\n")
+                return runner_module.CommandResult(0, "f6a1c2d3e4b5\n")
             if "CREATE ROLE" in sql:
                 return runner_module.CommandResult(self.bootstrap_exit, "")
             database = next(
@@ -223,12 +223,12 @@ def test_success_has_stable_json_and_complete_cleanup() -> None:
     payload = json.loads(json.dumps(runner_module.asdict(runner.evidence)))
     assert runner.evidence.exit_code == 0
     assert payload["schema_version"] == 1
-    assert payload["migration_head"] == "d4b7e2a9c6f1"
+    assert payload["migration_head"] == "f6a1c2d3e4b5"
     assert all(payload["cleanup"].values())
 
 
 def test_runner_uses_canonical_schema_manifest_head() -> None:
-    assert runner_module.EXPECTED_ALEMBIC_HEAD == "d4b7e2a9c6f1"
+    assert runner_module.EXPECTED_ALEMBIC_HEAD == "f6a1c2d3e4b5"
 
 
 @pytest.mark.parametrize(

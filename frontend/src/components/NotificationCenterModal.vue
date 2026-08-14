@@ -219,6 +219,10 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { renderMarkdown } from '@/utils/markdown'
 import { localizedPersonalNotification } from '@/utils/personalNotificationPresentation'
+import {
+  localizedAnnouncementContent,
+  localizedAnnouncementTitle,
+} from '@/utils/localizedDomainContent'
 import { formatExactDateTime24h } from '@/utils/time'
 
 const { t, locale } = useI18n()
@@ -248,7 +252,16 @@ const detailVisible = ref(false)
 const selectedItem = ref(null)
 const selectedType = ref('announcement')
 const renderedBody = computed(() => renderMarkdown(selectedItem.value?.body || ''))
-const groupedAnnouncements = computed(() => groupItemsByMonth(props.announcements, 'updated_at'))
+const localizedAnnouncements = computed(() =>
+  props.announcements.map((item) => ({
+    ...item,
+    title: localizedAnnouncementTitle(item),
+    body: localizedAnnouncementContent(item),
+  }))
+)
+const groupedAnnouncements = computed(() =>
+  groupItemsByMonth(localizedAnnouncements.value, 'updated_at')
+)
 const localizedPersonalNotifications = computed(() =>
   props.personalNotifications.map((item) => ({
     ...item,
@@ -291,7 +304,11 @@ function groupItemsByMonth(items, dateField) {
 
 function openAnnouncement(item) {
   selectedType.value = 'announcement'
-  selectedItem.value = item
+  selectedItem.value = {
+    ...item,
+    title: localizedAnnouncementTitle(item),
+    body: localizedAnnouncementContent(item),
+  }
   detailVisible.value = true
   if (!item.is_read) emit('mark-announcement-read', item.id)
 }
@@ -347,7 +364,8 @@ watch(
   () => [props.visible, props.focusType, props.focusId, props.loading],
   ([visible, type, id, loading]) => {
     if (!visible || !id || loading) return
-    const items = type === 'personal' ? localizedPersonalNotifications.value : props.announcements
+    const items =
+      type === 'personal' ? localizedPersonalNotifications.value : localizedAnnouncements.value
     const item = items.find((candidate) => candidate.id === id)
     if (!item) return
     activeTab.value = type === 'personal' ? 'personal' : 'announcements'

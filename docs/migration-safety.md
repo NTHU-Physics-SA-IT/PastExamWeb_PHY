@@ -62,7 +62,9 @@ Reviewed manifests currently cover:
   and
 - `c2a8e4f6b9d1`: the reviewed schema before bilingual ArchiveSubmission
   presentation snapshots; and
-- `d4b7e2a9c6f1`: the current repository head and SQLModel metadata contract.
+- `d4b7e2a9c6f1`: the reviewed schema before bilingual announcement and system
+  report content; and
+- `f6a1c2d3e4b5`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,
@@ -195,6 +197,13 @@ their existing Chinese snapshots. New submissions copy English metadata only
 from the canonical Course and CourseCategory records selected at submission
 time; missing English metadata remains null.
 
+The bilingual announcement and system-report content migration adds only
+nullable `notifications.title_en` / `body_en` and nullable
+`system_issue_reports.title_en` / `description_en`. It performs no backfill,
+preserves every canonical announcement and user-authored report value, and
+does not infer or machine-translate existing content. Downgrade drops only the
+four additive English presentation columns.
+
 On the first bootstrap, one missing canonical key or any extra custom category
 is evidence that the database is not the expected clean initialized target,
 so bootstrap fails without creating an administrator or marker. After the
@@ -235,6 +244,10 @@ ArchiveSubmission lifecycle classifier and aggregate fingerprints, while its
 continuity gate additionally requires the revision-appropriate nullable
 English catalog and submission-snapshot columns. Versions 1 through 3 retain
 their historical revision bounds.
+
+Adapter version 5 supports `d4b7e2a9c6f1` and `f6a1c2d3e4b5`, preserves the
+version 4 lifecycle classifier and aggregate fingerprints, and requires the
+four nullable announcement/report English columns only at the new head.
 
 Every execution sends one complete input stream to non-interactive `psql` and
 uses `ON_ERROR_STOP`, `REPEATABLE READ READ ONLY`, statement/lock/idle

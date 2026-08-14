@@ -49,6 +49,14 @@ remain unchanged. Known legacy rows without the newer presentation metadata
 use a centralized, notification-type-specific compatibility resolver rather
 than rewriting history or applying machine translation.
 
+Announcement rows retain canonical Chinese `title` and `body` content and may
+store nullable administrator-authored `title_en` and `body_en` presentation
+metadata. The English UI uses trimmed English metadata when present and falls
+back to the canonical content; the Chinese UI always uses canonical content.
+The same centralized frontend resolver owns announcement list, summary, and
+detail presentation. Updating translation metadata retains the existing
+announcement activation, schedule, read-receipt, and lifecycle semantics.
+
 ## Submission notifications
 
 ### Intended invariant

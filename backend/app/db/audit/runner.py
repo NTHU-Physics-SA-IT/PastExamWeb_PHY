@@ -24,6 +24,7 @@ from app.db.audit.models import (
 )
 from app.db.audit.registry import (
     BILINGUAL_COURSE_CATALOG_REVISION,
+    BILINGUAL_DOMAIN_CONTENT_REVISION,
     BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
     AuditAdapter,
     get_audit_adapter,
@@ -121,6 +122,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         "b7e3d9a1c5f2",
         BILINGUAL_COURSE_CATALOG_REVISION,
         BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
+        BILINGUAL_DOMAIN_CONTENT_REVISION,
     }
     owner_delete_column_condition = (
         """
@@ -154,6 +156,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         "b7e3d9a1c5f2",
         BILINGUAL_COURSE_CATALOG_REVISION,
         BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
+        BILINGUAL_DOMAIN_CONTENT_REVISION,
     }
     previous_status_column_condition = (
         """
@@ -181,6 +184,7 @@ def _continuity_cte(request: AuditRequest) -> str:
     expects_bilingual_catalog = request.expected_ledger in {
         BILINGUAL_COURSE_CATALOG_REVISION,
         BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
+        BILINGUAL_DOMAIN_CONTENT_REVISION,
     }
     bilingual_catalog_condition = (
         """
@@ -215,9 +219,10 @@ def _continuity_cte(request: AuditRequest) -> str:
         )
         """
     )
-    expects_bilingual_snapshots = (
-        request.expected_ledger == BILINGUAL_SUBMISSION_SNAPSHOT_REVISION
-    )
+    expects_bilingual_snapshots = request.expected_ledger in {
+        BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
+        BILINGUAL_DOMAIN_CONTENT_REVISION,
+    }
     bilingual_snapshot_condition = (
         """
         (
@@ -245,6 +250,47 @@ def _continuity_cte(request: AuditRequest) -> str:
                 'requested_course_name_en',
                 'requested_category_name_en',
                 'requested_category_label_en'
+              )
+        )
+        """
+    )
+    expects_bilingual_domain_content = (
+        request.expected_ledger == BILINGUAL_DOMAIN_CONTENT_REVISION
+    )
+    bilingual_domain_content_condition = (
+        """
+        (
+            SELECT count(*) = 4
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND (
+                (
+                    table_name = 'notifications'
+                    AND column_name IN ('title_en', 'body_en')
+                )
+                OR (
+                    table_name = 'system_issue_reports'
+                    AND column_name IN ('title_en', 'description_en')
+                )
+              )
+              AND is_nullable = 'YES'
+        )
+        """
+        if expects_bilingual_domain_content
+        else """
+        NOT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND (
+                (
+                    table_name = 'notifications'
+                    AND column_name IN ('title_en', 'body_en')
+                )
+                OR (
+                    table_name = 'system_issue_reports'
+                    AND column_name IN ('title_en', 'description_en')
+                )
               )
         )
         """
@@ -290,7 +336,8 @@ schema_state AS (
         AND ({owner_delete_column_condition})
         AND ({previous_status_column_condition})
         AND ({bilingual_catalog_condition})
-        AND ({bilingual_snapshot_condition}) AS schema_ok
+        AND ({bilingual_snapshot_condition})
+        AND ({bilingual_domain_content_condition}) AS schema_ok
     FROM required_columns
 ),
 enum_state AS (

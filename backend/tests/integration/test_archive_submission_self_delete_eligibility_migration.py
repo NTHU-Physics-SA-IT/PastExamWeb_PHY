@@ -112,7 +112,7 @@ def migration_engine(monkeypatch: pytest.MonkeyPatch) -> Engine:
 
 def test_model_and_manifest_define_the_new_head_contract() -> None:
     assert COLUMN_NAME in ArchiveSubmission.__table__.c
-    assert HEAD_SCHEMA_REVISION == "d4b7e2a9c6f1"
+    assert HEAD_SCHEMA_REVISION == "f6a1c2d3e4b5"
 
     source_metadata = metadata_for_revision(PREVIOUS_REVISION)
     head_metadata = metadata_for_revision(NEW_REVISION)

@@ -19,7 +19,7 @@
       <section v-if="summary.announcements?.length">
         <h3><i class="pi pi-megaphone mr-2" />{{ $t('公告') }}</h3>
         <article
-          v-for="(item, itemIndex) in summary.announcements"
+          v-for="(item, itemIndex) in localizedAnnouncements"
           :key="`a-${item.id}`"
           class="summary-item"
           :class="{ 'summary-item--divided': itemIndex > 0 }"
@@ -86,6 +86,10 @@
 <script setup>
 import { computed } from 'vue'
 import { localizedPersonalNotification } from '@/utils/personalNotificationPresentation'
+import {
+  localizedAnnouncementContent,
+  localizedAnnouncementTitle,
+} from '@/utils/localizedDomainContent'
 import { formatExactDateTime24h } from '@/utils/time'
 const props = defineProps({ visible: Boolean, summary: { type: Object, required: true } })
 defineEmits([
@@ -96,6 +100,13 @@ defineEmits([
   'view-personal',
 ])
 const total = computed(() => Number(props.summary?.counts?.total || 0))
+const localizedAnnouncements = computed(() =>
+  (props.summary?.announcements || []).map((item) => ({
+    ...item,
+    title: localizedAnnouncementTitle(item),
+    body: localizedAnnouncementContent(item),
+  }))
+)
 const localizedPersonalNotifications = computed(() =>
   (props.summary?.personal_notifications || []).map((item) => ({
     ...item,

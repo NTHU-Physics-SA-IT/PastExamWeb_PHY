@@ -231,6 +231,7 @@ def _metadata_for_variant(variant: str) -> MetaData:
     if variant == "head":
         return metadata
     if variant not in {
+        "pre_bilingual_domain_content",
         "pre_bilingual_submission_snapshots",
         "pre_bilingual_course_catalog",
         "pre_nthu_student_id",
@@ -243,6 +244,15 @@ def _metadata_for_variant(variant: str) -> MetaData:
         "pre_category_canonicalization",
     }:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
+
+    notifications = metadata.tables["notifications"]
+    notifications._columns.remove(notifications.c.title_en)
+    notifications._columns.remove(notifications.c.body_en)
+    system_reports = metadata.tables["system_issue_reports"]
+    system_reports._columns.remove(system_reports.c.title_en)
+    system_reports._columns.remove(system_reports.c.description_en)
+    if variant == "pre_bilingual_domain_content":
+        return metadata
 
     submissions = metadata.tables["archive_submissions"]
     submissions._columns.remove(submissions.c.requested_course_name_en)

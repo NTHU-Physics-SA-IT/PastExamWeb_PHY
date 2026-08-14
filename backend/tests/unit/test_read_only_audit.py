@@ -176,6 +176,13 @@ def test_bilingual_head_audit_is_new_version_and_preserves_lifecycle_classifier(
     assert adapter.combinations_sql == previous.combinations_sql
     assert "UPDATE ARCHIVE_SUBMISSIONS" not in adapter.summary_sql.upper()
 
+    current = get_audit_adapter(ELIGIBILITY_AUDIT_ID, 5)
+    assert current.accepted_source_revisions == frozenset(
+        {"d4b7e2a9c6f1", "f6a1c2d3e4b5"}
+    )
+    assert current.summary_sql == adapter.summary_sql
+    assert current.combinations_sql == adapter.combinations_sql
+
 
 def test_bilingual_head_continuity_requires_all_nullable_english_columns() -> None:
     bilingual_request = AuditRequest(
@@ -201,6 +208,16 @@ def test_bilingual_head_continuity_requires_all_nullable_english_columns() -> No
     assert "is_nullable = 'YES'" in sql
     assert "data_type = 'character varying'" in sql
 
+    current_request = bilingual_request.model_copy(
+        update={"audit_version": 5, "expected_ledger": "f6a1c2d3e4b5"}
+    )
+    current_sql = build_transaction_sql(
+        current_request,
+        get_audit_adapter(ELIGIBILITY_AUDIT_ID, 5),
+    )
+    for column in ("title_en", "body_en", "description_en"):
+        assert column in current_sql
+
 
 def test_cli_defaults_to_current_bilingual_audit_version() -> None:
     arguments = audit.parser().parse_args(
@@ -213,7 +230,7 @@ def test_cli_defaults_to_current_bilingual_audit_version() -> None:
         ]
     )
 
-    assert arguments.version == 4
+    assert arguments.version == 5
 
 
 def test_transaction_is_noninteractive_read_only_and_explicitly_rolled_back() -> None:

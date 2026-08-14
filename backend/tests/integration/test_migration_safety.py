@@ -317,6 +317,75 @@ def test_bilingual_catalog_nonempty_partial_defaults_fail_closed(
         )
 
 
+def test_bilingual_domain_content_upgrade_preserves_existing_rows(
+    clean_public_schema: Engine,
+) -> None:
+    previous_revision = "d4b7e2a9c6f1"
+    upgrade(previous_revision)
+    with clean_public_schema.begin() as connection:
+        notification_id = connection.scalar(
+            text(
+                "INSERT INTO notifications "
+                "(title, body, severity, is_active, created_at, updated_at) "
+                "VALUES ('Canonical announcement', 'Canonical body', 'INFO', true, now(), now()) "
+                "RETURNING id"
+            )
+        )
+        report_id = connection.scalar(
+            text(
+                "INSERT INTO system_issue_reports (report_type, title, description) "
+                "VALUES ('bug', 'Original report', 'Original description') RETURNING id"
+            )
+        )
+
+    command.upgrade(alembic_config(), "head")
+
+    inspector = sa_inspect(clean_public_schema)
+    expected = {
+        "notifications": ("title_en", "body_en"),
+        "system_issue_reports": ("title_en", "description_en"),
+    }
+    for table_name, column_names in expected.items():
+        columns = {
+            column["name"]: column
+            for column in inspector.get_columns(table_name, schema="public")
+        }
+        for column_name in column_names:
+            assert columns[column_name]["nullable"] is True
+
+    with clean_public_schema.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT title, body, title_en, body_en FROM notifications WHERE id = :id"
+            ),
+            {"id": notification_id},
+        ).one() == ("Canonical announcement", "Canonical body", None, None)
+        assert connection.execute(
+            text(
+                "SELECT title, description, title_en, description_en "
+                "FROM system_issue_reports WHERE id = :id"
+            ),
+            {"id": report_id},
+        ).one() == ("Original report", "Original description", None, None)
+
+    command.downgrade(alembic_config(), previous_revision)
+    inspector = sa_inspect(clean_public_schema)
+    for table_name, column_names in expected.items():
+        assert set(column_names).isdisjoint(
+            column["name"]
+            for column in inspector.get_columns(table_name, schema="public")
+        )
+    with clean_public_schema.connect() as connection:
+        assert connection.scalar(
+            text("SELECT count(*) FROM notifications WHERE id = :id"),
+            {"id": notification_id},
+        ) == 1
+        assert connection.scalar(
+            text("SELECT count(*) FROM system_issue_reports WHERE id = :id"),
+            {"id": report_id},
+        ) == 1
+
+
 def test_head_database_preflight_is_read_only(clean_public_schema: Engine) -> None:
     upgrade()
     course_id = insert_course(clean_public_schema)

@@ -38,6 +38,7 @@ from app.models.models import (
     SystemIssueReportListRead,
     SystemIssueReportRead,
     SystemIssueReportReadStateUpdate,
+    SystemIssueReportTranslationUpdate,
     User,
     UserRoles,
 )
@@ -310,7 +311,9 @@ def _serialize_system_issue(
         reporter_name=_display_name(report.reporter_user_id, nickname, name),
         report_type=report.report_type,
         title=report.title,
+        title_en=report.title_en,
         description=report.description,
+        description_en=report.description_en,
         contact=report.contact,
         status=report.status,
         github_issue_number=report.github_issue_number,
@@ -413,7 +416,9 @@ async def list_system_issue_reports(
         filters.append(
             or_(
                 SystemIssueReport.title.ilike(pattern),
+                SystemIssueReport.title_en.ilike(pattern),
                 SystemIssueReport.description.ilike(pattern),
+                SystemIssueReport.description_en.ilike(pattern),
                 reporter.name.ilike(pattern),
                 reporter.nickname.ilike(pattern),
             )
@@ -488,6 +493,42 @@ async def get_system_issue_report(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="System issue report not found",
         )
+    return _serialize_system_issue_row(row)
+
+
+@router.patch(
+    "/admin/system-issues/{report_id}/translation",
+    response_model=SystemIssueReportRead,
+)
+async def update_system_issue_translation(
+    report_id: int,
+    payload: SystemIssueReportTranslationUpdate,
+    current_user: UserRoles = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    _require_admin(current_user)
+    report = (
+        await db.execute(
+            select(SystemIssueReport)
+            .where(
+                SystemIssueReport.id == report_id,
+                SystemIssueReport.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if report is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="System issue report not found",
+        )
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(report, field, (value or "").strip() or None)
+    report.updated_at = datetime.now(UTC)
+    db.add(report)
+    await db.commit()
+    statement, _, _ = _system_issue_select()
+    row = (await db.execute(statement.where(SystemIssueReport.id == report_id))).one()
     return _serialize_system_issue_row(row)
 
 

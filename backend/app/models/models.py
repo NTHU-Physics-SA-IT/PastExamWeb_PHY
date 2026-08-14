@@ -623,7 +623,11 @@ class Notification(SQLModel, table=True):
     __tablename__ = "notifications"
     id: int | None = Field(default=None, primary_key=True)
     title: str = Field(sa_column=Column(String(150), nullable=False))
+    title_en: str | None = Field(
+        default=None, sa_column=Column(String(150), nullable=True)
+    )
     body: str = Field(sa_column=Column(Text, nullable=False))
+    body_en: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     severity: NotificationSeverity = Field(default=NotificationSeverity.INFO)
     is_active: bool = Field(default=True)
     deleted_at: datetime | None = Field(
@@ -1055,7 +1059,13 @@ class SystemIssueReport(SQLModel, table=True):
     )
     report_type: str = Field(sa_column=Column(String(40), nullable=False, index=True))
     title: str = Field(sa_column=Column(String(100), nullable=False))
+    title_en: str | None = Field(
+        default=None, sa_column=Column(String(100), nullable=True)
+    )
     description: str = Field(sa_column=Column(Text, nullable=False))
+    description_en: str | None = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
     contact: str | None = Field(
         default=None, sa_column=Column(String(200), nullable=True)
     )
@@ -1321,7 +1331,9 @@ class MemeRead(BaseModel):
 
 class NotificationBase(BaseModel):
     title: str
+    title_en: str | None = Field(default=None, max_length=150)
     body: str
+    body_en: str | None = None
     severity: NotificationSeverity = NotificationSeverity.INFO
     is_active: bool = True
     starts_at: datetime | None = None
@@ -1334,7 +1346,9 @@ class NotificationCreate(NotificationBase):
 
 class NotificationUpdate(BaseModel):
     title: str | None = None
+    title_en: str | None = Field(default=None, max_length=150)
     body: str | None = None
+    body_en: str | None = None
     severity: NotificationSeverity | None = None
     is_active: bool | None = None
     starts_at: datetime | None = None
@@ -1478,7 +1492,9 @@ class SystemIssueReportRead(BaseModel):
     reporter_name: str
     report_type: str
     title: str
+    title_en: str | None = None
     description: str
+    description_en: str | None = None
     contact: str | None
     status: str
     github_issue_number: int | None
@@ -1492,6 +1508,11 @@ class SystemIssueReportRead(BaseModel):
 
 class SystemIssueReportReadStateUpdate(BaseModel):
     is_read: bool
+
+
+class SystemIssueReportTranslationUpdate(BaseModel):
+    title_en: str | None = Field(default=None, max_length=100)
+    description_en: str | None = Field(default=None, max_length=2000)
 
 
 class SystemIssueReportListRead(BaseModel):
