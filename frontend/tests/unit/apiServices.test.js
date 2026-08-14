@@ -44,7 +44,12 @@ describe('API service wrappers', () => {
 
   it('courseService proxies to API client', () => {
     courseService.listPublicCourses()
-    expect(getMock).toHaveBeenCalledWith('/courses/public')
+    expect(getMock).toHaveBeenCalledWith('/courses/public', { params: {} })
+
+    courseService.listPublicCourses(' General Physics ')
+    expect(getMock).toHaveBeenCalledWith('/courses/public', {
+      params: { search: 'General Physics' },
+    })
 
     courseService.listPublicCategories()
     expect(getMock).toHaveBeenCalledWith('/courses/public/categories')
@@ -53,7 +58,7 @@ describe('API service wrappers', () => {
     expect(getMock).toHaveBeenCalledWith('/courses/public/course-1/archives')
 
     courseService.listCourses()
-    expect(getMock).toHaveBeenCalledWith('/courses')
+    expect(getMock).toHaveBeenCalledWith('/courses', { params: {} })
 
     courseService.getCourseArchives('course-1')
     expect(getMock).toHaveBeenCalledWith('/courses/course-1/archives')

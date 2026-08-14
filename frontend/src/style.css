@@ -736,13 +736,15 @@ html.dark {
 
 .soft-badge,
 .soft-badge.p-tag {
+  box-sizing: border-box;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.25rem;
   width: fit-content;
   max-width: 100%;
-  min-height: 1.45rem !important;
-  padding: 0.16rem 0.48rem !important;
+  min-height: 1.55rem !important;
+  padding: 0.2rem 0.56rem !important;
   border: 1px solid var(--soft-badge-border, color-mix(in srgb, currentColor 34%, transparent)) !important;
   border-radius: 999px;
   background: var(--soft-badge-bg, rgba(100, 116, 139, 0.08)) !important;
@@ -754,6 +756,10 @@ html.dark {
   white-space: normal;
   overflow-wrap: anywhere;
   box-shadow: none !important;
+}
+
+.soft-badge.p-tag .p-tag-label {
+  line-height: inherit;
 }
 
 .soft-badge--pending,

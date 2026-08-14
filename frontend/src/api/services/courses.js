@@ -1,8 +1,8 @@
 import { api } from './client'
 
 export const courseService = {
-  listPublicCourses() {
-    return api.get('/courses/public')
+  listPublicCourses(search = '') {
+    return api.get('/courses/public', { params: search.trim() ? { search: search.trim() } : {} })
   },
 
   listPublicCategories() {
@@ -13,8 +13,8 @@ export const courseService = {
     return api.get(`/courses/public/${courseId}/archives`)
   },
 
-  listCourses() {
-    return api.get('/courses')
+  listCourses(search = '') {
+    return api.get('/courses', { params: search.trim() ? { search: search.trim() } : {} })
   },
 
   listCategories() {

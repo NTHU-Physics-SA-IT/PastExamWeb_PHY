@@ -182,8 +182,8 @@ describe('UploadArchiveDialog', () => {
     expect(vm.isFilenameValid).toBe(true)
 
     expect(vm.subjectOptions).toEqual([
-      { name: 'Calculus I', code: 'c1' },
-      { name: 'Physics', code: 'c2' },
+      { name: 'Calculus I', canonicalName: 'Calculus I', code: 'c1' },
+      { name: 'Physics', canonicalName: 'Physics', code: 'c2' },
     ])
 
     await flushPromises()

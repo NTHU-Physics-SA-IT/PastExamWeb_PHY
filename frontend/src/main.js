@@ -9,10 +9,12 @@ import App from './App.vue'
 import router from './router'
 import ToastService from 'primevue/toastservice'
 import ConfirmationService from 'primevue/confirmationservice'
+import { i18n } from './i18n'
 
 const app = createApp(App)
 
 app.use(router)
+app.use(i18n)
 app.use(PrimeVue, {
   theme: {
     preset: Aura,

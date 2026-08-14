@@ -4,7 +4,7 @@
     <ConfirmDialog />
     <Navbar class="navbar px-1" @toggle-sidebar="toggleSidebar" />
     <div class="content-container">
-      <router-view />
+      <router-view :key="locale" />
     </div>
   </div>
 </template>
@@ -18,6 +18,7 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import { setGlobalToast } from './utils/toast'
 import { applyFontSizePreference } from './utils/fontSizePreference'
+import { useI18n } from 'vue-i18n'
 
 export default {
   components: {
@@ -29,6 +30,7 @@ export default {
     const sidebarVisible = ref(true)
     const toast = useToast()
     const confirm = useConfirm()
+    const { locale } = useI18n()
 
     setGlobalToast(toast)
     applyFontSizePreference()
@@ -42,6 +44,7 @@ export default {
 
     return {
       toggleSidebar,
+      locale,
     }
   },
 }

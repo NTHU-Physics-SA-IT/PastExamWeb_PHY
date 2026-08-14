@@ -725,6 +725,7 @@ async def test_repeated_review_cycles_create_distinct_durable_notifications(
                 "submission_id": submission.id,
                 "archive_id": stored_submission.created_archive_id,
                 "course_name": course.name,
+                "course_name_en": None,
                 "archive_name": submission.name,
                 "status": SubmissionStatus.APPROVED.value,
                 "destination": "my_submission_status",

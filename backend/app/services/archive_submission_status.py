@@ -398,6 +398,7 @@ async def enqueue_submission_status_notification(
     course_name = format_course_display_name(
         submission.requested_course_name or submission.subject
     )
+    course_name_en = format_course_display_name(submission.requested_course_name_en)
     await enqueue_personal_notification(
         db,
         user_id=submission.requester_id,
@@ -413,6 +414,7 @@ async def enqueue_submission_status_notification(
             "submission_id": submission.id,
             "archive_id": submission.created_archive_id,
             "course_name": course_name,
+            "course_name_en": course_name_en or None,
             "archive_name": submission.name,
             "status": new_status.value,
             "destination": "my_submission_status",
@@ -476,6 +478,7 @@ async def republish_archive_submission(
     course_name = format_course_display_name(
         submission.requested_course_name or submission.subject
     )
+    course_name_en = format_course_display_name(submission.requested_course_name_en)
     submission.status = SubmissionStatus.APPROVED
     submission.lifecycle_reason = None
     submission.reviewer_id = reviewer_id
@@ -496,6 +499,7 @@ async def republish_archive_submission(
             "submission_id": submission.id,
             "archive_id": submission.created_archive_id,
             "course_name": course_name,
+            "course_name_en": course_name_en or None,
             "archive_name": submission.name,
             "status": SubmissionStatus.APPROVED.value,
             "action": "republished",

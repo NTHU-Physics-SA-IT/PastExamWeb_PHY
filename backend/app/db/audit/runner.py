@@ -22,7 +22,12 @@ from app.db.audit.models import (
     ContinuityResult,
     FlagCombination,
 )
-from app.db.audit.registry import AuditAdapter, get_audit_adapter
+from app.db.audit.registry import (
+    BILINGUAL_COURSE_CATALOG_REVISION,
+    BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
+    AuditAdapter,
+    get_audit_adapter,
+)
 from app.db.migration_safety import redact_text
 from app.db.test_database_guard import validate_test_database_target
 
@@ -114,6 +119,8 @@ def _continuity_cte(request: AuditRequest) -> str:
         "6f3a9c2d8e41",
         "9f1c2a7e4b63",
         "b7e3d9a1c5f2",
+        BILINGUAL_COURSE_CATALOG_REVISION,
+        BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
     }
     owner_delete_column_condition = (
         """
@@ -145,6 +152,8 @@ def _continuity_cte(request: AuditRequest) -> str:
         "6f3a9c2d8e41",
         "9f1c2a7e4b63",
         "b7e3d9a1c5f2",
+        BILINGUAL_COURSE_CATALOG_REVISION,
+        BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
     }
     previous_status_column_condition = (
         """
@@ -166,6 +175,77 @@ def _continuity_cte(request: AuditRequest) -> str:
             WHERE table_schema = 'public'
               AND table_name = 'archive_submissions'
               AND column_name = 'previous_status'
+        )
+        """
+    )
+    expects_bilingual_catalog = request.expected_ledger in {
+        BILINGUAL_COURSE_CATALOG_REVISION,
+        BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
+    }
+    bilingual_catalog_condition = (
+        """
+        (
+            SELECT count(*) = 3
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND (
+                (table_name = 'courses' AND column_name = 'name_en')
+                OR (
+                    table_name = 'course_category_configs'
+                    AND column_name IN ('name_en', 'label_en')
+                )
+              )
+              AND data_type = 'character varying'
+              AND is_nullable = 'YES'
+        )
+        """
+        if expects_bilingual_catalog
+        else """
+        NOT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND (
+                (table_name = 'courses' AND column_name = 'name_en')
+                OR (
+                    table_name = 'course_category_configs'
+                    AND column_name IN ('name_en', 'label_en')
+                )
+              )
+        )
+        """
+    )
+    expects_bilingual_snapshots = (
+        request.expected_ledger == BILINGUAL_SUBMISSION_SNAPSHOT_REVISION
+    )
+    bilingual_snapshot_condition = (
+        """
+        (
+            SELECT count(*) = 3
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'archive_submissions'
+              AND column_name IN (
+                'requested_course_name_en',
+                'requested_category_name_en',
+                'requested_category_label_en'
+              )
+              AND data_type = 'character varying'
+              AND is_nullable = 'YES'
+        )
+        """
+        if expects_bilingual_snapshots
+        else """
+        NOT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'archive_submissions'
+              AND column_name IN (
+                'requested_course_name_en',
+                'requested_category_name_en',
+                'requested_category_label_en'
+              )
         )
         """
     )
@@ -208,7 +288,9 @@ schema_state AS (
         AND to_regclass('public.alembic_version') IS NOT NULL
         AND required_columns.required_columns_ok
         AND ({owner_delete_column_condition})
-        AND ({previous_status_column_condition}) AS schema_ok
+        AND ({previous_status_column_condition})
+        AND ({bilingual_catalog_condition})
+        AND ({bilingual_snapshot_condition}) AS schema_ok
     FROM required_columns
 ),
 enum_state AS (

@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { getCurrentUser, isAuthenticated } from '../utils/auth.js'
 import { applyRouteSeo, DEFAULT_DESCRIPTION } from '../utils/seo'
+import { i18n } from '../i18n'
 
 const routes = [
   {
@@ -146,8 +147,31 @@ router.beforeEach((to, from, next) => {
   }
 })
 
-router.afterEach((to) => {
-  applyRouteSeo(to)
-})
+const applyLocalizedRouteSeo = (route) => {
+  const seo = route.meta?.seo
+  applyRouteSeo(
+    seo
+      ? {
+          ...route,
+          meta: {
+            ...route.meta,
+            seo: {
+              ...seo,
+              title: seo.title ? i18n.global.t(seo.title) : seo.title,
+              description: seo.description ? i18n.global.t(seo.description) : seo.description,
+            },
+          },
+        }
+      : route
+  )
+}
+
+router.afterEach(applyLocalizedRouteSeo)
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pastexam:locale-changed', () =>
+    applyLocalizedRouteSeo(router.currentRoute.value)
+  )
+}
 
 export default router

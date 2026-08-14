@@ -1,8 +1,12 @@
 <template>
-  <form class="comment-inline-report" aria-label="回報這則留言" @submit.prevent="submitReport">
+  <form
+    class="comment-inline-report"
+    :aria-label="$t('回報這則留言')"
+    @submit.prevent="submitReport"
+  >
     <div class="comment-inline-report__heading">
       <i class="pi pi-flag" aria-hidden="true" />
-      <span>回報這則留言</span>
+      <span>{{ $t('回報這則留言') }}</span>
     </div>
 
     <blockquote class="comment-inline-report__target">
@@ -15,27 +19,27 @@
     </blockquote>
 
     <div class="comment-inline-report__field">
-      <label :for="reasonInputId">回報原因</label>
+      <label :for="reasonInputId">{{ $t('回報原因') }}</label>
       <Select
         :inputId="reasonInputId"
         :modelValue="reason"
-        :options="COMMENT_REPORT_REASONS"
+        :options="commentReportReasons"
         optionLabel="label"
         optionValue="value"
-        placeholder="請選擇回報原因"
+        :placeholder="$t('請選擇回報原因')"
         class="w-full"
         @update:modelValue="updateReason"
       />
     </div>
 
     <div v-if="isOtherReason" class="comment-inline-report__field">
-      <label :for="customMessageInputId">請描述回報原因</label>
+      <label :for="customMessageInputId">{{ $t('請描述回報原因') }}</label>
       <Textarea
         :id="customMessageInputId"
         :modelValue="customMessage"
         rows="3"
         class="w-full"
-        placeholder="請具體描述需要回報的原因"
+        :placeholder="$t('請具體描述需要回報的原因')"
         :maxlength="COMMENT_REPORT_CUSTOM_MESSAGE_MAX_LENGTH"
         @update:modelValue="$emit('update:customMessage', $event)"
       />
@@ -47,7 +51,7 @@
     <div class="comment-inline-report__actions">
       <Button
         type="button"
-        label="取消"
+        :label="$t('取消')"
         severity="secondary"
         text
         size="small"
@@ -55,13 +59,13 @@
       />
       <Button
         type="submit"
-        label="送出回報"
+        :label="$t('送出回報')"
         icon="pi pi-send"
         severity="secondary"
         size="small"
         :loading="loading"
         :disabled="!canSubmit"
-        title="送出留言回報"
+        :title="$t('送出留言回報')"
       />
     </div>
   </form>
@@ -69,6 +73,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { formatRelativeTime } from '../utils/time'
 import {
   COMMENT_REPORT_CUSTOM_MESSAGE_MAX_LENGTH,
@@ -84,6 +89,10 @@ const props = defineProps({
   customMessage: { type: String, default: '' },
   loading: { type: Boolean, default: false },
 })
+const { t } = useI18n()
+const commentReportReasons = computed(() =>
+  COMMENT_REPORT_REASONS.map((option) => ({ ...option, label: t(option.label) }))
+)
 
 const emit = defineEmits(['update:reason', 'update:customMessage', 'cancel', 'submit'])
 
@@ -92,7 +101,7 @@ const customMessageInputId = computed(() => `comment-report-message-${props.mess
 const formattedTime = computed(() => formatRelativeTime(props.message.created_at))
 const contentPreview = computed(() => {
   const content = props.message.is_deleted
-    ? '此留言已刪除'
+    ? t('此留言已刪除')
     : String(props.message.content || '').trim()
   return content.length > 120 ? `${content.slice(0, 120)}…` : content
 })
