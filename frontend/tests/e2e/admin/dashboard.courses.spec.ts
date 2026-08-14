@@ -63,7 +63,7 @@ test.describe('Admin Dashboard › Courses', () => {
     const createDialog = page.getByRole('dialog', { name: '新增課程' })
     await expect(createDialog).toBeVisible()
 
-    await createDialog.getByPlaceholder('輸入課程名稱').fill('線性代數(一)')
+    await createDialog.getByPlaceholder('輸入課程中文名稱').fill('線性代數(一)')
 
     const categoryTrigger = createDialog
       .locator('label', { hasText: '分類' })
@@ -97,7 +97,7 @@ test.describe('Admin Dashboard › Courses', () => {
     const editDialog = page.getByRole('dialog', { name: '編輯課程' })
     await expect(editDialog).toBeVisible()
 
-    const nameInput = editDialog.getByPlaceholder('輸入課程名稱')
+    const nameInput = editDialog.getByPlaceholder('輸入課程中文名稱')
     await nameInput.fill('普通物理(一) (更新)')
 
     const editCategoryTrigger = editDialog

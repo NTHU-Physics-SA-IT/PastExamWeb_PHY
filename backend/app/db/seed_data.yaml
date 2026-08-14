@@ -1,150 +1,221 @@
 courses:
   - name: "普通化學(一)"
+    name_en: "General Chemistry (I)"
     category: FRESHMAN
   - name: "普通化學(二)"
+    name_en: "General Chemistry (II)"
     category: FRESHMAN
   - name: "普通物理(一)"
+    name_en: "General Physics (I)"
     category: FRESHMAN
   - name: "普通物理(二)"
+    name_en: "General Physics (II)"
     category: FRESHMAN
   - name: "微積分(一)"
+    name_en: "Calculus (I)"
     category: FRESHMAN
   - name: "微積分(二)"
+    name_en: "Calculus (II)"
     category: FRESHMAN
   - name: "應用數學(一)"
+    name_en: "Applied Mathematics (I)"
     category: FRESHMAN
   - name: "應用數學(二)"
+    name_en: "Applied Mathematics (II)"
     category: FRESHMAN
 
   - name: "電磁學(一)"
+    name_en: "Electromagnetism (I)"
     category: SOPHOMORE
   - name: "電磁學(二)"
+    name_en: "Electromagnetism (II)"
     category: SOPHOMORE
   - name: "理論力學(一)"
+    name_en: "Theoretical Mechanics (I)"
     category: SOPHOMORE
   - name: "理論力學(二)"
+    name_en: "Theoretical Mechanics (II)"
     category: SOPHOMORE
   - name: "量子物理(一)"
+    name_en: "Quantum Physics (I)"
     category: SOPHOMORE
   - name: "量子物理(二)"
+    name_en: "Quantum Physics (II)"
     category: SOPHOMORE
   - name: "熱統計物理(一)"
+    name_en: "Thermal and Statistical Physics (I)"
     category: SOPHOMORE
   - name: "熱統計物理(二)"
+    name_en: "Thermal and Statistical Physics (II)"
     category: SOPHOMORE
   - name: "應用電子學(一)"
+    name_en: "Applied Electronics (I)"
     category: SOPHOMORE
   - name: "應用電子學(二)"
+    name_en: "Applied Electronics (II)"
     category: SOPHOMORE
   - name: "光學(一)"
+    name_en: "Optics (I)"
     category: SOPHOMORE
   - name: "光學(二)"
+    name_en: "Optics (II)"
     category: SOPHOMORE
   - name: "光電物理專論"
+    name_en: "Introduction to Optoelectronics"
     category: SOPHOMORE
 
   - name: "普通化學實驗(一)"
+    name_en: "General Chemistry Laboratory (I)"
     category: JUNIOR
   - name: "普通化學實驗(二)"
+    name_en: "General Chemistry Laboratory (II)"
     category: JUNIOR
   - name: "普通物理實驗(一)"
+    name_en: "General Physics Laboratory (I)"
     category: JUNIOR
   - name: "普通物理實驗(二)"
+    name_en: "General Physics Laboratory (II)"
     category: JUNIOR
   - name: "物理實驗技術"
+    name_en: "Experimental Technique in Physics"
     category: JUNIOR
   - name: "實驗物理"
+    name_en: "Experimental Physics"
     category: JUNIOR
   - name: "應用電子學實驗"
+    name_en: "Applied Electronics Lab."
     category: JUNIOR
   - name: "近代物理實驗"
+    name_en: "Modern Physics Lab."
     category: JUNIOR
   - name: "光學實驗"
+    name_en: "Optics Laboratory"
     category: JUNIOR
 
   - name: "基礎天文觀測"
+    name_en: "Fundamentals of Observational Astronomy"
     category: SENIOR
   - name: "黑洞天文導論"
+    name_en: "Introduction to Black Hole Astrophysics"
     category: SENIOR
   - name: "基本粒子物理導論"
+    name_en: "Intro. Elementary Particle Physics"
     category: SENIOR
   - name: "相對論導論(一)"
+    name_en: "Introduction to Relativity (I)"
     category: SENIOR
   - name: "相對論導論(二)"
+    name_en: "Introduction to Relativity (II)"
     category: SENIOR
   - name: "普通天文學(一)"
+    name_en: "General Astronomy (I)"
     category: SENIOR
   - name: "普通天文學(二)"
+    name_en: "General Astronomy (II)"
     category: SENIOR
   - name: "計算物理概論"
+    name_en: "Computation for Physics"
     category: SENIOR
   - name: "數值分析"
+    name_en: "Numerical Analysis"
     category: SENIOR
   - name: "量子資訊導論"
+    name_en: "Introduction to Quantum Information"
     category: SENIOR
   - name: "物理數學"
+    name_en: "Mathematical Methods for Physicists"
     category: SENIOR
 
   - name: "電動力學(一)"
+    name_en: "Electrodynamics (I)"
     category: GRADUATE
   - name: "電動力學(二)"
+    name_en: "Electrodynamics (II)"
     category: GRADUATE
   - name: "古典力學"
+    name_en: "Classical Mechanics"
     category: GRADUATE
   - name: "量子力學(一)"
+    name_en: "Quantum Mechanics (I)"
     category: GRADUATE
   - name: "量子力學(二)"
+    name_en: "Quantum Mechanics (II)"
     category: GRADUATE
   - name: "統計力學(一)"
+    name_en: "Statistical Mechanics (I)"
     category: GRADUATE
   - name: "統計力學(二)"
+    name_en: "Statistical Mechanics (II)"
     category: GRADUATE
   - name: "凝態物理"
+    name_en: "Condensed Matter Physics"
     category: GRADUATE
   - name: "固態物理導論"
+    name_en: "Introduction to Solid-State Physics"
     category: GRADUATE
   - name: "流體力學"
+    name_en: "Fluid Dynamics"
     category: GRADUATE
   - name: "半導體物理"
+    name_en: "Semiconductor Physics"
     category: GRADUATE
   - name: "量子場論(一)"
+    name_en: "Quantum Field Theory (I)"
     category: GRADUATE
   - name: "量子場論(二)"
+    name_en: "Quantum Field Theory (II)"
     category: GRADUATE
 
   - name: "數學導論"
+    name_en: "Introduction to Mathematics"
     category: INTERDISCIPLINARY
   - name: "線性代數(一)"
+    name_en: "Linear Algebra (I)"
     category: INTERDISCIPLINARY
   - name: "線性代數(二)"
+    name_en: "Linear Algebra (II)"
     category: INTERDISCIPLINARY
   - name: "幾何(一)"
+    name_en: "Geometry (I)"
     category: INTERDISCIPLINARY
   - name: "幾何(二)"
+    name_en: "Geometry (II)"
     category: INTERDISCIPLINARY
   - name: "代數(一)"
+    name_en: "Algebra (I)"
     category: INTERDISCIPLINARY
   - name: "代數(二)"
+    name_en: "Algebra (II)"
     category: INTERDISCIPLINARY
   - name: "高等微積分(一)"
+    name_en: "Advanced Calculus (I)"
     category: INTERDISCIPLINARY
   - name: "高等微積分(二)"
+    name_en: "Advanced Calculus (II)"
     category: INTERDISCIPLINARY
   - name: "機率論"
+    name_en: "Probability Theory"
     category: INTERDISCIPLINARY
   - name: "統計學"
+    name_en: "Statistics"
     category: INTERDISCIPLINARY
   - name: "離散數學"
+    name_en: "Discrete Mathematics"
     category: INTERDISCIPLINARY
   - name: "微分方程"
+    name_en: "Differential Equations"
     category: INTERDISCIPLINARY
   - name: "偏微分方程導論"
+    name_en: "Introduction to Partial Differential Equations"
     category: INTERDISCIPLINARY
   - name: "拓撲學導論"
+    name_en: "Introduction to Topology"
     category: INTERDISCIPLINARY
   - name: "高等線性代數"
+    name_en: "Advanced Linear Algebra"
     category: INTERDISCIPLINARY
   - name: "微分幾何"
+    name_en: "Differential Geometry"
     category: INTERDISCIPLINARY
 memes:
   - content: |-

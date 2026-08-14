@@ -17,7 +17,7 @@
                 id="archive-course-search"
                 name="archive-course-search"
                 v-model="searchQuery"
-                placeholder="搜尋課程"
+                :placeholder="$t('搜尋課程')"
                 class="w-full pl-6"
               />
             </div>
@@ -28,7 +28,7 @@
             <div v-if="searchQuery" class="search-results">
               <div v-if="filteredCategories.length === 0" class="p-3 text-center text-500">
                 <i class="pi pi-search text-2xl mb-2"></i>
-                <div>查無搜尋結果</div>
+                <div>{{ $t('查無搜尋結果') }}</div>
               </div>
               <div v-for="category in filteredCategories" :key="category.label" class="mb-2">
                 <div class="text-sm mb-1" style="color: var(--text-secondary)">
@@ -63,7 +63,7 @@
             <div class="upload-actions">
               <Button
                 icon="pi pi-cloud-upload"
-                label="上傳考古題"
+                :label="$t('上傳考古題')"
                 severity="success"
                 @click="showUploadDialog = true"
                 class="w-full"
@@ -71,7 +71,7 @@
               />
               <Button
                 icon="pi pi-list-check"
-                label="我的投稿狀態"
+                :label="$t('我的投稿狀態')"
                 severity="secondary"
                 outlined
                 @click="openSubmissionStatus"
@@ -102,7 +102,7 @@
       >
         <template #header>
           <div class="flex justify-content-between align-items-center w-full">
-            <span class="font-semibold">選單</span>
+            <span class="font-semibold">{{ $t('選單') }}</span>
           </div>
         </template>
         <div class="flex flex-column h-full">
@@ -114,7 +114,7 @@
                 id="archive-mobile-course-search"
                 name="archive-mobile-course-search"
                 v-model="searchQuery"
-                placeholder="搜尋課程"
+                :placeholder="$t('搜尋課程')"
                 class="w-full pl-6"
               />
             </div>
@@ -125,7 +125,7 @@
             <div v-if="searchQuery" class="search-results">
               <div v-if="filteredCategories.length === 0" class="p-3 text-center text-500">
                 <i class="pi pi-search text-2xl mb-2"></i>
-                <div>查無搜尋結果</div>
+                <div>{{ $t('查無搜尋結果') }}</div>
               </div>
               <div v-for="category in filteredCategories" :key="category.label" class="mb-2">
                 <div class="text-sm mb-1" style="color: var(--text-secondary)">
@@ -158,7 +158,7 @@
             <div class="upload-actions">
               <Button
                 icon="pi pi-cloud-upload"
-                label="上傳考古"
+                :label="$t('上傳考古題')"
                 severity="success"
                 @click="openUploadFromMobileMenu"
                 class="w-full"
@@ -166,7 +166,7 @@
               />
               <Button
                 icon="pi pi-list-check"
-                label="我的投稿狀態"
+                :label="$t('我的投稿狀態')"
                 severity="secondary"
                 outlined
                 @click="openSubmissionStatusFromMobileMenu"
@@ -192,9 +192,13 @@
                 </div>
               </div>
               <div class="subject-summary">
-                <span class="subject-summary-item">共 {{ archiveTotalCount }} 份考古題</span>
+                <span class="subject-summary-item">{{
+                  $t('共 {count} 份考古題', { count: archiveTotalCount })
+                }}</span>
                 <span class="subject-summary-separator" aria-hidden="true">・</span>
-                <span class="subject-summary-item">最新：{{ latestAcademicTerm }}</span>
+                <span class="subject-summary-item">{{
+                  $t('最新：{year}', { year: latestAcademicTerm })
+                }}</span>
               </div>
             </div>
           </div>
@@ -202,7 +206,12 @@
             <template #start>
               <div class="archive-filter-shell">
                 <div class="filter-summary">
-                  目前顯示：{{ selectedSubject }} · 共 {{ filteredArchiveCount }} 份考古題
+                  {{
+                    $t('目前顯示：{course} · 共 {count} 份考古題', {
+                      course: selectedSubject,
+                      count: filteredArchiveCount,
+                    })
+                  }}
                 </div>
                 <div class="archive-filter-controls">
                   <Select
@@ -212,7 +221,7 @@
                     :options="years"
                     optionLabel="name"
                     optionValue="code"
-                    placeholder="學期"
+                    :placeholder="$t('學期')"
                     class="filter-select"
                     showClear
                     filter
@@ -224,7 +233,7 @@
                     :options="professors"
                     optionLabel="name"
                     optionValue="code"
-                    placeholder="教授"
+                    :placeholder="$t('教授')"
                     class="filter-select"
                     showClear
                     filter
@@ -236,7 +245,7 @@
                     :options="archiveTypes"
                     optionLabel="name"
                     optionValue="code"
-                    placeholder="類型"
+                    :placeholder="$t('類型')"
                     class="filter-select"
                     showClear
                   />
@@ -247,7 +256,7 @@
                       inputId="hasAnswersFilter"
                       name="has-answers-filter"
                     />
-                    <label for="hasAnswersFilter">附解答</label>
+                    <label for="hasAnswersFilter">{{ $t('附解答') }}</label>
                   </div>
                 </div>
               </div>
@@ -275,7 +284,9 @@
                   <AccordionHeader>
                     <div class="term-header-content">
                       <span class="term-title">{{ formatAcademicTerm(group.year) }}</span>
-                      <span class="term-count">{{ group.list.length }} 份</span>
+                      <span class="term-count">{{
+                        $t('共 {count} 份', { count: group.list.length })
+                      }}</span>
                     </div>
                   </AccordionHeader>
                   <AccordionContent>
@@ -302,10 +313,10 @@
                                 @click="previewArchive(data)"
                                 size="small"
                                 severity="secondary"
-                                label="預覽"
+                                :label="$t('預覽')"
                                 outlined
-                                aria-label="預覽"
-                                title="預覽"
+                                :aria-label="$t('預覽')"
+                                :title="$t('預覽')"
                                 class="archive-action-preview"
                               />
                               <Button
@@ -313,10 +324,10 @@
                                 @click="downloadArchive(data)"
                                 size="small"
                                 severity="success"
-                                label="下載"
+                                :label="$t('下載')"
                                 :loading="downloadingId === data.id"
-                                aria-label="下載"
-                                title="下載"
+                                :aria-label="$t('下載')"
+                                :title="$t('下載')"
                                 class="archive-action-download"
                               />
                               <Button
@@ -325,10 +336,10 @@
                                 @click="openEditDialog(data)"
                                 size="small"
                                 severity="secondary"
-                                label="編輯"
+                                :label="$t('編輯')"
                                 outlined
-                                aria-label="編輯"
-                                title="編輯"
+                                :aria-label="$t('編輯')"
+                                :title="$t('編輯')"
                                 class="archive-action-edit"
                               />
                               <Button
@@ -337,10 +348,10 @@
                                 @click="confirmDelete(data)"
                                 size="small"
                                 severity="danger"
-                                label="刪除"
+                                :label="$t('刪除')"
                                 outlined
-                                aria-label="刪除"
-                                title="刪除"
+                                :aria-label="$t('刪除')"
+                                :title="$t('刪除')"
                                 class="archive-action-delete archive-action-danger admin-danger-outline-button danger-outline-button"
                               />
                             </div>
@@ -348,9 +359,13 @@
                           <div class="archive-record-line archive-record-meta-line">
                             <span>{{ data.professor }}</span>
                             <span>{{ formatAnswerStatus(data) }}</span>
-                            <span>{{ formatDownloadCount(data.downloadCount) }} 次下載</span>
+                            <span>{{
+                              $t('{count} 次下載', {
+                                count: formatDownloadCount(data.downloadCount),
+                              })
+                            }}</span>
                             <span v-if="formatSourceSubmissionIds(data)">
-                              投稿編號：{{ formatSourceSubmissionIds(data) }}
+                              {{ $t('投稿編號：{ids}', { ids: formatSourceSubmissionIds(data) }) }}
                             </span>
                           </div>
                         </div>
@@ -367,10 +382,10 @@
             >
               <i class="pi pi-book text-6xl" style="color: var(--text-secondary)"></i>
               <div class="text-xl font-medium mt-4" style="color: var(--text-secondary)">
-                請從左側選單選擇課程
+                {{ $t('請從左側選單選擇課程') }}
               </div>
               <div class="text-sm mt-2" style="color: var(--text-secondary)">
-                選擇課程後即可瀏覽相關考古題
+                {{ $t('選擇課程後即可瀏覽相關考古題') }}
               </div>
             </div>
           </div>
@@ -403,7 +418,7 @@
 
           <Dialog
             v-model:visible="showSubmissionStatusDialog"
-            header="我的投稿狀態"
+            :header="$t('我的投稿狀態')"
             class="submission-typography-dialog"
             modal
             :draggable="false"
@@ -419,7 +434,7 @@
                   <ContributorLevelBadge
                     id="submission-level-title"
                     :level="submissionLevel.level"
-                    :title="submissionLevel.name"
+                    :title="localizedSubmissionLevelName(submissionLevel)"
                     size="regular"
                     show-title
                   />
@@ -441,21 +456,28 @@
                   ></span>
                 </div>
                 <div class="submission-level-meta">
-                  <span v-if="submissionLevel.isMaxLevel">已達最高等級</span>
+                  <span v-if="submissionLevel.isMaxLevel">{{ $t('已達最高等級') }}</span>
                   <span v-else>
-                    本級 {{ submissionLevel.progressInLevel }} /
-                    {{ submissionLevel.progressRange }} EXP，距離 Lv.
-                    {{ submissionLevel.level + 1 }} 還差 {{ submissionLevel.expToNextLevel }} EXP
+                    {{
+                      $t('本級 {current} / {range} EXP，距離 Lv. {level} 還差 {remaining} EXP', {
+                        current: submissionLevel.progressInLevel,
+                        range: submissionLevel.progressRange,
+                        level: submissionLevel.level + 1,
+                        remaining: submissionLevel.expToNextLevel,
+                      })
+                    }}
                   </span>
-                  <span
-                    >由已通過與已下架投稿累積（{{ submissionLevel.countedSubmissions }} 筆）</span
-                  >
+                  <span>{{
+                    $t('由已通過與已下架投稿累積（{count} 筆）', {
+                      count: submissionLevel.countedSubmissions,
+                    })
+                  }}</span>
                 </div>
               </section>
-              <section class="submission-summary" aria-label="投稿統計">
+              <section class="submission-summary" :aria-label="$t('投稿統計')">
                 <div class="submission-summary-header">
-                  <strong>共 {{ submissionSummary.total }} 筆投稿</strong>
-                  <span>不含已刪除</span>
+                  <strong>{{ $t('共 {count} 筆投稿', { count: submissionSummary.total }) }}</strong>
+                  <span>{{ $t('不含已刪除') }}</span>
                 </div>
                 <div
                   class="submission-summary-bar"
@@ -471,7 +493,7 @@
                   ></span>
                 </div>
                 <div v-if="submissionSummary.total === 0" class="submission-summary-empty">
-                  目前沒有可統計的投稿
+                  {{ $t('目前沒有可統計的投稿') }}
                 </div>
                 <div v-else class="submission-summary-legend">
                   <div
@@ -485,15 +507,15 @@
                       aria-hidden="true"
                     ></span>
                     <span>{{ status.label }}</span>
-                    <strong>{{ status.count }} 筆</strong>
+                    <strong>{{ $t('{count} 筆', { count: status.count }) }}</strong>
                     <span>{{ status.percentage }}</span>
                   </div>
                 </div>
               </section>
               <section>
-                <h3>考古題投稿紀錄</h3>
+                <h3>{{ $t('考古題投稿紀錄') }}</h3>
                 <div v-if="archiveSubmissions.length === 0" class="submission-empty">
-                  目前沒有考古題投稿
+                  {{ $t('目前沒有考古題投稿') }}
                 </div>
                 <article
                   v-for="item in archiveSubmissions"
@@ -518,16 +540,16 @@
                         class="soft-badge soft-badge--admin submission-admin-badge"
                         severity="secondary"
                       >
-                        管理員投稿
+                        {{ $t('管理員投稿') }}
                       </Tag>
                     </div>
                     <div class="submission-status-title">
-                      <strong>{{ item.subject }}</strong>
+                      <strong>{{ localizedSubmissionCourseName(item) }}</strong>
                       <span>{{ item.name }}</span>
                     </div>
-                    <small class="my-submission-id"
-                      >投稿編號：{{ formatMySubmissionId(item) }}</small
-                    >
+                    <small class="my-submission-id">{{
+                      $t('投稿編號：{ids}', { ids: formatMySubmissionId(item) })
+                    }}</small>
                   </div>
                   <div class="submission-status-meta">
                     <span
@@ -552,25 +574,35 @@
                     </span>
                   </div>
                   <div v-if="item.requested_category_name" class="submission-status-note">
-                    <span class="soft-badge soft-badge--new-course-category">新分類</span>
-                    <strong>{{ item.requested_category_name }}</strong>
+                    <span class="soft-badge soft-badge--new-course-category">{{
+                      $t('新分類')
+                    }}</span>
+                    <strong>{{ localizedSubmissionCategoryName(item) }}</strong>
                     <small>{{ item.requested_category_key }}</small>
                   </div>
                   <div class="submission-time-meta">
                     <span>
                       <i class="pi pi-clock" aria-hidden="true"></i>
-                      投稿時間：{{ formatSubmissionDateTime(item.created_at) }}
+                      {{
+                        $t('投稿時間：{time}', { time: formatSubmissionDateTime(item.created_at) })
+                      }}
                     </span>
                     <span>
                       <i class="pi pi-check-circle" aria-hidden="true"></i>
-                      審核時間：{{ formatSubmissionReviewedAt(item.reviewed_at) }}
+                      {{
+                        $t('審核時間：{time}', {
+                          time: formatSubmissionReviewedAt(item.reviewed_at),
+                        })
+                      }}
                     </span>
                   </div>
                   <div class="submission-review-note">
-                    <span class="submission-review-note-label">審核留言</span>
+                    <span class="submission-review-note-label">{{ $t('審核留言') }}</span>
                     <span class="submission-review-note-divider" aria-hidden="true">｜</span>
                     <strong v-if="shouldShowReviewNote(item)">{{ item.review_note }}</strong>
-                    <span v-else class="submission-review-note-empty">尚無審核留言</span>
+                    <span v-else class="submission-review-note-empty">{{
+                      $t('尚無審核留言')
+                    }}</span>
                   </div>
                 </article>
               </section>
@@ -583,24 +615,24 @@
             :modal="true"
             :draggable="false"
             :closeOnEscape="false"
-            header="編輯考古題"
+            :header="$t('編輯考古題')"
             :style="{ width: '600px', maxWidth: '90vw' }"
             :autoFocus="false"
           >
             <div class="flex flex-column">
               <div class="flex flex-column gap-2">
-                <label>考試名稱</label>
+                <label>{{ $t('考試名稱') }}</label>
                 <InputText
                   id="archive-edit-name"
                   name="archive-edit-name"
                   v-model="editForm.name"
-                  placeholder="輸入考試名稱"
+                  :placeholder="$t('輸入考試名稱')"
                   class="w-full"
                 />
               </div>
 
               <div class="flex flex-column gap-2 mt-3">
-                <label>授課教授</label>
+                <label>{{ $t('授課教授') }}</label>
                 <AutoComplete
                   inputId="archive-edit-professor"
                   name="archive-edit-professor"
@@ -612,7 +644,7 @@
                   @focus="() => searchEditProfessor({ query: '' })"
                   @click="() => searchEditProfessor({ query: '' })"
                   optionLabel="name"
-                  placeholder="選擇授課教授"
+                  :placeholder="$t('選擇授課教授')"
                   class="w-full"
                   dropdown
                   completeOnFocus
@@ -626,7 +658,7 @@
               </div>
 
               <div class="flex flex-column gap-2 mt-3">
-                <label>考試年份</label>
+                <label>{{ $t('考試年份') }}</label>
                 <DatePicker
                   inputId="archive-edit-academic-year"
                   name="archive-edit-academic-year"
@@ -635,7 +667,7 @@
                   view="year"
                   dateFormat="yy"
                   :showIcon="true"
-                  placeholder="選擇考試年份"
+                  :placeholder="$t('選擇考試年份')"
                   class="w-full"
                   :maxDate="new Date()"
                   :minDate="new Date(2000, 0, 1)"
@@ -643,20 +675,20 @@
               </div>
 
               <div class="flex flex-column gap-2 mt-3">
-                <label>考試類型</label>
+                <label>{{ $t('考試類型') }}</label>
                 <Select
                   inputId="archive-edit-type"
                   name="archive-edit-type"
                   v-model="editForm.type"
                   :options="[
-                    { name: '期中考', value: 'midterm' },
-                    { name: '期末考', value: 'final' },
-                    { name: '小考', value: 'quiz' },
-                    { name: '其他', value: 'other' },
+                    { name: $t('期中考'), value: 'midterm' },
+                    { name: $t('期末考'), value: 'final' },
+                    { name: $t('小考'), value: 'quiz' },
+                    { name: $t('其他'), value: 'other' },
                   ]"
                   optionLabel="name"
                   optionValue="value"
-                  placeholder="選擇考試類型"
+                  :placeholder="$t('選擇考試類型')"
                   class="w-full"
                 />
               </div>
@@ -668,7 +700,7 @@
                   v-model="editForm.hasAnswers"
                   :binary="true"
                 />
-                <label for="archive-edit-has-answers">附解答</label>
+                <label for="archive-edit-has-answers">{{ $t('附解答') }}</label>
               </div>
 
               <Divider class="mt-3" />
@@ -680,14 +712,14 @@
                   v-model="editForm.shouldTransfer"
                   :binary="true"
                 />
-                <label for="archive-edit-should-transfer" class="font-semibold"
-                  >轉移到其他課程</label
-                >
+                <label for="archive-edit-should-transfer" class="font-semibold">{{
+                  $t('轉移到其他課程')
+                }}</label>
               </div>
 
               <div v-if="editForm.shouldTransfer" class="flex flex-column pl-4 mt-3">
                 <div class="flex flex-column gap-2">
-                  <label>目標課程類別</label>
+                  <label>{{ $t('目標課程類別') }}</label>
                   <Select
                     inputId="archive-edit-target-category"
                     name="archive-edit-target-category"
@@ -695,13 +727,13 @@
                     :options="categoryOptions"
                     optionLabel="name"
                     optionValue="value"
-                    placeholder="選擇課程類別"
+                    :placeholder="$t('選擇課程類別')"
                     class="w-full"
                   />
                 </div>
 
                 <div class="flex flex-column gap-2 mt-3">
-                  <label>目標課程名稱</label>
+                  <label>{{ $t('目標課程名稱') }}</label>
                   <AutoComplete
                     inputId="archive-edit-target-course"
                     name="archive-edit-target-course"
@@ -712,7 +744,7 @@
                     @focus="() => searchTargetCourse({ query: '' })"
                     @click="() => searchTargetCourse({ query: '' })"
                     optionLabel="label"
-                    placeholder="搜尋或輸入目標課程名稱"
+                    :placeholder="$t('搜尋或輸入目標課程名稱')"
                     class="w-full"
                     :disabled="!editForm.targetCategory"
                     dropdown
@@ -729,13 +761,13 @@
             </div>
             <div class="flex pt-6 justify-end gap-2.5">
               <Button
-                label="取消"
+                :label="$t('取消')"
                 icon="pi pi-times"
                 severity="secondary"
                 @click="closeEditDialog"
               />
               <Button
-                :label="editForm.shouldTransfer ? '儲存並轉移' : '儲存'"
+                :label="editForm.shouldTransfer ? $t('儲存並轉移') : $t('儲存')"
                 :icon="editForm.shouldTransfer ? 'pi pi-arrow-right-arrow-left' : 'pi pi-check'"
                 severity="success"
                 @click="handleEdit"
@@ -755,6 +787,7 @@ defineOptions({
 })
 
 import { ref, computed, onMounted, watch, inject, onBeforeUnmount } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { routeLocationKey } from 'vue-router'
 import { courseService, archiveService } from '../api'
 import PdfPreviewModal from '../components/PdfPreviewModal.vue'
@@ -766,8 +799,17 @@ import { trackEvent, EVENTS } from '../utils/analytics'
 import { isUnauthorizedError } from '../utils/http'
 import { formatCourseDisplayName, normalizeCourseSearchText } from '../utils/courseText'
 import {
+  courseMatchesSearch,
+  localizedCategoryLabel,
+  localizedCategoryName,
+  localizedCourseName,
+  localizedSubmissionCategoryName,
+  localizedSubmissionCourseName,
+} from '../utils/localizedCatalog'
+import {
   getContributorLevelPalette,
   loadContributorLevelSettings,
+  localizedSubmissionLevelName,
   resolveSubmissionLevel,
 } from '../utils/submissionLevel'
 import {
@@ -783,6 +825,7 @@ const confirm = inject('confirm')
 const route = inject(routeLocationKey, { fullPath: '/archive', query: {} })
 
 const { isDarkTheme } = useTheme()
+const { t, locale } = useI18n()
 loadContributorLevelSettings()
 const sidebarVisible = inject('sidebarVisible')
 
@@ -878,9 +921,20 @@ const submissionLevel = computed(() => {
 const submissionLevelAriaLabel = computed(() => {
   const level = submissionLevel.value
   if (level.isMaxLevel) {
-    return `投稿等級 Lv. ${level.level} ${level.name}，目前 ${level.currentExp} EXP，已達最高等級`
+    return t('投稿等級最高', {
+      level: level.level,
+      name: localizedSubmissionLevelName(level),
+      exp: level.currentExp,
+    })
   }
-  return `投稿等級 Lv. ${level.level} ${level.name}，經驗進度 ${level.progressPercent}%，本級 ${level.progressInLevel} / ${level.progressRange} EXP，距離下一級還差 ${level.expToNextLevel} EXP`
+  return t('投稿等級進度', {
+    level: level.level,
+    name: localizedSubmissionLevelName(level),
+    percent: level.progressPercent,
+    current: level.progressInLevel,
+    range: level.progressRange,
+    remaining: level.expToNextLevel,
+  })
 })
 const submissionLevelProgressStyle = computed(() => {
   const palette = getContributorLevelPalette(submissionLevel.value.level)
@@ -921,11 +975,13 @@ const submissionSummary = computed(() => {
   }
 })
 const submissionSummaryAriaLabel = computed(() => {
-  if (submissionSummary.value.total === 0) return '投稿統計：目前沒有可統計的投稿，不含已刪除'
+  if (submissionSummary.value.total === 0) return t('投稿統計：目前沒有可統計的投稿，不含已刪除')
   const details = submissionSummary.value.statuses
-    .map((status) => `${status.label} ${status.count} 筆，${status.percentage}`)
-    .join('；')
-  return `投稿統計：共 ${submissionSummary.value.total} 筆投稿，不含已刪除；${details}`
+    .map((status) =>
+      t('投稿統計項目', { label: status.label, count: status.count, percentage: status.percentage })
+    )
+    .join(t('；'))
+  return t('投稿統計摘要', { count: submissionSummary.value.total, details })
 })
 const uploadFormProfessors = ref([])
 const expandedPanels = ref([])
@@ -933,16 +989,53 @@ const expandedMenuItems = ref({})
 const shouldResetPanels = ref(true)
 
 const fallbackCategories = [
-  { key: 'fundamental', name: '基礎必修', icon: 'pi pi-fw pi-book', label: '基礎' },
-  { key: 'required', name: '專業必修', icon: 'pi pi-fw pi-compass', label: '必修' },
-  { key: 'experience', name: '實驗課程', icon: 'pi pi-fw pi-sparkles', label: '實驗' },
-  { key: 'optional', name: '專業選修', icon: 'pi pi-fw pi-book', label: '選修' },
-  { key: 'graduate', name: '研究所', icon: 'pi pi-fw pi-graduation-cap', label: '研究所' },
+  {
+    key: 'fundamental',
+    name: '基礎必修',
+    name_en: 'Foundation Courses',
+    icon: 'pi pi-fw pi-book',
+    label: '基礎',
+    label_en: 'Foundation',
+  },
+  {
+    key: 'required',
+    name: '專業必修',
+    name_en: 'Required Major Courses',
+    icon: 'pi pi-fw pi-compass',
+    label: '必修',
+    label_en: 'Required',
+  },
+  {
+    key: 'experience',
+    name: '實驗課程',
+    name_en: 'Laboratory Courses',
+    icon: 'pi pi-fw pi-sparkles',
+    label: '實驗',
+    label_en: 'Laboratory',
+  },
+  {
+    key: 'optional',
+    name: '專業選修',
+    name_en: 'Major Electives',
+    icon: 'pi pi-fw pi-book',
+    label: '選修',
+    label_en: 'Elective',
+  },
+  {
+    key: 'graduate',
+    name: '研究所',
+    name_en: 'Graduate Courses',
+    icon: 'pi pi-fw pi-graduation-cap',
+    label: '研究所',
+    label_en: 'Graduate',
+  },
   {
     key: 'math-department',
     name: '戳戳數學系',
+    name_en: 'Mathematics Courses',
     icon: 'pi pi-fw pi-calculator',
     label: '數學',
+    label_en: 'Mathematics',
   },
 ]
 
@@ -955,24 +1048,24 @@ const categoryMap = computed(() =>
   }, {})
 )
 
-const archiveTypeConfig = {
+const archiveTypeConfig = computed(() => ({
   midterm: {
-    name: '期中考',
+    name: t('期中考'),
     severity: 'secondary',
   },
   final: {
-    name: '期末考',
+    name: t('期末考'),
     severity: 'secondary',
   },
   quiz: {
-    name: '小考',
+    name: t('小考'),
     severity: 'secondary',
   },
   other: {
-    name: '其他',
+    name: t('其他'),
     severity: 'secondary',
   },
-}
+}))
 
 const years = ref([])
 const professors = ref([])
@@ -1057,13 +1150,13 @@ const menuItems = computed(() => {
 
   return courseCategories.value.map((category) => ({
     key: category.key,
-    label: category.name,
+    label: localizedCategoryName(category),
     icon: category.icon || 'pi pi-fw pi-book',
     items: (coursesList.value[category.key] || []).map((course) => ({
-      label: formatCourseDisplayName(course.name),
+      label: localizedCourseName(course),
+      course,
       class: selectedCourse.value === course.id ? 'active-course-menu-item' : undefined,
-      command: () =>
-        filterBySubject({ label: formatCourseDisplayName(course.name), id: course.id }),
+      command: () => filterBySubject({ label: localizedCourseName(course), id: course.id }),
     })),
   }))
 })
@@ -1077,22 +1170,15 @@ const filteredCategories = computed(() => {
   const filtered = []
 
   menuItems.value.forEach((category) => {
-    const filteredItems = category.items.filter((item) => {
-      const itemLabelNormalized = normalizeCourseSearchText(item.label)
-      const isIncluded = itemLabelNormalized.includes(query)
-      return isIncluded
-    })
+    const filteredItems = category.items.filter((item) => courseMatchesSearch(item.course, query))
 
     if (filteredItems.length > 0) {
       filtered.push({
         ...category,
         items: filteredItems.map((item) => {
-          const course = (coursesList.value[getCategoryKey(category.label)] || []).find(
-            (c) => c.name === item.label
-          )
           return {
             label: item.label,
-            id: course?.id,
+            id: item.course?.id,
           }
         }),
       })
@@ -1101,10 +1187,6 @@ const filteredCategories = computed(() => {
 
   return filtered
 })
-
-function getCategoryKey(categoryLabel) {
-  return courseCategories.value.find((category) => category.name === categoryLabel)?.key || ''
-}
 
 function getCategoryKeyForCourse(courseId) {
   for (const [categoryKey, courses] of Object.entries(coursesList.value)) {
@@ -1173,7 +1255,7 @@ const latestAcademicTerm = computed(() => {
     .filter(Boolean)
     .sort((a, b) => b - a)[0]
 
-  return latestYear ? formatAcademicTerm(latestYear) : '尚無資料'
+  return latestYear ? formatAcademicTerm(latestYear) : t('尚無資料')
 })
 
 function formatAcademicTerm(value) {
@@ -1182,9 +1264,9 @@ function formatAcademicTerm(value) {
   if (numericValue >= 1000 && numericValue < 2000) {
     const year = Math.floor(numericValue / 10)
     const semester = numericValue % 10
-    return `${year}${semester === 1 ? '上' : '下'}學期`
+    return t(semester === 1 ? '{year}上學期' : '{year}下學期', { year })
   }
-  return `${numericValue} 年`
+  return t('{year} 年', { year: numericValue })
 }
 
 function formatSourceSubmissionIds(archive) {
@@ -1223,7 +1305,9 @@ async function fetchCourses() {
     courseCategories.value = categories.map((category, index) => ({
       key: category.key,
       name: category.name,
+      name_en: category.name_en,
       label: category.label || category.name,
+      label_en: category.label_en,
       icon: category.icon || 'pi pi-fw pi-book',
       order_index: category.order_index ?? index,
     }))
@@ -1238,8 +1322,8 @@ async function fetchCourses() {
     }
     toast.add({
       severity: 'error',
-      summary: '載入失敗',
-      detail: '無法載入課程資料',
+      summary: t('載入失敗'),
+      detail: t('無法載入課程資料'),
       life: 3000,
     })
   } finally {
@@ -1249,16 +1333,16 @@ async function fetchCourses() {
 
 function getSubmissionLabel(status) {
   const labels = {
-    pending: '待審核',
-    approved: '已通過',
-    rejected: '未通過',
-    deleted: '已刪除',
-    takedown: '已下架',
-    PENDING: '待審核',
-    APPROVED: '已通過',
-    REJECTED: '未通過',
-    DELETED: '已刪除',
-    TAKEDOWN: '已下架',
+    pending: t('待審核'),
+    approved: t('已通過'),
+    rejected: t('未通過'),
+    deleted: t('已刪除'),
+    takedown: t('已下架'),
+    PENDING: t('待審核'),
+    APPROVED: t('已通過'),
+    REJECTED: t('未通過'),
+    DELETED: t('已刪除'),
+    TAKEDOWN: t('已下架'),
   }
   return labels[status] || status
 }
@@ -1286,10 +1370,10 @@ function getSubmissionStatusClass(status) {
 }
 
 function getArchiveSubmissionKind(item) {
-  if (item?.is_admin_upload) return '管理員投稿'
-  if (item?.requested_category_key) return '新分類 + 新課程'
-  if (item?.requested_course_name) return '新課程申請'
-  return '既有課程投稿'
+  if (item?.is_admin_upload) return t('管理員投稿')
+  if (item?.requested_category_key) return t('新分類 + 新課程')
+  if (item?.requested_course_name) return t('新課程申請')
+  return t('既有課程投稿')
 }
 
 function getArchiveSubmissionKindClass(item) {
@@ -1321,7 +1405,7 @@ function formatSubmissionDateTime(value) {
 }
 
 function formatSubmissionReviewedAt(value) {
-  return value ? formatSubmissionDateTime(value) : '尚未審核'
+  return value ? formatSubmissionDateTime(value) : t('尚未審核')
 }
 
 function isBoilerplateReviewNote(note) {
@@ -1350,8 +1434,8 @@ async function loadSubmissionStatus() {
     if (isUnauthorizedError(error)) return
     toast.add({
       severity: 'error',
-      summary: '載入失敗',
-      detail: '無法載入投稿狀態',
+      summary: t('載入失敗'),
+      detail: t('無法載入投稿狀態'),
       life: 3000,
     })
   } finally {
@@ -1378,7 +1462,7 @@ async function openRequestedSource() {
     .find((item) => Number(item.id) === requestedCourseId)
   if (!course) return
   selectedCourse.value = requestedCourseId
-  selectedSubject.value = formatCourseDisplayName(course.name)
+  selectedSubject.value = localizedCourseName(course)
   await fetchArchives()
   const archive = archives.value.find((item) => Number(item.id) === requestedArchiveId)
   if (archive) await previewArchive(archive)
@@ -1430,7 +1514,7 @@ async function fetchArchives() {
     archives.value = archiveRows.filter(isVisibleArchiveRow).map((archive) => ({
       id: archive.id,
       year: archive.academic_year || '',
-      name: archive.name || '未命名考古題',
+      name: archive.name || t('未命名考古題'),
       type: archive.archive_type || 'other',
       professor: archive.professor || '—',
       hasAnswers: Boolean(archive.has_answers),
@@ -1469,7 +1553,7 @@ async function fetchArchives() {
     archiveTypes.value = Array.from(uniqueTypes)
       .sort()
       .map((type) => ({
-        name: archiveTypeConfig[type]?.name || type,
+        name: archiveTypeConfig.value[type]?.name || type,
         code: type,
       }))
   } catch (error) {
@@ -1483,8 +1567,8 @@ async function fetchArchives() {
     }
     toast.add({
       severity: 'error',
-      summary: '載入失敗',
-      detail: '無法載入考古題資料',
+      summary: t('載入失敗'),
+      detail: t('無法載入考古題資料'),
       life: 3000,
     })
   } finally {
@@ -1593,8 +1677,8 @@ async function downloadArchive(archive) {
 
     toast.add({
       severity: 'success',
-      summary: '已開始下載',
-      detail: `已開始下載 ${fileName}`,
+      summary: t('已開始下載'),
+      detail: t('已開始下載 {file}', { file: fileName }),
       life: 3000,
     })
 
@@ -1606,8 +1690,9 @@ async function downloadArchive(archive) {
     }
     toast.add({
       severity: 'error',
-      summary: '下載失敗',
-      detail: error.response?.status === 404 ? '此筆考古題的 PDF 檔案缺失' : '無法取得下載連結',
+      summary: t('下載失敗'),
+      detail:
+        error.response?.status === 404 ? t('此筆考古題的 PDF 檔案缺失') : t('無法取得下載連結'),
       life: 3000,
     })
   } finally {
@@ -1617,13 +1702,13 @@ async function downloadArchive(archive) {
 
 const previewLoading = ref(false)
 const previewError = ref(false)
-const previewErrorMessage = ref('無法載入預覽')
+const previewErrorMessage = ref(t('無法載入預覽'))
 
 async function previewArchive(archive) {
   try {
     previewLoading.value = true
     previewError.value = false
-    previewErrorMessage.value = '無法載入預覽'
+    previewErrorMessage.value = t('無法載入預覽')
     showPreview.value = true
 
     const { data } = await archiveService.getArchivePreviewFile(selectedCourse.value, archive.id)
@@ -1645,14 +1730,14 @@ async function previewArchive(archive) {
     console.error('Preview error:', error)
     previewError.value = true
     const isMissingFile = error.response?.status === 404
-    previewErrorMessage.value = isMissingFile ? '檔案缺失' : '無法載入預覽'
+    previewErrorMessage.value = isMissingFile ? t('檔案缺失') : t('無法載入預覽')
     if (isUnauthorizedError(error)) {
       return
     }
     toast.add({
       severity: 'error',
-      summary: '預覽失敗',
-      detail: isMissingFile ? '此筆考古題的 PDF 檔案缺失' : '無法取得預覽連結',
+      summary: t('預覽失敗'),
+      detail: isMissingFile ? t('此筆考古題的 PDF 檔案缺失') : t('無法取得預覽連結'),
       life: 3000,
     })
   } finally {
@@ -1674,7 +1759,7 @@ function closePreview() {
 }
 
 function getCategoryName(code) {
-  return categoryMap.value[code]?.name || code
+  return localizedCategoryName(categoryMap.value[code]) || code
 }
 
 const availableEditProfessors = ref([])
@@ -1687,7 +1772,7 @@ const categoryOptions = computed(() =>
       return (a.id ?? 0) - (b.id ?? 0)
     })
     .map((category) => ({
-      name: category.name,
+      name: localizedCategoryName(category),
       value: category.key,
     }))
 )
@@ -1756,7 +1841,8 @@ const allAvailableCoursesForTransfer = computed(() => {
     .filter((course) => course.id !== selectedCourse.value)
     .map((course) => ({
       id: course.id,
-      label: course.name,
+      label: localizedCourseName(course),
+      searchCourse: course,
     }))
 })
 
@@ -1775,8 +1861,8 @@ const canEditArchive = () => {
 
 const confirmDelete = (archive) => {
   confirm.require({
-    message: '確定要刪除此考古題嗎？',
-    header: '確認刪除',
+    message: t('確定要刪除此考古題嗎？'),
+    header: t('確認刪除'),
     icon: 'pi pi-exclamation-triangle',
     accept: () => {
       deleteArchive(archive)
@@ -1800,8 +1886,8 @@ const deleteArchive = async (archive) => {
     await fetchArchives()
     toast.add({
       severity: 'success',
-      summary: '刪除成功',
-      detail: '考古題已成功刪除',
+      summary: t('刪除成功'),
+      detail: t('考古題已成功刪除'),
       life: 3000,
     })
   } catch (error) {
@@ -1811,8 +1897,8 @@ const deleteArchive = async (archive) => {
     }
     toast.add({
       severity: 'error',
-      summary: '刪除失敗',
-      detail: '發生錯誤，請稍後再試',
+      summary: t('刪除失敗'),
+      detail: t('發生錯誤，請稍後再試'),
       life: 3000,
     })
   }
@@ -1864,8 +1950,8 @@ const openEditDialog = async (archive) => {
     }
     toast.add({
       severity: 'error',
-      summary: '載入失敗',
-      detail: '無法載入教授清單',
+      summary: t('載入失敗'),
+      detail: t('無法載入教授清單'),
       life: 3000,
     })
   }
@@ -1919,12 +2005,12 @@ const handleEdit = async () => {
     closeEditDialog()
 
     const successMessage = editForm.value.shouldTransfer
-      ? '考古題已更新並轉移到新課程'
-      : '考古題資訊已更新'
+      ? t('考古題已更新並轉移到新課程')
+      : t('考古題資訊已更新')
 
     toast.add({
       severity: 'success',
-      summary: '更新成功',
+      summary: t('更新成功'),
       detail: successMessage,
       life: 3000,
     })
@@ -1943,11 +2029,11 @@ const handleEdit = async () => {
       typeof detail === 'object' &&
       approvedMoveErrorCodes.has(detail.code) &&
       typeof detail.message === 'string'
-        ? detail.message
-        : '發生錯誤，請稍後再試'
+        ? t(detail.message)
+        : t('發生錯誤，請稍後再試')
     toast.add({
       severity: 'error',
-      summary: '更新失敗',
+      summary: t('更新失敗'),
       detail: errorMessage,
       life: 3000,
     })
@@ -1982,7 +2068,9 @@ onMounted(async () => {
       )
 
       if (courseExists) {
-        selectedSubject.value = formatCourseDisplayName(matchedCourse?.name || subjectData.label)
+        selectedSubject.value = matchedCourse
+          ? localizedCourseName(matchedCourse)
+          : formatCourseDisplayName(subjectData.label)
         selectedCourse.value = subjectData.id
 
         const categoryKey = getCategoryKeyForCourse(subjectData.id)
@@ -2026,8 +2114,10 @@ async function handleUploadSuccess() {
 }
 
 function getCategoryTag(categoryLabel) {
-  const category = courseCategories.value.find((cat) => cat.name === categoryLabel)
-  return category?.label || categoryLabel
+  const category = courseCategories.value.find(
+    (cat) => localizedCategoryName(cat) === categoryLabel || cat.name === categoryLabel
+  )
+  return localizedCategoryLabel(category) || categoryLabel
 }
 
 function formatDownloadCount(count) {
@@ -2038,7 +2128,7 @@ function formatDownloadCount(count) {
 }
 
 function formatAnswerStatus(archive) {
-  return archive?.hasAnswers ? '含解答' : '僅題目'
+  return archive?.hasAnswers ? t('含解答') : t('僅題目')
 }
 
 function toggleSidebar() {
@@ -2086,8 +2176,8 @@ async function handlePreviewDownload(onComplete) {
 
     toast.add({
       severity: 'success',
-      summary: '已開始下載',
-      detail: `已開始下載 ${fileName}`,
+      summary: t('已開始下載'),
+      detail: t('已開始下載 {file}', { file: fileName }),
       life: 3000,
     })
 
@@ -2099,8 +2189,9 @@ async function handlePreviewDownload(onComplete) {
     }
     toast.add({
       severity: 'error',
-      summary: '下載失敗',
-      detail: error.response?.status === 404 ? '此筆考古題的 PDF 檔案缺失' : '無法取得下載連結',
+      summary: t('下載失敗'),
+      detail:
+        error.response?.status === 404 ? t('此筆考古題的 PDF 檔案缺失') : t('無法取得下載連結'),
       life: 3000,
     })
   } finally {
@@ -2125,9 +2216,20 @@ const currentCourseEnglishName = computed(() => {
 
   for (const courses of Object.values(coursesList.value)) {
     const course = courses.find((item) => item.id === selectedCourse.value)
-    if (course) return course.english_name || course.englishName || ''
+    if (course && locale.value !== 'en') return (course.name_en || '').trim()
   }
   return ''
+})
+
+watch(locale, () => {
+  if (!selectedCourse.value) return
+  for (const courses of Object.values(coursesList.value)) {
+    const course = courses.find((item) => item.id === selectedCourse.value)
+    if (course) {
+      selectedSubject.value = localizedCourseName(course)
+      break
+    }
+  }
 })
 
 const searchEditProfessor = (event) => {
@@ -2164,7 +2266,7 @@ const closeEditDialog = () => {
 const searchTargetCourse = (event) => {
   const query = normalizeCourseSearchText(event?.query || '')
   const filteredCourses = allAvailableCoursesForTransfer.value
-    .filter((course) => normalizeCourseSearchText(course.label).includes(query))
+    .filter((course) => courseMatchesSearch(course.searchCourse, query))
     .sort((a, b) => a.label.localeCompare(b.label))
 
   availableCoursesForTransfer.value = filteredCourses
@@ -2440,11 +2542,7 @@ const mobileMenuItems = computed(() => {
 
 .subject-title {
   color: var(--text-primary);
-  font-size: clamp(
-    1.25rem,
-    2vw,
-    1.75rem
-  );
+  font-size: clamp(1.25rem, 2vw, 1.75rem);
   font-weight: 800;
   line-height: 1.12;
   overflow-wrap: anywhere;
@@ -2837,11 +2935,7 @@ const mobileMenuItems = computed(() => {
   }
 
   .subject-title {
-    font-size: clamp(
-      1.12rem,
-      2.4vw,
-      1.5rem
-    );
+    font-size: clamp(1.12rem, 2.4vw, 1.5rem);
   }
 
   .subject-summary,

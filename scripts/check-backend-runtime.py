@@ -13,14 +13,19 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import time
 from typing import Any, Sequence
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
+sys.path.insert(0, str(BACKEND_ROOT))
+
+from app.db.schema_manifests import HEAD_SCHEMA_REVISION  # noqa: E402
+
 DEV_COMPOSE = REPOSITORY_ROOT / "scripts" / "dev-compose.sh"
-EXPECTED_ALEMBIC_HEAD = "b7e3d9a1c5f2"
+EXPECTED_ALEMBIC_HEAD = HEAD_SCHEMA_REVISION
 ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 EXIT_CODES = {
     "healthy": 0,

@@ -219,9 +219,17 @@ class CourseCategoryConfig(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     key: str = Field(sa_column=Column(String, nullable=False))
     name: str = Field(index=True)
+    name_en: str | None = Field(
+        default=None,
+        sa_column=Column(String, nullable=True),
+    )
     label: str = Field(
         default="",
         sa_column=Column(String, nullable=False, server_default=text("''")),
+    )
+    label_en: str | None = Field(
+        default=None,
+        sa_column=Column(String, nullable=True),
     )
     icon: str = Field(
         default="pi pi-fw pi-book",
@@ -318,6 +326,10 @@ class Course(SQLModel, table=True):
     __tablename__ = "courses"
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True)
+    name_en: str | None = Field(
+        default=None,
+        sa_column=Column(String, nullable=True),
+    )
     category: str = Field(index=True)
     order_index: int = Field(default=0, index=True)
     deleted_at: datetime | None = Field(
@@ -433,13 +445,22 @@ class ArchiveSubmission(SQLModel, table=True):
     requested_course_name: str | None = Field(
         default=None, sa_column=Column(String, nullable=True)
     )
+    requested_course_name_en: str | None = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
     requested_category_key: str | None = Field(
         default=None, sa_column=Column(String, nullable=True)
     )
     requested_category_name: str | None = Field(
         default=None, sa_column=Column(String, nullable=True)
     )
+    requested_category_name_en: str | None = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
     requested_category_label: str | None = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
+    requested_category_label_en: str | None = Field(
         default=None, sa_column=Column(String, nullable=True)
     )
     requested_category_icon: str | None = Field(
@@ -1228,11 +1249,13 @@ class UserSubmissionRecordRead(BaseModel):
     status: SubmissionStatus
     archive_type: ArchiveType
     course_name: str
+    course_name_en: str | None = None
     exam_name: str
     academic_year: int
     professor: str
     has_answers: bool = False
     requested_course_name: str | None = None
+    requested_course_name_en: str | None = None
     requested_category_key: str | None = None
     is_admin_upload: bool = False
     submitted_at: datetime
@@ -1375,6 +1398,7 @@ class CommentReportRead(BaseModel):
     comment_created_at_snapshot: datetime
     archive_name: str
     course_name: str
+    course_name_en: str | None = None
     status: str
     admin_response: str | None
     reviewed_by: int | None
@@ -1416,6 +1440,7 @@ class ArchiveReportRead(BaseModel):
     supplementary_detail: str | None
     archive_name: str
     course_name: str
+    course_name_en: str | None = None
     academic_year: int
     archive_type: str
     professor: str
@@ -1493,6 +1518,7 @@ class NotificationUnreadSummary(NotificationCenterRead):
 class CourseInfo(BaseModel):
     id: int
     name: str
+    name_en: str | None = None
     order_index: int = 0
 
     class Config:
@@ -1560,12 +1586,14 @@ class ArchiveDiscussionMessageRead(BaseModel):
 
 class CourseCreate(BaseModel):
     name: str
+    name_en: str | None = None
     category: str
     order_index: int | None = None
 
 
 class CourseUpdate(BaseModel):
     name: str | None = None
+    name_en: str | None = None
     category: str | None = None
     order_index: int | None = None
 
@@ -1578,6 +1606,7 @@ class CourseReorder(BaseModel):
 class CourseRead(BaseModel):
     id: int
     name: str
+    name_en: str | None = None
     category: str
     order_index: int = 0
 
@@ -1599,7 +1628,9 @@ class CourseSubmissionCreate(BaseModel):
 class CourseCategoryCreate(BaseModel):
     key: str
     name: str
+    name_en: str | None = None
     label: str = ""
+    label_en: str | None = None
     icon: str = "pi pi-fw pi-book"
     badge_color: str | None = None
     order_index: int | None = None
@@ -1608,7 +1639,9 @@ class CourseCategoryCreate(BaseModel):
 class CourseCategoryUpdate(BaseModel):
     key: str | None = None
     name: str | None = None
+    name_en: str | None = None
     label: str | None = None
+    label_en: str | None = None
     icon: str | None = None
     badge_color: str | None = None
     order_index: int | None = None
@@ -1623,7 +1656,9 @@ class CourseCategoryRead(BaseModel):
     id: int
     key: str
     name: str
+    name_en: str | None = None
     label: str
+    label_en: str | None = None
     icon: str
     badge_color: str = "blue"
     order_index: int
@@ -1664,9 +1699,12 @@ class ArchiveSubmissionRead(BaseModel):
     professor: str
     has_answers: bool
     requested_course_name: str | None = None
+    requested_course_name_en: str | None = None
     requested_category_key: str | None = None
     requested_category_name: str | None = None
+    requested_category_name_en: str | None = None
     requested_category_label: str | None = None
+    requested_category_label_en: str | None = None
     requested_category_icon: str | None = None
     status: SubmissionStatus
     requester_id: int
@@ -1714,9 +1752,12 @@ class ArchiveSubmissionUpdate(BaseModel):
     professor: str | None = None
     has_answers: bool | None = None
     requested_course_name: str | None = None
+    requested_course_name_en: str | None = None
     requested_category_key: str | None = None
     requested_category_name: str | None = None
+    requested_category_name_en: str | None = None
     requested_category_label: str | None = None
+    requested_category_label_en: str | None = None
     requested_category_icon: str | None = None
 
 
@@ -1724,6 +1765,7 @@ class TrashItem(BaseModel):
     item_type: TrashEntityType
     id: int
     display_name: str
+    display_name_en: str | None = None
     academic_year: int | None = None
     academic_term: str | None = None
     deleted_at: datetime
@@ -1734,10 +1776,18 @@ class TrashItem(BaseModel):
     parent_type: str | None = None
     parent_id: int | None = None
     parent_name: str | None = None
+    parent_name_en: str | None = None
     created_archive_id: int | None = None
     source_submission_id: int | None = None
     course_id: int | None = None
     course_name: str | None = None
+    course_name_en: str | None = None
+    requested_course_name: str | None = None
+    requested_course_name_en: str | None = None
+    requested_category_name: str | None = None
+    requested_category_name_en: str | None = None
+    requested_category_label: str | None = None
+    requested_category_label_en: str | None = None
     reason: str | None = None
     created_at: datetime | None = None
     reporter_name: str | None = None

@@ -44,9 +44,9 @@ describe('submission dialog typography', () => {
   })
 
   it('scopes all three dialogs and the teleported Select options to the same scaled token', () => {
-    expect(adminSource).toContain('header="考古題投稿詳情"')
-    expect(adminSource).toContain('header="使用者資料統計"')
-    expect(archiveSource).toContain('header="我的投稿狀態"')
+    expect(adminSource).toContain(':header="$t(\'考古題投稿詳情\')"')
+    expect(adminSource).toContain(':header="$t(\'使用者資料統計\')"')
+    expect(archiveSource).toContain(':header="$t(\'我的投稿狀態\')"')
     expect(adminSource.match(/class="[^"]*submission-typography-dialog/g)).toHaveLength(2)
     expect(archiveSource).toContain('class="submission-typography-dialog"')
     expect(adminSource.match(/overlayClass="submission-typography-overlay"/g)).toHaveLength(2)
@@ -78,14 +78,14 @@ describe('submission dialog typography', () => {
   })
 
   it('places the online duration chart before submission data in the renamed dialog', () => {
-    const dialogTitle = adminSource.indexOf('header="使用者資料統計"')
+    const dialogTitle = adminSource.indexOf(':header="$t(\'使用者資料統計\')"')
     const chart = adminSource.indexOf('<UserOnlineDurationChart', dialogTitle)
     const submissionSummary = adminSource.indexOf('class="user-submission-summary"', chart)
 
     expect(dialogTitle).toBeGreaterThan(-1)
     expect(chart).toBeGreaterThan(dialogTitle)
     expect(submissionSummary).toBeGreaterThan(chart)
-    expect(adminSource).toContain('aria-label="查看使用者資料統計"')
+    expect(adminSource).toContain(':aria-label="$t(\'查看使用者資料統計\')"')
     expect(adminSource).not.toContain('查看使用者投稿統計')
   })
 })

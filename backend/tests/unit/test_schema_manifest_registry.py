@@ -16,7 +16,7 @@ from app.models.models import ArchiveSubmission, User
 
 
 def test_reviewed_manifest_registry_has_required_revisions() -> None:
-    assert HEAD_SCHEMA_REVISION == "b7e3d9a1c5f2"
+    assert HEAD_SCHEMA_REVISION == "d4b7e2a9c6f1"
     assert reviewed_manifest_revisions() == (
         "c4d8e2f1a6b9",
         "a4c7e9d2f6b1",
@@ -28,6 +28,8 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
         "6f3a9c2d8e41",
         "9f1c2a7e4b63",
         "b7e3d9a1c5f2",
+        "c2a8e4f6b9d1",
+        "d4b7e2a9c6f1",
     )
 
 
@@ -46,7 +48,9 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     column_name = "owner_self_delete_consumed"
     previous_status_column = "previous_status"
     constraint_name = "uq_archive_submissions_created_archive_id"
-    head = metadata_for_revision("b7e3d9a1c5f2")
+    head = metadata_for_revision("d4b7e2a9c6f1")
+    pre_bilingual_snapshots = metadata_for_revision("c2a8e4f6b9d1")
+    pre_bilingual_catalog = metadata_for_revision("b7e3d9a1c5f2")
     pre_student_id = metadata_for_revision("9f1c2a7e4b63")
     previous_head = metadata_for_revision("6f3a9c2d8e41")
     d8 = metadata_for_revision("d8f2a6c1b4e7")
@@ -57,6 +61,8 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     a4 = metadata_for_revision("a4c7e9d2f6b1")
 
     assert head is not None
+    assert pre_bilingual_snapshots is not None
+    assert pre_bilingual_catalog is not None
     assert pre_student_id is not None
     assert previous_head is not None
     assert d8 is not None
@@ -68,6 +74,29 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
 
     assert column_name in head.tables["archive_submissions"].c
     assert "student_id" in head.tables["users"].c
+    assert "name_en" in head.tables["courses"].c
+    assert "name_en" in head.tables["course_category_configs"].c
+    assert "label_en" in head.tables["course_category_configs"].c
+    for bilingual_snapshot_column in (
+        "requested_course_name_en",
+        "requested_category_name_en",
+        "requested_category_label_en",
+    ):
+        assert bilingual_snapshot_column in head.tables["archive_submissions"].c
+        assert (
+            bilingual_snapshot_column
+            not in pre_bilingual_snapshots.tables["archive_submissions"].c
+        )
+        assert (
+            bilingual_snapshot_column
+            not in pre_bilingual_catalog.tables["archive_submissions"].c
+        )
+    assert "name_en" in pre_bilingual_snapshots.tables["courses"].c
+    assert "name_en" in pre_bilingual_snapshots.tables["course_category_configs"].c
+    assert "label_en" in pre_bilingual_snapshots.tables["course_category_configs"].c
+    assert "name_en" not in pre_bilingual_catalog.tables["courses"].c
+    assert "name_en" not in pre_bilingual_catalog.tables["course_category_configs"].c
+    assert "label_en" not in pre_bilingual_catalog.tables["course_category_configs"].c
     assert "student_id" not in pre_student_id.tables["users"].c
     assert previous_status_column in head.tables["archive_submissions"].c
     assert "archive_reports" in head.tables
@@ -139,7 +168,7 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     )
 
     # Building older variants must never mutate current SQLModel metadata.
-    rebuilt_head = metadata_for_revision("b7e3d9a1c5f2")
+    rebuilt_head = metadata_for_revision("d4b7e2a9c6f1")
     assert rebuilt_head is not None
     assert column_name in rebuilt_head.tables["archive_submissions"].c
     assert previous_status_column in rebuilt_head.tables["archive_submissions"].c

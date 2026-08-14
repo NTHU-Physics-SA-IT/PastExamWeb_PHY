@@ -6,14 +6,14 @@
       <div v-if="errorMessage">
         <Card class="border-round shadow-2" :style="{ backgroundColor: 'var(--bg-secondary)' }">
           <template #title>
-            <div class="text-red-400 text-xl mb-1">登入失敗</div>
+            <div class="text-red-400 text-xl mb-1">{{ $t('登入失敗') }}</div>
           </template>
           <template #content>
             <p :style="{ color: 'var(--text-secondary)' }" class="mb-4">
               {{ errorMessage }}
             </p>
             <Button
-              label="返回首頁"
+              :label="$t('返回首頁')"
               icon="pi pi-home"
               @click="goToHome"
               class="p-button-secondary"
@@ -23,7 +23,7 @@
       </div>
       <div v-else class="loading-container">
         <ProgressSpinner strokeWidth="4" class="mb-4" />
-        <p>驗證中...</p>
+        <p>{{ $t('驗證中...') }}</p>
       </div>
     </div>
   </div>
@@ -79,14 +79,15 @@ export default {
     window.history.replaceState({}, document.title, window.location.pathname)
 
     if (providerError) {
-      this.errorMessage =
+      this.errorMessage = this.$t(
         PROVIDER_ERROR_MESSAGES[providerError] || '驗證失敗，請重新登入或聯絡管理員。'
+      )
       return
     }
 
     try {
       if (!code) {
-        this.errorMessage = '登入驗證已失效，請重新登入。'
+        this.errorMessage = this.$t('登入驗證已失效，請重新登入。')
         return
       }
 
@@ -98,7 +99,7 @@ export default {
       setToken(response.access_token)
       this.$router.replace('/archive')
     } catch {
-      this.errorMessage = '驗證失敗，請重試或聯絡管理員。'
+      this.errorMessage = this.$t('驗證失敗，請重試或聯絡管理員。')
     }
   },
   watch: {

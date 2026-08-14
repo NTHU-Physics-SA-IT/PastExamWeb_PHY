@@ -1,4 +1,9 @@
+import { i18n } from '../i18n'
 import { formatProductDate, getProductTimeParts } from './productTimezone'
+
+function formatHourLabel(hour) {
+  return i18n.global.locale.value === 'en' ? `${hour}:00` : `${hour} 時`
+}
 
 export function resolveTemporalTickLayout({
   baseLabelEvery,
@@ -75,8 +80,8 @@ export function buildTemporalTicks(points, { mode, labelEvery, minGap = mode ===
       mode === 'date'
         ? [formatProductDate(point.start)]
         : isMidnight
-          ? [`${parts.hour} 時`, formatProductDate(point.start)]
-          : [`${parts.hour} 時`]
+          ? [formatHourLabel(parts.hour), formatProductDate(point.start)]
+          : [formatHourLabel(parts.hour)]
     return {
       labelLines,
       showLabel: visibleIndexes.has(index),

@@ -5,14 +5,19 @@
         <template #title>
           <div class="text-center">
             <div class="not-found-code text-red-400 mb-2">404</div>
-            <div class="text-red-400 text-xl font-medium">頁面不存在</div>
+            <div class="text-red-400 text-xl font-medium">{{ $t('頁面不存在') }}</div>
           </div>
         </template>
         <template #content>
           <p class="mb-4" :style="{ color: 'var(--text-secondary)' }">
-            抱歉，我們找不到您要找的頁面。請確認網址是否正確或返回首頁。
+            {{ $t('抱歉，我們找不到您要找的頁面。請確認網址是否正確或返回首頁。') }}
           </p>
-          <Button label="返回首頁" icon="pi pi-home" @click="goToHome" class="p-button-secondary" />
+          <Button
+            :label="$t('返回首頁')"
+            icon="pi pi-home"
+            @click="goToHome"
+            class="p-button-secondary"
+          />
         </template>
       </Card>
     </div>

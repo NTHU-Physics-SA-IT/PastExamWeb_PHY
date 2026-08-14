@@ -1,10 +1,10 @@
 <template>
-  <section class="discussion-panel" :style="{ width }" aria-label="考古題討論區">
+  <section class="discussion-panel" :style="{ width }" :aria-label="$t('考古題討論區')">
     <header
       v-if="showHeader"
       class="discussion-header p-3 flex align-items-center justify-content-between"
     >
-      <div class="font-semibold">討論區</div>
+      <div class="font-semibold">{{ $t('討論區') }}</div>
       <Button
         v-if="showSettings"
         icon="pi pi-cog"
@@ -12,8 +12,8 @@
         text
         rounded
         size="small"
-        aria-label="開啟討論區設定"
-        title="討論區設定"
+        :aria-label="$t('開啟討論區設定')"
+        :title="$t('討論區設定')"
         class="discussion-settings-btn"
         @click="openNicknameDialog"
       />
@@ -24,14 +24,14 @@
         <ProgressSpinner strokeWidth="4" />
       </div>
       <div v-else-if="sortedMessages.length === 0" class="discussion-empty">
-        還沒有人發起討論，來當第一個吧！
+        {{ $t('還沒有人發起討論，來當第一個吧！') }}
       </div>
 
       <section
         v-for="message in sortedMessages"
         :key="message.id"
         class="discussion-thread"
-        :aria-label="`${message.user_name} 的留言串`"
+        :aria-label="$t('{name} 的留言串', { name: message.user_name })"
       >
         <DiscussionMessageCard
           :message="message"
@@ -68,8 +68,8 @@
               :class="`pi ${isThreadExpanded(message.id) ? 'pi-angle-up' : 'pi-angle-down'}`"
               aria-hidden="true"
             />
-            {{ isThreadExpanded(message.id) ? '收起' : '查看' }}
-            {{ message.replies.length }} 則回覆
+            {{ isThreadExpanded(message.id) ? $t('收起') : $t('查看') }}
+            {{ $t('{count} 則回覆', { count: message.replies.length }) }}
           </button>
         </div>
 
@@ -108,15 +108,15 @@
           @submit.prevent="sendReply"
         >
           <div class="discussion-reply-editor__heading">
-            <span>回覆 @{{ replyTarget.message.user_name }}</span>
+            <span>{{ $t('回覆 @{name}', { name: replyTarget.message.user_name }) }}</span>
             <Button
               icon="pi pi-times"
               severity="secondary"
               text
               rounded
               size="small"
-              aria-label="取消回覆"
-              title="取消回覆"
+              :aria-label="$t('取消回覆')"
+              :title="$t('取消回覆')"
               class="discussion-cancel-reply-btn"
               @click="cancelReply"
             />
@@ -124,7 +124,7 @@
           <Textarea
             name="discussion-reply"
             v-model="replyDraft"
-            :placeholder="`回覆 @${replyTarget.message.user_name}`"
+            :placeholder="$t('回覆 @{name}', { name: replyTarget.message.user_name })"
             class="w-full"
             :maxlength="MESSAGE_MAX_LENGTH"
             :disabled="!canSend"
@@ -138,7 +138,7 @@
             <Button
               type="submit"
               icon="pi pi-send"
-              label="送出回覆"
+              :label="$t('送出回覆')"
               severity="secondary"
               size="small"
               :disabled="!canSend || !replyDraft.trim()"
@@ -153,7 +153,7 @@
         <Textarea
           name="discussion-message"
           v-model="draft"
-          placeholder="輸入訊息"
+          :placeholder="$t('輸入訊息')"
           class="w-full"
           :maxlength="MESSAGE_MAX_LENGTH"
           :disabled="!canSend"
@@ -166,7 +166,7 @@
           <Button
             type="submit"
             icon="pi pi-send"
-            label="送出"
+            :label="$t('送出')"
             severity="secondary"
             :disabled="!canSend || !draft.trim()"
           />
@@ -181,29 +181,29 @@
       :draggable="false"
       :style="{ width: '420px', maxWidth: '92vw' }"
       :autoFocus="false"
-      :pt="{ root: { 'aria-label': '討論區設定', 'aria-labelledby': null } }"
+      :pt="{ root: { 'aria-label': $t('討論區設定'), 'aria-labelledby': null } }"
     >
       <template #header>
         <div class="flex align-items-center gap-2.5">
           <i class="pi pi-cog text-2xl" />
-          <div class="text-xl leading-tight font-semibold">討論區設定</div>
+          <div class="text-xl leading-tight font-semibold">{{ $t('討論區設定') }}</div>
         </div>
       </template>
       <div class="flex flex-column gap-3">
         <div class="flex flex-column gap-2">
-          <label for="discussion-nickname" class="font-semibold">暱稱</label>
+          <label for="discussion-nickname" class="font-semibold">{{ $t('暱稱') }}</label>
           <InputText
             id="discussion-nickname"
             name="discussion-nickname"
             v-model="nicknameDraft"
-            placeholder="輸入暱稱"
+            :placeholder="$t('輸入暱稱')"
             maxlength="15"
             class="w-full"
           />
           <small class="discussion-setting-hint">{{ nicknameHint }}</small>
         </div>
         <div class="flex flex-column gap-2">
-          <span class="font-semibold">其他</span>
+          <span class="font-semibold">{{ $t('其他') }}</span>
           <label for="discussion-desktop-default-open" class="flex align-items-center gap-2">
             <Checkbox
               inputId="discussion-desktop-default-open"
@@ -212,7 +212,7 @@
               :binary="true"
               @change="handleDesktopDefaultOpenChange"
             />
-            <span>預設開啟討論區</span>
+            <span>{{ $t('預設開啟討論區') }}</span>
           </label>
           <label for="discussion-show-level-title" class="discussion-setting-option">
             <Checkbox
@@ -222,8 +222,8 @@
               :binary="true"
             />
             <span>
-              <span>顯示我的等級稱號</span>
-              <small>開啟後，留言名稱旁會顯示目前的 Lv. 與投稿稱號</small>
+              <span>{{ $t('顯示我的等級稱號') }}</span>
+              <small>{{ $t('開啟後，留言名稱旁會顯示目前的 Lv. 與投稿稱號') }}</small>
             </span>
           </label>
         </div>
@@ -232,13 +232,13 @@
       <template #footer>
         <div class="flex justify-content-end gap-2">
           <Button
-            label="取消"
+            :label="$t('取消')"
             severity="secondary"
             @click="closeNicknameDialog"
             :disabled="nicknameSaving"
           />
           <Button
-            label="儲存"
+            :label="$t('儲存')"
             severity="success"
             :loading="nicknameSaving"
             :disabled="!canSaveNickname"
@@ -252,6 +252,7 @@
 
 <script setup>
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { discussionService, userService } from '../api'
 import { getCurrentUser } from '../utils/auth'
 import { trackEvent, EVENTS } from '../utils/analytics'
@@ -277,6 +278,7 @@ const props = defineProps({
 
 const emit = defineEmits(['desktop-default-open-change'])
 const toast = inject('toast', null)
+const { t } = useI18n()
 const confirm = inject('confirm', null)
 
 const messages = ref([])
@@ -324,7 +326,7 @@ const sortedMessages = computed(() =>
 
 const nicknameHint = computed(() => {
   const trimmed = (nicknameDraft.value || '').trim()
-  return `設定後，討論區會以暱稱顯示，留空以清除暱稱（${trimmed.length}/15）`
+  return t('設定後，討論區會以暱稱顯示，留空以清除暱稱（{count}/15）', { count: trimmed.length })
 })
 const canSaveNickname = computed(() => Boolean(currentUser.value) && !nicknameSaving.value)
 const messageLengthLabel = computed(
@@ -422,8 +424,8 @@ function scheduleReconnect() {
   if (reconnectAttempts.value >= WS_RECONNECT_MAX_ATTEMPTS) {
     toast?.add?.({
       severity: 'warn',
-      summary: '連線中斷',
-      detail: '討論區已斷線，請重新整理後再試',
+      summary: t('連線中斷'),
+      detail: t('討論區已斷線，請重新整理後再試'),
       life: 4000,
     })
     return
@@ -538,8 +540,8 @@ async function connect() {
       } else if (data.type === 'error') {
         toast?.add?.({
           severity: 'error',
-          summary: '送出失敗',
-          detail: data.detail || '無法送出訊息，請稍後再試',
+          summary: t('送出失敗'),
+          detail: data.detail ? t(data.detail) : t('無法送出訊息，請稍後再試'),
           life: 3000,
         })
       }
@@ -593,8 +595,8 @@ function startReply(message) {
   if (!currentUser.value) {
     toast?.add?.({
       severity: 'warn',
-      summary: '請先登入',
-      detail: '登入後即可回覆留言',
+      summary: t('請先登入'),
+      detail: t('登入後即可回覆留言'),
       life: 3000,
     })
     return
@@ -626,8 +628,8 @@ function toggleReport(message) {
   if (!currentUser.value) {
     toast?.add?.({
       severity: 'warn',
-      summary: '請先登入',
-      detail: '登入後即可回報留言',
+      summary: t('請先登入'),
+      detail: t('登入後即可回報留言'),
       life: 3000,
     })
     return
@@ -654,8 +656,8 @@ async function handleReportSubmit(payload) {
     })
     toast?.add?.({
       severity: 'success',
-      summary: '回報已送出',
-      detail: '留言回報已送出，請等待管理員審核',
+      summary: t('回報已送出'),
+      detail: t('留言回報已送出，請等待管理員審核'),
       life: 3500,
     })
     cancelReport()
@@ -664,8 +666,8 @@ async function handleReportSubmit(payload) {
     const isDuplicate = error?.response?.status === 409
     toast?.add?.({
       severity: isDuplicate ? 'warn' : 'error',
-      summary: isDuplicate ? '已有待審核回報' : '回報送出失敗',
-      detail: isDuplicate ? '相同原因的回報仍在處理中' : '請稍後再試',
+      summary: isDuplicate ? t('已有待審核回報') : t('回報送出失敗'),
+      detail: isDuplicate ? t('相同原因的回報仍在處理中') : t('請稍後再試'),
       life: 3500,
     })
   } finally {
@@ -709,8 +711,8 @@ async function toggleLike(message) {
     message.like_count = previousCount
     toast?.add?.({
       severity: 'error',
-      summary: '愛心更新失敗',
-      detail: '無法更新愛心，請稍後再試',
+      summary: t('愛心更新失敗'),
+      detail: t('無法更新愛心，請稍後再試'),
       life: 3000,
     })
   } finally {
@@ -730,16 +732,16 @@ async function deleteMessage(message) {
     applyDelete(message.id, Boolean(data?.preserve_thread))
     toast?.add?.({
       severity: 'success',
-      summary: '刪除成功',
-      detail: '留言已刪除',
+      summary: t('刪除成功'),
+      detail: t('留言已刪除'),
       life: 3000,
     })
   } catch (error) {
     console.error('Delete message error:', error)
     toast?.add?.({
       severity: 'error',
-      summary: '刪除失敗',
-      detail: '無法刪除訊息，請稍後再試',
+      summary: t('刪除失敗'),
+      detail: t('無法刪除訊息，請稍後再試'),
       life: 3000,
     })
   } finally {
@@ -753,12 +755,12 @@ function confirmDelete(message) {
   const hasReplies = !message.parent_id && Boolean(message.replies?.length)
   confirm.require({
     message: hasReplies
-      ? '留言刪除後無法復原，也不會進入垃圾桶。已有的回覆會依目前討論串規則保留。'
-      : '留言刪除後無法復原，也不會進入垃圾桶。',
-    header: '刪除這則留言？',
+      ? t('留言刪除後無法復原，也不會進入垃圾桶。已有的回覆會依目前討論串規則保留。')
+      : t('留言刪除後無法復原，也不會進入垃圾桶。'),
+    header: t('刪除這則留言？'),
     icon: 'pi pi-exclamation-triangle',
-    rejectLabel: '取消',
-    acceptLabel: '刪除',
+    rejectLabel: t('取消'),
+    acceptLabel: t('刪除'),
     acceptClass: 'p-button-danger',
     accept: () => deleteMessage(message),
   })
@@ -778,8 +780,8 @@ async function togglePin(message) {
     message.is_pinned = previous
     toast?.add?.({
       severity: 'error',
-      summary: '置頂失敗',
-      detail: '無法更新留言置頂狀態',
+      summary: t('置頂失敗'),
+      detail: t('無法更新留言置頂狀態'),
       life: 3000,
     })
   }
@@ -834,8 +836,8 @@ async function saveNickname() {
     })
     toast?.add?.({
       severity: 'success',
-      summary: '儲存成功',
-      detail: '討論區設定已儲存',
+      summary: t('儲存成功'),
+      detail: t('討論區設定已儲存'),
       life: 2500,
     })
     closeNicknameDialog()
@@ -844,8 +846,11 @@ async function saveNickname() {
     const detail = error?.response?.data?.detail
     toast?.add?.({
       severity: 'error',
-      summary: '更新失敗',
-      detail: typeof detail === 'string' && detail.trim() ? detail : '無法更新暱稱，請稍後再試',
+      summary: t('更新失敗'),
+      detail:
+        typeof detail === 'string' && detail.trim()
+          ? t(detail.trim())
+          : t('無法更新暱稱，請稍後再試'),
       life: 3000,
     })
   } finally {

@@ -1,13 +1,16 @@
+import { i18n } from '../i18n'
+
 export function formatDuration(value) {
   const totalSeconds = Math.max(0, Math.round(Number(value) || 0))
-  if (totalSeconds === 0) return '0 秒'
+  const isEnglish = i18n.global.locale.value === 'en'
+  if (totalSeconds === 0) return isEnglish ? '0 sec' : '0 秒'
   const hours = Math.floor(totalSeconds / 3600)
   const minutes = Math.floor((totalSeconds % 3600) / 60)
   const seconds = totalSeconds % 60
   const parts = []
-  if (hours) parts.push(`${hours} 小時`)
-  if (minutes) parts.push(`${minutes} 分鐘`)
-  if (!hours && !minutes && seconds) parts.push(`${seconds} 秒`)
+  if (hours) parts.push(isEnglish ? `${hours} hr` : `${hours} 小時`)
+  if (minutes) parts.push(isEnglish ? `${minutes} min` : `${minutes} 分鐘`)
+  if (!hours && !minutes && seconds) parts.push(isEnglish ? `${seconds} sec` : `${seconds} 秒`)
   return parts.join(' ')
 }
 

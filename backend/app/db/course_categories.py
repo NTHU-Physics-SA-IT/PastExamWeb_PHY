@@ -9,7 +9,9 @@ from dataclasses import dataclass
 class DefaultCourseCategoryDefinition:
     key: str
     name: str
+    name_en: str
     label: str
+    label_en: str
     icon: str
     badge_color: str
     order_index: int
@@ -19,7 +21,9 @@ DEFAULT_COURSE_CATEGORY_DEFINITIONS = (
     DefaultCourseCategoryDefinition(
         "fundamental",
         "基礎必修",
+        "Foundation Courses",
         "基礎",
+        "Foundation",
         "pi pi-fw pi-book",
         "navy",
         1,
@@ -27,7 +31,9 @@ DEFAULT_COURSE_CATEGORY_DEFINITIONS = (
     DefaultCourseCategoryDefinition(
         "required",
         "專業必修",
+        "Required Major Courses",
         "必修",
+        "Required",
         "pi pi-fw pi-compass",
         "forest",
         2,
@@ -35,7 +41,9 @@ DEFAULT_COURSE_CATEGORY_DEFINITIONS = (
     DefaultCourseCategoryDefinition(
         "optional",
         "專業選修",
+        "Major Electives",
         "選修",
+        "Elective",
         "pi pi-fw pi-book",
         "violet",
         3,
@@ -43,7 +51,9 @@ DEFAULT_COURSE_CATEGORY_DEFINITIONS = (
     DefaultCourseCategoryDefinition(
         "experience",
         "實驗課程",
+        "Laboratory Courses",
         "實驗",
+        "Laboratory",
         "pi pi-fw pi-sparkles",
         "amber",
         4,
@@ -51,7 +61,9 @@ DEFAULT_COURSE_CATEGORY_DEFINITIONS = (
     DefaultCourseCategoryDefinition(
         "graduate",
         "研究所",
+        "Graduate Courses",
         "研究所",
+        "Graduate",
         "pi pi-fw pi-graduation-cap",
         "burgundy",
         5,
@@ -59,7 +71,9 @@ DEFAULT_COURSE_CATEGORY_DEFINITIONS = (
     DefaultCourseCategoryDefinition(
         "math-department",
         "戳戳數學系",
+        "Mathematics Courses",
         "數學",
+        "Mathematics",
         "pi pi-fw pi-calculator",
         "slate",
         6,

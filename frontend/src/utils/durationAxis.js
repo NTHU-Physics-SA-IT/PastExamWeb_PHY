@@ -1,3 +1,5 @@
+import { i18n } from '../i18n'
+
 export function buildDurationAxis({ mode, maxValue }) {
   if (mode === 'hourly') {
     return { yMax: 60, yTicks: [60, 45, 30, 15, 0] }
@@ -16,8 +18,10 @@ export function buildDurationAxis({ mode, maxValue }) {
 export function formatDurationAxisTick(value, unit) {
   const numericValue = Number(value)
   if (!Number.isFinite(numericValue) || numericValue < 0) return ''
-  if (unit === 'minutes') return `${numericValue} 分`
+  if (unit === 'minutes') {
+    return i18n.global.locale.value === 'en' ? `${numericValue} min` : `${numericValue} 分`
+  }
   if (unit !== 'hours') return ''
   const compactValue = Number.parseFloat(numericValue.toFixed(2))
-  return `${compactValue} 小時`
+  return i18n.global.locale.value === 'en' ? `${compactValue} hr` : `${compactValue} 小時`
 }

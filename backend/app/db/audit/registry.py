@@ -17,6 +17,8 @@ PREVIOUS_STATUS_REVISION = "d8f2a6c1b4e7"
 ONE_TO_ONE_REVISION = "6f3a9c2d8e41"
 OAUTH_IDENTITY_REVISION = "9f1c2a7e4b63"
 NTHU_STUDENT_ID_REVISION = "b7e3d9a1c5f2"
+BILINGUAL_COURSE_CATALOG_REVISION = "c2a8e4f6b9d1"
+BILINGUAL_SUBMISSION_SNAPSHOT_REVISION = "d4b7e2a9c6f1"
 
 
 _CLASSIFICATION_CTE = r"""
@@ -791,10 +793,28 @@ _ELIGIBILITY_V3 = AuditAdapter(
 )
 
 
+_ELIGIBILITY_V4 = AuditAdapter(
+    audit_id=ELIGIBILITY_AUDIT_ID,
+    version=4,
+    accepted_source_revisions=frozenset(
+        {
+            BILINGUAL_COURSE_CATALOG_REVISION,
+            BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
+        }
+    ),
+    approved_aggregate_labels=tuple(OneToOneAggregateCounts.model_fields),
+    approved_combination_flags=_ELIGIBILITY_V3.approved_combination_flags,
+    summary_sql=_ONE_TO_ONE_SUMMARY_SQL,
+    combinations_sql=_PREVIOUS_STATUS_COMBINATIONS_SQL,
+    aggregate_model=OneToOneAggregateCounts,
+)
+
+
 _REGISTRY = {
     (_ELIGIBILITY_V1.audit_id, _ELIGIBILITY_V1.version): _ELIGIBILITY_V1,
     (_ELIGIBILITY_V2.audit_id, _ELIGIBILITY_V2.version): _ELIGIBILITY_V2,
     (_ELIGIBILITY_V3.audit_id, _ELIGIBILITY_V3.version): _ELIGIBILITY_V3,
+    (_ELIGIBILITY_V4.audit_id, _ELIGIBILITY_V4.version): _ELIGIBILITY_V4,
 }
 
 

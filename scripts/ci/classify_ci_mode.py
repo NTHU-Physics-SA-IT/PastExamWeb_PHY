@@ -399,6 +399,15 @@ class GitHubActionsAPI:
             raise ClassificationFailure("GitHub workflow run response is malformed")
         return payload
 
+    def commit_object(self, commit: str) -> dict[str, Any]:
+        if not isinstance(commit, str) or not SHA_PATTERN.fullmatch(commit):
+            raise ClassificationFailure("commit identity is malformed")
+        repository = quote(self.repository, safe="/")
+        payload, _ = self._get(self._url(f"/repos/{repository}/git/commits/{commit}"))
+        if not isinstance(payload, dict):
+            raise ClassificationFailure("GitHub commit response is malformed")
+        return payload
+
     def run_jobs(self, run_id: int) -> list[dict[str, Any]]:
         repository = quote(self.repository, safe="/")
         return self._paged_list(
