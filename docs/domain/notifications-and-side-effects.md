@@ -223,7 +223,7 @@ leaves Report, Archive or Submission, and notification state unchanged.
 | --- | --- |
 | Active and authorized | Link may open the source |
 | Soft-deleted | Do not expose an active link; an authorized historical view may be designed separately |
-| Hard-deleted | Retain the notification, mark the source unavailable, display `來源已不存在`, and expose no active source action or navigation |
+| Hard-deleted | Retain the notification, mark the source unavailable with neutral wording, and expose no active source action or navigation |
 | Missing or unauthorized | Mark unavailable without revealing protected existence |
 
 Permanent source deletion does not delete durable notification history. A
@@ -260,9 +260,17 @@ historical-source view. Focused notification API tests protect ownership,
 lifecycle, coherence, malformed-reference, and durability cases. This change
 requires no migration.
 
-Frontend handling in `NotificationCenterModal.vue`, including generic
-`來源已不存在` presentation and suppression of unavailable or malformed
-navigation, remains the separate Stage 5C C3 scope.
+The frontend treats this backend projection as the sole live-source authority:
+it does not distinguish missing, unauthorized, or otherwise inaccessible
+sources. `source_available=false` prevents active navigation while the stored
+notification detail remains readable with neutral unavailable wording. A
+recognized navigable source also needs a valid route-metadata shape; malformed
+identifiers fail closed without closing the notification center or calling the
+router. This shape validation is not an authorization check. Detail-only,
+source-less, and unsupported notifications remain readable without inventing
+another recipient route. The C1 notification identity and C2 backend projection
+boundaries remain unchanged, and this frontend behavior requires no backend or
+migration change.
 
 ## ArchiveSubmissionEvent side effect
 
