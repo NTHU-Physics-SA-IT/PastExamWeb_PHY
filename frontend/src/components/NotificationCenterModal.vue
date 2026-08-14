@@ -148,8 +148,8 @@
                     </div>
                     <strong class="notification-card__title">{{ item.title }}</strong>
                     <p class="notification-card__summary">{{ item.message }}</p>
-                    <small v-if="!item.source_available" class="text-500">{{
-                      $t('來源已不存在')
+                    <small v-if="personalSourceUnavailable(item)" class="text-500">{{
+                      $t('來源目前無法開啟')
                     }}</small>
                     <div class="notification-card__footer">
                       <small class="text-500">{{ formatTimestamp(item.created_at) }}</small>
@@ -205,9 +205,9 @@
         />
         <p v-else>{{ selectedItem.message }}</p>
         <small
-          v-if="selectedType === 'personal' && !selectedItem.source_available"
+          v-if="selectedType === 'personal' && personalSourceUnavailable(selectedItem)"
           class="text-500"
-          >{{ $t('來源已不存在，無法開啟原留言。') }}</small
+          >{{ $t('來源目前無法開啟，但通知內容仍可查看。') }}</small
         >
       </div>
     </Dialog>
@@ -218,6 +218,10 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { renderMarkdown } from '@/utils/markdown'
+import {
+  buildPersonalNotificationRoute,
+  isNavigablePersonalNotificationSourceType,
+} from '@/utils/personalNotificationNavigation'
 import { localizedPersonalNotification } from '@/utils/personalNotificationPresentation'
 import { formatExactDateTime24h } from '@/utils/time'
 
@@ -297,16 +301,21 @@ function openAnnouncement(item) {
 }
 function openPersonal(item) {
   if (!item.read_at) emit('mark-personal-read', item.id)
-  if (
-    item.source_available &&
-    ['archive_discussion_thread', 'archive_submission', 'archive_report'].includes(item.source_type)
-  ) {
+  if (buildPersonalNotificationRoute(item)) {
     emit('open-personal-source', item)
     return
   }
   selectedType.value = 'personal'
   selectedItem.value = item
   detailVisible.value = true
+}
+function personalSourceUnavailable(item) {
+  return (
+    item?.source_available === false ||
+    (item?.source_available === true &&
+      isNavigablePersonalNotificationSourceType(item.source_type) &&
+      !buildPersonalNotificationRoute(item))
+  )
 }
 function notificationIcon(type) {
   const icons = {

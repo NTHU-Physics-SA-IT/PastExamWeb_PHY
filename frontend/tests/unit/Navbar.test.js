@@ -358,6 +358,7 @@ describe('Navbar methods', () => {
     }
 
     await Navbar.methods.handlePersonalNotificationSource.call(ctx, {
+      source_available: true,
       source_type: 'archive_submission',
       source_id: 42,
       metadata: { submission_id: 42 },
@@ -368,15 +369,45 @@ describe('Navbar methods', () => {
     })
 
     await Navbar.methods.handlePersonalNotificationSource.call(ctx, {
+      source_available: true,
       source_type: 'archive_discussion_thread',
       source_id: 7,
-      metadata: { course_id: 2, archive_id: 3, thread_id: 7, message_id: 9 },
+      source_message_id: 9,
+      metadata: { course_id: 2, archive_id: 3 },
     })
     expect(push).toHaveBeenLastCalledWith({
       path: '/archive',
       query: { courseId: 2, archiveId: 3, threadId: 7, messageId: 9 },
     })
+
+    await Navbar.methods.handlePersonalNotificationSource.call(ctx, {
+      source_available: true,
+      source_type: 'archive_report',
+      metadata: { course_id: 2, archive_id: 3 },
+    })
+    expect(push).toHaveBeenLastCalledWith({
+      path: '/archive',
+      query: { courseId: 2, archiveId: 3 },
+    })
     expect(notificationStoreMock.state.centerVisible).toBe(false)
+  })
+
+  it('keeps the notification center open and does not route malformed source metadata', async () => {
+    const push = vi.fn().mockResolvedValue()
+    const ctx = {
+      notificationStore: notificationStoreMock,
+      $router: { push },
+    }
+    notificationStoreMock.state.centerVisible = true
+
+    await Navbar.methods.handlePersonalNotificationSource.call(ctx, {
+      source_available: true,
+      source_type: 'archive_report',
+      metadata: { course_id: 'not-an-id' },
+    })
+
+    expect(push).not.toHaveBeenCalled()
+    expect(notificationStoreMock.state.centerVisible).toBe(true)
   })
 
   it('confirms personal notification deletion before calling the store', async () => {
