@@ -2,11 +2,11 @@
   <main class="personal-settings-page">
     <section class="personal-settings-shell">
       <header class="settings-header">
-        <h1>個人化設定</h1>
+        <h1>{{ $t('個人化設定') }}</h1>
       </header>
 
       <div class="settings-layout">
-        <aside class="settings-nav" aria-label="個人化設定目錄">
+        <aside class="settings-nav" :aria-label="$t('個人化設定目錄')">
           <button
             v-for="item in navItems"
             :key="item.id"
@@ -22,12 +22,12 @@
         <div class="settings-content">
           <section id="display-settings" class="settings-group settings-anchor">
             <div class="settings-group-header">
-              <h2>顯示設定</h2>
-              <p>調整網站閱讀與顯示偏好。</p>
+              <h2>{{ $t('顯示設定') }}</h2>
+              <p>{{ $t('調整網站閱讀與顯示偏好。') }}</p>
             </div>
 
             <Card class="settings-section">
-              <template #title>顯示設定</template>
+              <template #title>{{ $t('顯示設定') }}</template>
               <template #content>
                 <div class="settings-form display-settings-form">
                   <div class="display-settings-layout">
@@ -35,7 +35,7 @@
                       <div id="font-size-setting" class="field settings-anchor font-size-setting">
                         <div class="font-size-controls">
                           <div class="font-size-control-header">
-                            <label id="font-size-label">字體大小</label>
+                            <label id="font-size-label">{{ $t('字體大小') }}</label>
                             <span class="font-size-current">{{ fontSizeDisplayText }}</span>
                           </div>
                           <div class="font-size-slider-row">
@@ -48,67 +48,69 @@
                               aria-labelledby="font-size-label"
                             />
                           </div>
-                          <small>偏好值會保存於此裝置，重新整理後仍會保留。</small>
+                          <small>{{ $t('偏好值會保存於此裝置，重新整理後仍會保留。') }}</small>
                         </div>
                       </div>
 
                       <div id="language-setting" class="field settings-anchor language-setting">
-                        <label for="language">語言</label>
+                        <label for="language">{{ $t('介面語言') }}</label>
                         <Select
                           id="language"
-                          v-model="displayForm.language"
+                          v-model="locale"
                           :options="languageOptions"
                           optionLabel="label"
                           optionValue="value"
                           class="w-full"
                         />
-                        <small>語言功能目前僅為 UI placeholder，正式英文翻譯表之後才會提供。</small>
+                        <small>{{ $t('選擇網站顯示語言，變更會立即套用。') }}</small>
                       </div>
                     </div>
 
                     <div class="preview-sample-column">
-                      <p class="preview-sample-label">範例顯示：</p>
+                      <p class="preview-sample-label">{{ $t('範例顯示：') }}</p>
                       <div class="font-size-preview">
-                        <section class="preview-course-sample" aria-label="字體大小預覽">
+                        <section class="preview-course-sample" :aria-label="$t('字體大小預覽')">
                           <div class="preview-course-heading">
-                            <Tag severity="secondary" class="subject-tag preview-tag">必修</Tag>
+                            <Tag severity="secondary" class="subject-tag preview-tag">{{
+                              $t('必修')
+                            }}</Tag>
                             <div class="preview-course-title-block">
-                              <h3>原子彈製作</h3>
-                              <p>共 5 份考古題 · 最新：114下學期</p>
+                              <h3>{{ $t('原子彈製作') }}</h3>
+                              <p>{{ $t('共 5 份考古題 · 最新：114下學期') }}</p>
                             </div>
                           </div>
                           <div class="preview-meta-row">
-                            <span>奧本海默</span>
-                            <span>114下學期</span>
-                            <span>期中考 / midterm2</span>
+                            <span>{{ $t('奧本海默') }}</span>
+                            <span>{{ $t('114下學期') }}</span>
+                            <span>{{ $t('期中考') }} / midterm2</span>
                           </div>
 
                           <div class="preview-filter-row">
-                            <span class="preview-filter-chip">學期</span>
-                            <span class="preview-filter-chip">教授：奧本海默</span>
-                            <span class="preview-filter-chip">類型</span>
+                            <span class="preview-filter-chip">{{ $t('學期') }}</span>
+                            <span class="preview-filter-chip">{{ $t('教授：奧本海默') }}</span>
+                            <span class="preview-filter-chip">{{ $t('類型') }}</span>
                             <span class="preview-filter-chip preview-filter-chip--check">
                               <i class="pi pi-check-square" aria-hidden="true"></i>
-                              附解答
+                              {{ $t('附解答') }}
                             </span>
                           </div>
 
                           <article class="preview-archive-card">
                             <div class="preview-archive-main">
                               <Tag severity="secondary" class="exam-type-tag preview-tag">
-                                期中考
+                                {{ $t('期中考') }}
                               </Tag>
                               <div>
                                 <h4>midterm2</h4>
-                                <p>奧本海默 · 考題目 · 0 次下載</p>
+                                <p>{{ $t('奧本海默 · 考題目 · 0 次下載') }}</p>
                               </div>
                             </div>
                             <div class="preview-actions">
-                              <Button icon="pi pi-eye" label="預覽" size="small" outlined />
-                              <Button icon="pi pi-download" label="下載" size="small" />
+                              <Button icon="pi pi-eye" :label="$t('預覽')" size="small" outlined />
+                              <Button icon="pi pi-download" :label="$t('下載')" size="small" />
                               <Button
                                 icon="pi pi-trash"
-                                label="刪除"
+                                :label="$t('刪除')"
                                 size="small"
                                 severity="danger"
                                 outlined
@@ -118,19 +120,19 @@
 
                           <div class="preview-admin-tags">
                             <Tag class="soft-badge review-status-pending" severity="warning">
-                              待審核
+                              {{ $t('待審核') }}
                             </Tag>
                             <Tag class="soft-badge submission-status-deleted" severity="danger">
-                              已刪除
+                              {{ $t('已刪除') }}
                             </Tag>
-                            <Tag severity="success" class="preview-tag">啟用中</Tag>
+                            <Tag severity="success" class="preview-tag">{{ $t('啟用中') }}</Tag>
                           </div>
                         </section>
                       </div>
                     </div>
                   </div>
 
-                  <p class="autosave-hint">顯示偏好會自動儲存在此裝置。</p>
+                  <p class="autosave-hint">{{ $t('顯示偏好會自動儲存在此裝置。') }}</p>
                 </div>
               </template>
             </Card>
@@ -142,16 +144,16 @@
             class="settings-group settings-anchor"
           >
             <div class="settings-group-header">
-              <h2>帳號設定</h2>
+              <h2>{{ $t('帳號設定') }}</h2>
               <p>{{ accountSettingsDescription }}</p>
             </div>
 
             <Card id="profile-setting" class="settings-section settings-anchor">
-              <template #title>基本資料</template>
+              <template #title>{{ $t('基本資料') }}</template>
               <template #content>
                 <form class="settings-form" @submit.prevent="saveProfile">
                   <div class="field">
-                    <label for="display-name">名稱</label>
+                    <label for="display-name">{{ $t('名稱') }}</label>
                     <InputText
                       id="display-name"
                       name="display-name"
@@ -160,11 +162,13 @@
                       maxlength="15"
                       :disabled="profileLoading || !canEditProfile"
                     />
-                    <small v-if="canEditProfile">最多 15 字，會優先作為站內顯示名稱。</small>
+                    <small v-if="canEditProfile">{{
+                      $t('最多 15 字，會優先作為站內顯示名稱。')
+                    }}</small>
                   </div>
 
                   <div class="field">
-                    <label for="email">電子郵件</label>
+                    <label for="email">{{ $t('電子郵件') }}</label>
                     <InputText
                       id="email"
                       name="email"
@@ -175,13 +179,13 @@
                   </div>
 
                   <small v-if="!canEditProfile" class="oauth-profile-helper">
-                    此資料由清華校務系統提供，無法在本站修改。
+                    {{ $t('此資料由清華校務系統提供，無法在本站修改。') }}
                   </small>
 
                   <div v-if="canEditProfile" class="form-actions">
                     <Button
                       class="profile-save-button"
-                      label="儲存基本資料"
+                      :label="$t('儲存基本資料')"
                       icon="pi pi-save"
                       type="submit"
                       :loading="profileSaving"
@@ -197,11 +201,11 @@
               id="password-setting"
               class="settings-section settings-anchor"
             >
-              <template #title>密碼設定</template>
+              <template #title>{{ $t('密碼設定') }}</template>
               <template #content>
                 <form class="settings-form" @submit.prevent="savePassword">
                   <div class="field">
-                    <label for="current-password">目前密碼</label>
+                    <label for="current-password">{{ $t('目前密碼') }}</label>
                     <Password
                       inputId="current-password"
                       name="current-password"
@@ -214,7 +218,7 @@
                   </div>
 
                   <div class="field">
-                    <label for="new-password">新密碼</label>
+                    <label for="new-password">{{ $t('新密碼') }}</label>
                     <Password
                       inputId="new-password"
                       name="new-password"
@@ -226,7 +230,7 @@
                   </div>
 
                   <div class="field">
-                    <label for="confirm-password">確認新密碼</label>
+                    <label for="confirm-password">{{ $t('確認新密碼') }}</label>
                     <Password
                       inputId="confirm-password"
                       name="confirm-password"
@@ -244,7 +248,7 @@
 
                   <div class="form-actions">
                     <Button
-                      label="儲存密碼"
+                      :label="$t('儲存密碼')"
                       icon="pi pi-key"
                       type="submit"
                       :disabled="!canSubmitPassword"
@@ -262,7 +266,6 @@
 
 <script>
 import { userService } from '../api'
-import { getLocalItem, setLocalItem } from '../utils/storage'
 import {
   APP_FONT_BASELINE,
   FONT_SIZE_MAX,
@@ -273,16 +276,17 @@ import {
   setFontSizePreference,
 } from '../utils/fontSizePreference'
 import { useToast } from 'primevue/usetoast'
-
-const LANGUAGE_KEY = 'personal-settings-language'
+import { useLocale } from '../i18n'
 
 export default {
   name: 'PersonalSettings',
   setup() {
     const toast = useToast()
+    const { locale } = useLocale()
 
     return {
       toast,
+      locale,
     }
   },
   data() {
@@ -303,7 +307,6 @@ export default {
       },
       displayForm: {
         fontSize: getFontSizePreference(),
-        language: getLocalItem(LANGUAGE_KEY) || 'zh-TW',
       },
       fontSizeScale: getFontSizePreference(),
       fontSizeMin: FONT_SIZE_MIN,
@@ -311,13 +314,15 @@ export default {
       fontSizeStep: FONT_SIZE_STEP,
       activeSection: 'display-settings',
       sectionObserver: null,
-      languageOptions: [
-        { label: '繁體中文', value: 'zh-TW' },
-        { label: 'English', value: 'en' },
-      ],
     }
   },
   computed: {
+    languageOptions() {
+      return [
+        { label: this.$t('繁體中文'), value: 'zh-TW' },
+        { label: this.$t('英文'), value: 'en' },
+      ]
+    },
     showAccountSettings() {
       return this.profileLoaded
     },
@@ -329,23 +334,23 @@ export default {
     },
     accountSettingsDescription() {
       return this.isLocalAccount
-        ? '管理名稱、電子郵件與密碼。'
-        : '查看由清華校務系統提供的帳號資料。'
+        ? this.$t('管理名稱、電子郵件與密碼。')
+        : this.$t('查看由清華校務系統提供的帳號資料。')
     },
     navItems() {
       const items = [
-        { id: 'display-settings', label: '顯示設定', level: 'group' },
-        { id: 'font-size-setting', label: '字體大小', level: 'item' },
-        { id: 'language-setting', label: '語言', level: 'item' },
+        { id: 'display-settings', label: this.$t('顯示設定'), level: 'group' },
+        { id: 'font-size-setting', label: this.$t('字體大小'), level: 'item' },
+        { id: 'language-setting', label: this.$t('語言'), level: 'item' },
       ]
 
       if (this.showAccountSettings) {
         items.push(
-          { id: 'account-settings', label: '帳號設定', level: 'group' },
-          { id: 'profile-setting', label: '基本資料', level: 'item' }
+          { id: 'account-settings', label: this.$t('帳號設定'), level: 'group' },
+          { id: 'profile-setting', label: this.$t('基本資料'), level: 'item' }
         )
         if (this.showPasswordSettings) {
-          items.push({ id: 'password-setting', label: '密碼設定', level: 'item' })
+          items.push({ id: 'password-setting', label: this.$t('密碼設定'), level: 'item' })
         }
       }
 
@@ -357,15 +362,18 @@ export default {
     fontSizeToneLabel() {
       const defaultDisplayPercent = Math.round(USER_SCALE_DEFAULT_PERCENT * APP_FONT_BASELINE)
       if (this.fontSizePercent < defaultDisplayPercent) {
-        return '偏小'
+        return this.$t('偏小')
       }
       if (this.fontSizePercent > defaultDisplayPercent) {
-        return '偏大'
+        return this.$t('偏大')
       }
-      return '預設'
+      return this.$t('預設')
     },
     fontSizeDisplayText() {
-      return `目前大小：${this.fontSizePercent}%（${this.fontSizeToneLabel}）`
+      return this.$t('目前大小：{percent}%（{tone}）', {
+        percent: this.fontSizePercent,
+        tone: this.fontSizeToneLabel,
+      })
     },
     canSaveProfile() {
       return (
@@ -381,7 +389,7 @@ export default {
 
       return this.passwordForm.newPassword === this.passwordForm.confirmPassword
         ? ''
-        : '兩次輸入的新密碼不一致'
+        : this.$t('兩次輸入的新密碼不一致')
     },
     canSubmitPassword() {
       return (
@@ -396,10 +404,6 @@ export default {
     fontSizeScale(value) {
       const scale = setFontSizePreference(value)
       this.displayForm.fontSize = scale
-    },
-    'displayForm.language'(value) {
-      // TODO: Wire language preference to i18n after the official English translation table is provided.
-      setLocalItem(LANGUAGE_KEY, value)
     },
   },
   async mounted() {
@@ -497,8 +501,8 @@ export default {
         this.profileForm.email = (data?.email || this.profileForm.email || '').trim()
         this.toast.add({
           severity: 'success',
-          summary: '儲存成功',
-          detail: '基本資料已更新',
+          summary: this.$t('儲存成功'),
+          detail: this.$t('基本資料已更新'),
           life: 2500,
         })
       } catch (error) {
@@ -506,9 +510,11 @@ export default {
         const detail = error?.response?.data?.detail
         this.toast.add({
           severity: 'error',
-          summary: '更新失敗',
+          summary: this.$t('更新失敗'),
           detail:
-            typeof detail === 'string' && detail.trim() ? detail : '無法更新基本資料，請稍後再試',
+            typeof detail === 'string' && detail.trim()
+              ? this.$t(detail.trim())
+              : this.$t('無法更新基本資料，請稍後再試'),
           life: 3000,
         })
       } finally {
@@ -530,8 +536,8 @@ export default {
       }
       this.toast.add({
         severity: 'info',
-        summary: '尚未送出',
-        detail: '密碼 API 尚未接入，已先保留前端表單。',
+        summary: this.$t('尚未送出'),
+        detail: this.$t('密碼 API 尚未接入，已先保留前端表單。'),
         life: 3000,
       })
     },

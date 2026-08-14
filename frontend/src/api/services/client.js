@@ -1,5 +1,6 @@
 import axios from 'axios'
 import router from '../../router'
+import { i18n } from '../../i18n'
 import { getGlobalToast } from '../../utils/toast'
 import {
   STORAGE_KEYS,
@@ -30,8 +31,8 @@ export const handleUnauthorized = ({ redirect = true } = {}) => {
       unauthorizedToastActive = true
       toast.add({
         severity: 'warn',
-        summary: '登入階段已過期',
-        detail: '請重新登入。',
+        summary: i18n.global.t('登入階段已過期'),
+        detail: i18n.global.t('請重新登入。'),
         life: 3000,
       })
     }

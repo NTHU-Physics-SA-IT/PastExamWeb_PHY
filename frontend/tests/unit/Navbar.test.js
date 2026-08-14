@@ -33,6 +33,7 @@ const notificationStoreMock = vi.hoisted(() => ({
 }))
 
 let consoleErrorSpy
+const translate = (key) => key
 
 vi.mock('@/api', () => ({
   authService: {
@@ -121,9 +122,9 @@ describe('Navbar methods', () => {
     expect(Navbar.computed.showGuestLogin.call({ ...guest, $route: { path: '/courses' } })).toBe(
       false
     )
-    expect(
-      Navbar.computed.showGuestLogin.call({ ...guest, $route: { path: '/courses/42' } })
-    ).toBe(false)
+    expect(Navbar.computed.showGuestLogin.call({ ...guest, $route: { path: '/courses/42' } })).toBe(
+      false
+    )
     expect(
       Navbar.computed.showGuestLogin.call({ ...guest, $route: { path: '/personal-settings' } })
     ).toBe(true)
@@ -184,6 +185,7 @@ describe('Navbar methods', () => {
   it('handles local login success and failure', async () => {
     const routerPush = vi.fn()
     const ctx = {
+      $t: translate,
       username: 'user',
       password: 'pass',
       toast: { add: toastAddMock },
@@ -211,6 +213,7 @@ describe('Navbar methods', () => {
   it('handles local login rejection with error toast', async () => {
     const routerPush = vi.fn()
     const ctx = {
+      $t: translate,
       username: 'user',
       password: 'pass',
       toast: { add: toastAddMock },
@@ -237,6 +240,7 @@ describe('Navbar methods', () => {
     [{ code: 'ERR_NETWORK' }, '無法連線至後端，請確認服務是否正常'],
   ])('describes local login failures without leaving loading active', async (error, detail) => {
     const ctx = {
+      $t: translate,
       username: 'user',
       password: 'pass',
       toast: { add: toastAddMock },
@@ -315,6 +319,7 @@ describe('Navbar methods', () => {
 
   it('opens notification center with auth guard', async () => {
     const ctx = {
+      $t: translate,
       toast: { add: toastAddMock },
       notificationStore: notificationStoreMock,
       isAuthenticated: false,
@@ -377,6 +382,7 @@ describe('Navbar methods', () => {
   it('confirms personal notification deletion before calling the store', async () => {
     const item = { id: 7 }
     const ctx = {
+      $t: translate,
       confirm: { require: confirmRequireMock },
       notificationStore: notificationStoreMock,
       toast: { add: toastAddMock },
@@ -394,6 +400,7 @@ describe('Navbar methods', () => {
 
   it('confirms and permanently deletes all personal notifications', async () => {
     const ctx = {
+      $t: translate,
       confirm: { require: confirmRequireMock },
       notificationStore: notificationStoreMock,
       toast: { add: toastAddMock },
@@ -515,7 +522,7 @@ describe('Navbar methods', () => {
 
   it('links the complete brand lockup to Home', () => {
     expect(navbarSource).toContain(
-      '<RouterLink to="/" class="brand-lockup clickable-title" aria-label="回到首頁">'
+      '<RouterLink to="/" class="brand-lockup clickable-title" :aria-label="$t(\'回到首頁\')">'
     )
     expect(navbarSource).toContain('<span class="brand-title-main">清大物理考古系統</span>')
     expect(navbarSource).toContain('<span class="brand-title-sub">PHYSICS ARCHIVE · NTHU</span>')
@@ -631,6 +638,7 @@ describe('Navbar methods', () => {
   it('stores a local system issue before opening the GitHub prefill page', async () => {
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => {})
     const ctx = {
+      $t: translate,
       issueForm: {
         type: 'bug',
         title: '系統問題',
@@ -667,7 +675,7 @@ describe('Navbar methods', () => {
     expect(openSpy).toHaveBeenCalled()
     expect(navbarSource).toContain('請先在目前瀏覽器登入 GitHub')
     expect(navbarSource).toContain('GitHub Issue 仍需由您在 GitHub 頁面確認送出後才會正式建立')
-    expect(navbarSource).toContain('label="建立回報並前往 GitHub"')
+    expect(navbarSource).toContain(':label="$t(\'建立回報並前往 GitHub\')"')
     openSpy.mockRestore()
   })
 
@@ -680,6 +688,7 @@ describe('Navbar methods', () => {
     expect(Navbar.computed.pendingNotification.call(pendingCtx)).toBeNull()
 
     const actionsCtxDesktop = {
+      $t: translate,
       isAuthenticated: true,
       userData: { is_admin: true },
       isDesktopView: true,
@@ -696,10 +705,11 @@ describe('Navbar methods', () => {
     expect(actionsCtxDesktop.invokeMenuAction).toHaveBeenCalled()
     expect(actionsCtxDesktop.handleNavigatePersonalSettings).toHaveBeenCalled()
     actionsDesktop[1].command()
-    expect(actionsDesktop[1].label).toBe('公告與通知')
+    expect(actionsDesktop[1].label).toBe('通知中心')
     expect(actionsCtxDesktop.openNotificationCenter).toHaveBeenCalledWith('navbar-menu')
 
     const actionsCtxMobile = {
+      $t: translate,
       isAuthenticated: true,
       userData: { is_admin: true },
       isDesktopView: false,

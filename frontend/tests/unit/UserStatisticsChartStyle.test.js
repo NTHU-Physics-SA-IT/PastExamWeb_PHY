@@ -49,7 +49,7 @@ describe('user statistics chart layout styles', () => {
 
     expect(statisticsIndex).toBeGreaterThan(-1)
     expect(searchIndex).toBeGreaterThan(statisticsIndex)
-    expect(adminSource).toContain('統計時區：{{ PRODUCT_TIME_ZONE_LABEL }}')
+    expect(adminSource).toContain("$t('統計時區：{zone}', { zone: PRODUCT_TIME_ZONE_LABEL })")
     expect(adminSource).toContain(':aria-label="reviewSubmissionChartData.ariaLabel"')
     expect(adminSource).toContain('class="user-login-column-chart__bar"')
   })

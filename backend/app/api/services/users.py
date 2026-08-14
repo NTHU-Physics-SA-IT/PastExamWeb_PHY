@@ -454,6 +454,7 @@ async def get_user_submission_stats(
                 status=submission.status,
                 archive_type=submission.archive_type,
                 course_name=submission.requested_course_name or submission.subject,
+                course_name_en=submission.requested_course_name_en,
                 exam_name=submission.name,
                 academic_year=submission.academic_year,
                 professor=submission.professor,

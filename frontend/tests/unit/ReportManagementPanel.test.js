@@ -169,7 +169,7 @@ describe('ReportManagementPanel', () => {
     )
     expect(reportManagementSource).not.toContain('header="GitHub Issue"')
     expect(reportManagementSource).not.toContain('label="前往 GitHub"')
-    expect(reportManagementSource).toContain('label="前往專案 Issues"')
+    expect(reportManagementSource).toContain(':label="$t(\'前往專案 Issues\')"')
     expect(reportManagementSource).toContain('rel="noopener noreferrer"')
   })
 
@@ -280,7 +280,7 @@ describe('ReportManagementPanel', () => {
     expect(wrapper.text()).toContain('未提供')
     expect(wrapper.text()).toContain('無法確認使用者是否已在 GitHub 正式建立 Issue')
     expect(reportManagementSource).not.toContain('v-html')
-    expect(reportManagementSource).toContain('aria-label="檢視系統問題回報"')
+    expect(reportManagementSource).toContain(':aria-label="$t(\'檢視系統問題回報\')"')
     const fields = wrapper.findAll('.system-report-detail__content.report-review__content-field')
     expect(fields).toHaveLength(2)
     expect(fields[0].get('.report-review__content-label').text()).toBe('問題標題')
@@ -472,7 +472,7 @@ describe('ReportManagementPanel', () => {
       /\.comment-report-content__summary\s*\{[\s\S]*?white-space:\s*normal;[\s\S]*?-webkit-line-clamp:\s*3;/
     )
     expect(reportManagementSource).toContain('width: clamp(15rem, 22vw, 21.25rem)')
-    expect(reportManagementSource).toContain('header="原因與留言摘要"')
+    expect(reportManagementSource).toContain(':header="$t(\'原因與留言摘要\')"')
     expect(reportManagementSource).toContain('headerClass="report-user-column"')
     expect(reportManagementSource).toContain('headerClass="report-person-time-column"')
     expect(reportManagementSource).toContain('headerClass="report-review-column"')
@@ -480,7 +480,7 @@ describe('ReportManagementPanel', () => {
     expect(reportManagementSource).toMatch(
       /report-person-time__name[\s\S]*?reporter_name[\s\S]*?report-person-time__time[\s\S]*?created_at/
     )
-    expect(reportManagementSource).toContain("data.reviewer_name || '尚未審核'")
+    expect(reportManagementSource).toContain("data.reviewer_name || $t('尚未審核')")
     expect(reportManagementSource).toContain(
       '<span v-else class="report-person-time__time">--</span>'
     )
@@ -547,7 +547,7 @@ describe('ReportManagementPanel', () => {
     expect(wrapper.vm.systemPage.first).toBe(0)
     expect(wrapper.vm.commentPage.first).toBe(0)
     expect(reportManagementSource).toMatch(
-      /field="read_state"[\s\S]*?sortField="read_state"[\s\S]*?header="狀態"[\s\S]*?sortable/
+      /field="read_state"[\s\S]*?sortField="read_state"[\s\S]*?:header="\$t\('狀態'\)"[\s\S]*?sortable/
     )
 
     await wrapper.vm.refreshAll()
@@ -614,8 +614,8 @@ describe('ReportManagementPanel', () => {
     expect(mocks.toast).toHaveBeenCalledWith(
       expect.objectContaining({ summary: '回報已移至垃圾桶' })
     )
-    expect(reportManagementSource).toContain('aria-label="刪除系統問題回報"')
-    expect(reportManagementSource).toContain('aria-label="刪除留言回報"')
+    expect(reportManagementSource).toContain(':aria-label="$t(\'刪除系統問題回報\')"')
+    expect(reportManagementSource).toContain(':aria-label="$t(\'刪除留言回報\')"')
     expect(reportManagementSource).toContain(
       '回報會移至垃圾桶，可由管理員在垃圾桶中還原或永久刪除。'
     )
@@ -686,7 +686,7 @@ describe('ReportManagementPanel', () => {
     expect(wrapper.vm.statusSeverity('upheld')).toBe('success')
     expect(wrapper.vm.statusSeverity('dismissed')).toBe('danger')
     expect(reportManagementSource).not.toContain('in_review')
-    expect(reportManagementSource).toContain("selectedReport.admin_response || '未提供答覆'")
+    expect(reportManagementSource).toContain("selectedReport.admin_response || $t('未提供答覆')")
   })
 
   it('keeps one secondary Thread hint structure across review and source states', async () => {
@@ -824,7 +824,7 @@ describe('ReportManagementPanel', () => {
     expect(mocks.reviewComment).not.toHaveBeenCalled()
     expect(wrapper.get('.report-review__message').text()).toContain('審核結果已送出，無法修改。')
     expect(reportManagementSource).toContain('審核結果已送出，無法修改。')
-    expect(reportManagementSource).toContain("isFinal(data.status) ? '檢視' : '檢視／審核'")
+    expect(reportManagementSource).toContain("isFinal(data.status) ? $t('檢視') : $t('檢視／審核')")
     expect(reportManagementSource).toContain('v-if="!isFinal(selectedReport.status)"')
   })
 
@@ -920,13 +920,14 @@ describe('ReportManagementPanel', () => {
       )
     ).toHaveLength(3)
     expect(reportManagementSource).toContain('class="report-mobile-summary-preview__label"')
-    expect(reportManagementSource).toContain("data.description || '未提供詳細描述'")
-    expect(reportManagementSource).toContain("data.comment_content_snapshot || '無留言摘要'")
+    expect(reportManagementSource).toContain("data.description || $t('未提供詳細描述')")
+    expect(reportManagementSource).toContain("data.comment_content_snapshot || $t('無留言摘要')")
     expect(reportManagementSource).toMatch(
       /\.report-mobile-summary-preview\s*\{[\s\S]*?width:\s*100%;[\s\S]*?min-width:\s*0;[\s\S]*?background:/
     )
+    expect(reportManagementSource).toContain('max-height: calc(1.4em * 3)')
     expect(reportManagementSource).toMatch(
-      /\.report-mobile-summary-preview__text\s*\{[\s\S]*?max-height:\s*calc\(1\.4em \* 3\);[\s\S]*?overflow-wrap:\s*anywhere;[\s\S]*?-webkit-line-clamp:\s*3;/
+      /\.report-mobile-summary-preview__text\s*\{[\s\S]*?overflow-wrap:\s*anywhere;[\s\S]*?-webkit-line-clamp:\s*3;/
     )
     expect(reportManagementSource).toMatch(
       /\.report-mobile-card\s*\{[^}]*display:\s*grid;[^}]*grid-template-areas:[^}]*'header'[^}]*'body'[^}]*'footer';[^}]*grid-template-columns:\s*minmax\(0, 1fr\);[^}]*grid-template-rows:\s*auto auto auto;[^}]*align-content:\s*start;[^}]*justify-items:\s*stretch;[^}]*width:\s*100%;[^}]*min-height:\s*0;[^}]*height:\s*auto;[^}]*container-name:\s*report-card;[^}]*container-type:\s*inline-size;/
@@ -972,9 +973,9 @@ describe('ReportManagementPanel', () => {
     )
     expect(reportManagementSource).not.toContain('@container report-section (min-width: 56rem)')
     expect(reportManagementSource).toContain('@container report-section (max-width: 25rem)')
-    expect(reportManagementSource).toContain('<dt>回報者</dt>')
-    expect(reportManagementSource).toContain('<dt>留言者</dt>')
-    expect(reportManagementSource).toContain('<dt>審核時間</dt>')
+    expect(reportManagementSource).toContain("<dt>{{ $t('回報者') }}</dt>")
+    expect(reportManagementSource).toContain("<dt>{{ $t('留言者') }}</dt>")
+    expect(reportManagementSource).toContain("<dt>{{ $t('審核時間') }}</dt>")
     expect(reportManagementSource).toMatch(
       /\.report-mobile-card__footer\s*\{[\s\S]*?border-top:\s*1px solid/
     )

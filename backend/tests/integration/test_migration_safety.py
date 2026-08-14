@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from urllib.parse import quote, quote_plus
 
 import pytest
+import yaml
 from sqlalchemy import create_engine, text
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.engine import Engine, make_url
@@ -134,6 +136,185 @@ def test_empty_database_upgrade_is_idempotent() -> None:
     assert inspect_database().current_revision == head_revision()
     assert migrate.main(["upgrade", "--json"]) == 0
     assert inspect_database().upgrade_allowed is True
+
+
+def _default_bilingual_courses() -> list[dict[str, str]]:
+    category_keys = {
+        "FRESHMAN": "fundamental",
+        "SOPHOMORE": "required",
+        "JUNIOR": "experience",
+        "SENIOR": "optional",
+        "GRADUATE": "graduate",
+        "INTERDISCIPLINARY": "math-department",
+    }
+    seed_path = Path(__file__).parents[2] / "app" / "db" / "seed_data.yaml"
+    seed = yaml.safe_load(seed_path.read_text(encoding="utf-8"))
+    return [
+        {
+            "name": row["name"],
+            "name_en": row["name_en"],
+            "category": category_keys[row["category"]],
+        }
+        for row in seed["courses"]
+    ]
+
+
+def _insert_default_courses(engine: Engine, *, omit_last: bool = False) -> None:
+    rows = _default_bilingual_courses()
+    if omit_last:
+        rows = rows[:-1]
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO courses (name, category, order_index) "
+                "VALUES (:name, :category, 0)"
+            ),
+            [{"name": row["name"], "category": row["category"]} for row in rows],
+        )
+
+
+def test_bilingual_catalog_backfills_defaults_and_preserves_custom_rows(
+    clean_public_schema: Engine,
+) -> None:
+    previous_revision = "b7e3d9a1c5f2"
+    catalog_revision = "c2a8e4f6b9d1"
+    upgrade(previous_revision)
+    defaults = _default_bilingual_courses()
+    assert len(defaults) == 71
+    _insert_default_courses(clean_public_schema)
+    with clean_public_schema.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO course_category_configs (key, name, label) "
+                "VALUES ('custom-category', 'Custom Category', 'Custom')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO courses (name, category, order_index) "
+                "VALUES ('Custom Course', 'custom-category', 99)"
+            )
+        )
+        canonical_before = connection.execute(
+            text(
+                "SELECT key, name, label FROM course_category_configs "
+                "WHERE key = 'fundamental'"
+            )
+        ).one()
+
+    command.upgrade(alembic_config(), catalog_revision)
+
+    with clean_public_schema.connect() as connection:
+        actual_defaults = {
+            (row.category, row.name): row.name_en
+            for row in connection.execute(
+                text(
+                    "SELECT category, name, name_en FROM courses "
+                    "WHERE name != 'Custom Course'"
+                )
+            )
+        }
+        assert actual_defaults == {
+            (row["category"], row["name"]): row["name_en"] for row in defaults
+        }
+        assert connection.execute(
+            text(
+                "SELECT name, category, name_en FROM courses "
+                "WHERE name = 'Custom Course'"
+            )
+        ).one() == ("Custom Course", "custom-category", None)
+        assert connection.execute(
+            text(
+                "SELECT key, name, label, name_en, label_en "
+                "FROM course_category_configs WHERE key = 'custom-category'"
+            )
+        ).one() == (
+            "custom-category",
+            "Custom Category",
+            "Custom",
+            None,
+            None,
+        )
+        assert {
+            row.key: (row.name_en, row.label_en)
+            for row in connection.execute(
+                text(
+                    "SELECT key, name_en, label_en "
+                    "FROM course_category_configs WHERE key != 'custom-category'"
+                )
+            )
+        } == {
+            "fundamental": ("Foundation Courses", "Foundation"),
+            "required": ("Required Major Courses", "Required"),
+            "optional": ("Major Electives", "Elective"),
+            "experience": ("Laboratory Courses", "Laboratory"),
+            "graduate": ("Graduate Courses", "Graduate"),
+            "math-department": ("Mathematics Courses", "Mathematics"),
+        }
+        assert (
+            connection.execute(
+                text(
+                    "SELECT key, name, label FROM course_category_configs "
+                    "WHERE key = 'fundamental'"
+                )
+            ).one()
+            == canonical_before
+        )
+
+    command.downgrade(alembic_config(), previous_revision)
+    inspector = sa_inspect(clean_public_schema)
+    assert "name_en" not in {
+        column["name"] for column in inspector.get_columns("courses", schema="public")
+    }
+    assert {"name_en", "label_en"}.isdisjoint(
+        column["name"]
+        for column in inspector.get_columns("course_category_configs", schema="public")
+    )
+    with clean_public_schema.connect() as connection:
+        assert connection.scalar(text("SELECT count(*) FROM courses")) == 72
+        assert (
+            connection.scalar(
+                text(
+                    "SELECT count(*) FROM course_category_configs "
+                    "WHERE key = 'custom-category'"
+                )
+            )
+            == 1
+        )
+
+    command.upgrade(alembic_config(), "head")
+    snapshot_columns = {
+        column["name"]: column
+        for column in sa_inspect(clean_public_schema).get_columns(
+            "archive_submissions", schema="public"
+        )
+    }
+    for column_name in (
+        "requested_course_name_en",
+        "requested_category_name_en",
+        "requested_category_label_en",
+    ):
+        assert snapshot_columns[column_name]["nullable"] is True
+
+
+def test_bilingual_catalog_nonempty_partial_defaults_fail_closed(
+    clean_public_schema: Engine,
+) -> None:
+    previous_revision = "b7e3d9a1c5f2"
+    upgrade(previous_revision)
+    _insert_default_courses(clean_public_schema, omit_last=True)
+
+    with pytest.raises(RuntimeError, match="missing canonical course"):
+        command.upgrade(alembic_config(), "c2a8e4f6b9d1")
+
+    inspector = sa_inspect(clean_public_schema)
+    assert "name_en" not in {
+        column["name"] for column in inspector.get_columns("courses", schema="public")
+    }
+    with clean_public_schema.connect() as connection:
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
+            previous_revision
+        )
 
 
 def test_head_database_preflight_is_read_only(clean_public_schema: Engine) -> None:

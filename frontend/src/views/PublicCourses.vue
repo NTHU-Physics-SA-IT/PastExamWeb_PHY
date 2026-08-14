@@ -1,28 +1,45 @@
 <template>
   <main class="public-catalog">
-    <nav class="breadcrumbs" aria-label="麵包屑導覽">
-      <RouterLink to="/">首頁</RouterLink>
+    <nav class="breadcrumbs" :aria-label="$t('麵包屑導覽')">
+      <RouterLink to="/">{{ $t('首頁') }}</RouterLink>
       <span aria-hidden="true">/</span>
-      <span>公開課程目錄</span>
+      <span>{{ $t('公開課程目錄') }}</span>
     </nav>
 
     <header class="catalog-header">
       <p class="eyebrow">PHY ARCHIVE</p>
-      <h1>清大物理考古題課程目錄</h1>
-      <p>瀏覽清大物理相關課程；有公開考古題時，頁面會提供學年度、授課教師、考試類型與解答收錄狀況。完整 PDF 的預覽與下載仍需登入。</p>
+      <h1>{{ $t('清大物理考古題課程目錄') }}</h1>
+      <p>
+        {{
+          $t(
+            '瀏覽清大物理相關課程；有公開考古題時，頁面會提供學年度、授課教師、考試類型與解答收錄狀況。完整 PDF 的預覽與下載仍需登入。'
+          )
+        }}
+      </p>
     </header>
 
-    <p v-if="loading" class="status-message" aria-live="polite">正在載入課程資料……</p>
+    <label class="catalog-search">
+      <span>{{ $t('搜尋課程') }}</span>
+      <input v-model="searchQuery" type="search" :placeholder="$t('輸入中文或英文課程名稱')" />
+    </label>
+
+    <p v-if="loading" class="status-message" aria-live="polite">{{ $t('正在載入課程資料……') }}</p>
 
     <section v-else-if="errorMessage" class="status-message error-message" role="alert">
-      <h2>課程目錄暫時無法使用</h2>
+      <h2>{{ $t('課程目錄暫時無法使用') }}</h2>
       <p>{{ errorMessage }}</p>
-      <button type="button" class="retry-button" @click="loadCatalog">重新載入</button>
+      <button type="button" class="retry-button" @click="loadCatalog">{{ $t('重新載入') }}</button>
     </section>
 
     <section v-else-if="sections.length === 0" class="empty-state">
-      <h2>目前尚未有可公開瀏覽的課程</h2>
-      <p>網站運作正常；有通過公開條件的考古題後，課程會顯示在這裡。</p>
+      <h2>{{ searchQuery ? $t('找不到符合的課程') : $t('目前尚未有可公開瀏覽的課程') }}</h2>
+      <p>
+        {{
+          searchQuery
+            ? $t('請嘗試其他中文或英文關鍵字。')
+            : $t('網站運作正常；有通過公開條件的考古題後，課程會顯示在這裡。')
+        }}
+      </p>
     </section>
 
     <div v-else class="category-list">
@@ -32,7 +49,7 @@
             <p v-if="section.label" class="category-label">{{ section.label }}</p>
             <h2>{{ section.name }}</h2>
           </div>
-          <span>{{ section.courses.length }} 門課程</span>
+          <span>{{ $t('{count} 門課程', { count: section.courses.length }) }}</span>
         </header>
 
         <div class="course-grid">
@@ -41,35 +58,46 @@
               class="course-card-link"
               :to="{ name: 'PublicCourse', params: { courseId: course.id } }"
             >
-              <h3>{{ course.name }}</h3>
+              <h3>{{ localizedCourseName(course) }}</h3>
               <i class="pi pi-arrow-right" aria-hidden="true"></i>
             </RouterLink>
           </article>
         </div>
       </section>
     </div>
-
   </main>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { courseService } from '../api'
 import { SITE_URL, setSeo } from '../utils/seo'
+import {
+  courseMatchesSearch,
+  localizedCategoryLabel,
+  localizedCategoryName,
+  localizedCourseName,
+} from '../utils/localizedCatalog'
+
+const { t } = useI18n()
 
 const categories = ref([])
 const coursesByCategory = ref({})
 const loading = ref(true)
 const errorMessage = ref('')
+const searchQuery = ref('')
 
 const sections = computed(() =>
   categories.value
     .map((category) => ({
       key: category.key,
-      name: category.name,
-      label: category.label,
-      courses: coursesByCategory.value[category.key] || [],
+      name: localizedCategoryName(category),
+      label: localizedCategoryLabel(category),
+      courses: (coursesByCategory.value[category.key] || []).filter((course) =>
+        courseMatchesSearch(course, searchQuery.value)
+      ),
     }))
     .filter((section) => section.courses.length > 0)
 )
@@ -82,40 +110,40 @@ function applyCatalogSeo() {
       position: index + 1,
       item: {
         '@type': 'Course',
-        name: course.name,
+        name: localizedCourseName(course),
         url: `${SITE_URL}/courses/${course.id}`,
         provider: { '@id': `${SITE_URL}/#organization` },
       },
     }))
 
   setSeo({
-    title: '清大物理考古題課程目錄',
-    description: '瀏覽清大物理相關課程已公開收錄的歷屆考題資訊。',
+    title: t('清大物理考古題課程目錄'),
+    description: t('瀏覽清大物理相關課程已公開收錄的歷屆考題資訊。'),
     canonicalPath: '/courses',
     robots: 'index, follow',
     jsonLd: [
       {
         '@type': 'CollectionPage',
         '@id': `${SITE_URL}/courses#page`,
-        name: '清大物理考古題課程目錄',
+        name: t('清大物理考古題課程目錄'),
         url: `${SITE_URL}/courses`,
         isPartOf: { '@id': `${SITE_URL}/#website` },
       },
       {
         '@type': 'BreadcrumbList',
         itemListElement: [
-          { '@type': 'ListItem', position: 1, name: '首頁', item: `${SITE_URL}/` },
+          { '@type': 'ListItem', position: 1, name: t('首頁'), item: `${SITE_URL}/` },
           {
             '@type': 'ListItem',
             position: 2,
-            name: '公開課程目錄',
+            name: t('公開課程目錄'),
             item: `${SITE_URL}/courses`,
           },
         ],
       },
       {
         '@type': 'ItemList',
-        name: '公開考古題課程',
+        name: t('公開考古題課程'),
         numberOfItems: courseItems.length,
         itemListElement: courseItems,
       },
@@ -139,9 +167,9 @@ async function loadCatalog() {
     console.error('Failed to load public course catalog:', error)
     categories.value = []
     coursesByCategory.value = {}
-    errorMessage.value = '目前無法讀取課程目錄，請稍後再試。'
+    errorMessage.value = t('目前無法讀取課程目錄，請稍後再試。')
     setSeo({
-      title: '課程目錄暫時無法使用',
+      title: t('課程目錄暫時無法使用'),
       canonicalPath: '/courses',
       robots: 'noindex, follow',
     })
@@ -198,6 +226,24 @@ onMounted(loadCatalog)
 .catalog-header {
   max-width: 720px;
   margin-bottom: 2rem;
+}
+
+.catalog-search {
+  display: grid;
+  gap: 0.45rem;
+  max-width: 32rem;
+  margin: 0 0 2rem;
+  font-weight: 650;
+}
+
+.catalog-search input {
+  min-width: 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.7rem;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  font: inherit;
 }
 
 .catalog-header h1 {

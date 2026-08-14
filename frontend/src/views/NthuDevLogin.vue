@@ -4,18 +4,21 @@
       <p class="nthu-dev-login__eyebrow">Development only</p>
       <h1>NTHU OAuth Local QA</h1>
       <p>
-        選擇固定測試身分，接著會走正式的 OAuth callback、access policy、Redis handoff 與 JWT
-        exchange 流程。
+        {{
+          $t(
+            '選擇固定測試身分，接著會走正式的 OAuth callback、access policy、Redis handoff 與 JWT exchange 流程。'
+          )
+        }}
       </p>
     </header>
 
     <Message v-if="errorMessage" severity="error" :closable="false">{{ errorMessage }}</Message>
-    <ProgressSpinner v-else-if="loading" aria-label="載入測試身分" />
-    <section v-else class="nthu-dev-login__grid" aria-label="NTHU OAuth 固定測試身分">
+    <ProgressSpinner v-else-if="loading" :aria-label="$t('載入測試身分')" />
+    <section v-else class="nthu-dev-login__grid" :aria-label="$t('NTHU OAuth 固定測試身分')">
       <article v-for="profile in profiles" :key="profile.key" class="nthu-dev-login__card">
         <div>
           <span class="nthu-dev-login__status" :class="{ 'is-inactive': !profile.inschool }">
-            {{ profile.inschool ? '在校' : '非在校' }}
+            {{ profile.inschool ? $t('在校') : $t('非在校') }}
           </span>
           <h2>{{ profile.label }}</h2>
           <p>{{ profile.name }}</p>
@@ -26,15 +29,19 @@
             <dd>{{ profile.userid || '—' }}</dd>
           </div>
           <div>
-            <dt>系所</dt>
-            <dd>{{ profile.department_name || '—' }}</dd>
+            <dt>{{ $t('系所') }}</dt>
+            <dd>{{ localizedNthuDepartmentName(profile) || '—' }}</dd>
           </div>
           <div>
-            <dt>預期身分類別</dt>
-            <dd>{{ profile.nthu_affiliation_label }}</dd>
+            <dt>{{ $t('預期身分類別') }}</dt>
+            <dd>{{ $t(profile.nthu_affiliation_label) }}</dd>
           </div>
         </dl>
-        <Button label="以此測試身分登入" icon="pi pi-sign-in" @click="startLogin(profile.key)" />
+        <Button
+          :label="$t('以此測試身分登入')"
+          icon="pi pi-sign-in"
+          @click="startLogin(profile.key)"
+        />
       </article>
     </section>
   </main>
@@ -42,8 +49,12 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { authService } from '../api'
+import { localizedNthuDepartmentName } from '../utils/nthuAffiliation'
+
+const { t } = useI18n()
 
 const profiles = ref([])
 const loading = ref(true)
@@ -64,7 +75,7 @@ onMounted(async () => {
     profiles.value = data.profiles
   } catch (error) {
     console.error('Failed to load NTHU development profiles:', error)
-    errorMessage.value = '無法載入 NTHU OAuth 測試身分。請確認 development mock 已明確啟用。'
+    errorMessage.value = t('無法載入 NTHU OAuth 測試身分。請確認 development mock 已明確啟用。')
   } finally {
     loading.value = false
   }

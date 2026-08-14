@@ -67,6 +67,8 @@ def test_dev_compose_command_matches_the_platform_execution_boundary() -> None:
         "backend/app/main.py",
         "backend/alembic/versions/9f1c2a7e4b63_add_nthu_oauth_identity_unique.py",
         "backend/alembic/versions/b7e3d9a1c5f2_add_nthu_student_id.py",
+        "backend/alembic/versions/c2a8e4f6b9d1_add_bilingual_course_catalog.py",
+        "backend/alembic/versions/d4b7e2a9c6f1_add_bilingual_submission_snapshots.py",
     ),
 )
 def test_backend_python_sources_use_lf_checkout_policy(path: str) -> None:
@@ -91,7 +93,7 @@ def test_backend_python_sources_use_lf_checkout_policy(path: str) -> None:
 
 
 def test_runtime_checker_tracks_current_schema_head() -> None:
-    assert checker.EXPECTED_ALEMBIC_HEAD == "b7e3d9a1c5f2"
+    assert checker.EXPECTED_ALEMBIC_HEAD == "d4b7e2a9c6f1"
 
 
 def test_posix_source_identity_is_unchanged() -> None:
