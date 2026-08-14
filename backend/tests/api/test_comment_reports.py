@@ -89,8 +89,6 @@ async def test_comment_report_creation_validates_auth_reason_scope_and_duplicate
         created = await client.post(path, json={"report_reason": "misinformation"})
         assert created.status_code == 201
         body = created.json()
-        assert body["title_en"] is None
-        assert body["description_en"] is None
         assert body["comment_content_snapshot"] == messages[0].content
         assert body["comment_author_name"] == "Reported Author"
         assert body["source_exists"] is True
@@ -368,6 +366,8 @@ async def test_system_issue_reports_are_local_admin_only_and_filter_unsafe_githu
         created = await client.post("/reports/system-issues", json=payload)
         assert created.status_code == 201
         body = created.json()
+        assert body["title_en"] is None
+        assert body["description_en"] is None
         assert body["github_issue_number"] is None
         assert body["github_issue_url"] is None
         assert body["status"] == "local_only"
