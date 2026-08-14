@@ -3,7 +3,7 @@ import re
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import case, func, or_
+from sqlalchemy import and_, case, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlmodel import select
@@ -108,6 +108,8 @@ def _report_select():
             reviewer.nickname,
             reviewer.name,
             source.id,
+            Course.name,
+            Course.name_en,
         )
         .outerjoin(reporter, reporter.id == CommentReport.reporter_user_id)
         .outerjoin(author, author.id == CommentReport.comment_author_id)
@@ -116,6 +118,7 @@ def _report_select():
             source,
             (source.id == CommentReport.comment_id) & (source.deleted_at.is_(None)),
         )
+        .outerjoin(Course, Course.id == CommentReport.course_id)
         .where(CommentReport.deleted_at.is_(None))
     )
     return statement, reporter, author, reviewer
@@ -144,6 +147,7 @@ def _serialize_report(row) -> CommentReportRead:
         comment_created_at_snapshot=report.comment_created_at_snapshot,
         archive_name=report.archive_name_snapshot,
         course_name=report.course_name_snapshot,
+        course_name_en=row[9] if row[8] == report.course_name_snapshot else None,
         status=report.status,
         admin_response=report.admin_response,
         reviewed_by=report.reviewed_by,
@@ -187,6 +191,8 @@ def _archive_report_select():
             ArchiveSubmission.id,
             ArchiveSubmission.status,
             ArchiveSubmission.deleted_at,
+            Course.name,
+            Course.name_en,
         )
         .outerjoin(reporter, reporter.id == ArchiveReport.reporter_user_id)
         .outerjoin(reviewer, reviewer.id == ArchiveReport.reviewed_by)
@@ -245,6 +251,7 @@ def _serialize_archive_report(row) -> ArchiveReportRead:
         supplementary_detail=report.supplementary_detail,
         archive_name=report.archive_name_snapshot,
         course_name=report.course_name_snapshot,
+        course_name_en=row[13] if row[12] == report.course_name_snapshot else None,
         academic_year=report.academic_year_snapshot,
         archive_type=report.archive_type_snapshot,
         professor=report.professor_snapshot,
@@ -676,6 +683,10 @@ async def list_comment_reports(
             or_(
                 CommentReport.comment_content_snapshot.ilike(pattern),
                 CommentReport.course_name_snapshot.ilike(pattern),
+                and_(
+                    Course.name == CommentReport.course_name_snapshot,
+                    Course.name_en.ilike(pattern),
+                ),
                 CommentReport.archive_name_snapshot.ilike(pattern),
                 reporter.name.ilike(pattern),
                 reporter.nickname.ilike(pattern),
@@ -854,6 +865,7 @@ async def review_comment_report(
             "report_id": report.id,
             "status": new_status,
             "comment_deleted": report.comment_deleted,
+            "admin_response": response or None,
             "reviewed_at": now.isoformat(),
         },
         dedupe_key=f"comment_report_result:{report.id}",
@@ -989,6 +1001,7 @@ async def create_archive_report(
             "course_id": course.id,
             "archive_id": archive.id,
             "course_name": course.name,
+            "course_name_en": course.name_en,
             "archive_name": archive.name,
             "reason": report.reason,
             "status": report.status,
@@ -1052,6 +1065,10 @@ async def list_archive_reports(
         search_conditions = [
             ArchiveReport.supplementary_detail.ilike(pattern),
             ArchiveReport.course_name_snapshot.ilike(pattern),
+            and_(
+                Course.name == ArchiveReport.course_name_snapshot,
+                Course.name_en.ilike(pattern),
+            ),
             ArchiveReport.archive_name_snapshot.ilike(pattern),
             ArchiveReport.professor_snapshot.ilike(pattern),
             ArchiveReport.reporter_name_snapshot.ilike(pattern),
@@ -1267,6 +1284,12 @@ async def review_archive_report(
         else "管理員已完成處理；該考古題未因本次審核下架。"
     )
     if report.reporter_user_id is not None:
+        course = locked.rows.course(report.course_id) if report.course_id is not None else None
+        course_name_en = (
+            course.name_en
+            if course is not None and course.name == report.course_name_snapshot
+            else None
+        )
         await enqueue_personal_notification(
             db,
             user_id=report.reporter_user_id,
@@ -1284,9 +1307,11 @@ async def review_archive_report(
                 "course_id": report.course_id,
                 "archive_id": report.archive_id,
                 "course_name": report.course_name_snapshot,
+                "course_name_en": course_name_en,
                 "archive_name": report.archive_name_snapshot,
                 "status": new_status,
                 "archive_taken_down": report.archive_taken_down,
+                "admin_response": response or None,
                 "reviewed_at": now.isoformat(),
                 "destination": "archive",
             },

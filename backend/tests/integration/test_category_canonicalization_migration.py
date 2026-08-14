@@ -22,6 +22,7 @@ from app.db.test_database_guard import (
 )
 
 PREVIOUS_REVISION = "a4c7e9d2f6b1"
+CANONICALIZATION_REVISION = "c9e4f1a7b2d6"
 
 
 @pytest.fixture()
@@ -293,6 +294,10 @@ def _upgrade_head() -> None:
     command.upgrade(alembic_config(), "head")
 
 
+def _upgrade_canonicalization() -> None:
+    command.upgrade(alembic_config(), CANONICALIZATION_REVISION)
+
+
 def test_fresh_database_creates_six_canonical_defaults(
     migration_engine: Engine,
 ) -> None:
@@ -421,7 +426,7 @@ def test_existing_canonical_row_updates_legacy_references_only(
         suffix="canonical-with-legacy-reference",
     )
 
-    _upgrade_head()
+    _upgrade_canonicalization()
 
     assert _category(migration_engine, "fundamental") == before
     with migration_engine.connect() as connection:
@@ -500,7 +505,7 @@ def test_custom_category_and_its_references_are_untouched(
         ("users", "courses", "course_submissions", "archive_submissions"),
     )
 
-    _upgrade_head()
+    _upgrade_canonicalization()
 
     assert _category(migration_engine, "web-development") == before
     assert _table_signatures(
@@ -567,7 +572,7 @@ def test_legacy_only_row_keeps_id_metadata_and_updates_only_keys(
         suffix="legacy",
     )
 
-    _upgrade_head()
+    _upgrade_canonicalization()
 
     after = _category(migration_engine, "math-department")
     assert after["id"] == before["id"]

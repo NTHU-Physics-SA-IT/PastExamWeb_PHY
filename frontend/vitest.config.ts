@@ -12,6 +12,7 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    setupFiles: ['./tests/setup.js'],
     include: ['tests/unit/**/*.{test,spec}.{js,ts,tsx}'],
     exclude: [...configDefaults.exclude, 'tests/e2e/**', 'playwright-report/**'],
     coverage: {

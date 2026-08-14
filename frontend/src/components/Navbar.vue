@@ -12,7 +12,7 @@
             class="sidebar-toggle"
             @click="$emit('toggle-sidebar')"
           />
-          <RouterLink to="/" class="brand-lockup clickable-title" aria-label="回到首頁">
+          <RouterLink to="/" class="brand-lockup clickable-title" :aria-label="$t('回到首頁')">
             <span class="brand-mark-frame">
               <img :src="'/physics-symbol.png'" alt="清大物理考古系統" class="brand-mark" />
             </span>
@@ -32,17 +32,17 @@
             <Button
               v-if="canAccessAdmin"
               icon="pi pi-cog"
-              label="管理中心"
+              :label="$t('管理中心')"
               severity="secondary"
               size="small"
               text
               @click="handleNavigateAdmin"
-              aria-label="管理中心"
+              :aria-label="$t('管理中心')"
             />
             <Button
               v-if="moreActions.length"
               icon="pi pi-list"
-              label="功能列表"
+              :label="$t('功能列表')"
               severity="secondary"
               size="small"
               text
@@ -52,7 +52,7 @@
             <Button
               v-if="isAuthenticated"
               icon="pi pi-sign-out"
-              label="登出"
+              :label="$t('登出')"
               @click="handleLogout"
               severity="secondary"
               size="small"
@@ -62,7 +62,7 @@
             <Button
               v-else-if="showGuestLogin"
               icon="pi pi-sign-in"
-              label="登入"
+              :label="$t('登入')"
               @click="openLoginDialog"
               severity="secondary"
               size="small"
@@ -81,8 +81,8 @@
               severity="secondary"
               size="small"
               text
-              aria-label="管理中心"
-              title="管理中心"
+              :aria-label="$t('管理中心')"
+              :title="$t('管理中心')"
             />
             <Button
               v-if="moreActions.length"
@@ -107,8 +107,17 @@
           </div>
 
           <Button
+            :label="isEnglish ? '中' : 'EN'"
+            :aria-label="isEnglish ? $t('切換為中文') : $t('切換為英文')"
+            severity="secondary"
+            size="small"
+            text
+            class="locale-toggle-button"
+            @click="toggleLocale"
+          />
+          <Button
             :icon="isDarkTheme ? 'pi pi-sun' : 'pi pi-moon'"
-            :aria-label="isDarkTheme ? '切換至淺色模式' : '切換至深色模式'"
+            :aria-label="isDarkTheme ? $t('切換至淺色模式') : $t('切換至深色模式')"
             severity="secondary"
             size="small"
             text
@@ -161,7 +170,7 @@
     <Dialog
       :visible="loginVisible"
       @update:visible="loginVisible = $event"
-      header="登入"
+      :header="$t('登入')"
       :modal="true"
       :draggable="false"
       :closeOnEscape="false"
@@ -178,7 +187,7 @@
               class="w-full"
               @keyup.enter="handleLocalLogin"
             />
-            <label for="username">帳號</label>
+            <label for="username">{{ $t('帳號') }}</label>
           </FloatLabel>
         </div>
         <div class="field mt-3 w-full">
@@ -193,12 +202,12 @@
               inputClass="w-full"
               @keyup.enter="handleLocalLogin"
             />
-            <label for="password">密碼</label>
+            <label for="password">{{ $t('密碼') }}</label>
           </FloatLabel>
         </div>
         <div class="field mt-4">
           <Button
-            label="登入"
+            :label="$t('登入')"
             type="submit"
             class="p-button-primary w-full"
             @click="handleLocalLogin"
@@ -216,17 +225,17 @@
       :closeOnEscape="true"
       :style="{ width: '700px', maxWidth: '90vw' }"
       class="issue-report-dialog"
-      :pt="{ root: { 'aria-label': '系統問題回報', 'aria-labelledby': null } }"
+      :pt="{ root: { 'aria-label': $t('系統問題回報'), 'aria-labelledby': null } }"
     >
       <template #header>
         <div class="flex align-items-center gap-2.5">
           <i class="pi pi-comments text-2xl" />
-          <div class="text-xl leading-tight font-semibold">系統問題回報</div>
+          <div class="text-xl leading-tight font-semibold">{{ $t('系統問題回報') }}</div>
         </div>
       </template>
       <div class="p-fluid w-full">
         <div class="field">
-          <label for="issue-type" class="font-semibold">問題類型</label>
+          <label for="issue-type" class="font-semibold">{{ $t('問題類型') }}</label>
           <Select
             inputId="issue-type"
             name="issue-type"
@@ -234,18 +243,18 @@
             :options="issueTypes"
             optionLabel="label"
             optionValue="value"
-            placeholder="選擇問題類型"
+            :placeholder="$t('選擇問題類型')"
             class="w-full mt-2"
           />
         </div>
 
         <div class="field mt-3">
-          <label for="issue-title" class="font-semibold">問題標題</label>
+          <label for="issue-title" class="font-semibold">{{ $t('問題標題') }}</label>
           <InputText
             id="issue-title"
             name="issue-title"
             v-model="issueForm.title"
-            placeholder="簡短描述遇到的問題"
+            :placeholder="$t('簡短描述遇到的問題')"
             class="w-full mt-2"
             :maxlength="100"
           />
@@ -253,12 +262,12 @@
         </div>
 
         <div class="field mt-3">
-          <label for="issue-description" class="font-semibold">詳細描述</label>
+          <label for="issue-description" class="font-semibold">{{ $t('詳細描述') }}</label>
           <Textarea
             id="issue-description"
             name="issue-description"
             v-model="issueForm.description"
-            placeholder="請詳細描述遇到的問題，包括：&#10;1. 操作步驟&#10;2. 預期結果&#10;3. 實際結果"
+            :placeholder="$t('請詳細描述遇到的問題，包括：\n1. 操作步驟\n2. 預期結果\n3. 實際結果')"
             class="w-full mt-2"
             rows="8"
             :maxlength="2000"
@@ -267,19 +276,19 @@
         </div>
 
         <div class="field mt-3">
-          <label for="user-info" class="font-semibold">聯絡方式 (選填)</label>
+          <label for="user-info" class="font-semibold">{{ $t('聯絡方式 (選填)') }}</label>
           <InputText
             id="user-info"
             name="user-info"
             v-model="issueForm.contact"
-            placeholder="Email 或其他聯絡方式，方便我們回覆"
+            :placeholder="$t('Email 或其他聯絡方式，方便我們回覆')"
             class="w-full mt-2"
           />
         </div>
 
         <div class="flex justify-between gap-3 mt-4">
           <Button
-            label="取消"
+            :label="$t('取消')"
             icon="pi pi-times"
             severity="secondary"
             outlined
@@ -287,7 +296,7 @@
             class="flex-1"
           />
           <Button
-            label="建立回報並前往 GitHub"
+            :label="$t('建立回報並前往 GitHub')"
             icon="pi pi-external-link"
             @click="submitIssueReport"
             :disabled="!canSubmitIssue"
@@ -299,9 +308,9 @@
         <div class="mt-3 p-3 bg-blue-50 border-round text-sm flex align-items-start">
           <i class="pi pi-info-circle text-blue-600 mr-2 mt-1"></i>
           <span class="text-blue-800 line-height-3" style="overflow-wrap: anywhere">
-            系統會先保存本地回報摘要，再開啟 GitHub 預填 Issue 頁面。<br />
-            請先在目前瀏覽器登入 GitHub，否則登入後可能無法正確返回預填頁面。<br />
-            GitHub Issue 仍需由您在 GitHub 頁面確認送出後才會正式建立。
+            {{ $t('系統會先保存本地回報摘要，再開啟 GitHub 預填 Issue 頁面。') }}<br />
+            {{ $t('請先在目前瀏覽器登入 GitHub，否則登入後可能無法正確返回預填頁面。') }}<br />
+            {{ $t('GitHub Issue 仍需由您在 GitHub 頁面確認送出後才會正式建立。') }}
           </span>
         </div>
       </div>
@@ -318,6 +327,7 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import { trackEvent, EVENTS } from '../utils/analytics'
 import { useNotifications } from '../utils/useNotifications'
+import { useLocale } from '../i18n'
 import NotificationModal from './NotificationModal.vue'
 import NotificationCenterModal from './NotificationCenterModal.vue'
 import {
@@ -359,13 +369,6 @@ export default {
       notificationFocusId: null,
       deletingPersonalNotificationId: null,
       deletingAllPersonalNotifications: false,
-      issueTypes: [
-        { label: 'Bug / 程式錯誤', value: 'bug' },
-        { label: '功能建議', value: 'enhancement' },
-        { label: '效能問題', value: 'performance' },
-        { label: 'UI/UX 問題', value: 'ui-ux' },
-        { label: '其他問題', value: 'question' },
-      ],
     }
   },
   setup() {
@@ -374,6 +377,7 @@ export default {
     const toast = useToast()
     const confirm = useConfirm()
     const notificationStore = useNotifications()
+    const { isEnglish, toggleLocale } = useLocale()
 
     return {
       isDarkTheme,
@@ -382,6 +386,8 @@ export default {
       toast,
       confirm,
       notificationStore,
+      isEnglish,
+      toggleLocale,
     }
   },
   mounted() {
@@ -527,8 +533,8 @@ export default {
       if (!this.isAuthenticated) {
         this.toast.add({
           severity: 'warn',
-          summary: '請先登入',
-          detail: '登入後即可檢視公告與個人通知',
+          summary: this.$t('請先登入'),
+          detail: this.$t('登入後即可檢視公告與個人通知'),
           life: 3000,
         })
         return
@@ -606,16 +612,16 @@ export default {
         await this.notificationStore.deletePersonalNotification(item.id)
         this.toast.add({
           severity: 'success',
-          summary: '通知已刪除',
-          detail: '這則個人通知已永久刪除',
+          summary: this.$t('通知已刪除'),
+          detail: this.$t('這則個人通知已永久刪除'),
           life: 3000,
         })
       } catch (error) {
         console.error('Delete personal notification error:', error)
         this.toast.add({
           severity: 'error',
-          summary: '刪除失敗',
-          detail: '無法刪除通知，請稍後再試',
+          summary: this.$t('刪除失敗'),
+          detail: this.$t('無法刪除通知，請稍後再試'),
           life: 3000,
         })
       } finally {
@@ -625,11 +631,11 @@ export default {
 
     handleDeletePersonalNotification(item) {
       this.confirm.require({
-        header: '刪除這則通知？',
-        message: '通知刪除後無法復原，也不會進入垃圾桶。',
+        header: this.$t('刪除這則通知？'),
+        message: this.$t('通知刪除後無法復原，也不會進入垃圾桶。'),
         icon: 'pi pi-exclamation-triangle',
-        rejectLabel: '取消',
-        acceptLabel: '刪除',
+        rejectLabel: this.$t('取消'),
+        acceptLabel: this.$t('刪除'),
         acceptClass: 'p-button-danger',
         accept: () => this.deletePersonalNotification(item),
       })
@@ -642,16 +648,16 @@ export default {
         await this.notificationStore.deleteAllPersonalNotifications()
         this.toast.add({
           severity: 'success',
-          summary: '已刪除全部個人通知',
-          detail: '所有個人通知已永久刪除',
+          summary: this.$t('已刪除全部個人通知'),
+          detail: this.$t('所有個人通知已永久刪除'),
           life: 3000,
         })
       } catch (error) {
         console.error('Delete all personal notifications error:', error)
         this.toast.add({
           severity: 'error',
-          summary: '刪除失敗',
-          detail: '無法刪除全部個人通知，請稍後再試',
+          summary: this.$t('刪除失敗'),
+          detail: this.$t('無法刪除全部個人通知，請稍後再試'),
           life: 3000,
         })
       } finally {
@@ -661,11 +667,11 @@ export default {
 
     handleDeleteAllPersonalNotifications() {
       this.confirm.require({
-        header: '刪除全部個人通知？',
-        message: '這會永久刪除你的所有個人通知，刪除後無法復原，也不會進入垃圾桶。',
+        header: this.$t('刪除全部個人通知？'),
+        message: this.$t('這會永久刪除你的所有個人通知，刪除後無法復原，也不會進入垃圾桶。'),
         icon: 'pi pi-exclamation-triangle',
-        rejectLabel: '取消',
-        acceptLabel: '全部刪除',
+        rejectLabel: this.$t('取消'),
+        acceptLabel: this.$t('全部刪除'),
         acceptClass: 'p-button-danger',
         accept: () => this.deleteAllPersonalNotifications(),
       })
@@ -694,8 +700,8 @@ export default {
       if (!this.username || !this.password) {
         this.toast.add({
           severity: 'error',
-          summary: '錯誤',
-          detail: '請輸入帳號和密碼',
+          summary: this.$t('錯誤'),
+          detail: this.$t('請輸入帳號和密碼'),
           life: 3000,
         })
         return
@@ -718,18 +724,18 @@ export default {
         console.error('Login failed:', error)
         trackEvent(EVENTS.LOGIN_LOCAL, { success: false })
 
-        let detail = '無法連線至後端，請確認服務是否正常'
+        let detail = this.$t('無法連線至後端，請確認服務是否正常')
         if (error.isInvalidCredentials || error.response?.status === 401) {
-          detail = '帳號或密碼錯誤'
+          detail = this.$t('帳號或密碼錯誤')
         } else if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
-          detail = '伺服器回應逾時，請稍後再試'
+          detail = this.$t('伺服器回應逾時，請稍後再試')
         } else if (error.response?.status >= 500) {
-          detail = '伺服器發生錯誤，請稍後再試'
+          detail = this.$t('伺服器發生錯誤，請稍後再試')
         }
 
         this.toast.add({
           severity: 'error',
-          summary: '登入失敗',
+          summary: this.$t('登入失敗'),
           detail,
           life: 3000,
         })
@@ -873,16 +879,16 @@ export default {
         this.closeIssueReportDialog()
         this.toast.add({
           severity: 'success',
-          summary: '回報摘要已保存',
-          detail: '已開啟 GitHub 預填頁面，請在 GitHub 完成送出',
+          summary: this.$t('回報摘要已保存'),
+          detail: this.$t('已開啟 GitHub 預填頁面，請在 GitHub 完成送出'),
           life: 4000,
         })
       } catch (error) {
         console.error('Submit system issue report error:', error)
         this.toast.add({
           severity: 'error',
-          summary: '回報建立失敗',
-          detail: '尚未開啟 GitHub，請稍後再試',
+          summary: this.$t('回報建立失敗'),
+          detail: this.$t('尚未開啟 GitHub，請稍後再試'),
           life: 3500,
         })
       } finally {
@@ -1066,9 +1072,20 @@ export default {
   },
 
   computed: {
+    issueTypes() {
+      return [
+        { label: 'Bug / Software Error', value: 'bug' },
+        { label: this.$t('功能建議'), value: 'enhancement' },
+        { label: this.$t('效能問題'), value: 'performance' },
+        { label: this.$t('UI/UX 問題'), value: 'ui-ux' },
+        { label: this.$t('其他問題'), value: 'question' },
+      ]
+    },
     showGuestLogin() {
       const isPublicDiscoveryRoute =
-        this.$route.path === '/' || this.$route.path === '/courses' || this.$route.path.startsWith('/courses/')
+        this.$route.path === '/' ||
+        this.$route.path === '/courses' ||
+        this.$route.path.startsWith('/courses/')
       return !this.isAuthenticated && !isPublicDiscoveryRoute
     },
 
@@ -1095,7 +1112,7 @@ export default {
 
       const items = [
         {
-          label: '公告與通知',
+          label: this.$t('通知中心'),
           icon: 'pi pi-bell',
           badge: this.notificationStore?.unreadTotal?.value || null,
           command: () => this.invokeMenuAction(() => this.openNotificationCenter('navbar-menu')),
@@ -1103,12 +1120,12 @@ export default {
       ]
 
       items.unshift({
-        label: '個人化設定',
+        label: this.$t('個人化設定'),
         icon: 'pi pi-sliders-h',
         command: () => this.invokeMenuAction(() => this.handleNavigatePersonalSettings()),
       })
       items.push({
-        label: '系統問題回報',
+        label: this.$t('系統問題回報'),
         icon: 'pi pi-comments',
         command: () => this.invokeMenuAction(() => this.openIssueReportDialog()),
       })
@@ -1116,7 +1133,7 @@ export default {
       if (this.isAuthenticated && !this.isDesktopView) {
         items.push({ separator: true })
         items.push({
-          label: '登出',
+          label: this.$t('登出'),
           icon: 'pi pi-sign-out',
           command: () => this.invokeMenuAction(() => this.handleLogout()),
         })

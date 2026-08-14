@@ -1,45 +1,55 @@
 <template>
   <main class="public-course">
-    <nav class="breadcrumbs" aria-label="麵包屑導覽">
-      <RouterLink to="/">首頁</RouterLink>
+    <nav class="breadcrumbs" :aria-label="$t('麵包屑導覽')">
+      <RouterLink to="/">{{ $t('首頁') }}</RouterLink>
       <span aria-hidden="true">/</span>
-      <RouterLink to="/courses">公開課程目錄</RouterLink>
+      <RouterLink to="/courses">{{ $t('公開課程目錄') }}</RouterLink>
       <template v-if="course">
         <span aria-hidden="true">/</span>
-        <span>{{ course.name }}</span>
+        <span>{{ courseName }}</span>
       </template>
     </nav>
 
-    <p v-if="loading" class="status-message" aria-live="polite">正在載入課程資料……</p>
+    <p v-if="loading" class="status-message" aria-live="polite">{{ $t('正在載入課程資料……') }}</p>
 
     <section v-else-if="errorMessage" class="status-message error-message" role="alert">
-      <h1>找不到公開課程</h1>
+      <h1>{{ $t('找不到公開課程') }}</h1>
       <p>{{ errorMessage }}</p>
-      <RouterLink to="/courses">返回公開課程目錄</RouterLink>
+      <RouterLink to="/courses">{{ $t('返回公開課程目錄') }}</RouterLink>
     </section>
 
     <template v-else-if="course">
       <header class="course-header">
-        <p v-if="category" class="eyebrow">{{ category.name }}</p>
-        <h1>{{ course.name }}考古題</h1>
-        <p>本頁公開顯示這門課程已收錄考古題的學年度、授課教師、考試類型與是否附解答。完整 PDF 仍需登入後依網站權限使用。</p>
-        <div class="course-summary" aria-label="課程收錄摘要">
-          <span>共 {{ archives.length }} 份</span>
-          <span v-if="latestAcademicYear">最新：{{ latestAcademicYear }}</span>
-          <span v-if="professorCount">{{ professorCount }} 位授課教師</span>
+        <p v-if="category" class="eyebrow">{{ categoryName }}</p>
+        <h1>{{ $t('{course}考古題', { course: courseName }) }}</h1>
+        <p>
+          {{
+            $t(
+              '本頁公開顯示這門課程已收錄考古題的學年度、授課教師、考試類型與是否附解答。完整 PDF 仍需登入後依網站權限使用。'
+            )
+          }}
+        </p>
+        <div class="course-summary" :aria-label="$t('課程收錄摘要')">
+          <span>{{ $t('共 {count} 份', { count: archives.length }) }}</span>
+          <span v-if="latestAcademicYear">{{
+            $t('最新：{year}', { year: latestAcademicYear })
+          }}</span>
+          <span v-if="professorCount">{{
+            $t('{count} 位授課教師', { count: professorCount })
+          }}</span>
         </div>
       </header>
 
       <section v-if="archives.length === 0" class="empty-state">
-        <h2>目前尚未有可公開瀏覽的考古題</h2>
-        <p>這門課程目前尚未收錄可公開顯示的考古題中繼資料。</p>
+        <h2>{{ $t('目前尚未有可公開瀏覽的考古題') }}</h2>
+        <p>{{ $t('這門課程目前尚未收錄可公開顯示的考古題中繼資料。') }}</p>
       </section>
 
-      <section v-else class="archive-groups" aria-label="公開考古題中繼資料">
+      <section v-else class="archive-groups" :aria-label="$t('公開考古題中繼資料')">
         <section v-for="group in groupedArchives" :key="group.year" class="archive-group">
           <header class="group-header">
             <h2>{{ formatAcademicYear(group.year) }}</h2>
-            <span>{{ group.items.length }} 份</span>
+            <span>{{ $t('共 {count} 份', { count: group.items.length }) }}</span>
           </header>
 
           <div class="archive-grid">
@@ -52,19 +62,18 @@
               </div>
               <dl>
                 <div>
-                  <dt>授課教師</dt>
-                  <dd>{{ archive.professor || '未提供' }}</dd>
+                  <dt>{{ $t('授課教師') }}</dt>
+                  <dd>{{ archive.professor || $t('未提供') }}</dd>
                 </div>
                 <div>
-                  <dt>解答</dt>
-                  <dd>{{ archive.has_answers ? '附解答' : '未附解答' }}</dd>
+                  <dt>{{ $t('解答') }}</dt>
+                  <dd>{{ archive.has_answers ? $t('附解答') : $t('未附解答') }}</dd>
                 </div>
               </dl>
             </article>
           </div>
         </section>
       </section>
-
     </template>
   </main>
 </template>
@@ -72,23 +81,29 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 
 import { courseService } from '../api'
 import { SITE_URL, setSeo } from '../utils/seo'
+import { localizedCategoryName, localizedCourseName } from '../utils/localizedCatalog'
 
 const route = useRoute()
+const { t, locale } = useI18n()
 const course = ref(null)
 const category = ref(null)
 const archives = ref([])
 const loading = ref(true)
 const errorMessage = ref('')
 
-const archiveTypeLabels = {
-  quiz: '小考',
-  midterm: '期中考',
-  final: '期末考',
-  other: '其他',
-}
+const archiveTypeLabels = computed(() => ({
+  quiz: t('小考'),
+  midterm: t('期中考'),
+  final: t('期末考'),
+  other: t('其他'),
+}))
+
+const courseName = computed(() => localizedCourseName(course.value))
+const categoryName = computed(() => localizedCategoryName(category.value))
 
 const groupedArchives = computed(() => {
   const groups = new Map()
@@ -111,7 +126,7 @@ const professorCount = computed(
 )
 
 function formatAcademicYear(value) {
-  return `${value} 學年度`
+  return t('{year} 學年度', { year: value })
 }
 
 function findCourse(courseId, categories, coursesByCategory) {
@@ -126,7 +141,7 @@ function findCourse(courseId, categories, coursesByCategory) {
 
 function applyMissingSeo() {
   setSeo({
-    title: '找不到公開課程',
+    title: t('找不到公開課程'),
     canonicalPath: route.path,
     robots: 'noindex, nofollow',
   })
@@ -136,14 +151,14 @@ function applyCourseSeo() {
   const courseUrl = `${SITE_URL}/courses/${course.value.id}`
   const hasPublicArchives = archives.value.length > 0
   const description = hasPublicArchives
-    ? `清大物理相關課程 ${course.value.name} 的公開考古題資訊，共收錄 ${archives.value.length} 份。`
-    : `清大物理相關課程 ${course.value.name} 的課程資訊，目前尚未有可公開瀏覽的考古題。`
+    ? t('公開課程 SEO 有資料', { course: courseName.value, count: archives.value.length })
+    : t('公開課程 SEO 無資料', { course: courseName.value })
   const archiveItems = archives.value.map((archive, index) => ({
     '@type': 'ListItem',
     position: index + 1,
     name: [
       formatAcademicYear(archive.academic_year),
-      archiveTypeLabels[archive.archive_type] || archive.archive_type,
+      archiveTypeLabels.value[archive.archive_type] || archive.archive_type,
       archive.name,
     ]
       .filter(Boolean)
@@ -153,7 +168,7 @@ function applyCourseSeo() {
   const collectionPage = {
     '@type': 'CollectionPage',
     '@id': `${courseUrl}#page`,
-    name: `${course.value.name}考古題`,
+    name: t('{course}考古題', { course: courseName.value }),
     url: courseUrl,
     description,
     isPartOf: { '@id': `${SITE_URL}/#website` },
@@ -161,14 +176,14 @@ function applyCourseSeo() {
   const breadcrumbList = {
     '@type': 'BreadcrumbList',
     itemListElement: [
-      { '@type': 'ListItem', position: 1, name: '首頁', item: `${SITE_URL}/` },
+      { '@type': 'ListItem', position: 1, name: t('首頁'), item: `${SITE_URL}/` },
       {
         '@type': 'ListItem',
         position: 2,
-        name: '公開課程目錄',
+        name: t('公開課程目錄'),
         item: `${SITE_URL}/courses`,
       },
-      { '@type': 'ListItem', position: 3, name: course.value.name, item: courseUrl },
+      { '@type': 'ListItem', position: 3, name: courseName.value, item: courseUrl },
     ],
   }
   const jsonLd = [collectionPage, breadcrumbList]
@@ -181,13 +196,13 @@ function applyCourseSeo() {
       {
         '@type': 'Course',
         '@id': `${courseUrl}#course`,
-        name: course.value.name,
+        name: courseName.value,
         url: courseUrl,
         provider: { '@id': `${SITE_URL}/#organization` },
       },
       {
         '@type': 'ItemList',
-        name: `${course.value.name}公開考古題中繼資料`,
+        name: t('課程公開考古題中繼資料', { course: courseName.value }),
         numberOfItems: archiveItems.length,
         itemListElement: archiveItems,
       }
@@ -195,7 +210,7 @@ function applyCourseSeo() {
   }
 
   setSeo({
-    title: `${course.value.name}考古題｜清大物理`,
+    title: t('公開課程 SEO 標題', { course: courseName.value }),
     description,
     canonicalPath: `/courses/${course.value.id}`,
     robots: hasPublicArchives ? 'index, follow' : 'noindex, follow',
@@ -212,7 +227,7 @@ async function loadCourse() {
 
   const courseId = Number(route.params.courseId)
   if (!Number.isInteger(courseId) || courseId <= 0) {
-    errorMessage.value = '課程編號格式不正確。'
+    errorMessage.value = t('課程編號格式不正確。')
     loading.value = false
     applyMissingSeo()
     return
@@ -237,7 +252,7 @@ async function loadCourse() {
     applyCourseSeo()
   } catch (error) {
     console.error('Failed to load public course:', error)
-    errorMessage.value = '這門課程不存在或目前無法載入。'
+    errorMessage.value = t('這門課程不存在或目前無法載入。')
     applyMissingSeo()
   } finally {
     loading.value = false
@@ -246,6 +261,10 @@ async function loadCourse() {
 
 onMounted(loadCourse)
 watch(() => route.params.courseId, loadCourse)
+watch(locale, () => {
+  if (course.value) applyCourseSeo()
+  else if (errorMessage.value) applyMissingSeo()
+})
 </script>
 
 <style scoped>

@@ -10,7 +10,7 @@
     :dismissableMask="true"
     :maximizable="true"
     :autoFocus="false"
-    :pt="{ root: { 'aria-label': title || 'PDF 預覽', 'aria-labelledby': null } }"
+    :pt="{ root: { 'aria-label': displayTitle, 'aria-labelledby': null } }"
     @maximize="handleMaximize"
     @unmaximize="handleUnmaximize"
     @hide="onHide"
@@ -22,8 +22,8 @@
         severity="secondary"
         text
         rounded
-        aria-label="回報考古題"
-        title="回報考古題"
+        :aria-label="$t('回報考古題')"
+        :title="$t('回報考古題')"
         style="width: 2.5rem; height: 2.5rem; padding: 0"
         @click="handleArchiveReportClick"
       />
@@ -33,7 +33,9 @@
         severity="secondary"
         text
         rounded
-        :aria-label="isMobile ? '開啟討論區' : discussionOpen ? '關閉討論區' : '開啟討論區'"
+        :aria-label="
+          isMobile ? $t('開啟討論區') : discussionOpen ? $t('關閉討論區') : $t('開啟討論區')
+        "
         style="width: 2.5rem; height: 2.5rem; padding: 0"
         @click="handleDiscussionClick"
       />
@@ -42,7 +44,7 @@
         severity="secondary"
         text
         rounded
-        :aria-label="maximized ? '還原' : '最大化'"
+        :aria-label="maximized ? $t('還原視窗') : $t('最大化')"
         style="width: 2.5rem; height: 2.5rem; padding: 0"
         @click="maximizeCallback"
       />
@@ -52,7 +54,7 @@
         <i class="pi pi-file-pdf text-2xl" />
         <div class="flex flex-column">
           <div class="text-xl leading-tight">
-            {{ title }}
+            {{ displayTitle }}
           </div>
           <div
             v-if="metaTextItems.length && !isMobile"
@@ -77,8 +79,8 @@
           >
             <i class="pi pi-exclamation-circle text-6xl text-red-500" />
             <div class="text-xl">{{ errorMessage }}</div>
-            <div v-if="errorMessage === '無法載入預覽'" class="text-sm text-gray-600">
-              請嘗試下載檔案查看
+            <div v-if="isGenericPreviewError" class="text-sm text-gray-600">
+              {{ $t('請嘗試下載檔案查看') }}
             </div>
           </div>
 
@@ -87,7 +89,7 @@
               :key="currentPdf"
               :src="currentPdf"
               class="pdf-frame"
-              title="PDF 預覽"
+              :title="$t('PDF 預覽')"
               @load="handlePdfLoaded"
               @error="handlePdfError"
             ></iframe>
@@ -132,7 +134,7 @@
     <template #footer>
       <Button
         v-if="showDownload"
-        label="下載"
+        :label="$t('下載')"
         icon="pi pi-download"
         @click="handleDownload"
         severity="success"
@@ -157,7 +159,7 @@
       <div class="flex align-items-center gap-2.5">
         <i :class="`pi ${sidePanelMode === 'exam-report' ? 'pi-flag' : 'pi-comments'} text-2xl`" />
         <div class="text-xl leading-tight">
-          {{ sidePanelMode === 'exam-report' ? '回報考古題' : '討論區' }}
+          {{ sidePanelMode === 'exam-report' ? $t('回報考古題') : $t('討論區') }}
         </div>
       </div>
     </template>
@@ -167,7 +169,7 @@
         severity="secondary"
         text
         rounded
-        :aria-label="sidePanelMode === 'exam-report' ? '返回留言區' : '回報考古題'"
+        :aria-label="sidePanelMode === 'exam-report' ? $t('返回留言區') : $t('回報考古題')"
         style="width: 2.5rem; height: 2.5rem; padding: 0"
         @click="toggleSidePanelMode"
       />
@@ -177,7 +179,7 @@
         severity="secondary"
         text
         rounded
-        aria-label="暱稱設定"
+        :aria-label="$t('暱稱設定')"
         style="width: 2.5rem; height: 2.5rem; padding: 0"
         @click="openDiscussionSettings"
       />
@@ -186,7 +188,7 @@
         severity="secondary"
         text
         rounded
-        aria-label="關閉"
+        :aria-label="$t('關閉')"
         style="width: 2.5rem; height: 2.5rem; padding: 0"
         @click="closeCallback"
       />
@@ -218,6 +220,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useUnauthorizedEvent } from '../utils/useUnauthorizedEvent'
 import ArchiveDiscussionPanel from './ArchiveDiscussionPanel.vue'
 import ArchiveReportPanel from './ArchiveReportPanel.vue'
@@ -225,6 +228,7 @@ import { getBooleanPreference } from '../utils/usePreferences'
 import { STORAGE_KEYS } from '../utils/storage'
 
 const DESKTOP_DEFAULT_OPEN_KEY = STORAGE_KEYS.local.DISCUSSION_DESKTOP_DEFAULT_OPEN
+const { t } = useI18n()
 
 const props = defineProps({
   visible: {
@@ -245,7 +249,7 @@ const props = defineProps({
   },
   title: {
     type: String,
-    default: '預覽文件',
+    default: '',
   },
   academicYear: {
     type: [Number, String, Date],
@@ -273,7 +277,7 @@ const props = defineProps({
   },
   errorMessage: {
     type: String,
-    default: '無法載入預覽',
+    default: '',
   },
   showDownload: {
     type: Boolean,
@@ -306,14 +310,21 @@ const discussionPanelRef = ref(null)
 const discussionEnabled = computed(
   () => props.showDiscussion && Boolean(props.courseId) && Boolean(props.archiveId)
 )
+const displayTitle = computed(() => props.title || t('預覽文件'))
+const isGenericPreviewError = computed(
+  () =>
+    !props.errorMessage ||
+    props.errorMessage === '無法載入預覽' ||
+    props.errorMessage === t('無法載入預覽')
+)
 
 const archiveTypeLabel = computed(() => {
   const archiveTypeKey = (props.archiveType || '').trim().toLowerCase()
   const map = {
-    midterm: '期中考',
-    final: '期末考',
-    quiz: '小考',
-    other: '其他',
+    midterm: t('期中考'),
+    final: t('期末考'),
+    quiz: t('小考'),
+    other: t('其他'),
   }
   return map[archiveTypeKey] || (props.archiveType || '').trim()
 })

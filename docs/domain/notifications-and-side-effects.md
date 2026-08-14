@@ -42,6 +42,13 @@ guarantee.
 `ON CONFLICT DO NOTHING` on the dedupe key and flushes without committing.
 Callers own the surrounding commit.
 
+Personal-notification rows retain their canonical persisted title and message.
+Locale-aware presentation is derived from the stable notification type and
+structured metadata; user-authored discussion/report content and actor names
+remain unchanged. Known legacy rows without the newer presentation metadata
+use a centralized, notification-type-specific compatibility resolver rather
+than rewriting history or applying machine translation.
+
 ## Submission notifications
 
 ### Intended invariant

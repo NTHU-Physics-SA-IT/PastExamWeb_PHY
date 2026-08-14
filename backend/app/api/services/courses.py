@@ -7,6 +7,7 @@ from fastapi import (
     Depends,
     Form,
     HTTPException,
+    Query,
     WebSocket,
     WebSocketDisconnect,
     status,
@@ -359,7 +360,9 @@ async def _list_course_categories_data(db: AsyncSession) -> list[CourseCategoryR
             id=index + 1,
             key=category.key,
             name=category.name,
+            name_en=category.name_en,
             label=category.label,
+            label_en=category.label_en,
             icon=category.icon,
             badge_color=category.badge_color,
             order_index=category.order_index,
@@ -383,13 +386,21 @@ async def list_public_course_categories(db: AsyncSession = Depends(get_session))
 
 
 async def _get_categorized_courses_data(
-    db: AsyncSession, *, public_only: bool
+    db: AsyncSession, *, public_only: bool, search: str | None = None
 ) -> CategorizedCourses:
     query = select(Course)
     if public_only:
         query = query.where(*_public_catalog_course_conditions())
     else:
         query = query.where(Course.deleted_at.is_(None))
+    normalized_search = normalize_course_search_text(search)
+    if normalized_search:
+        query = query.where(
+            or_(
+                normalized_course_text_expr(Course.name).contains(normalized_search),
+                normalized_course_text_expr(Course.name_en).contains(normalized_search),
+            )
+        )
     result = await db.execute(query)
     category_order = await _category_order_map(db)
     courses = _visible_courses(result.scalars().all(), category_order)
@@ -401,6 +412,7 @@ async def _get_categorized_courses_data(
         course_info = CourseInfo(
             id=course.id,
             name=format_course_display_name(course.name),
+            name_en=(course.name_en or "").strip() or None,
             order_index=course.order_index,
         )
         categorized_courses.setdefault(_course_category_value(course), []).append(
@@ -417,17 +429,21 @@ async def _get_categorized_courses_data(
 
 @router.get("", response_model=dict[str, list[CourseInfo]])
 async def get_categorized_courses(
+    search: str | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
     """Return the authenticated application course catalog."""
-    return await _get_categorized_courses_data(db, public_only=False)
+    return await _get_categorized_courses_data(db, public_only=False, search=search)
 
 
 @router.get("/public", response_model=dict[str, list[CourseInfo]])
-async def get_public_categorized_courses(db: AsyncSession = Depends(get_session)):
+async def get_public_categorized_courses(
+    search: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_session),
+):
     """Return canonical active courses for anonymous human discovery."""
-    return await _get_categorized_courses_data(db, public_only=True)
+    return await _get_categorized_courses_data(db, public_only=True, search=search)
 
 
 @router.get("/public/{course_id}/archives", response_model=list[PublicArchiveRead])
@@ -1290,6 +1306,7 @@ async def archive_discussion_ws(
                         "thread_id": parent_id,
                         "reply_message_id": message.id,
                         "reply_to_message_id": reply_to_message_id,
+                        "actor_name": actor_name,
                     },
                     dedupe_key=f"discussion_reply:{message.id}:{reply_target.user_id}",
                     created_at=message.created_at,
@@ -1438,9 +1455,11 @@ async def like_archive_discussion_message(
                 "archive_name": archive.name,
                 "course_id": course_id,
                 "course_name": course.name if course else None,
+                "course_name_en": course.name_en if course else None,
                 "thread_id": message.parent_id or message.id,
                 "message_id": message.id,
                 "actor_user_id": current_user.user_id,
+                "actor_name": actor_name,
             },
             dedupe_key=f"discussion_like:{message.id}:{current_user.user_id}",
         )
@@ -1574,6 +1593,7 @@ async def pin_archive_discussion_message(
                 "archive_name": archive.name if archive else None,
                 "course_id": course_id,
                 "course_name": course.name if course else None,
+                "course_name_en": course.name_en if course else None,
                 "thread_id": message.id,
                 "message_id": message.id,
                 "actor_user_id": current_user.user_id,
@@ -1880,6 +1900,7 @@ async def create_course(
 
     course = Course(
         name=formatted_name,
+        name_en=(course_data.name_en or "").strip() or None,
         category=course_data.category,
         order_index=order_index,
     )
@@ -1947,6 +1968,8 @@ async def update_course(
 
     if course_data.name is not None:
         course.name = formatted_name
+    if course_data.name_en is not None:
+        course.name_en = course_data.name_en.strip() or None
     if course_data.category is not None:
         await _ensure_category(db, course_data.category)
         course.category = course_data.category
@@ -2179,7 +2202,9 @@ async def create_course_category(
     category = CourseCategoryConfig(
         key=key,
         name=name,
+        name_en=(category_data.name_en or "").strip() or None,
         label=category_data.label.strip(),
+        label_en=(category_data.label_en or "").strip() or None,
         icon=category_data.icon.strip() or "pi pi-fw pi-book",
         badge_color=_normalize_category_badge_color(category_data.badge_color),
         order_index=order_index,
@@ -2245,8 +2270,12 @@ async def update_course_category(
             category_data.name,
             exclude_category_id=category_id,
         )
+    if category_data.name_en is not None:
+        category.name_en = category_data.name_en.strip() or None
     if category_data.label is not None:
         category.label = category_data.label.strip()
+    if category_data.label_en is not None:
+        category.label_en = category_data.label_en.strip() or None
     if category_data.icon is not None:
         category.icon = category_data.icon.strip() or "pi pi-fw pi-book"
     if category_data.badge_color is not None:

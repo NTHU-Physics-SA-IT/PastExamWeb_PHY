@@ -1,3 +1,4 @@
+import logging
 from collections import Counter
 from dataclasses import FrozenInstanceError
 from inspect import iscoroutinefunction, signature
@@ -300,11 +301,23 @@ def test_archive_submission_actual_status_normalization_rejects_unknown_status()
 def test_archive_submission_delete_source_status_rejects_static_corruption(
     caplog,
 ):
-    with pytest.raises(HTTPException) as exc_info:
-        resolve_archive_submission_delete_source_status(
-            "private-invalid-status",
-            operation="unit_test",
-        )
+    logger = logging.getLogger("app.services.archive_submission_status")
+    previous_disabled = logger.disabled
+    previous_propagate = logger.propagate
+    logger.disabled = False
+    logger.propagate = True
+    try:
+        with (
+            caplog.at_level(logging.ERROR, logger=logger.name),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            resolve_archive_submission_delete_source_status(
+                "private-invalid-status",
+                operation="unit_test",
+            )
+    finally:
+        logger.disabled = previous_disabled
+        logger.propagate = previous_propagate
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Internal Server Error"

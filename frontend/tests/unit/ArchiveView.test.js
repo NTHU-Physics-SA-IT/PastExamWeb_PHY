@@ -35,7 +35,7 @@ let consoleErrorSpy
 
 const sampleCourses = {
   fundamental: [
-    { id: 'c1', name: 'Calculus I', english_name: 'Calculus I (English)' },
+    { id: 'c1', name: 'Calculus I', name_en: 'Calculus I (English)' },
     { id: 'c2', name: 'Linear Algebra' },
   ],
   required: [{ id: 'c3', name: 'Data Structures' }],
@@ -43,7 +43,7 @@ const sampleCourses = {
   optional: [],
   'math-department': [],
   freshman: [
-    { id: 'c1', name: 'Calculus I', english_name: 'Calculus I (English)' },
+    { id: 'c1', name: 'Calculus I', name_en: 'Calculus I (English)' },
     { id: 'c2', name: 'Linear Algebra' },
   ],
   sophomore: [{ id: 'c3', name: 'Data Structures' }],

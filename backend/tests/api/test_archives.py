@@ -55,6 +55,19 @@ def _override_admin(user_id: int):
     return _get_current_user
 
 
+async def _create_upload_course(session_maker, *, name: str) -> Course:
+    async with session_maker() as session:
+        course = Course(
+            name=name,
+            name_en=f"{name} English",
+            category=CourseCategory.FRESHMAN.value,
+        )
+        session.add(course)
+        await session.commit()
+        await session.refresh(course)
+        return course
+
+
 async def _create_pending_review_context(
     session_maker,
     *,
@@ -468,6 +481,7 @@ async def test_upload_archive_creates_course_and_archive(
 
     fake_pdf = io.BytesIO(b"%PDF-1.4 test content")
     unique_course = f"Test Course {unique}"
+    unique_course_en = f"Test Course English {unique}"
 
     class FakeMinio:
         def put_object(self, **kwargs):
@@ -490,6 +504,9 @@ async def test_upload_archive_creates_course_and_archive(
                 "has_answers": "true",
                 "filename": f"Final Exam {unique}",
                 "academic_year": 2024,
+                "request_new_course": "true",
+                "requested_course_name": unique_course,
+                "requested_course_name_en": unique_course_en,
             },
         )
         assert response.status_code == 200
@@ -515,6 +532,8 @@ async def test_upload_archive_creates_course_and_archive(
             submission = result.scalar_one_or_none()
             assert submission is not None
             assert submission.subject == unique_course
+            assert submission.requested_course_name == unique_course
+            assert submission.requested_course_name_en == unique_course_en
             assert submission.requester_id == user_id
     finally:
         app.dependency_overrides.pop(get_current_user, None)
@@ -747,6 +766,10 @@ async def test_upload_archive_rejects_large_file(
     monkeypatch,
 ):
     user = await make_user()
+    course = await _create_upload_course(
+        session_maker,
+        name="Oversized Course",
+    )
 
     async def fake_get_current_user():
         return UserRoles(user_id=user.id, is_admin=False)
@@ -781,6 +804,7 @@ async def test_upload_archive_rejects_large_file(
                 "has_answers": "true",
                 "filename": "Too Large",
                 "academic_year": 2024,
+                "course_id": str(course.id),
             },
         )
         assert response.status_code == 400
@@ -802,6 +826,10 @@ async def test_upload_archive_handles_storage_failure(
     monkeypatch,
 ):
     user = await make_user()
+    course = await _create_upload_course(
+        session_maker,
+        name="Fail Course",
+    )
 
     async def fake_get_current_user():
         return UserRoles(user_id=user.id, is_admin=False)
@@ -835,6 +863,7 @@ async def test_upload_archive_handles_storage_failure(
                 "has_answers": "false",
                 "filename": "Failure",
                 "academic_year": 2024,
+                "course_id": str(course.id),
             },
         )
         assert response.status_code == 500
@@ -873,7 +902,13 @@ async def test_upload_archive_function_covers_creation_and_reuse(
     async with session_maker() as session:
         uploader = UserRoles(user_id=user.id, is_admin=True)
 
-        async def _call(subject, filename):
+        async def _call(
+            subject,
+            filename,
+            *,
+            course_id=None,
+            request_new_course=False,
+        ):
             upload = UploadFile(
                 filename=filename,
                 file=io.BytesIO(b"%PDF-1.4 direct test"),
@@ -888,12 +923,29 @@ async def test_upload_archive_function_covers_creation_and_reuse(
                 has_answers=True,
                 filename=filename,
                 academic_year=2024,
+                course_id=course_id,
+                request_new_course=request_new_course,
+                requested_course_name=subject if request_new_course else None,
+                requested_course_name_en=(
+                    "Direct Subject English" if request_new_course else None
+                ),
                 current_user=uploader,
                 db=session,
             )
 
-        first = await _call("Direct Subject", "Direct Archive.pdf")
-        second = await _call("Direct Subject", "Second Archive.pdf")
+        first = await _call(
+            "Direct Subject",
+            "Direct Archive.pdf",
+            request_new_course=True,
+        )
+        created_course = (
+            await session.execute(select(Course).where(Course.name == "Direct Subject"))
+        ).scalar_one()
+        second = await _call(
+            "Direct Subject",
+            "Second Archive.pdf",
+            course_id=created_course.id,
+        )
 
         assert first["success"] is True
         assert second["success"] is True
@@ -966,9 +1018,12 @@ async def test_admin_upload_persists_requested_category_caller_transaction(
                 "request_new_course": "true",
                 "request_new_category": "true",
                 "requested_course_name": course_name,
+                "requested_course_name_en": f"{course_name} English",
                 "requested_category_key": category_key,
                 "requested_category_name": category_name,
+                "requested_category_name_en": f"{category_name} English",
                 "requested_category_label": category_name,
+                "requested_category_label_en": "Admin upload",
                 "requested_category_icon": "pi pi-book",
             },
         )
@@ -1008,7 +1063,10 @@ async def test_admin_upload_persists_requested_category_caller_transaction(
             ).scalar_one()
 
             assert category.is_active is True
+            assert category.name_en == f"{category_name} English"
+            assert category.label_en == "Admin upload"
             assert course.category == category.key
+            assert course.name_en == f"{course_name} English"
             assert archive.course_id == course.id
             assert submission.created_archive_id == archive.id
             assert submission.status == SubmissionStatus.APPROVED
@@ -1464,6 +1522,9 @@ async def test_upload_archive_requires_pdf(
                 "has_answers": "false",
                 "filename": "Not PDF",
                 "academic_year": 2024,
+                "request_new_course": "true",
+                "requested_course_name": "Non PDF Course",
+                "requested_course_name_en": "Non-PDF Course",
             },
         )
         assert response.status_code == 400
@@ -1537,6 +1598,10 @@ async def test_upload_archive_function_handles_storage_error(
     monkeypatch,
 ):
     user = await make_user()
+    course = await _create_upload_course(
+        session_maker,
+        name="Failure",
+    )
 
     class FailingMinio:
         def put_object(self, **kwargs):
@@ -1560,7 +1625,12 @@ async def test_upload_archive_function_handles_storage_error(
                 has_answers=False,
                 filename="Failure",
                 academic_year=2024,
+                course_id=course.id,
                 current_user=UserRoles(user_id=user.id, is_admin=False),
                 db=session,
             )
         assert exc.value.status_code == 500
+
+    async with session_maker() as session:
+        await session.execute(delete(Course).where(Course.id == course.id))
+        await session.commit()

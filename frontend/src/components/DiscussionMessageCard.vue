@@ -13,13 +13,13 @@
         <ContributorLevelBadge
           v-if="shouldShowLevelTitle"
           :level="messageLevel.level"
-          :title="messageLevel.name"
+          :title="localizedSubmissionLevelName(messageLevel)"
           size="compact"
           show-title
         />
         <Tag
           v-if="message.is_pinned"
-          value="置頂"
+          :value="$t('置頂')"
           severity="warning"
           class="discussion-card__pin-tag"
         />
@@ -37,8 +37,8 @@
           text
           rounded
           size="small"
-          aria-label="回覆留言"
-          title="回覆"
+          :aria-label="$t('回覆留言')"
+          :title="$t('回覆')"
           class="discussion-card__icon-button"
           @click="$emit('reply', message)"
         />
@@ -51,9 +51,9 @@
           size="small"
           :loading="likeLoading"
           :disabled="likeLoading"
-          :aria-label="message.liked_by_current_user ? '取消愛心' : '按愛心'"
+          :aria-label="message.liked_by_current_user ? $t('取消愛心') : $t('按愛心')"
           :aria-pressed="Boolean(message.liked_by_current_user)"
-          :title="message.liked_by_current_user ? '取消愛心' : '按愛心'"
+          :title="message.liked_by_current_user ? $t('取消愛心') : $t('按愛心')"
           class="discussion-card__icon-button discussion-card__like-button"
           :class="{ 'is-active': message.liked_by_current_user }"
           @click="$emit('like', message)"
@@ -64,8 +64,8 @@
           text
           rounded
           size="small"
-          aria-label="回報留言"
-          title="回報"
+          :aria-label="$t('回報留言')"
+          :title="$t('回報')"
           class="discussion-card__icon-button"
           @click="$emit('report', message)"
         />
@@ -79,8 +79,8 @@
           text
           rounded
           size="small"
-          :aria-label="message.is_pinned ? '取消置頂' : '置頂留言'"
-          :title="message.is_pinned ? '取消置頂' : '置頂'"
+          :aria-label="message.is_pinned ? $t('取消置頂') : $t('置頂留言')"
+          :title="message.is_pinned ? $t('取消置頂') : $t('置頂')"
           class="discussion-card__icon-button"
           @click="$emit('pin', message)"
         />
@@ -91,18 +91,20 @@
           text
           rounded
           size="small"
-          aria-label="刪除留言"
-          title="刪除"
+          :aria-label="$t('刪除留言')"
+          :title="$t('刪除')"
           class="discussion-card__icon-button"
           @click="$emit('delete', message)"
         />
       </div>
     </div>
 
-    <div v-if="message.is_deleted" class="discussion-card__deleted-text">此留言已刪除</div>
+    <div v-if="message.is_deleted" class="discussion-card__deleted-text">
+      {{ $t('此留言已刪除') }}
+    </div>
     <div v-else class="discussion-card__body">
       <div v-if="isReply && message.reply_to_user_name" class="discussion-card__reply-context">
-        回覆 @{{ message.reply_to_user_name }}
+        {{ $t('回覆 @{name}', { name: message.reply_to_user_name }) }}
       </div>
       <div class="discussion-card__content">{{ displayedContent }}</div>
       <div v-if="shouldShowToggle" class="discussion-card__more-row">
@@ -110,10 +112,10 @@
           type="button"
           class="discussion-card__more-button"
           :aria-expanded="expanded"
-          :aria-label="expanded ? '收合訊息' : '顯示完整訊息'"
+          :aria-label="expanded ? $t('收合訊息') : $t('顯示完整訊息')"
           @click="$emit('toggle-expanded', message.id)"
         >
-          {{ expanded ? '顯示較少' : '顯示更多' }}
+          {{ expanded ? $t('顯示較少') : $t('顯示更多') }}
           <i :class="`pi ${expanded ? 'pi-angle-up' : 'pi-angle-down'}`" aria-hidden="true" />
         </button>
       </div>
@@ -137,7 +139,7 @@
 <script setup>
 import { computed } from 'vue'
 import { formatRelativeTime } from '../utils/time'
-import { resolveSubmissionLevel } from '../utils/submissionLevel'
+import { localizedSubmissionLevelName, resolveSubmissionLevel } from '../utils/submissionLevel'
 import ContributorLevelBadge from './ContributorLevelBadge.vue'
 import InlineCommentReport from './InlineCommentReport.vue'
 
