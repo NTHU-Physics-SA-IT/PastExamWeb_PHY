@@ -85,6 +85,19 @@ const routes = [
     },
   },
   {
+    path: '/about-us',
+    name: 'AboutUs',
+    component: () => import(/* webpackChunkName: "about-us" */ '../views/AboutUs.vue'),
+    meta: {
+      requiresAuth: true,
+      seo: {
+        title: '關於我們',
+        canonicalPath: '/about-us',
+        robots: 'noindex, nofollow',
+      },
+    },
+  },
+  {
     path: '/login/callback',
     name: 'LoginCallback',
     component: () => import(/* webpackChunkName: "login-callback" */ '../views/LoginCallback.vue'),

@@ -788,6 +788,10 @@ export default {
       this.$router.push('/personal-settings')
     },
 
+    handleNavigateAboutUs() {
+      this.$router.push('/about-us')
+    },
+
     openIssueReportDialog() {
       this.issueReportVisible = true
       trackEvent(EVENTS.OPEN_ISSUE_REPORT)
@@ -1123,6 +1127,11 @@ export default {
         label: this.$t('個人化設定'),
         icon: 'pi pi-sliders-h',
         command: () => this.invokeMenuAction(() => this.handleNavigatePersonalSettings()),
+      })
+      items.splice(1, 0, {
+        label: this.$t('關於我們'),
+        icon: 'pi pi-info-circle',
+        command: () => this.invokeMenuAction(() => this.handleNavigateAboutUs()),
       })
       items.push({
         label: this.$t('系統問題回報'),

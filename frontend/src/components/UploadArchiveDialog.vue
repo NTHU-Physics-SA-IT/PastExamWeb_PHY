@@ -155,7 +155,7 @@
                   id="requested-course-name"
                   name="requested-course-name"
                   v-model="form.requestedCourseName"
-                  :placeholder="$t('輸入課程中文名稱')"
+                  :placeholder="$t('例如 普通物理(一)')"
                   class="w-full"
                 />
               </div>
@@ -168,7 +168,7 @@
                   id="requested-course-name-en"
                   name="requested-course-name-en"
                   v-model="form.requestedCourseNameEn"
-                  :placeholder="$t('輸入課程英文名稱')"
+                  :placeholder="$t('例如 General Physics (I)')"
                   class="w-full"
                 />
               </div>
@@ -376,7 +376,8 @@
               <FileUpload
                 ref="fileUpload"
                 accept="application/pdf"
-                :maxFileSize="10 * 1024 * 1024"
+                :maxFileSize="MAX_PDF_SIZE_BYTES"
+                :invalidFileSizeMessage="$t('{0}：PDF 檔案超過 20 MB 大小上限')"
                 class="w-full"
                 @select="onFileSelect"
                 :multiple="false"
@@ -395,7 +396,7 @@
                       ></Button>
                     </div>
                     <div v-if="form.file" class="text-sm text-500">
-                      {{ formatFileSize(form.file.size) }} / 10MB
+                      {{ formatFileSize(form.file.size) }} / 20MB
                     </div>
                   </div>
                 </template>
@@ -438,11 +439,19 @@
                     ></i>
                     <p class="m-0 text-600">{{ $t('將 PDF 檔案拖放至此處以上傳') }}</p>
                     <p class="m-0 text-sm text-500 mt-2">
-                      {{ $t('僅接受 PDF 檔案，檔案大小最大 10MB') }}
+                      {{ $t('僅接受 PDF 檔案，檔案大小最大 20MB') }}
                     </p>
                   </div>
                 </template>
               </FileUpload>
+              <small
+                v-if="fileValidationError"
+                id="archive-upload-file-error"
+                class="p-error"
+                role="alert"
+              >
+                {{ fileValidationError }}
+              </small>
             </div>
             <div class="flex pt-6 justify-between">
               <Button
@@ -574,6 +583,8 @@ import { isUnauthorizedError } from '../utils/http'
 import { formatCourseDisplayName } from '../utils/courseText'
 import { localizedCategoryName, localizedCourseName } from '../utils/localizedCatalog'
 
+const MAX_PDF_SIZE_BYTES = 20 * 1024 * 1024
+
 const props = defineProps({
   modelValue: {
     type: Boolean,
@@ -621,6 +632,7 @@ const form = ref({
 const uploadStep = ref('1')
 const uploading = ref(false)
 const fileUpload = ref(null)
+const fileValidationError = ref('')
 const uploadFormProfessors = ref([])
 const isFilenameValid = ref(false)
 
@@ -853,6 +865,12 @@ async function fetchProfessorsForSubject(subjectId) {
 }
 
 const handleUpload = async () => {
+  if (!form.value.file || form.value.file.size > MAX_PDF_SIZE_BYTES) {
+    fileValidationError.value = t('PDF 檔案超過 20 MB 大小上限')
+    uploadStep.value = '3'
+    form.value.file = null
+    return
+  }
   if (form.value.requestNewCategory && !form.value.requestNewCourse) {
     toast.add({
       severity: 'error',
@@ -934,6 +952,13 @@ const handleUpload = async () => {
     }
 
     const responseDetail = error?.response?.data?.detail
+    if (responseDetail === 'File size exceeds 20MB limit') {
+      fileValidationError.value = t('PDF 檔案超過 20 MB 大小上限')
+      uploadStep.value = '3'
+      form.value.file = null
+      fileUpload.value?.clear()
+      return
+    }
     toast.add({
       severity: 'error',
       summary: t('上傳失敗'),
@@ -952,6 +977,12 @@ const onFileSelect = (event) => {
     fileUpload.value.clear()
   }
   form.value.file = null
+  fileValidationError.value = ''
+
+  if (!newFile || newFile.size > MAX_PDF_SIZE_BYTES) {
+    fileValidationError.value = t('PDF 檔案超過 20 MB 大小上限')
+    return
+  }
 
   nextTick(() => {
     form.value.file = newFile
@@ -961,6 +992,7 @@ const onFileSelect = (event) => {
 function clearSelectedFile(removeFileCallback) {
   if (removeFileCallback) removeFileCallback(0)
   form.value.file = null
+  fileValidationError.value = ''
   if (fileUpload.value) {
     fileUpload.value.clear()
   }
@@ -1137,6 +1169,7 @@ function resetForm() {
     academicYear: null,
     file: null,
   }
+  fileValidationError.value = ''
   uploadStep.value = '1'
   isFilenameValid.value = false
   availableProfessors.value = []
