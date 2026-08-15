@@ -15,10 +15,12 @@ from app.api.services.archive_submission_lifecycle import (
     is_course_trash_lifecycle_reason,
 )
 from app.api.services.courses import (
+    approve_course_request,
     create_course,
     create_course_category,
     create_course_request,
     delete_archive,
+    delete_course_category,
     delete_course,
     get_archive_download_url,
     get_archive_preview_url,
@@ -28,6 +30,7 @@ from app.api.services.courses import (
     update_archive,
     update_archive_course,
     update_course,
+    update_course_request_for_admin,
 )
 from app.main import app
 from app.models.models import (
@@ -42,6 +45,7 @@ from app.models.models import (
     CourseCreate,
     CourseSubmission,
     CourseSubmissionCreate,
+    CourseSubmissionUpdate,
     CourseUpdate,
     PersonalNotification,
     SubmissionStatus,
@@ -2077,6 +2081,166 @@ async def test_category_create_rejects_legacy_key_and_duplicate_normalized_name(
             )
         assert name_error.value.status_code == 400
         assert "name already exists" in name_error.value.detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("was_active", [True, False])
+async def test_category_trash_restore_preserves_prior_active_state(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    was_active: bool,
+):
+    admin = await make_user(is_admin=True)
+    current_user = UserRoles(user_id=admin.id, is_admin=True)
+    key = f"d1-state-{uuid.uuid4().hex[:8]}"
+
+    async with session_maker() as session:
+        category = await create_course_category(
+            category_data=CourseCategoryCreate(key=key, name=f"D1 state {key}"),
+            current_user=current_user,
+            db=session,
+        )
+        category.is_active = was_active
+        await session.commit()
+        category_id = category.id
+
+        await delete_course_category(
+            category_id=category_id,
+            current_user=current_user,
+            db=session,
+        )
+        await session.refresh(category)
+        assert category.deleted_at is not None
+        assert category.is_active is False
+        assert category.pre_delete_is_active is was_active
+
+    app.dependency_overrides[get_current_user] = _override_user(admin)
+    try:
+        response = await client.post(
+            "/trash/restore",
+            json={"item_type": "course_category", "item_id": category_id},
+        )
+        assert response.status_code == 200
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    async with session_maker() as session:
+        category = await session.get(CourseCategoryConfig, category_id)
+        assert category.deleted_at is None
+        assert category.is_active is was_active
+        assert category.pre_delete_is_active is None
+        await session.delete(category)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("category_state", ["inactive", "deleted"])
+async def test_category_ineligible_for_new_course_and_submission_work(
+    session_maker,
+    make_user,
+    category_state: str,
+):
+    admin = await make_user(is_admin=True)
+    requester = await make_user()
+    admin_roles = UserRoles(user_id=admin.id, is_admin=True)
+    requester_roles = UserRoles(user_id=requester.id, is_admin=False)
+    key = f"d1-ineligible-{uuid.uuid4().hex[:8]}"
+
+    async with session_maker() as session:
+        category = await create_course_category(
+            category_data=CourseCategoryCreate(key=key, name=f"D1 blocked {key}"),
+            current_user=admin_roles,
+            db=session,
+        )
+        category.is_active = False
+        if category_state == "deleted":
+            category.deleted_at = datetime.now(UTC)
+        pending = CourseSubmission(
+            name=f"D1 pending {key}",
+            category=key,
+            requester_id=requester.id,
+        )
+        session.add(pending)
+        await session.commit()
+        await session.refresh(pending)
+
+        with pytest.raises(HTTPException) as course_error:
+            await create_course(
+                course_data=CourseCreate(name=f"D1 course {key}", category=key),
+                current_user=admin_roles,
+                db=session,
+            )
+        assert course_error.value.status_code == 400
+
+        with pytest.raises(HTTPException) as request_error:
+            await create_course_request(
+                course_data=CourseSubmissionCreate(
+                    name=f"D1 request {key}", category=key
+                ),
+                current_user=requester_roles,
+                db=session,
+            )
+        assert request_error.value.status_code == 400
+
+        with pytest.raises(HTTPException) as update_error:
+            await update_course_request_for_admin(
+                request_id=pending.id,
+                request_data=CourseSubmissionUpdate(category=key),
+                current_user=admin_roles,
+                db=session,
+            )
+        assert update_error.value.status_code == 400
+
+        with pytest.raises(HTTPException) as approval_error:
+            await approve_course_request(
+                request_id=pending.id,
+                current_user=admin_roles,
+                db=session,
+            )
+        assert approval_error.value.status_code == 400
+        await session.refresh(pending)
+        assert pending.status == SubmissionStatus.PENDING
+        assert pending.created_course_id is None
+
+        await session.delete(pending)
+        await session.delete(category)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_persisted_inactive_default_category_does_not_use_fallback(
+    session_maker,
+    make_user,
+):
+    admin = await make_user(is_admin=True)
+    category_key = CourseCategory.FRESHMAN.value
+
+    async with session_maker() as session:
+        category = (
+            await session.execute(
+                select(CourseCategoryConfig).where(
+                    CourseCategoryConfig.key == category_key
+                )
+            )
+        ).scalar_one()
+        original_active = category.is_active
+        category.is_active = False
+        await session.commit()
+        try:
+            with pytest.raises(HTTPException) as error:
+                await create_course(
+                    course_data=CourseCreate(
+                        name=f"D1 default fallback {uuid.uuid4().hex}",
+                        category=category_key,
+                    ),
+                    current_user=UserRoles(user_id=admin.id, is_admin=True),
+                    db=session,
+                )
+            assert error.value.status_code == 400
+        finally:
+            category.is_active = original_active
+            await session.commit()
 
 
 @pytest.mark.asyncio
