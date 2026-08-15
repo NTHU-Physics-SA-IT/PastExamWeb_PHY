@@ -271,6 +271,17 @@ gate before starting an existing paused backend; it never creates a container
 or performs an upgrade. `backend-pause` and `backend-resume` are deliberate
 schema-branch controls, not general restart shortcuts.
 
+For isolated validation on a schema-changing branch only,
+`schema-status --expected-ledger <revision>` exposes the audit runner's existing
+read-only ledger selection. The isolated test runner first requires that the
+revision have a reviewed manifest, be a legal Alembic ancestor of the single
+repository head, and be supported by the sealed audit. The selected value is
+the canonical persistent pre/post baseline only; callers cannot override the
+ephemeral migration target, which remains the repository head. Unknown,
+unreviewed, non-ancestor, schema-drifting, or checksum-changing baselines fail
+before or during the guarded run. Persistent migration remains a later,
+separately authorized operation after isolated branch evidence is Green.
+
 ## Migration-chain rule
 
 Published or deployed revision files are immutable. Add a new revision for

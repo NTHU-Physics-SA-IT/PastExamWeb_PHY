@@ -98,6 +98,16 @@ and branch evidence are green:
 6. verify backend, proxy, public, authentication, and admin boundaries; and
 7. record the required manual UI verification.
 
+The isolated runner may validate the unchanged persistent baseline with
+`--canonical-expected-ledger` when it is a reviewed Alembic ancestor of the
+branch head. Internally this calls the read-only
+`scripts/dev-compose.sh schema-status --expected-ledger <revision>` path. It
+does not migrate, stamp, repair, or otherwise write the persistent database;
+the ephemeral database still migrates to the repository head. Canonical
+pre/post identity, restart counts, aggregate fingerprints, and ledger must be
+identical. `backend-resume` never accepts this override and continues to
+require compatibility with the current repository head.
+
 Switching back to a commit that expects an older schema is blocked until a
 separately reviewed compatibility or recovery plan exists. Never automatically
 downgrade the persistent-local database. The guarded wrapper reports schema
