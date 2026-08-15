@@ -169,6 +169,7 @@ def test_bilingual_head_audit_is_new_version_and_preserves_lifecycle_classifier(
         {
             "c2a8e4f6b9d1",
             "d4b7e2a9c6f1",
+            "e8a4c1d7b2f6",
         }
     )
     previous = get_audit_adapter(ELIGIBILITY_AUDIT_ID, 3)
@@ -182,7 +183,7 @@ def test_bilingual_head_continuity_requires_all_nullable_english_columns() -> No
         audit_id=ELIGIBILITY_AUDIT_ID,
         audit_version=4,
         mode=AuditMode.PERSISTENT_LOCAL,
-        expected_ledger="d4b7e2a9c6f1",
+        expected_ledger="e8a4c1d7b2f6",
         repository_revision="a" * 40,
     )
     sql = build_transaction_sql(
