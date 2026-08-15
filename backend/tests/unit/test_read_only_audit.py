@@ -197,8 +197,10 @@ def test_bilingual_head_continuity_requires_all_nullable_english_columns() -> No
         "requested_course_name_en",
         "requested_category_name_en",
         "requested_category_label_en",
+        "pre_delete_is_active",
     ):
         assert column in sql
+    assert "data_type = 'boolean'" in sql
     assert "is_nullable = 'YES'" in sql
     assert "data_type = 'character varying'" in sql
 
