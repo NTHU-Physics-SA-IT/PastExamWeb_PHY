@@ -62,7 +62,8 @@ Reviewed manifests currently cover:
   and
 - `c2a8e4f6b9d1`: the reviewed schema before bilingual ArchiveSubmission
   presentation snapshots; and
-- `d4b7e2a9c6f1`: the current repository head and SQLModel metadata contract.
+- `d4b7e2a9c6f1`: the reviewed schema before About Us entries; and
+- `e6a1b3c5d7f9`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,
@@ -195,6 +196,11 @@ their existing Chinese snapshots. New submissions copy English metadata only
 from the canonical Course and CourseCategory records selected at submission
 time; missing English metadata remains null.
 
+The About Us migration adds only the dedicated `about_us_entries` table and
+its update-order/editor indexes. It backfills or rewrites no existing rows,
+keeps its editor reference nullable with `ON DELETE SET NULL`, and downgrade
+removes only that new table and its indexes.
+
 On the first bootstrap, one missing canonical key or any extra custom category
 is evidence that the database is not the expected clean initialized target,
 so bootstrap fails without creating an administrator or marker. After the
@@ -230,7 +236,7 @@ reviewed migration classifier. Adding a classifier requires a new registered
 version and synthetic PostgreSQL evidence.
 
 Adapter version 4 supports the reviewed bilingual revisions
-`c2a8e4f6b9d1` and `d4b7e2a9c6f1`. It preserves the version 3
+`c2a8e4f6b9d1`, `d4b7e2a9c6f1`, and `e6a1b3c5d7f9`. It preserves the version 3
 ArchiveSubmission lifecycle classifier and aggregate fingerprints, while its
 continuity gate additionally requires the revision-appropriate nullable
 English catalog and submission-snapshot columns. Versions 1 through 3 retain

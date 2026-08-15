@@ -16,7 +16,7 @@ from app.models.models import ArchiveSubmission, User
 
 
 def test_reviewed_manifest_registry_has_required_revisions() -> None:
-    assert HEAD_SCHEMA_REVISION == "d4b7e2a9c6f1"
+    assert HEAD_SCHEMA_REVISION == "e6a1b3c5d7f9"
     assert reviewed_manifest_revisions() == (
         "c4d8e2f1a6b9",
         "a4c7e9d2f6b1",
@@ -30,6 +30,7 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
         "b7e3d9a1c5f2",
         "c2a8e4f6b9d1",
         "d4b7e2a9c6f1",
+        "e6a1b3c5d7f9",
     )
 
 
@@ -48,7 +49,8 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     column_name = "owner_self_delete_consumed"
     previous_status_column = "previous_status"
     constraint_name = "uq_archive_submissions_created_archive_id"
-    head = metadata_for_revision("d4b7e2a9c6f1")
+    head = metadata_for_revision("e6a1b3c5d7f9")
+    pre_about_us = metadata_for_revision("d4b7e2a9c6f1")
     pre_bilingual_snapshots = metadata_for_revision("c2a8e4f6b9d1")
     pre_bilingual_catalog = metadata_for_revision("b7e3d9a1c5f2")
     pre_student_id = metadata_for_revision("9f1c2a7e4b63")
@@ -61,6 +63,9 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     a4 = metadata_for_revision("a4c7e9d2f6b1")
 
     assert head is not None
+    assert pre_about_us is not None
+    assert "about_us_entries" in head.tables
+    assert "about_us_entries" not in pre_about_us.tables
     assert pre_bilingual_snapshots is not None
     assert pre_bilingual_catalog is not None
     assert pre_student_id is not None
@@ -168,7 +173,7 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     )
 
     # Building older variants must never mutate current SQLModel metadata.
-    rebuilt_head = metadata_for_revision("d4b7e2a9c6f1")
+    rebuilt_head = metadata_for_revision("e6a1b3c5d7f9")
     assert rebuilt_head is not None
     assert column_name in rebuilt_head.tables["archive_submissions"].c
     assert previous_status_column in rebuilt_head.tables["archive_submissions"].c

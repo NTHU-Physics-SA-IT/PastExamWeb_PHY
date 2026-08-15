@@ -317,6 +317,7 @@ integration.
 | Permanent delete | MinIO call and DB delete cannot be atomic; helper may downgrade storage failure to warning | Retry and truthful result gap |
 | WebSocket discussion update | Database commit precedes broadcast | Durable write succeeds even if live delivery fails |
 | Redis | Used primarily for authentication token blacklist/state | Not part of archive lifecycle atomicity |
+| About Us create/update | Route-authorized single PostgreSQL commit | No notification, receipt, storage, Redis, or WebSocket side effect |
 
 ## NTHU OAuth and login handoff
 

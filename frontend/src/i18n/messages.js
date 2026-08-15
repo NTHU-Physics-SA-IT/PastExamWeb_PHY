@@ -193,7 +193,7 @@ const en = {
   新增課程: 'Add Course',
   '課程中文名稱 / Course Name (Chinese)': 'Course Name (Chinese)',
   '課程英文名稱 / Course Name (English)': 'Course Name (English)',
-  輸入課程中文名稱: 'Enter the Chinese course name',
+  '例如 普通物理(一)': 'e.g. 普通物理(一)',
   '輸入課程英文名稱（選填）': 'Enter the English course name (optional)',
   選擇分類: 'Select a category',
   編輯課程分類: 'Edit Course Category',
@@ -412,7 +412,7 @@ const en = {
     'A new category is being requested. This exam will belong to that category.',
   新課程名稱: 'New Course Name',
   輸入要申請的課程名稱: 'Enter the requested course name',
-  輸入課程英文名稱: 'Enter the English course name',
+  '例如 General Physics (I)': 'e.g. General Physics (I)',
   課程名稱: 'Course Name',
   選擇課程名稱: 'Select a course',
   '若課程不在列表上，請勾選「申請新增課程」。':
@@ -441,7 +441,9 @@ const en = {
   選擇檔案: 'Choose File',
   移除已選檔案: 'Remove selected file',
   '將 PDF 檔案拖放至此處以上傳': 'Drag and drop a PDF file here to upload',
-  '僅接受 PDF 檔案，檔案大小最大 10MB': 'PDF files only, up to 10 MB',
+  '僅接受 PDF 檔案，檔案大小最大 20MB': 'PDF files only, up to 20 MB',
+  'PDF 檔案超過 20 MB 大小上限': 'The PDF exceeds the 20 MB maximum file size.',
+  '{0}：PDF 檔案超過 20 MB 大小上限': '{0}: The PDF exceeds the 20 MB maximum file size.',
   '投稿類型：': 'Submission Type:',
   '申請分類：': 'Requested Category:',
   '申請分類中文名稱：': 'Requested Category Name (Chinese):',
@@ -1445,6 +1447,19 @@ const en = {
   此電子郵件已被其他帳號使用: 'This email is already used by another account.',
   此使用者名稱已被其他帳號使用: 'This user name is already used by another account.',
   你沒有權限新增或編輯使用者: 'You do not have permission to create or edit users.',
+  關於我們: 'About Us',
+  '認識清大物理考古題網站與維護團隊。':
+    'Learn about the NTHU Physics Past Exam website and its maintainers.',
+  新增關於我們內容: 'Add About Us Entry',
+  編輯關於我們內容: 'Edit About Us Entry',
+  正在載入關於我們內容: 'Loading About Us content',
+  目前尚無關於我們內容: 'No About Us content yet',
+  '關於我們內容載入失敗，請稍後再試。': 'Unable to load About Us content. Please try again later.',
+  '關於我們內容儲存失敗，請稍後再試。': 'Unable to save About Us content. Please try again later.',
+  'Markdown 內容': 'Markdown Content',
+  'Markdown 預覽': 'Markdown Preview',
+  標題是必填欄位: 'Title is required',
+  內容是必填欄位: 'Content is required',
 }
 
 const zhTW = {
