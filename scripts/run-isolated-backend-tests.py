@@ -4,12 +4,9 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import secrets
 import shutil
@@ -19,15 +16,26 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Any, Sequence
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 from urllib.parse import quote
-
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 sys.path.insert(0, str(BACKEND_ROOT))
 
-from app.db.schema_manifests import HEAD_SCHEMA_REVISION  # noqa: E402
+from app.db.audit.registry import (
+    ELIGIBILITY_AUDIT_ID,
+    get_audit_adapter,
+)
+from app.db.migration_safety import (
+    is_revision_ancestor,
+    revision_graph,
+)
+from app.db.schema_manifests import HEAD_SCHEMA_REVISION, get_manifest_spec
 
 BACKEND_PYTHON = (
     BACKEND_ROOT / ".venv" / "Scripts" / "python.exe"
@@ -36,10 +44,11 @@ BACKEND_PYTHON = (
 )
 DEV_COMPOSE = REPOSITORY_ROOT / "scripts" / "dev-compose.sh"
 POSTGRES_IMAGE = "postgres:15.14-alpine3.22"
-EXPECTED_ALEMBIC_HEAD = HEAD_SCHEMA_REVISION
+EPHEMERAL_TARGET_HEAD = HEAD_SCHEMA_REVISION
 NAME_PREFIX = "pastexam-test-postgres-s5a-"
 ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SAFE_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+REVISION_PATTERN = re.compile(r"^[0-9a-f]{12}$")
 
 
 class RunnerFailure(RuntimeError):
@@ -89,9 +98,14 @@ class CommandExecutor:
         return CommandResult(process.returncode, process.stdout, process.stderr)
 
 
-def dev_compose_command(action: str) -> tuple[str, ...]:
+def dev_compose_command(
+    action: str, *, expected_ledger: str | None = None
+) -> tuple[str, ...]:
+    arguments = (action,)
+    if expected_ledger is not None:
+        arguments += ("--expected-ledger", expected_ledger)
     if os.name != "nt":
-        return (str(DEV_COMPOSE), action)
+        return (str(DEV_COMPOSE), *arguments)
 
     git_bash = (
         Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
@@ -101,7 +115,7 @@ def dev_compose_command(action: str) -> tuple[str, ...]:
     )
     if not git_bash.is_file():
         raise RunnerFailure("Git Bash is required on Windows", 20)
-    return (str(git_bash), str(DEV_COMPOSE), action)
+    return (str(git_bash), str(DEV_COMPOSE), *arguments)
 
 
 @dataclass(frozen=True)
@@ -136,7 +150,7 @@ class CanonicalSnapshot:
 
 @dataclass
 class Evidence:
-    schema_version: int = 1
+    schema_version: int = 2
     generated_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -146,6 +160,8 @@ class Evidence:
     lifecycle_stage: str = "invocation"
     migration_status: str = "not_started"
     migration_head: str | None = None
+    canonical_expected_ledger: str | None = None
+    ephemeral_target_head: str = EPHEMERAL_TARGET_HEAD
     pytest_arguments: list[str] = field(default_factory=list)
     pytest_exit_status: int | None = None
     cleanup: dict[str, bool] = field(
@@ -170,6 +186,14 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--postgres-container-id", required=True)
     parser.add_argument("--backend-container-id", required=True)
+    parser.add_argument(
+        "--canonical-expected-ledger",
+        default=EPHEMERAL_TARGET_HEAD,
+        help=(
+            "Reviewed ancestor ledger expected only for canonical persistent "
+            "pre/post snapshots. The ephemeral target remains repository head."
+        ),
+    )
     parser.add_argument("--output", choices=("text", "json"), default="text")
     parser.add_argument("pytest_args", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
@@ -181,6 +205,30 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         if not ID_PATTERN.fullmatch(value):
             parser.error("container IDs must be exact 64-character lowercase hex IDs")
     return args
+
+
+def validate_canonical_expected_ledger(revision: str) -> str:
+    if not REVISION_PATTERN.fullmatch(revision):
+        raise RunnerFailure("canonical baseline revision is malformed", 20)
+    if get_manifest_spec(revision) is None:
+        raise RunnerFailure("canonical baseline has no reviewed schema manifest", 20)
+
+    script, heads = revision_graph()
+    if heads != [EPHEMERAL_TARGET_HEAD]:
+        raise RunnerFailure("repository migration target is ambiguous", 20)
+    if not is_revision_ancestor(
+        script,
+        revision=revision,
+        head=EPHEMERAL_TARGET_HEAD,
+    ):
+        raise RunnerFailure(
+            "canonical baseline is not an ancestor of repository head", 20
+        )
+
+    adapter = get_audit_adapter(ELIGIBILITY_AUDIT_ID, 4)
+    if revision not in adapter.accepted_source_revisions:
+        raise RunnerFailure("canonical baseline is unsupported by sealed audit", 20)
+    return revision
 
 
 def require(result: CommandResult, message: str, exit_code: int) -> str:
@@ -250,6 +298,7 @@ def canonical_snapshot(
     executor: CommandExecutor,
     postgres_id: str,
     backend_id: str,
+    canonical_expected_ledger: str,
 ) -> CanonicalSnapshot:
     postgres = container_state(executor, postgres_id)
     backend = container_state(executor, backend_id)
@@ -262,14 +311,19 @@ def canonical_snapshot(
         raise RunnerFailure("canonical runtime preflight is not Green", 20)
     schema = parse_schema_status(
         require(
-            executor.run(dev_compose_command("schema-status"), timeout=60),
+            executor.run(
+                dev_compose_command(
+                    "schema-status", expected_ledger=canonical_expected_ledger
+                ),
+                timeout=60,
+            ),
             "sealed schema-status failed",
             20,
         )
     )
     if (
         schema["status"] != "complete"
-        or schema["expected_ledger"] != EXPECTED_ALEMBIC_HEAD
+        or schema["expected_ledger"] != canonical_expected_ledger
         or schema["explicit_rollback"].lower() != "true"
     ):
         raise RunnerFailure("sealed schema baseline is not Green", 20)
@@ -624,6 +678,7 @@ class IsolatedPostgresRunner:
                     self.executor,
                     self.args.postgres_container_id,
                     self.args.backend_container_id,
+                    self.args.canonical_expected_ledger,
                 )
                 self.evidence.canonical_post = public_snapshot(post)
                 matches = post == self.pre_snapshot
@@ -641,10 +696,17 @@ class IsolatedPostgresRunner:
         try:
             self.evidence.lifecycle_stage = "preflight"
             git_clean(self.executor)
+            self.args.canonical_expected_ledger = validate_canonical_expected_ledger(
+                self.args.canonical_expected_ledger
+            )
+            self.evidence.canonical_expected_ledger = (
+                self.args.canonical_expected_ledger
+            )
             self.pre_snapshot = canonical_snapshot(
                 self.executor,
                 self.args.postgres_container_id,
                 self.args.backend_container_id,
+                self.args.canonical_expected_ledger,
             )
             self.evidence.canonical_pre = public_snapshot(self.pre_snapshot)
             self.evidence.sealed_baseline_digest = self.pre_snapshot.baseline_digest
@@ -765,7 +827,7 @@ class IsolatedPostgresRunner:
                 bootstrap_user,
                 test_database,
             )
-            if head != EXPECTED_ALEMBIC_HEAD:
+            if head != EPHEMERAL_TARGET_HEAD:
                 raise RunnerFailure("isolated migration head mismatch", 21)
             self.evidence.migration_status = "complete"
             self.evidence.migration_head = head
@@ -854,6 +916,8 @@ def render_text(evidence: Evidence) -> str:
         f"Resource: {evidence.generated_resource_name or 'not-created'}",
         f"Image: {evidence.image_identity or 'unknown'}",
         f"Port: {evidence.allocated_port or 'unallocated'}",
+        f"Canonical expected ledger: {evidence.canonical_expected_ledger or 'unknown'}",
+        f"Ephemeral target head: {evidence.ephemeral_target_head}",
         f"Migration: {evidence.migration_status}",
         f"Migration head: {evidence.migration_head or 'unknown'}",
         f"Pytest exit: {evidence.pytest_exit_status}",

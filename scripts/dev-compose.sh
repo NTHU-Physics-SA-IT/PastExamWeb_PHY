@@ -9,7 +9,7 @@ env_file="${PASTEXAM_DEV_COMPOSE_ENV_FILE:-${default_env_file}}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/dev-compose.sh <preflight|config|start|stop|status|logs|schema-status|backend-pause|backend-resume>
+Usage: scripts/dev-compose.sh <preflight|config|start|stop|status|logs|schema-status [--expected-ledger REVISION]|backend-pause|backend-resume>
 
 The development stack reads secrets and resource identities from the ignored
 docker/.env file. It never bootstraps, destroys volumes, or targets
@@ -118,16 +118,33 @@ audit_python() {
 }
 
 schema_status() {
+  local expected_ledger=""
+  if [[ "$#" -eq 0 ]]; then
+    :
+  elif [[ "$#" -eq 2 \
+    && "$1" == "--expected-ledger" \
+    && "$2" =~ ^[0-9a-f]{12}$ ]]; then
+    expected_ledger="$2"
+  else
+    fail "schema-status accepts only --expected-ledger with a 12-character lowercase hexadecimal revision"
+  fi
+
   preflight
   require_container_state "pastexam-dev-postgres" "db" "running" "healthy"
   local executable
   executable="$(audit_python)"
+  local audit_args=(
+    audit.py run
+    --audit archive-submission-self-delete-eligibility
+    --mode persistent-local
+    --output text
+  )
+  if [[ -n "${expected_ledger}" ]]; then
+    audit_args+=(--expected-ledger "${expected_ledger}")
+  fi
   (
     cd "${repo_root}/backend"
-    "${executable}" audit.py run \
-      --audit archive-submission-self-delete-eligibility \
-      --mode persistent-local \
-      --output text
+    "${executable}" "${audit_args[@]}"
   )
 }
 
@@ -139,7 +156,15 @@ backend_pause() {
 
 backend_resume() {
   schema_status
-  require_container_state "pastexam-dev-backend" "backend" "exited" ""
+  local stopped
+  stopped="$(container_state "pastexam-dev-backend")" \
+    || fail "cannot inspect pastexam-dev-backend before resume"
+  if [[ "${stopped}" != \
+      "/pastexam-dev-backend|${COMPOSE_PROJECT_NAME}|backend|exited|" \
+    && "${stopped}" != \
+      "/pastexam-dev-backend|${COMPOSE_PROJECT_NAME}|backend|exited|unhealthy" ]]; then
+    fail "pastexam-dev-backend identity/state is incompatible: ${stopped}"
+  fi
   compose start backend
 
   local attempt actual
@@ -215,7 +240,7 @@ case "${1:-}" in
     compose logs --tail "${DEV_LOG_TAIL:-200}" "${@:2}"
     ;;
   schema-status)
-    schema_status
+    schema_status "${@:2}"
     ;;
   backend-pause)
     backend_pause

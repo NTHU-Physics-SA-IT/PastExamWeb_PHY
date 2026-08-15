@@ -79,6 +79,15 @@ prove canonical identity, restart counts, and the sealed baseline before and
 after the run. Do not substitute Compose, a permanent test service, or a
 canonical database.
 
+On a schema-changing branch, the canonical persistent ledger may remain at a
+reviewed ancestor while the ephemeral database migrates to the repository
+head. Pass that baseline explicitly with
+`--canonical-expected-ledger <revision>`. The runner accepts it only when the
+revision has a reviewed manifest, is an Alembic ancestor of the single current
+head, and is supported by the sealed audit. This option affects only canonical
+pre/post snapshots: the ephemeral target is always the non-overridable current
+repository head, and exact canonical snapshot equality remains mandatory.
+
 ### Current CI implementation
 
 The workflows under `.github/workflows/` run scope detection, frontend and
