@@ -1799,12 +1799,18 @@ async def restore_trash_item(
         category = await db.get(CourseCategoryConfig, payload.item_id)
         if not category or category.deleted_at is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+        if category.pre_delete_is_active is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Category restore state is unavailable",
+            )
 
+        category.is_active = category.pre_delete_is_active
         category.deleted_at = None
         category.restored_at = now
         category.restored_by_id = current_user.user_id
         category.deleted_by_id = None
-        category.is_active = True
+        category.pre_delete_is_active = None
         await db.commit()
         return {
             "message": "已復原分類「" + category.name + "」，課程不會自動復原，若需要請另外復原課程。",

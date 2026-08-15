@@ -563,17 +563,30 @@ application milestone and are not claimed as implemented here.
 
 ### Intended invariant
 
-Soft delete sets `deleted_at` and `is_active=false`. Public category queries and
-submission choices exclude both deleted and inactive categories. Restore
-recovers the pre-delete active state rather than always enabling the category.
+Soft delete snapshots the Category's current `is_active` value, then sets
+`deleted_at` and `is_active=false` in the same transaction. Restore requires
+that snapshot, restores the exact prior active state, clears the deletion
+metadata and snapshot, and records the restore metadata in one transaction.
+Thus an active Category restores active and an inactive Category restores
+inactive; malformed deleted rows without a snapshot fail closed.
 
-### Current implementation and gap
+New Course creation, CourseSubmission creation or Category editing, and
+CourseSubmission approval may target a Category only when it is both live
+(`deleted_at IS NULL`) and active (`is_active IS TRUE`). The persisted Category
+row is authoritative: a stored inactive or deleted default key cannot fall
+through to the synthesized-default compatibility path. Rejection happens
+before Course lookup, reuse, or creation, leaving the pending request and
+related rows unchanged.
 
-Public queries commonly filter `is_active=true`; admin queries use
-`deleted_at`. `delete_course_category` sets `deleted_at` but does not set
-`is_active=false`, while category restore in `trash.py` unconditionally assigns
-`is_active=true`. This is an implementation gap. The category canonicalization
-migration tests protect metadata preservation but not this full lifecycle.
+### Current implementation
+
+`CourseCategoryConfig.pre_delete_is_active` stores the nullable lifecycle
+snapshot. The additive migration preserves live active/inactive rows, snapshots
+the previous state of existing deleted rows, and makes every deleted Category
+inactive. Upgrade and downgrade validate the lifecycle shape and abort on
+ambiguous rows rather than guessing. Focused API and migration tests protect
+active/inactive delete-and-restore behavior, new-work eligibility, default-key
+fail-closed behavior, reversible backfill, and anomaly rejection.
 
 ## Pending report uniqueness
 

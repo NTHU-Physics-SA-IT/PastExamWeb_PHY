@@ -262,12 +262,16 @@ async def _ensure_category(db: AsyncSession, category_key: str) -> CourseCategor
     result = await db.execute(
         select(CourseCategoryConfig).where(
             CourseCategoryConfig.key == category_key,
-            CourseCategoryConfig.is_active.is_(True),
         )
     )
     category = result.scalar_one_or_none()
-    if category:
+    if category and category.deleted_at is None and category.is_active:
         return category
+    if category:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Course category is not available",
+        )
     if category_key in DEFAULT_CATEGORY_ORDER:
         return CourseCategoryConfig(
             key=category_key,
@@ -604,8 +608,8 @@ async def update_course_request_for_admin(
     if request_data.name is not None:
         submission.name = format_course_display_name(request_data.name)
     if request_data.category is not None:
-        await _ensure_category(db, request_data.category)
-        submission.category = request_data.category
+        category = await _ensure_category(db, request_data.category)
+        submission.category = category.key
 
     await db.commit()
     await db.refresh(submission)
@@ -627,6 +631,8 @@ async def approve_course_request(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
     if submission.status != SubmissionStatus.PENDING:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Request already reviewed")
+
+    await _ensure_category(db, submission.category)
 
     normalized_course_name = normalize_course_search_text(submission.name)
     formatted_course_name = format_course_display_name(submission.name)
@@ -2354,7 +2360,7 @@ async def delete_course_category(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
     category = await db.get(CourseCategoryConfig, category_id)
-    if not category:
+    if not category or category.deleted_at is not None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
 
     active_courses = (
@@ -2376,6 +2382,8 @@ async def delete_course_category(
             detail=f"此分類仍有啟用中的課程，請先刪除或移動這些課程後再刪除分類。({len(active_courses)} 門，包含：{sample_names})",
         )
 
+    category.pre_delete_is_active = category.is_active
+    category.is_active = False
     category.deleted_at = datetime.now(UTC)
     category.deleted_by_id = current_user.user_id
 

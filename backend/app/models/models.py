@@ -280,6 +280,10 @@ class CourseCategoryConfig(SQLModel, table=True):
     deleted_at: datetime | None = Field(
         sa_column=Column(DateTime(timezone=True), nullable=True)
     )
+    pre_delete_is_active: bool | None = Field(
+        default=None,
+        sa_column=Column(Boolean, nullable=True),
+    )
     deleted_by_id: int | None = Field(default=None)
     restored_at: datetime | None = Field(
         sa_column=Column(DateTime(timezone=True), nullable=True)

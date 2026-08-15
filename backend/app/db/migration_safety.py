@@ -231,6 +231,7 @@ def _metadata_for_variant(variant: str) -> MetaData:
     if variant == "head":
         return metadata
     if variant not in {
+        "pre_category_active_state_preservation",
         "pre_bilingual_submission_snapshots",
         "pre_bilingual_course_catalog",
         "pre_nthu_student_id",
@@ -244,6 +245,11 @@ def _metadata_for_variant(variant: str) -> MetaData:
     }:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
 
+    categories = metadata.tables["course_category_configs"]
+    categories._columns.remove(categories.c.pre_delete_is_active)
+    if variant == "pre_category_active_state_preservation":
+        return metadata
+
     submissions = metadata.tables["archive_submissions"]
     submissions._columns.remove(submissions.c.requested_course_name_en)
     submissions._columns.remove(submissions.c.requested_category_name_en)
@@ -253,7 +259,6 @@ def _metadata_for_variant(variant: str) -> MetaData:
 
     courses = metadata.tables["courses"]
     courses._columns.remove(courses.c.name_en)
-    categories = metadata.tables["course_category_configs"]
     categories._columns.remove(categories.c.name_en)
     categories._columns.remove(categories.c.label_en)
     if variant == "pre_bilingual_course_catalog":
