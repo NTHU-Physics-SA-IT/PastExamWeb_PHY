@@ -280,6 +280,10 @@ class CourseCategoryConfig(SQLModel, table=True):
     deleted_at: datetime | None = Field(
         sa_column=Column(DateTime(timezone=True), nullable=True)
     )
+    pre_delete_is_active: bool | None = Field(
+        default=None,
+        sa_column=Column(Boolean, nullable=True),
+    )
     deleted_by_id: int | None = Field(default=None)
     restored_at: datetime | None = Field(
         sa_column=Column(DateTime(timezone=True), nullable=True)
@@ -398,9 +402,7 @@ class CourseSubmission(SQLModel, table=True):
     status: SubmissionStatus = Field(default=SubmissionStatus.PENDING, index=True)
     requester_id: int = Field(foreign_key="users.id", index=True)
     reviewer_id: int | None = Field(default=None, foreign_key="users.id")
-    review_note: str | None = Field(
-        default=None, sa_column=Column(Text, nullable=True)
-    )
+    review_note: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     created_course_id: int | None = Field(default=None, foreign_key="courses.id")
     created_at: datetime = Field(
         sa_column=Column(
@@ -479,9 +481,7 @@ class ArchiveSubmission(SQLModel, table=True):
         ),
     )
     reviewer_id: int | None = Field(default=None, foreign_key="users.id")
-    review_note: str | None = Field(
-        default=None, sa_column=Column(Text, nullable=True)
-    )
+    review_note: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     is_admin_upload: bool = Field(
         default=False,
         sa_column=Column(

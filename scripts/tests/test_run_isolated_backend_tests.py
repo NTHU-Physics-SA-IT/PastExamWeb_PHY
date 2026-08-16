@@ -262,13 +262,13 @@ def test_success_has_stable_json_and_complete_cleanup() -> None:
     assert runner.evidence.exit_code == 0
     assert payload["schema_version"] == 2
     assert payload["canonical_expected_ledger"] == "d4b7e2a9c6f1"
-    assert payload["ephemeral_target_head"] == "e6a1b3c5d7f9"
-    assert payload["migration_head"] == "e6a1b3c5d7f9"
+    assert payload["ephemeral_target_head"] == "e8a4c1d7b2f6"
+    assert payload["migration_head"] == "e8a4c1d7b2f6"
     assert all(payload["cleanup"].values())
 
 
 def test_runner_uses_canonical_schema_manifest_head() -> None:
-    assert runner_module.EPHEMERAL_TARGET_HEAD == "e6a1b3c5d7f9"
+    assert runner_module.EPHEMERAL_TARGET_HEAD == "e8a4c1d7b2f6"
 
 
 def test_explicit_canonical_baseline_is_distinct_from_ephemeral_target() -> None:

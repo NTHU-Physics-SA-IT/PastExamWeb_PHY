@@ -545,6 +545,133 @@ def test_archive_report_revision_is_additive_and_reversible(
         )
 
 
+def test_category_state_preservation_revision_backfills_and_fails_closed(
+    clean_public_schema: Engine,
+) -> None:
+    baseline_revision = "d4b7e2a9c6f1"
+    previous_revision = "e6a1b3c5d7f9"
+    new_revision = "e8a4c1d7b2f6"
+    config = alembic_config()
+    upgrade(baseline_revision)
+
+    rows = (
+        ("d1-live-active", True, None),
+        ("d1-live-inactive", False, None),
+        ("d1-deleted-active", True, "2026-08-15T00:00:00+00:00"),
+        ("d1-deleted-inactive", False, "2026-08-15T00:00:00+00:00"),
+    )
+    with clean_public_schema.begin() as connection:
+        for order_index, (key, is_active, deleted_at) in enumerate(rows):
+            connection.execute(
+                text(
+                    "INSERT INTO course_category_configs "
+                    "(key, name, label, icon, badge_color, order_index, "
+                    "is_active, deleted_at) "
+                    "VALUES (:key, :name, '', 'pi pi-book', 'blue', "
+                    ":order_index, :is_active, :deleted_at)"
+                ),
+                {
+                    "key": key,
+                    "name": key,
+                    "order_index": order_index,
+                    "is_active": is_active,
+                    "deleted_at": deleted_at,
+                },
+            )
+
+    command.upgrade(config, new_revision)
+    with clean_public_schema.connect() as connection:
+        assert (
+            connection.scalar(text("SELECT version_num FROM alembic_version"))
+            == new_revision
+        )
+        assert sa_inspect(connection).has_table("about_us_entries", schema="public")
+        migrated = {
+            row.key: (row.is_active, row.pre_delete_is_active)
+            for row in connection.execute(
+                text(
+                    "SELECT key, is_active, pre_delete_is_active "
+                    "FROM course_category_configs WHERE key LIKE 'd1-%'"
+                )
+            )
+        }
+    assert migrated == {
+        "d1-live-active": (True, None),
+        "d1-live-inactive": (False, None),
+        "d1-deleted-active": (False, True),
+        "d1-deleted-inactive": (False, False),
+    }
+
+    with clean_public_schema.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO about_us_entries "
+                "(title, body, created_at, updated_at, updated_by_id) "
+                "VALUES ('D1 migration sentinel', 'preserve across downgrade', "
+                "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)"
+            )
+        )
+
+    command.downgrade(config, previous_revision)
+    with clean_public_schema.connect() as connection:
+        assert (
+            connection.scalar(text("SELECT version_num FROM alembic_version"))
+            == previous_revision
+        )
+        inspector = sa_inspect(connection)
+        assert inspector.has_table("about_us_entries", schema="public")
+        assert "pre_delete_is_active" not in {
+            column["name"]
+            for column in inspector.get_columns(
+                "course_category_configs", schema="public"
+            )
+        }
+        assert (
+            connection.scalar(
+                text(
+                    "SELECT count(*) FROM about_us_entries "
+                    "WHERE title = 'D1 migration sentinel'"
+                )
+            )
+            == 1
+        )
+        downgraded = {
+            row.key: row.is_active
+            for row in connection.execute(
+                text(
+                    "SELECT key, is_active FROM course_category_configs "
+                    "WHERE key LIKE 'd1-%'"
+                )
+            )
+        }
+    assert downgraded == {key: is_active for key, is_active, _ in rows}
+    source_report = inspect_database()
+    assert source_report.current_revision == previous_revision
+    assert source_report.schema_candidate_revision == previous_revision
+    assert source_report.upgrade_allowed is True
+
+    command.upgrade(config, new_revision)
+    with clean_public_schema.connect() as connection:
+        assert (
+            connection.scalar(
+                text(
+                    "SELECT count(*) FROM about_us_entries "
+                    "WHERE title = 'D1 migration sentinel'"
+                )
+            )
+            == 1
+        )
+    with clean_public_schema.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE course_category_configs SET pre_delete_is_active = NULL "
+                "WHERE key = 'd1-deleted-active'"
+            )
+        )
+    with pytest.raises(RuntimeError, match="snapshot validation failed"):
+        command.downgrade(config, previous_revision)
+
+
 def test_known_revision_without_manifest_is_blocked() -> None:
     upgrade("d1e6c8a4f2b9")
 
