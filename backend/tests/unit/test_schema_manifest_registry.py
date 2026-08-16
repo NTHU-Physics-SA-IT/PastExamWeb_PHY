@@ -98,8 +98,7 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
         not in pre_category_state.tables["course_category_configs"].c
     )
     assert (
-        "pre_delete_is_active"
-        not in pre_about_us.tables["course_category_configs"].c
+        "pre_delete_is_active" not in pre_about_us.tables["course_category_configs"].c
     )
     assert "label_en" in head.tables["course_category_configs"].c
     for bilingual_snapshot_column in (

@@ -292,18 +292,14 @@ async def _assert_course_trash_restore_lifecycle(
     )
     previous_reviewed_at = submission.reviewed_at
 
-    delete_response = await client.delete(
-        f"/courses/admin/courses/{course.id}"
-    )
+    delete_response = await client.delete(f"/courses/admin/courses/{course.id}")
     assert delete_response.status_code == 200
     assert "1 associated archives" in delete_response.json()["message"]
 
     async with session_maker() as session:
         trashed_course = await session.get(Course, course.id)
         trashed_archive = await session.get(Archive, archive.id)
-        temporary_submission = await session.get(
-            ArchiveSubmission, submission.id
-        )
+        temporary_submission = await session.get(ArchiveSubmission, submission.id)
         assert trashed_course.deleted_at is not None
         assert trashed_course.deleted_by_id == admin_id
         assert trashed_course.restored_at is None
@@ -312,13 +308,9 @@ async def _assert_course_trash_restore_lifecycle(
         assert trashed_archive.deleted_reason == "course deleted"
         assert temporary_submission.deleted_at is None
         assert temporary_submission.status == SubmissionStatus.TAKEDOWN
-        assert is_course_trash_lifecycle_reason(
-            temporary_submission.lifecycle_reason
-        )
+        assert is_course_trash_lifecycle_reason(temporary_submission.lifecycle_reason)
         assert (
-            get_course_trash_previous_status(
-                temporary_submission.lifecycle_reason
-            )
+            get_course_trash_previous_status(temporary_submission.lifecycle_reason)
             == expected_previous_status
         )
         assert f"course_id={course.id}" in temporary_submission.lifecycle_reason
@@ -347,9 +339,7 @@ async def _assert_course_trash_restore_lifecycle(
     async with session_maker() as session:
         restored_course = await session.get(Course, course.id)
         restored_archive = await session.get(Archive, archive.id)
-        restored_submission = await session.get(
-            ArchiveSubmission, submission.id
-        )
+        restored_submission = await session.get(ArchiveSubmission, submission.id)
         assert restored_course.deleted_at is None
         assert restored_course.deleted_by_id is None
         assert restored_course.restored_at is not None
@@ -447,8 +437,7 @@ async def test_course_request_approval_reuses_existing_course_without_duplicates
             course_count_before = int(
                 await session.scalar(
                     select(func.count(Course.id)).where(
-                        normalized_course_text_expr(Course.name)
-                        == normalized_name,
+                        normalized_course_text_expr(Course.name) == normalized_name,
                         Course.category == category_key,
                     )
                 )
@@ -466,9 +455,7 @@ async def test_course_request_approval_reuses_existing_course_without_duplicates
         assert approve_response.json()["created_course_id"] == existing_course_id
 
         async with session_maker() as session:
-            stored_submission = await session.get(
-                CourseSubmission, submission_id
-            )
+            stored_submission = await session.get(CourseSubmission, submission_id)
             stored_course = await session.get(Course, existing_course_id)
             assert stored_submission.status == SubmissionStatus.APPROVED
             assert stored_submission.reviewer_id == admin.id
@@ -490,8 +477,7 @@ async def test_course_request_approval_reuses_existing_course_without_duplicates
             course_count_after = int(
                 await session.scalar(
                     select(func.count(Course.id)).where(
-                        normalized_course_text_expr(Course.name)
-                        == normalized_name,
+                        normalized_course_text_expr(Course.name) == normalized_name,
                         Course.category == category_key,
                     )
                 )
@@ -504,14 +490,11 @@ async def test_course_request_approval_reuses_existing_course_without_duplicates
         async with session_maker() as session:
             if submission_id is not None:
                 await session.execute(
-                    delete(CourseSubmission).where(
-                        CourseSubmission.id == submission_id
-                    )
+                    delete(CourseSubmission).where(CourseSubmission.id == submission_id)
                 )
             await session.execute(
                 delete(Course).where(
-                    normalized_course_text_expr(Course.name)
-                    == normalized_name,
+                    normalized_course_text_expr(Course.name) == normalized_name,
                     Course.category == category_key,
                 )
             )
@@ -522,8 +505,7 @@ async def test_course_request_approval_reuses_existing_course_without_duplicates
                 int(
                     await session.scalar(
                         select(func.count(Course.id)).where(
-                            normalized_course_text_expr(Course.name)
-                            == normalized_name,
+                            normalized_course_text_expr(Course.name) == normalized_name,
                             Course.category == category_key,
                         )
                     )
@@ -589,12 +571,8 @@ async def test_get_course_archives_returns_active_archives(
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
-            await session.execute(
-                delete(Archive).where(Archive.course_id == course.id)
-            )
-            await session.execute(
-                delete(Course).where(Course.id == course.id)
-            )
+            await session.execute(delete(Archive).where(Archive.course_id == course.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
             await session.commit()
 
 
@@ -612,7 +590,10 @@ async def test_get_course_archives_limits_submission_ids_to_owner_or_admin(
         session_maker, course_id=course.id, uploader_id=owner.id, name="Owner archive"
     )
     other_archive = await _create_archive(
-        session_maker, course_id=course.id, uploader_id=other_user.id, name="Other archive"
+        session_maker,
+        course_id=course.id,
+        uploader_id=other_user.id,
+        name="Other archive",
     )
     owner_submission = await _create_linked_submission(
         session_maker, archive=owner_archive, requester_id=owner.id
@@ -629,18 +610,26 @@ async def test_get_course_archives_limits_submission_ids_to_owner_or_admin(
 
     try:
         owner_rows = await fetch_as(owner)
-        assert owner_rows[owner_archive.id]["source_submission_ids"] == [owner_submission.id]
+        assert owner_rows[owner_archive.id]["source_submission_ids"] == [
+            owner_submission.id
+        ]
         assert owner_rows[other_archive.id]["source_submission_ids"] == []
         assert "source_submission_id" not in owner_rows[owner_archive.id]
 
         other_rows = await fetch_as(other_user)
         assert other_rows[owner_archive.id]["source_submission_ids"] == []
-        assert other_rows[other_archive.id]["source_submission_ids"] == [other_submission.id]
+        assert other_rows[other_archive.id]["source_submission_ids"] == [
+            other_submission.id
+        ]
         assert "source_submission_id" not in other_rows[other_archive.id]
 
         admin_rows = await fetch_as(admin)
-        assert admin_rows[owner_archive.id]["source_submission_ids"] == [owner_submission.id]
-        assert admin_rows[other_archive.id]["source_submission_ids"] == [other_submission.id]
+        assert admin_rows[owner_archive.id]["source_submission_ids"] == [
+            owner_submission.id
+        ]
+        assert admin_rows[other_archive.id]["source_submission_ids"] == [
+            other_submission.id
+        ]
         assert "source_submission_id" not in admin_rows[owner_archive.id]
 
         app.dependency_overrides.pop(get_current_user, None)
@@ -774,10 +763,14 @@ async def test_same_metadata_archives_keep_exact_sources_and_file_objects(
         admin_rows = await fetch_as(admin)
 
         assert set(admin_rows) == {archive_a.id, archive_b.id}
-        assert requester_a_rows[archive_a.id]["source_submission_ids"] == [submission_a.id]
+        assert requester_a_rows[archive_a.id]["source_submission_ids"] == [
+            submission_a.id
+        ]
         assert requester_a_rows[archive_b.id]["source_submission_ids"] == []
         assert requester_b_rows[archive_a.id]["source_submission_ids"] == []
-        assert requester_b_rows[archive_b.id]["source_submission_ids"] == [submission_b.id]
+        assert requester_b_rows[archive_b.id]["source_submission_ids"] == [
+            submission_b.id
+        ]
         assert unrelated_rows[archive_a.id]["source_submission_ids"] == []
         assert unrelated_rows[archive_b.id]["source_submission_ids"] == []
         assert admin_rows[archive_a.id]["source_submission_ids"] == [submission_a.id]
@@ -862,12 +855,8 @@ async def test_archive_file_endpoints_require_authentication(
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
-            await session.execute(
-                delete(Archive).where(Archive.id == archive.id)
-            )
-            await session.execute(
-                delete(Course).where(Course.id == course.id)
-            )
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
             await session.commit()
 
 
@@ -891,9 +880,7 @@ async def test_get_archive_preview_url_returns_presigned_link(
         assert expires.total_seconds() == 1800
         return preview_url
 
-    monkeypatch.setattr(
-        "app.api.services.courses.presigned_get_url", fake_presigned
-    )
+    monkeypatch.setattr("app.api.services.courses.presigned_get_url", fake_presigned)
     monkeypatch.setattr(
         "app.api.services.courses.get_minio_client",
         lambda: type("MinioStub", (), {"stat_object": lambda *_args: None})(),
@@ -908,12 +895,8 @@ async def test_get_archive_preview_url_returns_presigned_link(
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
-            await session.execute(
-                delete(Archive).where(Archive.id == archive.id)
-            )
-            await session.execute(
-                delete(Course).where(Course.id == course.id)
-            )
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
             await session.commit()
 
 
@@ -984,9 +967,7 @@ async def test_get_archive_download_url_increments_count(
         assert expires.total_seconds() == 3600
         return download_url
 
-    monkeypatch.setattr(
-        "app.api.services.courses.presigned_get_url", fake_presigned
-    )
+    monkeypatch.setattr("app.api.services.courses.presigned_get_url", fake_presigned)
     monkeypatch.setattr(
         "app.api.services.courses.get_minio_client",
         lambda: type("MinioStub", (), {"stat_object": lambda *_args: None})(),
@@ -1005,12 +986,8 @@ async def test_get_archive_download_url_increments_count(
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
-            await session.execute(
-                delete(Archive).where(Archive.id == archive.id)
-            )
-            await session.execute(
-                delete(Course).where(Course.id == course.id)
-            )
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
             await session.commit()
 
 
@@ -1036,12 +1013,8 @@ async def test_update_archive_requires_admin(
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
-            await session.execute(
-                delete(Archive).where(Archive.id == archive.id)
-            )
-            await session.execute(
-                delete(Course).where(Course.id == course.id)
-            )
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
             await session.commit()
 
 
@@ -1079,12 +1052,8 @@ async def test_admin_update_archive_changes_fields(
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
-            await session.execute(
-                delete(Archive).where(Archive.id == archive.id)
-            )
-            await session.execute(
-                delete(Course).where(Course.id == course.id)
-            )
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
             await session.commit()
 
 
@@ -1144,9 +1113,7 @@ async def test_admin_course_crud_flow(
                 await session.execute(
                     delete(Archive).where(Archive.course_id == course_id)
                 )
-                await session.execute(
-                    delete(Course).where(Course.id == course_id)
-                )
+                await session.execute(delete(Course).where(Course.id == course_id))
                 await session.commit()
 
 
@@ -1184,9 +1151,7 @@ async def test_admin_course_endpoints_require_admin(
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
-            await session.execute(
-                delete(Course).where(Course.id == course.id)
-            )
+            await session.execute(delete(Course).where(Course.id == course.id))
             await session.commit()
 
 
@@ -1222,13 +1187,9 @@ async def test_update_archive_course_transfers_to_existing_course(
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
             await session.execute(
-                delete(Archive).where(Archive.id == archive.id)
-            )
-            await session.execute(
-                delete(Course).where(
-                    Course.id.in_([course_a.id, course_b.id])
-                )
+                delete(Course).where(Course.id.in_([course_a.id, course_b.id]))
             )
             await session.commit()
 
@@ -1280,22 +1241,24 @@ async def test_update_archive_course_name_uses_unique_active_with_trashed_duplic
             assert stored_archive.course_id == active.id
             assert stored_submission.status == SubmissionStatus.APPROVED
             assert stored_submission.created_archive_id == archive.id
-            assert all([
-                (await session.get(Course, item.id)).deleted_at is not None
-                for item in trashed
-            ])
+            assert all(
+                [
+                    (await session.get(Course, item.id)).deleted_at is not None
+                    for item in trashed
+                ]
+            )
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
             await session.execute(
-                delete(ArchiveSubmission).where(
-                    ArchiveSubmission.id == submission.id
-                )
+                delete(ArchiveSubmission).where(ArchiveSubmission.id == submission.id)
             )
             await session.execute(delete(Archive).where(Archive.id == archive.id))
             await session.execute(
                 delete(Course).where(
-                    Course.id.in_([original.id, active.id, *(item.id for item in trashed)])
+                    Course.id.in_(
+                        [original.id, active.id, *(item.id for item in trashed)]
+                    )
                 )
             )
             await session.commit()
@@ -1349,10 +1312,12 @@ async def test_update_archive_course_trashed_targets_return_exact_contract(
         assert (by_name.status_code, by_name.json()) == (409, expected)
         async with session_maker() as session:
             assert (await session.get(Archive, archive.id)).course_id == original.id
-            assert all([
-                (await session.get(Course, item.id)).deleted_at is not None
-                for item in trashed
-            ])
+            assert all(
+                [
+                    (await session.get(Course, item.id)).deleted_at is not None
+                    for item in trashed
+                ]
+            )
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
@@ -1562,13 +1527,9 @@ async def test_update_archive_course_missing_name_returns_exact_contract_without
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
             await session.execute(
-                delete(Archive).where(Archive.id == archive.id)
-            )
-            await session.execute(
-                delete(Course).where(
-                    Course.name.in_(["Original Course", "New Course"])
-                )
+                delete(Course).where(Course.name.in_(["Original Course", "New Course"]))
             )
             await session.commit()
 
@@ -1599,12 +1560,8 @@ async def test_update_archive_course_rejects_same_course(
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
-            await session.execute(
-                delete(Archive).where(Archive.id == archive.id)
-            )
-            await session.execute(
-                delete(Course).where(Course.id == course.id)
-            )
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
             await session.commit()
 
 
@@ -1625,9 +1582,7 @@ async def test_delete_archive_admin_success(
     app.dependency_overrides[get_current_user] = _override_user(admin)
 
     try:
-        response = await client.delete(
-            f"/courses/{course.id}/archives/{archive.id}"
-        )
+        response = await client.delete(f"/courses/{course.id}/archives/{archive.id}")
         assert response.status_code == 200
         assert response.json()["message"] == "Archive deleted successfully"
 
@@ -1637,12 +1592,8 @@ async def test_delete_archive_admin_success(
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
-            await session.execute(
-                delete(Archive).where(Archive.id == archive.id)
-            )
-            await session.execute(
-                delete(Course).where(Course.id == course.id)
-            )
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
             await session.commit()
 
 
@@ -1674,10 +1625,7 @@ async def test_get_categorized_courses_direct(session_maker, make_user):
             item["id"] == course_freshman.id
             for item in payload[CourseCategory.FRESHMAN.value]
         )
-        assert any(
-            item["id"] == course_graduate.id
-            for item in payload["graduate"]
-        )
+        assert any(item["id"] == course_graduate.id for item in payload["graduate"])
     finally:
         pass
 
@@ -1749,12 +1697,8 @@ async def test_archive_preview_and_download_direct(
             assert refreshed.download_count == 1
     finally:
         async with session_maker() as session:
-            await session.execute(
-                delete(Archive).where(Archive.id == archive.id)
-            )
-            await session.execute(
-                delete(Course).where(Course.id == course.id)
-            )
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
             await session.commit()
 
 
@@ -1819,12 +1763,8 @@ async def test_update_archive_direct_sets_fields(
             assert updated.academic_year == 2026
     finally:
         async with session_maker() as session:
-            await session.execute(
-                delete(Archive).where(Archive.id == archive.id)
-            )
-            await session.execute(
-                delete(Course).where(Course.id == course.id)
-            )
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
             await session.commit()
 
 
@@ -2395,9 +2335,7 @@ async def test_admin_delete_course_soft_deletes_archives(
 
     app.dependency_overrides[get_current_user] = _override_user(admin)
     try:
-        response = await client.delete(
-            f"/courses/admin/courses/{course.id}"
-        )
+        response = await client.delete(f"/courses/admin/courses/{course.id}")
         assert response.status_code == 200
         body = response.json()
         assert "1 associated archives" in body["message"]
@@ -2410,12 +2348,8 @@ async def test_admin_delete_course_soft_deletes_archives(
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
-            await session.execute(
-                delete(Archive).where(Archive.id == archive.id)
-            )
-            await session.execute(
-                delete(Course).where(Course.id == course.id)
-            )
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
             await session.commit()
 
 
