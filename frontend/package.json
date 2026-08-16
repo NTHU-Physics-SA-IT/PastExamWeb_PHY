@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": "^24.15.0 || ^26.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -45,7 +48,7 @@
     "eslint-plugin-vue": "^10.10.0",
     "globals": "^17.9.0",
     "husky": "^9.1.7",
-    "jsdom": "^29.1.1",
+    "jsdom": "^30.0.1",
     "lint-staged": "^17.3.0",
     "prettier": "3.9.6",
     "typescript": "^6.0.3",

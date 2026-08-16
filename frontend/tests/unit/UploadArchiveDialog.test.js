@@ -224,6 +224,22 @@ describe('UploadArchiveDialog', () => {
     wrapper.unmount()
   })
 
+  it('rejects an oversized PDF with a visible validation error', async () => {
+    const wrapper = mountDialog()
+    const vm = wrapper.vm
+    const clear = vi.fn()
+    vm.fileUpload = { clear }
+
+    vm.onFileSelect({
+      files: [{ name: 'oversized.pdf', size: 20 * 1024 * 1024 + 1 }],
+    })
+    await flushPromises()
+
+    expect(vm.form.file).toBeNull()
+    expect(vm.fileValidationError).toBe('PDF 檔案超過 20 MB 大小上限')
+    expect(clear).toHaveBeenCalled()
+  })
+
   it('covers helper utilities, watchers, and error branches', async () => {
     const wrapper = mountDialog()
     const vm = wrapper.vm

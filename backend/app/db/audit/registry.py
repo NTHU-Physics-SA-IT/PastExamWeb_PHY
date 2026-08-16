@@ -19,6 +19,7 @@ OAUTH_IDENTITY_REVISION = "9f1c2a7e4b63"
 NTHU_STUDENT_ID_REVISION = "b7e3d9a1c5f2"
 BILINGUAL_COURSE_CATALOG_REVISION = "c2a8e4f6b9d1"
 BILINGUAL_SUBMISSION_SNAPSHOT_REVISION = "d4b7e2a9c6f1"
+ABOUT_US_REVISION = "e6a1b3c5d7f9"
 
 
 _CLASSIFICATION_CTE = r"""
@@ -800,6 +801,7 @@ _ELIGIBILITY_V4 = AuditAdapter(
         {
             BILINGUAL_COURSE_CATALOG_REVISION,
             BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
+            ABOUT_US_REVISION,
         }
     ),
     approved_aggregate_labels=tuple(OneToOneAggregateCounts.model_fields),

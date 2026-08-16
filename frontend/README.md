@@ -40,6 +40,12 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
+The canonical local, CI, and release runtime is Node 24, with a minimum
+supported version of 24.15.0. Use the repository root `.nvmrc` to select that
+family locally. The frontend production-build and development Dockerfiles
+intentionally remain on Node 26. Dependency-major migrations, including jsdom
+and Vite, are reviewed separately from the runtime policy.
+
 This standalone server does not prepare the backend, PostgreSQL, Redis, or
 MinIO. Use the [local development environment](../docs/development/local-environment.md)
 for the complete stack and environment boundaries.

@@ -74,6 +74,10 @@ body {
   font-size: var(--app-font-size-base);
 }
 
+.p-error {
+  color: var(--p-form-field-invalid-placeholder-color);
+}
+
 #app {
   font-size: var(--app-font-size-base);
 }

@@ -18,6 +18,7 @@ from app.db.course_categories import (
 from app.db.migration_safety import MigrationReport, inspect_database
 from app.db.session import AsyncSessionLocal
 from app.models.models import (
+    AboutUsEntry,
     Archive,
     ArchiveDiscussionMessage,
     ArchiveSubmission,
@@ -268,6 +269,7 @@ async def _validate_bootstrap_contents(session) -> bool:
         )
 
     protected_models = (
+        AboutUsEntry,
         User,
         Course,
         CourseSubmission,
