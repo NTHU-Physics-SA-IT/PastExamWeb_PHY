@@ -4205,10 +4205,17 @@
               class="w-full"
               inputClass="w-full"
               :class="{ 'p-invalid': userFormErrors.password }"
+              :aria-describedby="userFormErrors.password ? 'admin-user-password-error' : undefined"
+              :aria-invalid="Boolean(userFormErrors.password)"
               toggleMask
               :feedback="false"
             />
-            <small v-if="userFormErrors.password" class="p-error">
+            <small
+              v-if="userFormErrors.password"
+              id="admin-user-password-error"
+              class="p-error"
+              role="alert"
+            >
               {{ userFormErrors.password }}
             </small>
           </div>
@@ -4273,11 +4280,20 @@
               class="w-full"
               inputClass="w-full"
               :class="{ 'p-invalid': resetPasswordFormErrors.newPassword }"
+              :aria-describedby="
+                resetPasswordFormErrors.newPassword ? 'admin-reset-new-password-error' : undefined
+              "
+              :aria-invalid="Boolean(resetPasswordFormErrors.newPassword)"
               toggleMask
               :feedback="false"
               :maxlength="128"
             />
-            <small v-if="resetPasswordFormErrors.newPassword" class="p-error">
+            <small
+              v-if="resetPasswordFormErrors.newPassword"
+              id="admin-reset-new-password-error"
+              class="p-error"
+              role="alert"
+            >
               {{ resetPasswordFormErrors.newPassword }}
             </small>
           </div>
@@ -4292,11 +4308,22 @@
               class="w-full"
               inputClass="w-full"
               :class="{ 'p-invalid': resetPasswordFormErrors.confirmPassword }"
+              :aria-describedby="
+                resetPasswordFormErrors.confirmPassword
+                  ? 'admin-reset-confirm-password-error'
+                  : undefined
+              "
+              :aria-invalid="Boolean(resetPasswordFormErrors.confirmPassword)"
               toggleMask
               :feedback="false"
               :maxlength="128"
             />
-            <small v-if="resetPasswordFormErrors.confirmPassword" class="p-error">
+            <small
+              v-if="resetPasswordFormErrors.confirmPassword"
+              id="admin-reset-confirm-password-error"
+              class="p-error"
+              role="alert"
+            >
               {{ resetPasswordFormErrors.confirmPassword }}
             </small>
           </div>
@@ -8849,13 +8876,25 @@ const saveUser = async () => {
     if (isUnauthorizedError(error)) {
       return
     }
+    const saveErrorMessage = getUserSaveErrorMessage(
+      error,
+      editingUser.value ? t('使用者更新失敗') : t('使用者新增失敗')
+    )
+    const responseDetail = error?.response?.data?.detail
+    const validationLocation = Array.isArray(responseDetail)
+      ? responseDetail.find((item) => Array.isArray(item?.loc))?.loc || []
+      : []
+    if (validationLocation.includes('password')) userFormErrors.value.password = saveErrorMessage
+    if (responseDetail === 'User with this email already exists') {
+      userFormErrors.value.email = saveErrorMessage
+    }
+    if (responseDetail === 'User with this name already exists') {
+      userFormErrors.value.name = saveErrorMessage
+    }
     toast.add({
       severity: 'error',
       summary: t('錯誤'),
-      detail: getUserSaveErrorMessage(
-        error,
-        editingUser.value ? t('使用者更新失敗') : t('使用者新增失敗')
-      ),
+      detail: saveErrorMessage,
       life: 3000,
     })
   } finally {

@@ -389,7 +389,7 @@ async def test_first_bootstrap_accepts_only_six_categories_and_empty_tables():
         for definition in DEFAULT_COURSE_CATEGORY_DEFINITIONS
     ]
     fake_session = FakeSession(
-        query_values=[None, categories, *([0] * 11)],
+        query_values=[None, categories, *([0] * 12)],
     )
 
     assert await init_db._validate_bootstrap_contents(fake_session) is True

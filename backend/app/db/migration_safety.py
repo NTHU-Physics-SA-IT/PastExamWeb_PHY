@@ -231,6 +231,7 @@ def _metadata_for_variant(variant: str) -> MetaData:
     if variant == "head":
         return metadata
     if variant not in {
+        "pre_about_us_entries",
         "pre_bilingual_submission_snapshots",
         "pre_bilingual_course_catalog",
         "pre_nthu_student_id",
@@ -243,6 +244,10 @@ def _metadata_for_variant(variant: str) -> MetaData:
         "pre_category_canonicalization",
     }:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
+
+    metadata.remove(metadata.tables["about_us_entries"])
+    if variant == "pre_about_us_entries":
+        return metadata
 
     submissions = metadata.tables["archive_submissions"]
     submissions._columns.remove(submissions.c.requested_course_name_en)

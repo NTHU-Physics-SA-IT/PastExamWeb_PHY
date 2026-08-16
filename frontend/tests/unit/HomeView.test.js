@@ -63,7 +63,10 @@ describe('HomeView', () => {
     setLocale('zh-TW')
   })
 
-  it('restores the original hero title sizes at tablet and mobile widths', () => {
+  it('restores the hero title lockup to 100% scale at tablet and mobile widths', () => {
+    expect(homeSource).toMatch(
+      /@media \(max-width: 768px\)[\s\S]*?\.hero-title-lockup\s*\{[^}]*transform:\s*scale\(1\.1111\)/
+    )
     expect(homeSource).toMatch(
       /@media \(max-width: 768px\)[\s\S]*?h1\s*\{[^}]*font-size:\s*clamp\(1\.7rem, 7\.8vw, 2\.15rem\)/
     )

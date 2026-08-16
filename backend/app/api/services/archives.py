@@ -814,11 +814,11 @@ async def upload_archive(
     file_content = await file.read()
     file_size = len(file_content)
 
-    max_size = 10 * 1024 * 1024  # 10MB
+    max_size = 20 * 1024 * 1024  # 20MB
     if file_size > max_size:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File size exceeds 10MB limit",
+            detail="File size exceeds 20MB limit",
         )
 
     _, file_extension = os.path.splitext(file.filename)

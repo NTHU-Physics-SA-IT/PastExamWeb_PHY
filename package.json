@@ -1,4 +1,7 @@
 {
+	"engines": {
+		"node": "^24.15.0"
+	},
 	"devDependencies": {
 		"semantic-release": "^25.0.9",
 		"@semantic-release/commit-analyzer": "^13.0.1",

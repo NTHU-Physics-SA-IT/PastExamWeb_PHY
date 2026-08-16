@@ -115,6 +115,18 @@ vi.mock('@/components/NotificationCenterModal.vue', () => ({
 }))
 
 describe('Navbar methods', () => {
+  it('places About Us directly below Personal Settings', () => {
+    const actions = Navbar.computed.moreActions.call({
+      isAuthenticated: true,
+      isDesktopView: true,
+      notificationStore: { unreadTotal: { value: 0 } },
+      $t: translate,
+      invokeMenuAction: vi.fn(),
+    })
+
+    expect(actions.slice(0, 2).map((item) => item.label)).toEqual(['個人化設定', '關於我們'])
+  })
+
   it('hides guest login only on Home and the public course catalog', () => {
     const guest = { isAuthenticated: false }
 
@@ -725,18 +737,22 @@ describe('Navbar methods', () => {
       isDesktopView: true,
       invokeMenuAction: vi.fn((handler) => handler()),
       handleNavigatePersonalSettings: vi.fn(),
+      handleNavigateAboutUs: vi.fn(),
       openNotificationCenter: vi.fn(),
       openIssueReportDialog: vi.fn(),
       handleNavigateAdmin: vi.fn(),
       handleLogout: vi.fn(),
     }
     const actionsDesktop = Navbar.computed.moreActions.call(actionsCtxDesktop)
-    expect(actionsDesktop).toHaveLength(3)
+    expect(actionsDesktop).toHaveLength(4)
     actionsDesktop[0].command()
     expect(actionsCtxDesktop.invokeMenuAction).toHaveBeenCalled()
     expect(actionsCtxDesktop.handleNavigatePersonalSettings).toHaveBeenCalled()
     actionsDesktop[1].command()
-    expect(actionsDesktop[1].label).toBe('通知中心')
+    expect(actionsDesktop[1].label).toBe('關於我們')
+    expect(actionsCtxDesktop.handleNavigateAboutUs).toHaveBeenCalled()
+    actionsDesktop[2].command()
+    expect(actionsDesktop[2].label).toBe('通知中心')
     expect(actionsCtxDesktop.openNotificationCenter).toHaveBeenCalledWith('navbar-menu')
 
     const actionsCtxMobile = {
@@ -746,17 +762,18 @@ describe('Navbar methods', () => {
       isDesktopView: false,
       invokeMenuAction: vi.fn((handler) => handler()),
       handleNavigatePersonalSettings: vi.fn(),
+      handleNavigateAboutUs: vi.fn(),
       openNotificationCenter: vi.fn(),
       openIssueReportDialog: vi.fn(),
       handleNavigateAdmin: vi.fn(),
       handleLogout: vi.fn(),
     }
     const actionsMobile = Navbar.computed.moreActions.call(actionsCtxMobile)
-    expect(actionsMobile).toHaveLength(5)
-    expect(actionsMobile[3]).toHaveProperty('separator')
-    expect(actionsMobile[4].label).toBe('登出')
-    expect(actionsMobile[4].icon).toBe('pi pi-sign-out')
-    actionsMobile[4].command()
+    expect(actionsMobile).toHaveLength(6)
+    expect(actionsMobile[4]).toHaveProperty('separator')
+    expect(actionsMobile[5].label).toBe('登出')
+    expect(actionsMobile[5].icon).toBe('pi pi-sign-out')
+    actionsMobile[5].command()
     expect(actionsCtxMobile.invokeMenuAction).toHaveBeenCalled()
     expect(actionsCtxMobile.handleLogout).toHaveBeenCalled()
 

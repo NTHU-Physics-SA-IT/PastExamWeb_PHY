@@ -23,6 +23,7 @@ from app.db.audit.models import (
     FlagCombination,
 )
 from app.db.audit.registry import (
+    ABOUT_US_REVISION,
     BILINGUAL_COURSE_CATALOG_REVISION,
     BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
     AuditAdapter,
@@ -121,6 +122,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         "b7e3d9a1c5f2",
         BILINGUAL_COURSE_CATALOG_REVISION,
         BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
+        ABOUT_US_REVISION,
     }
     owner_delete_column_condition = (
         """
@@ -154,6 +156,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         "b7e3d9a1c5f2",
         BILINGUAL_COURSE_CATALOG_REVISION,
         BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
+        ABOUT_US_REVISION,
     }
     previous_status_column_condition = (
         """
@@ -181,6 +184,7 @@ def _continuity_cte(request: AuditRequest) -> str:
     expects_bilingual_catalog = request.expected_ledger in {
         BILINGUAL_COURSE_CATALOG_REVISION,
         BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
+        ABOUT_US_REVISION,
     }
     bilingual_catalog_condition = (
         """
@@ -215,9 +219,10 @@ def _continuity_cte(request: AuditRequest) -> str:
         )
         """
     )
-    expects_bilingual_snapshots = (
-        request.expected_ledger == BILINGUAL_SUBMISSION_SNAPSHOT_REVISION
-    )
+    expects_bilingual_snapshots = request.expected_ledger in {
+        BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
+        ABOUT_US_REVISION,
+    }
     bilingual_snapshot_condition = (
         """
         (
