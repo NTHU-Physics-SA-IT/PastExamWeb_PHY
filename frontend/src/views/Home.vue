@@ -1667,6 +1667,12 @@ h1 {
 }
 
 @media (max-width: 768px) {
+  .hero-title-lockup {
+    margin-block: 0.3rem;
+    transform: scale(1.1111);
+    transform-origin: center;
+  }
+
   h1 {
     font-size: clamp(1.7rem, 7.8vw, 2.15rem);
   }

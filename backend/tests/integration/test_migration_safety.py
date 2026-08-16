@@ -548,10 +548,11 @@ def test_archive_report_revision_is_additive_and_reversible(
 def test_category_state_preservation_revision_backfills_and_fails_closed(
     clean_public_schema: Engine,
 ) -> None:
-    previous_revision = "d4b7e2a9c6f1"
+    baseline_revision = "d4b7e2a9c6f1"
+    previous_revision = "e6a1b3c5d7f9"
     new_revision = "e8a4c1d7b2f6"
     config = alembic_config()
-    upgrade(previous_revision)
+    upgrade(baseline_revision)
 
     rows = (
         ("d1-live-active", True, None),
@@ -580,6 +581,11 @@ def test_category_state_preservation_revision_backfills_and_fails_closed(
 
     command.upgrade(config, new_revision)
     with clean_public_schema.connect() as connection:
+        assert (
+            connection.scalar(text("SELECT version_num FROM alembic_version"))
+            == new_revision
+        )
+        assert sa_inspect(connection).has_table("about_us_entries", schema="public")
         migrated = {
             row.key: (row.is_active, row.pre_delete_is_active)
             for row in connection.execute(
@@ -596,8 +602,39 @@ def test_category_state_preservation_revision_backfills_and_fails_closed(
         "d1-deleted-inactive": (False, False),
     }
 
+    with clean_public_schema.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO about_us_entries "
+                "(title, body, created_at, updated_at, updated_by_id) "
+                "VALUES ('D1 migration sentinel', 'preserve across downgrade', "
+                "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)"
+            )
+        )
+
     command.downgrade(config, previous_revision)
     with clean_public_schema.connect() as connection:
+        assert (
+            connection.scalar(text("SELECT version_num FROM alembic_version"))
+            == previous_revision
+        )
+        inspector = sa_inspect(connection)
+        assert inspector.has_table("about_us_entries", schema="public")
+        assert "pre_delete_is_active" not in {
+            column["name"]
+            for column in inspector.get_columns(
+                "course_category_configs", schema="public"
+            )
+        }
+        assert (
+            connection.scalar(
+                text(
+                    "SELECT count(*) FROM about_us_entries "
+                    "WHERE title = 'D1 migration sentinel'"
+                )
+            )
+            == 1
+        )
         downgraded = {
             row.key: row.is_active
             for row in connection.execute(
@@ -608,8 +645,22 @@ def test_category_state_preservation_revision_backfills_and_fails_closed(
             )
         }
     assert downgraded == {key: is_active for key, is_active, _ in rows}
+    source_report = inspect_database()
+    assert source_report.current_revision == previous_revision
+    assert source_report.schema_candidate_revision == previous_revision
+    assert source_report.upgrade_allowed is True
 
     command.upgrade(config, new_revision)
+    with clean_public_schema.connect() as connection:
+        assert (
+            connection.scalar(
+                text(
+                    "SELECT count(*) FROM about_us_entries "
+                    "WHERE title = 'D1 migration sentinel'"
+                )
+            )
+            == 1
+        )
     with clean_public_schema.begin() as connection:
         connection.execute(
             text(

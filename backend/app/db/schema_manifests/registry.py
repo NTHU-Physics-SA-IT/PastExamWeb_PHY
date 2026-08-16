@@ -99,8 +99,13 @@ MANIFESTS = {
     ),
     "d4b7e2a9c6f1": ManifestSpec(
         revision="d4b7e2a9c6f1",
-        description="schema before Category active-state preservation",
-        metadata_variant="pre_category_active_state_preservation",
+        description="schema before About Us entries",
+        metadata_variant="pre_about_us_entries",
+    ),
+    "e6a1b3c5d7f9": ManifestSpec(
+        revision="e6a1b3c5d7f9",
+        description="schema before Category state preservation",
+        metadata_variant="pre_category_state_preservation",
     ),
     HEAD_SCHEMA_REVISION: ManifestSpec(
         revision=HEAD_SCHEMA_REVISION,

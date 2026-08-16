@@ -18,7 +18,7 @@ import tempfile
 import time
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -152,7 +152,7 @@ class CanonicalSnapshot:
 class Evidence:
     schema_version: int = 2
     generated_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
     generated_resource_name: str | None = None
     image_identity: str | None = None
@@ -727,7 +727,7 @@ class IsolatedPostgresRunner:
             )
 
             suffix = secrets.token_hex(6)
-            timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
             self.container_name = f"{NAME_PREFIX}{timestamp}-{os.getpid()}-{suffix}"
             self.evidence.generated_resource_name = self.container_name
             if not container_absent(self.executor, self.container_name):

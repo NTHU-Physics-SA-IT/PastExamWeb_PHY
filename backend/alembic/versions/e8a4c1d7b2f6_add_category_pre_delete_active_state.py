@@ -1,7 +1,7 @@
 """add Category pre-delete active-state snapshot
 
 Revision ID: e8a4c1d7b2f6
-Revises: d4b7e2a9c6f1
+Revises: e6a1b3c5d7f9
 Create Date: 2026-08-15 16:00:00.000000
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "e8a4c1d7b2f6"
-down_revision: str | Sequence[str] | None = "d4b7e2a9c6f1"
+down_revision: str | Sequence[str] | None = "e6a1b3c5d7f9"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

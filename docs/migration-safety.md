@@ -62,7 +62,9 @@ Reviewed manifests currently cover:
   and
 - `c2a8e4f6b9d1`: the reviewed schema before bilingual ArchiveSubmission
   presentation snapshots; and
-- `d4b7e2a9c6f1`: the current repository head and SQLModel metadata contract.
+- `d4b7e2a9c6f1`: the reviewed schema before About Us entries; and
+- `e6a1b3c5d7f9`: the reviewed schema before Category state preservation; and
+- `e8a4c1d7b2f6`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,
@@ -195,6 +197,19 @@ their existing Chinese snapshots. New submissions copy English metadata only
 from the canonical Course and CourseCategory records selected at submission
 time; missing English metadata remains null.
 
+The About Us migration adds only the dedicated `about_us_entries` table and
+its update-order/editor indexes. It backfills or rewrites no existing rows,
+keeps its editor reference nullable with `ON DELETE SET NULL`, and downgrade
+removes only that new table and its indexes.
+
+The Category state-preservation migration follows the About Us revision. It
+adds nullable `course_category_configs.pre_delete_is_active`, leaves live rows
+unchanged, snapshots the prior active state of deleted rows, and makes every
+deleted Category inactive. Upgrade and downgrade reject malformed lifecycle
+rows rather than guessing. Downgrade returns only to the About Us revision:
+it restores deleted rows' representable pre-D1 active state, removes only the
+snapshot column, and preserves the About Us table and its contents.
+
 On the first bootstrap, one missing canonical key or any extra custom category
 is evidence that the database is not the expected clean initialized target,
 so bootstrap fails without creating an administrator or marker. After the
@@ -230,11 +245,13 @@ reviewed migration classifier. Adding a classifier requires a new registered
 version and synthetic PostgreSQL evidence.
 
 Adapter version 4 supports the reviewed bilingual revisions
-`c2a8e4f6b9d1` and `d4b7e2a9c6f1`. It preserves the version 3
-ArchiveSubmission lifecycle classifier and aggregate fingerprints, while its
-continuity gate additionally requires the revision-appropriate nullable
-English catalog and submission-snapshot columns. Versions 1 through 3 retain
-their historical revision bounds.
+`c2a8e4f6b9d1`, `d4b7e2a9c6f1`, `e6a1b3c5d7f9`, and `e8a4c1d7b2f6`. It
+preserves the version 3 ArchiveSubmission lifecycle classifier and aggregate
+fingerprints, while its continuity gate additionally requires the
+revision-appropriate nullable English catalog and submission-snapshot columns.
+The e8 revision also requires the nullable Category lifecycle snapshot; e6 and
+all older revisions require that column to be absent. Versions 1 through 3
+retain their historical revision bounds.
 
 Every execution sends one complete input stream to non-interactive `psql` and
 uses `ON_ERROR_STOP`, `REPEATABLE READ READ ONLY`, statement/lock/idle

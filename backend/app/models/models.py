@@ -673,6 +673,28 @@ class Notification(SQLModel, table=True):
     )
 
 
+class AboutUsEntry(SQLModel, table=True):
+    __tablename__ = "about_us_entries"
+    id: int | None = Field(default=None, primary_key=True)
+    title: str = Field(sa_column=Column(String(150), nullable=False))
+    body: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
+    updated_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False, index=True)
+    )
+    updated_by_id: int | None = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+
+
 class AnnouncementReadReceipt(SQLModel, table=True):
     __tablename__ = "announcement_read_receipts"
     __table_args__ = (
@@ -1358,6 +1380,39 @@ class NotificationRead(NotificationBase):
 class AnnouncementWithRead(NotificationRead):
     is_read: bool = False
     read_at: datetime | None = None
+
+
+def validate_about_us_text(value: str) -> str:
+    value = value.strip()
+    if not value:
+        raise ValueError("About Us fields must not be blank")
+    return value
+
+
+class AboutUsEntryBase(BaseModel):
+    title: str = Field(min_length=1, max_length=150)
+    body: str = Field(min_length=1)
+    _normalize_text = field_validator("title", "body")(validate_about_us_text)
+
+
+class AboutUsEntryCreate(AboutUsEntryBase):
+    pass
+
+
+class AboutUsEntryUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=150)
+    body: str | None = Field(default=None, min_length=1)
+    _normalize_text = field_validator("title", "body")(validate_about_us_text)
+
+
+class AboutUsEntryRead(AboutUsEntryBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    updated_by_username: str | None = None
+
+    class Config:
+        from_attributes = True
 
 
 class PersonalNotificationRead(BaseModel):

@@ -30,8 +30,16 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
         "b7e3d9a1c5f2",
         "c2a8e4f6b9d1",
         "d4b7e2a9c6f1",
+        "e6a1b3c5d7f9",
         "e8a4c1d7b2f6",
     )
+    assert get_manifest_spec("d4b7e2a9c6f1").metadata_variant == (
+        "pre_about_us_entries"
+    )
+    assert get_manifest_spec("e6a1b3c5d7f9").metadata_variant == (
+        "pre_category_state_preservation"
+    )
+    assert get_manifest_spec("e8a4c1d7b2f6").metadata_variant == "head"
 
 
 def test_recovery_manifest_is_versioned_and_revision_bound() -> None:
@@ -50,7 +58,8 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     previous_status_column = "previous_status"
     constraint_name = "uq_archive_submissions_created_archive_id"
     head = metadata_for_revision("e8a4c1d7b2f6")
-    pre_category_state = metadata_for_revision("d4b7e2a9c6f1")
+    pre_category_state = metadata_for_revision("e6a1b3c5d7f9")
+    pre_about_us = metadata_for_revision("d4b7e2a9c6f1")
     pre_bilingual_snapshots = metadata_for_revision("c2a8e4f6b9d1")
     pre_bilingual_catalog = metadata_for_revision("b7e3d9a1c5f2")
     pre_student_id = metadata_for_revision("9f1c2a7e4b63")
@@ -64,6 +73,10 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
 
     assert head is not None
     assert pre_category_state is not None
+    assert pre_about_us is not None
+    assert "about_us_entries" in head.tables
+    assert "about_us_entries" in pre_category_state.tables
+    assert "about_us_entries" not in pre_about_us.tables
     assert pre_bilingual_snapshots is not None
     assert pre_bilingual_catalog is not None
     assert pre_student_id is not None
@@ -83,6 +96,10 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     assert (
         "pre_delete_is_active"
         not in pre_category_state.tables["course_category_configs"].c
+    )
+    assert (
+        "pre_delete_is_active"
+        not in pre_about_us.tables["course_category_configs"].c
     )
     assert "label_en" in head.tables["course_category_configs"].c
     for bilingual_snapshot_column in (

@@ -381,6 +381,15 @@ For a NTHU OAuth User, provider-synchronized `name` and `email` remain provider-
 
 ## Public visibility
 
+### About Us managed content
+
+- Authenticated users may list and read every About Us entry.
+- Only administrators may create or update entries; the backend enforces this
+  independently of hidden frontend controls.
+- About Us content is separate from announcements and creates no notification
+  or read-receipt state. Deletion is outside the current contract.
+- Invalid content is rejected without persisting a partial mutation.
+
 ### Intended invariant
 
 - Full public-Archive data is public only to an authenticated user who may use
@@ -721,6 +730,8 @@ empty custom fields remains valid.
 | --- | --- | --- | --- | --- | --- |
 | View safe public Course/Archive metadata catalog | Allowed | Allowed | Allowed | Allowed | Allowed |
 | View public effective archive | Denied | Allowed | Allowed | Allowed | Allowed |
+| View About Us entries | Denied | Allowed | Allowed | Allowed | Denied unless authenticated |
+| Create or update About Us entries | Denied | Denied | Denied unless also admin | Allowed | Denied |
 | Create archive/comment report | Denied | Allowed | Allowed | Allowed | Allowed when explicitly designed |
 | Submit archive | Denied | Allowed | Allowed | Allowed | Explicit system imports only |
 | Review submission/report | Denied | Denied | Denied unless also admin | Allowed | Explicit automation only |
