@@ -23,10 +23,20 @@ export default defineConfig(({ mode }) => {
       cssCodeSplit: true,
       chunkSizeWarningLimit: 600,
       sourcemap: true,
-      minify: 'esbuild',
-      esbuildOptions: {
-        drop: mode === 'production' ? ['debugger'] : [],
-        pure: mode === 'production' ? ['console.log', 'console.debug'] : [],
+      minify: 'oxc',
+      rolldownOptions: {
+        treeshake: {
+          manualPureFunctions: mode === 'production' ? ['console.log', 'console.debug'] : [],
+        },
+        output: {
+          minify: {
+            compress: {
+              dropDebugger: mode === 'production',
+            },
+            mangle: true,
+            codegen: true,
+          },
+        },
       },
     },
     plugins: [
