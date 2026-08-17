@@ -660,18 +660,34 @@ this legacy `CourseSubmission` endpoint.
 - Approval is deduplicated and idempotent at the business boundary.
 - Created category/course lifecycle is independent after approval.
 
-### Current implementation
+### Approval transaction
 
-The legacy Course request approval path normalizes category/course identities
-and reuses existing rows. It remains separate from the ArchiveSubmission
-approval caller transaction above and has its own lifecycle and idempotency
-scope.
-`test_course_request_approval_reuses_existing_course_without_duplicates`
-directly protects the separate `CourseSubmission` model's first
-`pending`-to-`approved` path when a matching Course exists by approval time:
-the request resolves to that Course and matching Category/Course counts do not
-increase. It does not prescribe repeat-approval responses, notification
-behavior, request trash, or the later lifecycle of the resolved Course.
+The legacy Course request approval path uses the same normalized
+Category/Course approval-namespace mutex as ArchiveSubmission approval. It
+discovers the request identity without a row lock, acquires that namespace,
+then locks and revalidates the exact CourseSubmission row. An identity change
+between discovery and lock fails closed with a reload-required conflict; the
+transaction never acquires a second namespace while holding the request row.
+
+For a pending request, the transaction revalidates the D1 live-and-active
+Category requirement and the normalized Course identity while holding the
+namespace. Exactly one live match is reused, no match is created with
+`flush()`, and multiple matches fail closed as ambiguous. Course creation and
+the request's approved review fields are owned by one caller transaction and
+one final commit. Any exception before that commit rolls both back.
+
+A repeated approval is a business-idempotent no-op only when the existing
+approved request has a linked Course whose normalized Category/name identity
+matches and whose reviewer and review timestamp are present. It does not
+replace review metadata or commit a new mutation. An incoherent approved row
+fails closed; rejected and other illegal states remain non-approvable.
+
+Admin direct-approved request creation follows the same namespace and
+transaction boundary: it rechecks Course and pending-request identity under
+the mutex, flushes the new Course to obtain its ID, adds the approved request,
+and commits once. These guarantees do not make CourseSubmission the permanent
+owner of the resulting Course and do not define request trash or later Course
+lifecycle behavior.
 
 ## Authorization
 

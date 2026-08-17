@@ -348,6 +348,78 @@ async def _next_order_index(db: AsyncSession, category) -> int:
     return 0 if current_max is None else int(current_max) + 1
 
 
+COURSE_SUBMISSION_APPROVAL_IDENTITY_CONFLICT = {
+    "code": "course_submission_approval_identity_conflict",
+    "message": "Course request identity changed; reload and retry.",
+    "reload_required": True,
+}
+COURSE_SUBMISSION_APPROVAL_RESULT_CONFLICT = {
+    "code": "course_submission_approval_result_conflict",
+    "message": "Approved course request has an inconsistent result.",
+    "reload_required": False,
+}
+COURSE_SUBMISSION_COURSE_IDENTITY_CONFLICT = {
+    "code": "course_submission_course_identity_conflict",
+    "message": "Course identity is ambiguous.",
+    "reload_required": False,
+}
+
+
+def _course_submission_identity(submission: CourseSubmission) -> tuple[str, str]:
+    return (
+        canonicalize_course_category_key(submission.category),
+        normalize_course_search_text(submission.name),
+    )
+
+
+async def _live_courses_for_submission_identity(
+    db: AsyncSession,
+    *,
+    category_key: str,
+    normalized_course_name: str,
+) -> list[Course]:
+    return list(
+        (
+            await db.execute(
+                select(Course)
+                .where(
+                    normalized_course_text_expr(Course.name) == normalized_course_name,
+                    Course.category == category_key,
+                    Course.deleted_at.is_(None),
+                )
+                .order_by(Course.id.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def _coherent_approved_course_submission(
+    db: AsyncSession,
+    submission: CourseSubmission,
+    *,
+    expected_category_key: str,
+    expected_normalized_course_name: str,
+) -> CourseSubmissionRead | None:
+    if (
+        submission.created_course_id is None
+        or submission.reviewer_id is None
+        or submission.reviewed_at is None
+    ):
+        return None
+    course = await db.get(Course, submission.created_course_id)
+    if course is None:
+        return None
+    course_category = canonicalize_course_category_key(_course_category_value(course))
+    if (
+        course_category != expected_category_key
+        or normalize_course_search_text(course.name) != expected_normalized_course_name
+    ):
+        return None
+    return CourseSubmissionRead.model_validate(submission)
+
+
 def _discussion_public_display_name(
     *, user_id: int, nickname: str | None, name: str | None
 ) -> str:
@@ -504,25 +576,77 @@ async def create_course_request(
     db: AsyncSession = Depends(get_session),
 ):
     normalized_category = canonicalize_course_category_key(course_data.category)
-    await _ensure_category(db, normalized_category)
     normalized_name = normalize_course_search_text(course_data.name)
     formatted_name = format_course_display_name(course_data.name)
 
-    existing_course = (
-        await db.execute(
-            select(Course).where(
-                normalized_course_text_expr(Course.name) == normalized_name,
-                Course.category == normalized_category,
-                Course.deleted_at.is_(None),
+    if current_user.is_admin:
+        try:
+            await archive_lifecycle_locks.acquire_approval_namespace_mutex(
+                db,
+                category_key=normalized_category,
+                course_name=normalized_name,
             )
-        )
-    ).scalar_one_or_none()
-    if existing_course:
+            await _ensure_category(db, normalized_category)
+            existing_courses = await _live_courses_for_submission_identity(
+                db,
+                category_key=normalized_category,
+                normalized_course_name=normalized_name,
+            )
+            if existing_courses:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Course already exists",
+                )
+            existing_pending = (
+                await db.execute(
+                    select(CourseSubmission).where(
+                        normalized_course_text_expr(CourseSubmission.name)
+                        == normalized_name,
+                        CourseSubmission.category == normalized_category,
+                        CourseSubmission.status == SubmissionStatus.PENDING,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing_pending:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Course request already pending",
+                )
+
+            course = Course(
+                name=formatted_name,
+                category=normalized_category,
+                order_index=await _next_order_index(db, normalized_category),
+            )
+            db.add(course)
+            await db.flush()
+            submission = CourseSubmission(
+                name=course.name,
+                category=course.category,
+                requester_id=current_user.user_id,
+                reviewer_id=current_user.user_id,
+                status=SubmissionStatus.APPROVED,
+                created_course_id=course.id,
+                reviewed_at=datetime.now(UTC),
+            )
+            db.add(submission)
+            await db.commit()
+            return submission
+        except Exception:
+            await db.rollback()
+            raise
+
+    await _ensure_category(db, normalized_category)
+    existing_courses = await _live_courses_for_submission_identity(
+        db,
+        category_key=normalized_category,
+        normalized_course_name=normalized_name,
+    )
+    if existing_courses:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Course already exists",
         )
-
     existing_pending = (
         await db.execute(
             select(CourseSubmission).where(
@@ -538,30 +662,11 @@ async def create_course_request(
             detail="Course request already pending",
         )
 
-    if current_user.is_admin:
-        course = Course(
-            name=formatted_name,
-            category=normalized_category,
-            order_index=await _next_order_index(db, normalized_category),
-        )
-        db.add(course)
-        await db.commit()
-        await db.refresh(course)
-        submission = CourseSubmission(
-            name=course.name,
-            category=course.category,
-            requester_id=current_user.user_id,
-            reviewer_id=current_user.user_id,
-            status=SubmissionStatus.APPROVED,
-            created_course_id=course.id,
-            reviewed_at=datetime.now(UTC),
-        )
-    else:
-        submission = CourseSubmission(
-            name=formatted_name,
-            category=normalized_category,
-            requester_id=current_user.user_id,
-        )
+    submission = CourseSubmission(
+        name=formatted_name,
+        category=normalized_category,
+        requester_id=current_user.user_id,
+    )
 
     db.add(submission)
     await db.commit()
@@ -648,47 +753,97 @@ async def approve_course_request(
             status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
         )
 
-    submission = await db.get(CourseSubmission, request_id)
-    if not submission:
+    discovered_submission = (
+        await db.execute(
+            select(CourseSubmission).where(CourseSubmission.id == request_id)
+        )
+    ).scalar_one_or_none()
+    if not discovered_submission:
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Request not found"
         )
-    if submission.status != SubmissionStatus.PENDING:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Request already reviewed"
+    discovered_identity = _course_submission_identity(discovered_submission)
+
+    try:
+        await archive_lifecycle_locks.acquire_approval_namespace_mutex(
+            db,
+            category_key=discovered_identity[0],
+            course_name=discovered_identity[1],
         )
-
-    await _ensure_category(db, submission.category)
-
-    normalized_course_name = normalize_course_search_text(submission.name)
-    formatted_course_name = format_course_display_name(submission.name)
-    course = (
-        await db.execute(
-            select(Course).where(
-                normalized_course_text_expr(Course.name) == normalized_course_name,
-                Course.category == submission.category,
-                Course.deleted_at.is_(None),
+        submission = (
+            await db.execute(
+                select(CourseSubmission)
+                .where(CourseSubmission.id == request_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
-        )
-    ).scalar_one_or_none()
-    if not course:
-        course = Course(
-            name=formatted_course_name,
-            category=submission.category,
-            order_index=await _next_order_index(db, submission.category),
-        )
-        db.add(course)
-        await db.commit()
-        await db.refresh(course)
+        ).scalar_one_or_none()
+        if submission is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Request not found",
+            )
 
-    submission.status = SubmissionStatus.APPROVED
-    submission.reviewer_id = current_user.user_id
-    submission.review_note = decision.note if decision else None
-    submission.created_course_id = course.id
-    submission.reviewed_at = datetime.now(UTC)
-    await db.commit()
-    await db.refresh(submission)
-    return submission
+        locked_identity = _course_submission_identity(submission)
+        if locked_identity != discovered_identity:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=COURSE_SUBMISSION_APPROVAL_IDENTITY_CONFLICT,
+            )
+
+        if submission.status == SubmissionStatus.APPROVED:
+            approved_result = await _coherent_approved_course_submission(
+                db,
+                submission,
+                expected_category_key=locked_identity[0],
+                expected_normalized_course_name=locked_identity[1],
+            )
+            if approved_result is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=COURSE_SUBMISSION_APPROVAL_RESULT_CONFLICT,
+                )
+            await db.rollback()
+            return approved_result
+        if submission.status != SubmissionStatus.PENDING:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Request already reviewed",
+            )
+
+        await _ensure_category(db, locked_identity[0])
+        matching_courses = await _live_courses_for_submission_identity(
+            db,
+            category_key=locked_identity[0],
+            normalized_course_name=locked_identity[1],
+        )
+        if len(matching_courses) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=COURSE_SUBMISSION_COURSE_IDENTITY_CONFLICT,
+            )
+        if matching_courses:
+            course = matching_courses[0]
+        else:
+            course = Course(
+                name=format_course_display_name(submission.name),
+                category=locked_identity[0],
+                order_index=await _next_order_index(db, locked_identity[0]),
+            )
+            db.add(course)
+            await db.flush()
+
+        submission.status = SubmissionStatus.APPROVED
+        submission.reviewer_id = current_user.user_id
+        submission.review_note = decision.note if decision else None
+        submission.created_course_id = course.id
+        submission.reviewed_at = datetime.now(UTC)
+        await db.commit()
+        return submission
+    except Exception:
+        await db.rollback()
+        raise
 
 
 @router.post("/admin/requests/{request_id}/reject", response_model=CourseSubmissionRead)
