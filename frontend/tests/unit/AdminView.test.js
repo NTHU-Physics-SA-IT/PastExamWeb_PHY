@@ -875,6 +875,36 @@ describe('AdminView', () => {
         parent_name: '期中考',
       })
     ).toBe('關聯考古題：期中考')
+    expect(
+      wrapper.vm.getTrashContextLine({
+        item_type: 'course_submission',
+        parent_type: 'course',
+        parent_name: '量子力學',
+      })
+    ).toBe('關聯課程：量子力學')
+    expect(
+      wrapper.vm.getTrashContextLine({
+        item_type: 'course_submission',
+        parent_type: null,
+        parent_name: null,
+      })
+    ).toBe('歷史紀錄：未連結課程（保留為獨立歷史紀錄）')
+
+    const legacyCourseRequest = {
+      item_type: 'course_submission',
+      canRestore: false,
+      canPermanentDelete: true,
+      dependencies: ['無法還原：舊資料缺少可驗證的原始審核狀態'],
+    }
+    expect(wrapper.vm.canRestoreTrashItem(legacyCourseRequest)).toBe(false)
+    expect(wrapper.vm.canPermanentDeleteTrashItem(legacyCourseRequest)).toBe(true)
+    expect(wrapper.vm.getTrashDependencies(legacyCourseRequest)).toEqual([
+      expect.objectContaining({
+        label: '阻擋還原：舊資料缺少可驗證的原始審核狀態',
+        restoreBlocking: true,
+        deleteBlocking: false,
+      }),
+    ])
 
     wrapper.unmount()
   })
@@ -1004,12 +1034,19 @@ describe('AdminView', () => {
       'archive_submission',
       'course_category',
       'course',
+      'course_submission',
       'notification',
       'user',
       'system_issue_report',
       'comment_report',
       'archive_report',
     ])
+    expect(adminTemplateSource).toContain(
+      '操作按鈕以後端回傳的可用操作為準；依賴與阻擋文字只用來說明原因。'
+    )
+    expect(adminTemplateSource).toContain(
+      '課程申請是獨立歷史紀錄；關聯課程不存在時仍可正常保留，不代表資料異常。'
+    )
     expect(adminViewSource).toContain('永久刪除後無法復原。')
     expect(adminTemplateSource).toContain('getTrashReportDetails(data)')
     expect(
