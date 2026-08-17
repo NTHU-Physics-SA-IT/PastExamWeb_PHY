@@ -604,6 +604,7 @@ async def create_course_request(
                         == normalized_name,
                         CourseSubmission.category == normalized_category,
                         CourseSubmission.status == SubmissionStatus.PENDING,
+                        CourseSubmission.deleted_at.is_(None),
                     )
                 )
             ).scalar_one_or_none()
@@ -653,6 +654,7 @@ async def create_course_request(
                 normalized_course_text_expr(CourseSubmission.name) == normalized_name,
                 CourseSubmission.category == normalized_category,
                 CourseSubmission.status == SubmissionStatus.PENDING,
+                CourseSubmission.deleted_at.is_(None),
             )
         )
     ).scalar_one_or_none()
@@ -681,7 +683,11 @@ async def list_my_course_requests(
 ):
     result = await db.execute(
         select(CourseSubmission)
-        .where(CourseSubmission.requester_id == current_user.user_id)
+        .where(
+            CourseSubmission.requester_id == current_user.user_id,
+            CourseSubmission.deleted_at.is_(None),
+            CourseSubmission.status != SubmissionStatus.DELETED,
+        )
         .order_by(CourseSubmission.created_at.desc())
     )
     return result.scalars().all()
@@ -698,7 +704,12 @@ async def list_course_requests_for_admin(
         )
 
     result = await db.execute(
-        select(CourseSubmission).order_by(
+        select(CourseSubmission)
+        .where(
+            CourseSubmission.deleted_at.is_(None),
+            CourseSubmission.status != SubmissionStatus.DELETED,
+        )
+        .order_by(
             CourseSubmission.status.asc(),
             CourseSubmission.created_at.desc(),
         )
@@ -719,7 +730,11 @@ async def update_course_request_for_admin(
         )
 
     submission = await db.get(CourseSubmission, request_id)
-    if not submission:
+    if (
+        not submission
+        or submission.deleted_at is not None
+        or submission.status == SubmissionStatus.DELETED
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Request not found"
         )
@@ -739,6 +754,45 @@ async def update_course_request_for_admin(
     return submission
 
 
+@router.delete("/admin/requests/{request_id}")
+async def delete_course_request_for_admin(
+    request_id: int,
+    current_user: UserRoles = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+
+    submission = (
+        await db.execute(
+            select(CourseSubmission)
+            .where(CourseSubmission.id == request_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if (
+        submission is None
+        or submission.deleted_at is not None
+        or submission.status == SubmissionStatus.DELETED
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Request not found",
+        )
+
+    submission.previous_status = submission.status
+    submission.status = SubmissionStatus.DELETED
+    submission.deleted_at = datetime.now(UTC)
+    submission.deleted_by_id = current_user.user_id
+    submission.restored_at = None
+    submission.restored_by_id = None
+    await db.commit()
+    return {"message": "Course request moved to trash"}
+
+
 @router.post(
     "/admin/requests/{request_id}/approve", response_model=CourseSubmissionRead
 )
@@ -755,7 +809,11 @@ async def approve_course_request(
 
     discovered_submission = (
         await db.execute(
-            select(CourseSubmission).where(CourseSubmission.id == request_id)
+            select(CourseSubmission).where(
+                CourseSubmission.id == request_id,
+                CourseSubmission.deleted_at.is_(None),
+                CourseSubmission.status != SubmissionStatus.DELETED,
+            )
         )
     ).scalar_one_or_none()
     if not discovered_submission:
@@ -774,7 +832,11 @@ async def approve_course_request(
         submission = (
             await db.execute(
                 select(CourseSubmission)
-                .where(CourseSubmission.id == request_id)
+                .where(
+                    CourseSubmission.id == request_id,
+                    CourseSubmission.deleted_at.is_(None),
+                    CourseSubmission.status != SubmissionStatus.DELETED,
+                )
                 .with_for_update()
                 .execution_options(populate_existing=True)
             )
@@ -859,7 +921,11 @@ async def reject_course_request(
         )
 
     submission = await db.get(CourseSubmission, request_id)
-    if not submission:
+    if (
+        not submission
+        or submission.deleted_at is not None
+        or submission.status == SubmissionStatus.DELETED
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Request not found"
         )

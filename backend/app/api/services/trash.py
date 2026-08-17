@@ -292,7 +292,8 @@ async def _get_category_action_authority(
         db,
         select(func.count(CourseSubmission.id)).where(
             CourseSubmission.category == category.key,
-            CourseSubmission.status != SubmissionStatus.DELETED,
+            CourseSubmission.status == SubmissionStatus.PENDING,
+            CourseSubmission.deleted_at.is_(None),
         ),
     )
     active_archive_submissions = await _count_rows(
@@ -820,7 +821,8 @@ async def _get_active_category_submission_blockers(
             await db.execute(
                 select(CourseSubmission).where(
                     CourseSubmission.category == category.key,
-                    CourseSubmission.status != SubmissionStatus.DELETED,
+                    CourseSubmission.status == SubmissionStatus.PENDING,
+                    CourseSubmission.deleted_at.is_(None),
                 )
             )
         )
@@ -1845,6 +1847,78 @@ async def list_trash_items(
                     exc_info=redacted_exc_info(exc),
                 )
 
+    if normalized_item_type in (None, TrashEntityType.COURSE_SUBMISSION):
+        course_submissions = (
+            (
+                await db.execute(
+                    select(CourseSubmission)
+                    .where(
+                        or_(
+                            CourseSubmission.deleted_at.is_not(None),
+                            CourseSubmission.status == SubmissionStatus.DELETED,
+                        )
+                    )
+                    .order_by(
+                        CourseSubmission.deleted_at.desc().nullslast(),
+                        CourseSubmission.created_at.desc(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        created_course_ids = {
+            submission.created_course_id
+            for submission in course_submissions
+            if submission.created_course_id is not None
+        }
+        courses_by_id = (
+            {
+                course.id: course
+                for course in (
+                    await db.execute(
+                        select(Course).where(Course.id.in_(created_course_ids))
+                    )
+                )
+                .scalars()
+                .all()
+            }
+            if created_course_ids
+            else {}
+        )
+        for submission in course_submissions:
+            linked_course = courses_by_id.get(submission.created_course_id)
+            restore_available = (
+                submission.status == SubmissionStatus.DELETED
+                and submission.deleted_at is not None
+                and submission.previous_status is not None
+            )
+            items.append(
+                _to_trash_item(
+                    item_type=TrashEntityType.COURSE_SUBMISSION,
+                    item_id=submission.id,
+                    display_name=f"{submission.name} ({submission.category})",
+                    deleted_at=submission.deleted_at,
+                    deleted_by_id=submission.deleted_by_id,
+                    deleted_by_name=_format_deleted_by(
+                        users_by_id, submission.deleted_by_id
+                    ),
+                    status=submission.status.value,
+                    parent_type="course" if linked_course else None,
+                    parent_id=linked_course.id if linked_course else None,
+                    parent_name=linked_course.name if linked_course else None,
+                    course_id=linked_course.id if linked_course else None,
+                    course_name=linked_course.name if linked_course else None,
+                    created_at=submission.created_at,
+                    can_restore=restore_available,
+                    dependencies=(
+                        []
+                        if restore_available
+                        else ["無法還原：舊資料缺少可驗證的原始審核狀態"]
+                    ),
+                )
+            )
+
     if normalized_item_type in (None, TrashEntityType.ARCHIVE_SUBMISSION):
         is_course_trash_reason = or_(
             ArchiveSubmission.lifecycle_reason == LIFECYCLE_COURSE_TRASHED,
@@ -2056,7 +2130,9 @@ async def list_trash_items(
                 )
 
     return sorted(
-        _dedupe_trash_items(items), key=lambda item: item.deleted_at, reverse=True
+        _dedupe_trash_items(items),
+        key=lambda item: item.deleted_at or datetime.min.replace(tzinfo=UTC),
+        reverse=True,
     )
 
 
@@ -2139,6 +2215,34 @@ async def restore_trash_item(
             + "」，課程不會自動復原，若需要請另外復原課程。",
             "restoredCourses": 0,
         }
+
+    if payload.item_type == TrashEntityType.COURSE_SUBMISSION:
+        submission = (
+            await db.execute(
+                select(CourseSubmission)
+                .where(CourseSubmission.id == payload.item_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if submission is None or submission.status != SubmissionStatus.DELETED:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Course request not found",
+            )
+        if submission.deleted_at is None or submission.previous_status is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Course request restore state is unavailable",
+            )
+
+        submission.status = submission.previous_status
+        submission.previous_status = None
+        submission.deleted_at = None
+        submission.deleted_by_id = None
+        submission.restored_at = now
+        submission.restored_by_id = current_user.user_id
+        await db.commit()
+        return {"message": "Course request restored"}
 
     if payload.item_type == TrashEntityType.COURSE:
         budget = PlanRebuildBudget()
@@ -2455,15 +2559,16 @@ async def bulk_permanently_delete_trash_items(
         item_type=item_type, current_user=current_user, db=db
     )
     delete_order = {
-        TrashEntityType.ARCHIVE_SUBMISSION: 0,
-        TrashEntityType.ARCHIVE: 1,
-        TrashEntityType.COURSE: 2,
-        TrashEntityType.COURSE_CATEGORY: 3,
-        TrashEntityType.NOTIFICATION: 4,
-        TrashEntityType.USER: 5,
-        TrashEntityType.SYSTEM_ISSUE_REPORT: 6,
-        TrashEntityType.COMMENT_REPORT: 7,
-        TrashEntityType.ARCHIVE_REPORT: 8,
+        TrashEntityType.COURSE_SUBMISSION: 0,
+        TrashEntityType.ARCHIVE_SUBMISSION: 1,
+        TrashEntityType.ARCHIVE: 2,
+        TrashEntityType.COURSE: 3,
+        TrashEntityType.COURSE_CATEGORY: 4,
+        TrashEntityType.NOTIFICATION: 5,
+        TrashEntityType.USER: 6,
+        TrashEntityType.SYSTEM_ISSUE_REPORT: 7,
+        TrashEntityType.COMMENT_REPORT: 8,
+        TrashEntityType.ARCHIVE_REPORT: 9,
     }
     sorted_items = sorted(
         items,
@@ -2624,6 +2729,27 @@ async def _permanently_delete_trash_item(
             name=category.name,
             deleted=detail.get("deleted", 1),
             details=[detail],
+            warnings=warnings,
+        )
+
+    if item_type == TrashEntityType.COURSE_SUBMISSION:
+        submission = await db.get(CourseSubmission, item_id)
+        if submission is None or (
+            submission.deleted_at is None
+            and submission.status != SubmissionStatus.DELETED
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Course request not found",
+            )
+
+        name = submission.name
+        await db.delete(submission)
+        return _delete_result(
+            item_type=item_type,
+            item_id=item_id,
+            name=name,
+            deleted=1,
             warnings=warnings,
         )
 

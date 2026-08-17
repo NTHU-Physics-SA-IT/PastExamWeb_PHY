@@ -171,6 +171,7 @@ def test_bilingual_head_audit_is_new_version_and_preserves_lifecycle_classifier(
             "d4b7e2a9c6f1",
             "e6a1b3c5d7f9",
             "e8a4c1d7b2f6",
+            "a9c2e5f7b1d4",
         }
     )
     previous = get_audit_adapter(ELIGIBILITY_AUDIT_ID, 3)
@@ -237,6 +238,32 @@ def test_e8_continuity_inherits_e6_shape_and_requires_category_snapshot() -> Non
     snapshot_context = _column_condition_context(sql, "pre_delete_is_active")
     assert "NOT EXISTS (" not in snapshot_context
     assert "EXISTS (" in snapshot_context
+
+
+def test_a9_continuity_requires_course_submission_lifecycle_shape() -> None:
+    request = AuditRequest(
+        audit_id=ELIGIBILITY_AUDIT_ID,
+        audit_version=4,
+        mode=AuditMode.PERSISTENT_LOCAL,
+        expected_ledger="a9c2e5f7b1d4",
+        repository_revision="a" * 40,
+    )
+    sql = build_transaction_sql(
+        request,
+        get_audit_adapter(ELIGIBILITY_AUDIT_ID, 4),
+    )
+
+    for column in (
+        "pre_delete_is_active",
+        "previous_status",
+        "deleted_at",
+        "deleted_by_id",
+        "restored_at",
+        "restored_by_id",
+    ):
+        assert column in sql
+    assert "table_name = 'course_submissions'" in sql
+    assert "SELECT count(*) = 5" in sql
 
 
 def test_cli_defaults_to_current_bilingual_audit_version() -> None:
