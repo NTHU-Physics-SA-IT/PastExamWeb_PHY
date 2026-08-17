@@ -85,6 +85,31 @@ def test_workflow_runs_three_isolated_browser_family_jobs() -> None:
     assert "--no-deps" not in execution
 
 
+def test_playwright_image_pull_retries_are_bounded_and_fail_closed() -> None:
+    workflow = _workflow()
+    family = workflow["jobs"]["frontend-e2e-family"]
+    image_pull = _step(family, "Pull Playwright image")["run"]
+
+    assert "max_attempts=3" in image_pull
+    assert 'for attempt in $(seq 1 "$max_attempts")' in image_pull
+    assert 'docker pull "$PLAYWRIGHT_IMAGE"' in image_pull
+    assert 'sleep "$delay_seconds"' in image_pull
+    assert 'exit "$pull_status"' in image_pull
+    assert "|| true" not in image_pull
+
+
+def test_e2e_teardown_skips_only_when_docker_env_was_never_prepared() -> None:
+    workflow = _workflow()
+    family = workflow["jobs"]["frontend-e2e-family"]
+    teardown = _step(family, "Tear down")
+
+    assert teardown["if"] == "always()"
+    assert "if [[ ! -f docker/.env ]]" in teardown["run"]
+    assert "docker compose" in teardown["run"]
+    assert "down --volumes --remove-orphans" in teardown["run"]
+    assert "|| true" not in teardown["run"]
+
+
 def test_blob_artifacts_are_unique_and_aggregate_fails_closed() -> None:
     workflow = _workflow()
     family = workflow["jobs"]["frontend-e2e-family"]
