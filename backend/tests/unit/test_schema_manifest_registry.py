@@ -16,7 +16,7 @@ from app.models.models import ArchiveSubmission, User
 
 
 def test_reviewed_manifest_registry_has_required_revisions() -> None:
-    assert HEAD_SCHEMA_REVISION == "e8a4c1d7b2f6"
+    assert HEAD_SCHEMA_REVISION == "a9c2e5f7b1d4"
     assert reviewed_manifest_revisions() == (
         "c4d8e2f1a6b9",
         "a4c7e9d2f6b1",
@@ -32,6 +32,7 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
         "d4b7e2a9c6f1",
         "e6a1b3c5d7f9",
         "e8a4c1d7b2f6",
+        "a9c2e5f7b1d4",
     )
     assert get_manifest_spec("d4b7e2a9c6f1").metadata_variant == (
         "pre_about_us_entries"
@@ -39,7 +40,10 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
     assert get_manifest_spec("e6a1b3c5d7f9").metadata_variant == (
         "pre_category_state_preservation"
     )
-    assert get_manifest_spec("e8a4c1d7b2f6").metadata_variant == "head"
+    assert get_manifest_spec("e8a4c1d7b2f6").metadata_variant == (
+        "pre_course_submission_lifecycle"
+    )
+    assert get_manifest_spec("a9c2e5f7b1d4").metadata_variant == "head"
 
 
 def test_recovery_manifest_is_versioned_and_revision_bound() -> None:
@@ -57,7 +61,8 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     column_name = "owner_self_delete_consumed"
     previous_status_column = "previous_status"
     constraint_name = "uq_archive_submissions_created_archive_id"
-    head = metadata_for_revision("e8a4c1d7b2f6")
+    head = metadata_for_revision("a9c2e5f7b1d4")
+    pre_course_submission_lifecycle = metadata_for_revision("e8a4c1d7b2f6")
     pre_category_state = metadata_for_revision("e6a1b3c5d7f9")
     pre_about_us = metadata_for_revision("d4b7e2a9c6f1")
     pre_bilingual_snapshots = metadata_for_revision("c2a8e4f6b9d1")
@@ -72,6 +77,7 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     a4 = metadata_for_revision("a4c7e9d2f6b1")
 
     assert head is not None
+    assert pre_course_submission_lifecycle is not None
     assert pre_category_state is not None
     assert pre_about_us is not None
     assert "about_us_entries" in head.tables
@@ -93,6 +99,18 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     assert "name_en" in head.tables["courses"].c
     assert "name_en" in head.tables["course_category_configs"].c
     assert "pre_delete_is_active" in head.tables["course_category_configs"].c
+    for lifecycle_column in (
+        "previous_status",
+        "deleted_at",
+        "deleted_by_id",
+        "restored_at",
+        "restored_by_id",
+    ):
+        assert lifecycle_column in head.tables["course_submissions"].c
+        assert (
+            lifecycle_column
+            not in pre_course_submission_lifecycle.tables["course_submissions"].c
+        )
     assert (
         "pre_delete_is_active"
         not in pre_category_state.tables["course_category_configs"].c
@@ -192,7 +210,7 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     )
 
     # Building older variants must never mutate current SQLModel metadata.
-    rebuilt_head = metadata_for_revision("e8a4c1d7b2f6")
+    rebuilt_head = metadata_for_revision("a9c2e5f7b1d4")
     assert rebuilt_head is not None
     assert column_name in rebuilt_head.tables["archive_submissions"].c
     assert previous_status_column in rebuilt_head.tables["archive_submissions"].c

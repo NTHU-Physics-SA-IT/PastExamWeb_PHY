@@ -23,7 +23,7 @@ current implementation separately from the intended product relation.
 | `User` | Owns uploads, submissions, reports, discussion activity, and personal notifications through user IDs; many actor/deleter FKs use `SET NULL`, while some owned rows cascade | Authentication identity and audit actor; deletion must preserve required history without exposing unnecessary identity | Confirmed by code; deletion policy varies by entity |
 | `CourseCategoryConfig` | `Course.category` stores its key as a string rather than an FK; submissions also retain category snapshots | Category controls discovery and creation choices, but its soft-delete lifecycle is independent from historical submissions | Confirmed by code; no DB FK means application checks carry integrity |
 | `Course` | Required parent of `Archive`; category is a string key; has soft-delete metadata | Groups archives for navigation; course trash may hide/deactivate children but must not rewrite independent submission review results | Confirmed by code in `courses.py` and `trash.py` |
-| `CourseSubmission` | Separate legacy course-request record with requester/reviewer and optional `created_course_id`; no soft-delete metadata in the current model | Not the ownership model for an ArchiveSubmission that requests missing parent metadata | Independent legacy flow; it must not be used to add permanent Category/Course ownership to ArchiveSubmission |
+| `CourseSubmission` | Separate historical course-request record with requester/reviewer, independent soft-delete metadata, and nullable `created_course_id` using `ON DELETE SET NULL` | Retains the request and review history without owning the resulting Category/Course | Course deletion detaches the optional historical link; submission deletion never cascades to Course |
 | `Archive` | Required `course_id`, optional uploader, one `object_name`, optional soft-delete metadata; at most one submission points to it through the named nullable unique `created_archive_id` constraint | One independently accessible approved public file for authenticated system users, optionally created by exactly one submission | Administrator-created Archives may have no source submission; approval, exact restore, and source projection fail closed on occupancy or cardinality violations |
 | `ArchiveSubmission` | Required requester and object name; optional reviewer, legacy owner, and nullable unique `created_archive_id`; review/trash fields and monotonic owner-self-delete eligibility coexist | One independent submission and PDF, optionally paired with exactly one Archive. Ownership survives eligibility consumption | Database uniqueness, application fail-fast guards, and exact-pair soft-lifecycle coverage are enforced |
 | `ArchiveSubmissionEvent` | Unique `submission_id` integer and timestamp, without a declared FK | Immutable statistical event retained after submission deletion, with active link/PII detached as needed | Implementation gap: permanent-delete helper currently deletes events |
@@ -306,15 +306,19 @@ intended invariant.
 
 ### Current implementation
 
-`CourseSubmission` has requester, reviewer, status, and `created_course_id`.
-Archive approval instead carries requested course/category snapshots directly
-on `ArchiveSubmission`; it does not create or link a `CourseSubmission`.
+`CourseSubmission` has requester/reviewer history plus `deleted_at`, exact
+`previous_status`, delete/restore actor metadata, and a nullable
+`created_course_id`. New deletions snapshot the exact non-deleted state;
+restore consumes only that snapshot. Legacy `DELETED` rows without an
+authoritative snapshot remain non-restorable but may be permanently deleted.
 
-### Known gap
-
-The two representations are not a single explicit lifecycle. `CourseSubmission`
-does not currently have trash metadata, and idempotent restore behavior is not
-fully specified by code/tests.
+The database link to `Course` uses `ON DELETE SET NULL`. Course soft trash and
+restore do not rewrite the request, permanent Course deletion preserves the
+request as detached history, and permanent CourseSubmission deletion does not
+mutate the Course. An active pending request may block Category permanent
+deletion; approved, rejected, and deleted history does not. Archive approval
+continues to carry its own requested-parent snapshots and does not create or
+link a `CourseSubmission`.
 
 ## Legacy Archive without ArchiveSubmission
 

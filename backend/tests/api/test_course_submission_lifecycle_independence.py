@@ -270,30 +270,32 @@ async def test_category_blockers_include_only_active_pending_requests(
         session_maker,
         requester_id=requester.id,
     )
-    async with session_maker() as session:
-        for status_value in (
-            SubmissionStatus.APPROVED,
-            SubmissionStatus.REJECTED,
-            SubmissionStatus.DELETED,
-        ):
-            session.add(
-                CourseSubmission(
-                    name=f"D2B terminal {status_value.value} {uuid.uuid4().hex}",
-                    category=category.key,
-                    requester_id=requester.id,
-                    status=status_value,
+    try:
+        async with session_maker() as session:
+            for status_value in (
+                SubmissionStatus.APPROVED,
+                SubmissionStatus.REJECTED,
+                SubmissionStatus.DELETED,
+            ):
+                session.add(
+                    CourseSubmission(
+                        name=f"D2B terminal {status_value.value} {uuid.uuid4().hex}",
+                        category=category.key,
+                        requester_id=requester.id,
+                        status=status_value,
+                    )
                 )
+            await session.commit()
+            stored_category = await session.get(CourseCategoryConfig, category.id)
+            blockers = await trash_service._get_active_category_submission_blockers(
+                session, stored_category
             )
-        await session.commit()
-        stored_category = await session.get(CourseCategoryConfig, category.id)
-        blockers = await trash_service._get_active_category_submission_blockers(
-            session, stored_category
-        )
-        course_submission_blockers = [
-            item for item in blockers if item["type"] == "course_submission"
-        ]
-        assert [item["id"] for item in course_submission_blockers] == [pending.id]
-    await _cleanup_context(session_maker, category_id=category.id)
+            course_submission_blockers = [
+                item for item in blockers if item["type"] == "course_submission"
+            ]
+            assert [item["id"] for item in course_submission_blockers] == [pending.id]
+    finally:
+        await _cleanup_context(session_maker, category_id=category.id)
 
 
 @pytest.mark.asyncio

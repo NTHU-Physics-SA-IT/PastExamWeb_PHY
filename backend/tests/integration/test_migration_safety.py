@@ -672,6 +672,62 @@ def test_category_state_preservation_revision_backfills_and_fails_closed(
         command.downgrade(config, previous_revision)
 
 
+def test_course_submission_lifecycle_revision_is_additive_and_reversible(
+    clean_public_schema: Engine,
+) -> None:
+    previous_revision = "e8a4c1d7b2f6"
+    new_revision = "a9c2e5f7b1d4"
+    config = alembic_config()
+    upgrade(previous_revision)
+
+    def lifecycle_shape(connection) -> tuple[set[str], str | None]:
+        inspector = sa_inspect(connection)
+        columns = {
+            column["name"]
+            for column in inspector.get_columns("course_submissions", schema="public")
+        }
+        matching_foreign_keys = [
+            foreign_key
+            for foreign_key in inspector.get_foreign_keys(
+                "course_submissions", schema="public"
+            )
+            if foreign_key["constrained_columns"] == ["created_course_id"]
+            and foreign_key["referred_table"] == "courses"
+        ]
+        assert len(matching_foreign_keys) == 1
+        return columns, (matching_foreign_keys[0].get("options") or {}).get("ondelete")
+
+    lifecycle_columns = {
+        "previous_status",
+        "deleted_at",
+        "deleted_by_id",
+        "restored_at",
+        "restored_by_id",
+    }
+    with clean_public_schema.connect() as connection:
+        source_columns, source_ondelete = lifecycle_shape(connection)
+    assert lifecycle_columns.isdisjoint(source_columns)
+    assert source_ondelete is None
+
+    command.upgrade(config, new_revision)
+    with clean_public_schema.connect() as connection:
+        upgraded_columns, upgraded_ondelete = lifecycle_shape(connection)
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
+            new_revision
+        )
+    assert lifecycle_columns.issubset(upgraded_columns)
+    assert upgraded_ondelete == "SET NULL"
+
+    command.downgrade(config, previous_revision)
+    with clean_public_schema.connect() as connection:
+        downgraded_columns, downgraded_ondelete = lifecycle_shape(connection)
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
+            previous_revision
+        )
+    assert lifecycle_columns.isdisjoint(downgraded_columns)
+    assert downgraded_ondelete is None
+
+
 def test_known_revision_without_manifest_is_blocked() -> None:
     upgrade("d1e6c8a4f2b9")
 

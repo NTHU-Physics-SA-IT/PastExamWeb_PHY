@@ -47,6 +47,10 @@ ARCHIVE_SUBMISSION_PREVIOUS_STATUS_CHECKS = {
     "ck_archive_submissions_active_previous_status_null",
 }
 ARCHIVE_SUBMISSION_CREATED_ARCHIVE_UNIQUE = "uq_archive_submissions_created_archive_id"
+COURSE_SUBMISSION_LIFECYCLE_CHECKS = {
+    "ck_course_submissions_previous_status_not_deleted",
+    "ck_course_submissions_active_previous_status_null",
+}
 USER_OAUTH_IDENTITY_UNIQUE = "uq_users_oauth_provider_sub"
 IDENTIFIER_TEXT_CAST = re.compile(
     r"\bcast\(\s*(?P<identifier>[a-z_]\w*(?:\.[a-z_]\w*)?)"
@@ -231,6 +235,7 @@ def _metadata_for_variant(variant: str) -> MetaData:
     if variant == "head":
         return metadata
     if variant not in {
+        "pre_course_submission_lifecycle",
         "pre_category_state_preservation",
         "pre_about_us_entries",
         "pre_bilingual_submission_snapshots",
@@ -245,6 +250,33 @@ def _metadata_for_variant(variant: str) -> MetaData:
         "pre_category_canonicalization",
     }:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
+
+    course_submissions = metadata.tables["course_submissions"]
+    for constraint in list(course_submissions.constraints):
+        if (
+            isinstance(constraint, CheckConstraint)
+            and constraint.name in COURSE_SUBMISSION_LIFECYCLE_CHECKS
+        ):
+            course_submissions.constraints.remove(constraint)
+        if tuple(constraint.columns.keys()) == ("created_course_id",) and hasattr(
+            constraint, "ondelete"
+        ):
+            constraint.ondelete = None
+            for element in constraint.elements:
+                element.ondelete = None
+    for index in list(course_submissions.indexes):
+        if index.name == "ix_course_submissions_deleted_at":
+            course_submissions.indexes.remove(index)
+    for column_name in (
+        "previous_status",
+        "deleted_at",
+        "deleted_by_id",
+        "restored_at",
+        "restored_by_id",
+    ):
+        course_submissions._columns.remove(course_submissions.c[column_name])
+    if variant == "pre_course_submission_lifecycle":
+        return metadata
 
     categories = metadata.tables["course_category_configs"]
     categories._columns.remove(categories.c.pre_delete_is_active)

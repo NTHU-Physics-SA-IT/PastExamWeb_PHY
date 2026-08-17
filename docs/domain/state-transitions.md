@@ -686,8 +686,33 @@ Admin direct-approved request creation follows the same namespace and
 transaction boundary: it rechecks Course and pending-request identity under
 the mutex, flushes the new Course to obtain its ID, adds the approved request,
 and commits once. These guarantees do not make CourseSubmission the permanent
-owner of the resulting Course and do not define request trash or later Course
-lifecycle behavior.
+owner of the resulting Course.
+
+### Independent request history lifecycle
+
+Administrator trash of an active CourseSubmission records the exact current
+non-`DELETED` status in `previous_status`, changes the row to `DELETED`, and
+records delete time and actor without changing the linked Course. Active
+request lists exclude trashed and legacy-deleted rows. Restore is permitted
+only when the exact snapshot exists: it restores that status, consumes the
+snapshot, clears delete metadata, and records restore metadata. It never
+searches for, recreates, or relinks a Course or Category.
+
+A legacy `DELETED` row without `previous_status` is preserved as an explicit
+unknown-history state. It is visible to backend Trash authority, cannot be
+restored, and can be permanently deleted without inventing a prior status or
+deletion timestamp. A restored pending row whose Category is now missing,
+deleted, or inactive remains pending; the existing D1 approval eligibility
+check rejects later approval.
+
+Course soft trash/restore does not rewrite CourseSubmission state. The optional
+`created_course_id` foreign key uses `ON DELETE SET NULL`, so permanent Course
+deletion preserves an approved request as valid detached history. Re-approving
+that detached approved row remains a fail-closed conflict under D2A and never
+repairs the link. Permanent CourseSubmission deletion deletes only the request.
+For Category permanent-delete authority, only a live pending request is an
+operational blocker; approved, rejected, soft-deleted, and legacy-deleted rows
+are historical and do not own the Category.
 
 ## Authorization
 
