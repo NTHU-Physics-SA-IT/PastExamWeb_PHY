@@ -1160,7 +1160,7 @@ def test_full_attestation_checks_each_required_execution_job(
             "attested_sha": fixture["merge"],
             "execution_head_sha": fixture["merge"],
             "pr_number": 0,
-            "base_sha": "",
+            "base_ref": "",
             "repository_root": fixture["root"],
             "github_output": output,
         },
@@ -1246,7 +1246,7 @@ def test_full_attestation_rejects_missing_or_failed_sharded_evidence(
             "attested_sha": fixture["merge"],
             "execution_head_sha": fixture["merge"],
             "pr_number": 0,
-            "base_sha": "",
+            "base_ref": "",
             "repository_root": fixture["root"],
             "github_output": None,
         },
@@ -1294,12 +1294,21 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
         "actions": "read",
         "pull-requests": "read",
     }
+    full_attestation = next(
+        step
+        for step in parsed["jobs"]["full_attestation"]["steps"]
+        if step["name"] == "Validate complete full-CI evidence"
+    )
+    assert full_attestation["env"]["EVENT_BASE_REF"] == (
+        "${{ github.event.pull_request.base.ref }}"
+    )
+    assert "EVENT_BASE_SHA" not in full_attestation["env"]
     assert "--run-attempt '${{ github.run_attempt }}'" in workflow
     assert '--event-name "$EVENT_NAME"' in workflow
     assert '--attested-sha "$ATTESTED_SHA"' in workflow
     assert '--execution-head-sha "$EXECUTION_HEAD_SHA"' in workflow
     assert '--pr-number "$EVENT_PR_NUMBER"' in workflow
-    assert '--base-sha "$EVENT_BASE_SHA"' in workflow
+    assert '--base-ref "$EVENT_BASE_REF"' in workflow
     assert "${{ github.event.pull_request.head.sha || github.sha }}" in workflow
     assert parsed["jobs"]["ci_gate"]["name"] == "CI Gate"
     assert parsed["jobs"]["ci_gate"]["if"] == "${{ always() }}"

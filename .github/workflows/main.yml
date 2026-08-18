@@ -294,7 +294,7 @@ jobs:
           EXECUTION_HEAD_SHA: >-
             ${{ github.event.pull_request.head.sha || github.sha }}
           EVENT_PR_NUMBER: ${{ github.event.pull_request.number || 0 }}
-          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: >-
           python3 scripts/ci/validate_ci_gate.py full-attestation
           --mode '${{ needs.ci_mode.outputs.ci_mode }}'
@@ -310,7 +310,7 @@ jobs:
           --attested-sha "$ATTESTED_SHA"
           --execution-head-sha "$EXECUTION_HEAD_SHA"
           --pr-number "$EVENT_PR_NUMBER"
-          --base-sha "$EVENT_BASE_SHA"
+          --base-ref "$EVENT_BASE_REF"
           --github-output "$GITHUB_OUTPUT"
 
   ci_gate:
