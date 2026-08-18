@@ -75,6 +75,7 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
   await page.addInitScript((value: string) => {
     window.sessionStorage.setItem('auth-token', value)
     window.localStorage.setItem('auth-token', value)
+    window.localStorage.setItem('admin-current-tab', '1')
   }, token)
 
   await page.route('**/api/notifications/active', (route) => route.fulfill(json([])))
@@ -207,7 +208,6 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
   expect(viewportMetrics.visualViewportWidth).toBe(393)
   expect(viewportMetrics.devicePixelRatio).toBe(3)
 
-  await page.getByRole('tab', { name: '使用者管理' }).click()
   await expect(page.getByRole('heading', { name: '使用者統計圖表' })).toBeVisible()
   await page.getByRole('button', { name: '展開使用者統計圖表' }).click()
 
