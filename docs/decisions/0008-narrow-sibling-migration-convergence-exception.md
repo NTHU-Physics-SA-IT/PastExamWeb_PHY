@@ -2,7 +2,7 @@
 
 - ID: ADR-0008
 - Title: Narrow sibling-migration convergence exception
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-18
 - Scope:
   - Paths:
@@ -18,8 +18,8 @@
   - [ADR-0003 — Coordination-branch freshness](0003-coordination-branch-freshness.md)
   - [ADR-0004 — Decision Record and semantic-conflict authority](0004-decision-record-and-semantic-conflict-authority.md)
   - [Decision Record index](README.md)
-- Related PR / issue: PR #136, PR #134, and the bounded post-D3 migration
-  convergence investigation
+- Related PR / issue: PR #140, PR #136, PR #134, and the bounded post-D3
+  migration-convergence investigation
 - Supersedes: None
 - Superseded by: None
 
@@ -66,10 +66,10 @@ explicit governance authority before implementation.
 
 ## Decision
 
-This record is **Proposed** and is not operative authority. If it is later
-Accepted together with the required operating-document updates, it authorizes
-one narrow compatibility exception for the exact sibling convergence formed
-by `e8a4c1d7b2f6`, `a9c2e5f7b1d4`, and `a9c4e7b2d6f1`.
+This record authorizes one narrow compatibility exception for the exact
+sibling convergence formed by `e8a4c1d7b2f6`, `a9c2e5f7b1d4`, and
+`a9c4e7b2d6f1`. It is operative durable governance authority only within that
+declared scope; implementation remains a separate reviewed task.
 
 Published and deployed migration revisions remain immutable by default. This
 exception does not permit general historical migration edits, arbitrary
@@ -130,10 +130,10 @@ Before the later reconciliation can be accepted, its evidence must include:
 - the combined product and Domain tests required by the eventual ADR-0003
   Case-B reconciliation.
 
-This decision does not authorize implementation while Proposed. Even after
-acceptance, it does not authorize production or canonical-local migration,
-stamping or repair, deployment, or the ADR-0003 Case-B execution. Each remains
-a separately authorized operation.
+This decision authorizes the exact guard-compatibility boundary but does not
+itself authorize its implementation. It also does not authorize production or
+canonical-local migration, stamping or repair, deployment, or the ADR-0003
+Case-B execution. Each remains a separately authorized operation.
 
 ## Rationale
 
@@ -222,6 +222,6 @@ Stop for new owner and governance authority if implementation would require:
 - applying a canonical-local or production migration; or
 - modifying ADR-0003 or CI policy to make reconciliation easier.
 
-An Accepted ADR-0008 would authorize only the exact guard-compatibility
-boundary described here. Any broader migration policy requires a new,
-explicitly reviewed decision.
+ADR-0008 authorizes only the exact guard-compatibility boundary described
+here. Any broader migration policy requires a new, explicitly reviewed
+decision.
