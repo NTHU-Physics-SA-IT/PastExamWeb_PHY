@@ -71,5 +71,6 @@ declare module 'vue' {
     Toolbar: typeof import('primevue/toolbar')['default']
     UploadArchiveDialog: typeof import('./src/components/UploadArchiveDialog.vue')['default']
     UserOnlineDurationChart: typeof import('./src/components/UserOnlineDurationChart.vue')['default']
+    WishPool: typeof import('./src/components/WishPool.vue')['default']
   }
 }

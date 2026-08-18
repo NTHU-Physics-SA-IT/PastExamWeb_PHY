@@ -53,6 +53,20 @@ function mountReport(props = {}) {
 }
 
 describe('InlineCommentReport', () => {
+  it('keeps wish reporting reason-only without a supplementary details field', async () => {
+    const wrapper = mountReport({ targetType: 'wish', reason: 'misinformation' })
+
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('請描述回報原因')
+    expect(wrapper.vm.commentReportReasons.map((option) => option.value)).not.toContain('other')
+    expect(wrapper.vm.isFormValid).toBe(true)
+    expect(wrapper.vm.reportPayload).toEqual({
+      comment_id: 42,
+      report_reason: 'misinformation',
+      custom_message: null,
+    })
+  })
+
   it('shows the selected reply target and the centrally defined report reasons', () => {
     const wrapper = mountReport({ reason: 'spam_or_duplicate' })
 

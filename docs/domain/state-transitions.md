@@ -326,6 +326,19 @@ sibling visibility.
 
 ## Report states
 
+Archive Wish reports use the same one-way moderation vocabulary as comment and
+archive reports: `pending -> upheld|dismissed`. A final Wish report cannot be
+reviewed again. Permanent Wish deletion is administrator-only, is not a Trash
+transition, cascades hearts, detaches retained reports and Help Upload source
+links through `SET NULL`, and does not delete a matching Archive or submission.
+
+An Archive Wish itself has no fulfilled state column. Its `fulfilled` projection
+is derived on every read from a matching effective-public Archive. Pending,
+rejected, taken-down, soft-deleted, or parent-hidden Archives do not fulfill a
+wish. Once a public match exists the Wish remains visible with a fulfilled
+badge. Duplicate canonical targets fail with `409 wish_already_exists` and the
+database unique constraint is the concurrency arbiter.
+
 Both comment and archive reports use:
 
 | Value | Canonical meaning |

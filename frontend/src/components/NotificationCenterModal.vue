@@ -65,7 +65,9 @@
                         item.is_read ? $t('已讀') : $t('未讀')
                       }}</Tag>
                     </div>
-                    <strong class="notification-card__title">{{ item.title }}</strong>
+                    <strong class="notification-card__title">{{
+                      localizedAnnouncementField(item, 'title')
+                    }}</strong>
                     <div class="notification-card__tags">
                       <Tag :severity="severity(item.severity)">{{
                         severityLabel(item.severity)
@@ -194,7 +196,13 @@
       :header="selectedType === 'announcement' ? $t('公告內容') : $t('個人通知')"
     >
       <div v-if="selectedItem" class="notification-detail">
-        <h3>{{ selectedItem.title }}</h3>
+        <h3>
+          {{
+            selectedType === 'announcement'
+              ? localizedAnnouncementField(selectedItem, 'title')
+              : selectedItem.title
+          }}
+        </h3>
         <small class="text-500">{{
           formatTimestamp(selectedItem.updated_at || selectedItem.created_at)
         }}</small>
@@ -247,7 +255,13 @@ const activeTab = ref('announcements')
 const detailVisible = ref(false)
 const selectedItem = ref(null)
 const selectedType = ref('announcement')
-const renderedBody = computed(() => renderMarkdown(selectedItem.value?.body || ''))
+const localizedAnnouncementField = (item, field) =>
+  locale.value.toLowerCase().startsWith('en')
+    ? item?.[`${field}_en`]?.trim() || item?.[field] || ''
+    : item?.[field] || ''
+const renderedBody = computed(() =>
+  renderMarkdown(localizedAnnouncementField(selectedItem.value, 'body'))
+)
 const groupedAnnouncements = computed(() => groupItemsByMonth(props.announcements, 'updated_at'))
 const localizedPersonalNotifications = computed(() =>
   props.personalNotifications.map((item) => ({

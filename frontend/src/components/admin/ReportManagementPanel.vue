@@ -1,6 +1,18 @@
 <template>
   <section class="report-management" :aria-label="$t('回報管理')">
-    <section class="report-section" aria-labelledby="system-report-heading">
+    <Tabs v-model:value="activeReportTab" class="mb-4">
+      <TabList>
+        <Tab value="archive">{{ $t('考古題回報') }}</Tab>
+        <Tab value="comment">{{ $t('留言回報') }}</Tab>
+        <Tab value="wish">{{ $t('許願回報') }}</Tab>
+        <Tab value="system">{{ $t('系統問題回報') }}</Tab>
+      </TabList>
+    </Tabs>
+    <section
+      v-show="activeReportTab === 'system'"
+      class="report-section"
+      aria-labelledby="system-report-heading"
+    >
       <div class="report-section__header report-section__header--system">
         <div class="report-section__copy">
           <h4 id="system-report-heading">{{ $t('系統問題回報') }}</h4>
@@ -330,7 +342,11 @@
       </Dialog>
     </section>
 
-    <section class="report-section" aria-labelledby="comment-report-heading">
+    <section
+      v-show="activeReportTab === 'comment'"
+      class="report-section"
+      aria-labelledby="comment-report-heading"
+    >
       <div class="report-section__header">
         <div>
           <h4 id="comment-report-heading">{{ $t('留言回報') }}</h4>
@@ -617,6 +633,7 @@
     </section>
 
     <section
+      v-show="activeReportTab === 'archive'"
       class="report-section"
       aria-labelledby="archive-report-heading"
       :aria-busy="archiveListState.loading"
@@ -871,6 +888,317 @@
         </Column>
       </DataTable>
     </section>
+
+    <section
+      v-show="activeReportTab === 'wish'"
+      class="report-section"
+      aria-labelledby="wish-report-heading"
+    >
+      <div class="report-section__header">
+        <div>
+          <h4 id="wish-report-heading">{{ $t('許願回報') }}</h4>
+          <p>{{ $t('審核使用者針對考古許願提交的回報。') }}</p>
+        </div>
+      </div>
+      <div class="report-management__filters report-management__filters--compact">
+        <InputText
+          v-model="wishFilters.search"
+          class="report-filter-search"
+          :placeholder="$t('搜尋許願或回報內容')"
+          @keyup.enter="applyWishFilters"
+        />
+        <Select
+          v-model="wishFilters.status"
+          class="report-filter-select report-filter-select--primary"
+          :options="statusOptions"
+          optionLabel="label"
+          optionValue="value"
+          :placeholder="$t('全部狀態')"
+          showClear
+          @change="applyWishFilters"
+        />
+        <Button
+          class="report-filter-submit"
+          :label="$t('搜尋')"
+          icon="pi pi-search"
+          outlined
+          @click="applyWishFilters"
+        />
+      </div>
+      <Message v-if="wishError" severity="error" :closable="false">{{ wishError }}</Message>
+      <DataTable
+        v-else
+        :value="wishReports"
+        :loading="wishLoading"
+        lazy
+        paginator
+        :first="wishPage.first"
+        :rows="wishPage.rows"
+        :totalRecords="wishTotal"
+        :rowsPerPageOptions="ADMIN_PAGE_SIZE_OPTIONS"
+        paginatorTemplate="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown CurrentPageReport"
+        :currentPageReportTemplate="paginationReportTemplate"
+        :sortField="wishPage.sortField"
+        :sortOrder="wishPage.sortOrder"
+        responsiveLayout="stack"
+        breakpoint="1399.98px"
+        class="report-management__table report-management__wish-table admin-data-table"
+        tableStyle="table-layout: fixed; min-width: 68rem"
+        @page="onWishPage"
+        @sort="onWishSort"
+      >
+        <template #empty>{{ $t('目前沒有符合條件的許願回報') }}</template>
+        <Column
+          field="created_at"
+          sortField="created_at"
+          :header="$t('回報者')"
+          sortable
+          style="width: 10rem"
+        >
+          <template #body="{ data }">
+            <div v-if="!isCardLayout" class="report-person-time">
+              <span class="report-person-time__name" :title="data.reporter_name">{{
+                data.reporter_name
+              }}</span>
+              <time class="report-person-time__time" :datetime="data.created_at">{{
+                formatDateTime(data.created_at, true)
+              }}</time>
+            </div>
+          </template>
+        </Column>
+        <Column
+          field="reason"
+          sortField="reason"
+          :header="$t('回報原因')"
+          sortable
+          style="width: 13rem"
+        >
+          <template #body="{ data }">
+            <strong
+              v-if="!isCardLayout"
+              class="comment-report-content__reason"
+              :title="reasonLabel(data.reason)"
+              >{{ reasonLabel(data.reason) }}</strong
+            >
+            <article v-else class="report-mobile-card report-mobile-card-content">
+              <header class="report-mobile-card__header report-mobile-card-header">
+                <strong class="report-mobile-card-title" :title="reasonLabel(data.reason)">{{
+                  reasonLabel(data.reason)
+                }}</strong>
+                <Tag
+                  class="report-mobile-card-status"
+                  :severity="statusSeverity(data.status)"
+                  :value="statusLabel(data.status)"
+                />
+              </header>
+              <div class="report-mobile-card__body">
+                <section
+                  class="report-mobile-card__summary report-mobile-summary-preview"
+                  :aria-label="$t('許願目標')"
+                >
+                  <span class="report-mobile-summary-preview__label">{{ $t('許願目標') }}</span>
+                  <p class="report-mobile-summary-preview__text">
+                    {{ data.wish_title }} · {{ data.target_summary }}
+                  </p>
+                </section>
+                <dl
+                  class="report-mobile-card__metadata report-mobile-info-grid report-mobile-info-grid--wish"
+                >
+                  <div class="report-mobile-info-item">
+                    <dt>{{ $t('回報者') }}</dt>
+                    <dd>{{ data.reporter_name }}</dd>
+                  </div>
+                  <div class="report-mobile-info-item">
+                    <dt>{{ $t('回報時間') }}</dt>
+                    <dd>
+                      <time :datetime="data.created_at">{{
+                        formatDateTime(data.created_at, true)
+                      }}</time>
+                    </dd>
+                  </div>
+                  <div class="report-mobile-info-item">
+                    <dt>{{ $t('許願者') }}</dt>
+                    <dd>{{ data.wisher_name || $t('已刪除使用者') }}</dd>
+                  </div>
+                  <div class="report-mobile-info-item report-mobile-info-item--wide">
+                    <dt>{{ $t('許願目標') }}</dt>
+                    <dd>{{ data.wish_title }} · {{ data.target_summary }}</dd>
+                  </div>
+                  <div class="report-mobile-info-item">
+                    <dt>{{ $t('審核') }}</dt>
+                    <dd>{{ data.reviewer_name || $t('尚未審核') }}</dd>
+                  </div>
+                  <div class="report-mobile-info-item">
+                    <dt>{{ $t('審核時間') }}</dt>
+                    <dd>{{ formatReviewTime(data.reviewed_at) }}</dd>
+                  </div>
+                </dl>
+              </div>
+              <footer class="report-mobile-card__footer">
+                <div class="report-row-actions">
+                  <Button
+                    :label="isFinal(data.status) ? $t('檢視') : $t('檢視／審核')"
+                    icon="pi pi-search"
+                    :aria-label="$t('檢視或審核許願回報')"
+                    :title="$t('檢視或審核許願回報')"
+                    size="small"
+                    outlined
+                    @click="openWishReport(data.id)"
+                  />
+                  <Button
+                    :label="$t('刪除')"
+                    icon="pi pi-trash"
+                    severity="danger"
+                    :aria-label="$t('刪除許願回報')"
+                    :title="$t('刪除許願回報')"
+                    size="small"
+                    outlined
+                    :loading="deletingWishReportId === data.id"
+                    :disabled="deletingWishReportId !== null"
+                    @click="confirmDeleteWishReport(data)"
+                  />
+                </div>
+              </footer>
+            </article>
+          </template>
+        </Column>
+        <Column
+          field="wisher_name"
+          sortField="wisher"
+          :header="$t('許願者')"
+          sortable
+          style="width: 9rem"
+        >
+          <template #body="{ data }"
+            ><span
+              v-if="!isCardLayout"
+              class="report-user-cell__text"
+              :title="data.wisher_name || $t('已刪除使用者')"
+              >{{ data.wisher_name || $t('已刪除使用者') }}</span
+            ></template
+          >
+        </Column>
+        <Column sortField="wish_target" :header="$t('許願目標')" sortable>
+          <template #body="{ data }"
+            ><div v-if="!isCardLayout" class="comment-report-content" :title="data.target_summary">
+              <strong class="comment-report-content__reason">{{ data.wish_title }}</strong
+              ><span class="comment-report-content__summary">{{ data.target_summary }}</span>
+            </div></template
+          >
+        </Column>
+        <Column field="status" sortField="status" :header="$t('狀態')" sortable style="width: 8rem"
+          ><template #body="{ data }"
+            ><Tag
+              v-if="!isCardLayout"
+              :severity="statusSeverity(data.status)"
+              :value="statusLabel(data.status)" /></template
+        ></Column>
+        <Column :header="$t('操作')" style="width: 17rem">
+          <template #body="{ data }"
+            ><footer v-if="!isCardLayout" class="report-desktop-actions">
+              <div class="report-row-actions">
+                <Button
+                  :label="isFinal(data.status) ? $t('檢視') : $t('檢視／審核')"
+                  icon="pi pi-search"
+                  :aria-label="$t('檢視或審核許願回報')"
+                  :title="$t('檢視或審核許願回報')"
+                  size="small"
+                  outlined
+                  @click="openWishReport(data.id)"
+                /><Button
+                  :label="$t('刪除')"
+                  icon="pi pi-trash"
+                  :aria-label="$t('刪除許願回報')"
+                  :title="$t('刪除許願回報')"
+                  size="small"
+                  severity="danger"
+                  outlined
+                  :loading="deletingWishReportId === data.id"
+                  :disabled="deletingWishReportId !== null"
+                  @click="confirmDeleteWishReport(data)"
+                />
+              </div></footer
+          ></template>
+        </Column>
+      </DataTable>
+    </section>
+
+    <Dialog
+      v-model:visible="wishReviewVisible"
+      class="report-management-dialog"
+      modal
+      :header="$t('許願回報審核')"
+      :style="{ width: '720px', maxWidth: '94vw' }"
+      :draggable="false"
+    >
+      <div v-if="selectedWishReport" class="report-review">
+        <div class="report-review__title">
+          <div>
+            <strong>{{ $t('許願回報') }}</strong
+            ><small>{{ formatDateTime(selectedWishReport.created_at) }}</small>
+          </div>
+          <Tag
+            :severity="statusSeverity(selectedWishReport.status)"
+            :value="statusLabel(selectedWishReport.status)"
+          />
+        </div>
+        <dl class="report-review__meta">
+          <div>
+            <dt>{{ $t('回報者') }}</dt>
+            <dd>{{ selectedWishReport.reporter_name }}</dd>
+          </div>
+          <div>
+            <dt>{{ $t('許願者') }}</dt>
+            <dd>{{ selectedWishReport.wisher_name || $t('已刪除使用者') }}</dd>
+          </div>
+          <div>
+            <dt>{{ $t('回報原因') }}</dt>
+            <dd>{{ reasonLabel(selectedWishReport.reason) }}</dd>
+          </div>
+          <div>
+            <dt>{{ $t('許願目標') }}</dt>
+            <dd>{{ selectedWishReport.wish_title }} · {{ selectedWishReport.target_summary }}</dd>
+          </div>
+        </dl>
+        <div v-if="selectedWishReport.custom_message" class="report-review__message">
+          <strong>{{ $t('補充說明') }}</strong>
+          <p>{{ selectedWishReport.custom_message }}</p>
+        </div>
+        <div class="report-review__form">
+          <label>{{ $t('審核結果') }}</label
+          ><Select
+            v-model="wishReviewForm.status"
+            :options="statusOptions.filter((item) => item.value !== 'pending')"
+            optionLabel="label"
+            optionValue="value"
+            class="w-full"
+            :disabled="isFinal(selectedWishReport.status)"
+          /><label>{{ $t('管理員答覆（選填）') }}</label
+          ><Textarea
+            v-model="wishReviewForm.admin_response"
+            rows="4"
+            maxlength="1000"
+            class="w-full"
+            :disabled="isFinal(selectedWishReport.status)"
+          />
+        </div>
+        <div class="report-review__actions">
+          <Button
+            :label="$t('關閉')"
+            severity="secondary"
+            text
+            @click="wishReviewVisible = false"
+          /><Button
+            v-if="!isFinal(selectedWishReport.status)"
+            :label="$t('確認送出')"
+            icon="pi pi-check"
+            :loading="wishReviewSaving"
+            :disabled="!['upheld', 'dismissed'].includes(wishReviewForm.status)"
+            @click="confirmSaveWishReview"
+          />
+        </div>
+      </div>
+    </Dialog>
 
     <Dialog
       v-model:visible="reviewVisible"
@@ -1169,7 +1497,7 @@ import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { reportService } from '@/api'
+import { reportService, wishService } from '@/api'
 import { ADMIN_PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import { ARCHIVE_REPORT_REASONS } from '@/constants/archiveReport'
 import { getMessageTemplate } from '@/i18n'
@@ -1187,6 +1515,18 @@ const paginationReportTemplate = computed(() =>
 const REPORT_CARD_MEDIA_QUERY = '(max-width: 1399.98px)'
 let reportCardMediaQuery = null
 const isCardLayout = ref(false)
+const activeReportTab = ref('archive')
+const wishReports = ref([])
+const wishTotal = ref(0)
+const wishLoading = ref(false)
+const wishError = ref('')
+const wishFilters = ref({ search: '', status: null })
+const wishPage = ref({ first: 0, rows: 10, sortField: 'created_at', sortOrder: -1 })
+const wishReviewVisible = ref(false)
+const selectedWishReport = ref(null)
+const wishReviewForm = ref({ status: 'pending', admin_response: '' })
+const wishReviewSaving = ref(false)
+const deletingWishReportId = ref(null)
 const loadingSystem = ref(false)
 const loadingComments = ref(false)
 const archiveReports = ref([])
@@ -1423,12 +1763,150 @@ function onArchiveSort(event) {
 function refreshAll() {
   Object.assign(systemPage.value, { first: 0, sortField: 'read_state', sortOrder: 1 })
   Object.assign(commentPage.value, { first: 0, sortField: 'status', sortOrder: 1 })
+  Object.assign(wishPage.value, { first: 0, sortField: 'created_at', sortOrder: -1 })
   Object.assign(archiveListState.value, {
     first: 0,
     sortField: 'status',
     sortOrder: 1,
   })
-  return Promise.allSettled([loadSystemIssues(), loadCommentReports(), loadArchiveReports()])
+  return Promise.allSettled([
+    loadSystemIssues(),
+    loadCommentReports(),
+    loadArchiveReports(),
+    loadWishReports(),
+  ])
+}
+async function loadWishReports() {
+  wishLoading.value = true
+  wishError.value = ''
+  try {
+    const { data } = await wishService.listReports({
+      search: wishFilters.value.search.trim() || undefined,
+      status: wishFilters.value.status || undefined,
+      sort_by: wishPage.value.sortField,
+      sort_order: wishPage.value.sortOrder === 1 ? 'asc' : 'desc',
+      limit: wishPage.value.rows,
+      offset: wishPage.value.first,
+    })
+    wishReports.value = data.items || []
+    wishTotal.value = Number(data.total || 0)
+  } catch {
+    wishError.value = t('無法載入許願回報，請重新整理後再試。')
+  } finally {
+    wishLoading.value = false
+  }
+}
+function applyWishFilters() {
+  wishPage.value.first = 0
+  return loadWishReports()
+}
+function onWishPage(event) {
+  const pageSizeChanged = wishPage.value.rows !== event.rows
+  wishPage.value.first = pageSizeChanged ? 0 : event.first
+  wishPage.value.rows = event.rows
+  return loadWishReports()
+}
+function onWishSort(event) {
+  wishPage.value.first = 0
+  wishPage.value.sortField = event.sortField || 'created_at'
+  wishPage.value.sortOrder = event.sortOrder || -1
+  return loadWishReports()
+}
+async function openWishReport(id) {
+  try {
+    const { data } = await wishService.getReport(id)
+    selectedWishReport.value = data
+    wishReviewForm.value = { status: data.status, admin_response: data.admin_response || '' }
+    wishReviewVisible.value = true
+  } catch {
+    toast.add({
+      severity: 'error',
+      summary: t('載入失敗'),
+      detail: t('無法載入回報詳情'),
+      life: 3000,
+    })
+  }
+}
+function confirmSaveWishReview() {
+  if (
+    !selectedWishReport.value ||
+    wishReviewSaving.value ||
+    !['upheld', 'dismissed'].includes(wishReviewForm.value.status)
+  )
+    return
+  confirm.require({
+    header: t('確認送出審核結果'),
+    message: t('審核結果與管理員答覆送出後將無法修改。'),
+    icon: 'pi pi-question-circle',
+    rejectLabel: t('取消'),
+    acceptLabel: t('確認送出'),
+    defaultFocus: 'reject',
+    accept: saveWishReview,
+  })
+}
+async function saveWishReview() {
+  wishReviewSaving.value = true
+  try {
+    const { data } = await wishService.reviewReport(selectedWishReport.value.id, {
+      status: wishReviewForm.value.status,
+      admin_response: wishReviewForm.value.admin_response.trim() || null,
+    })
+    selectedWishReport.value = data
+    toast.add({
+      severity: 'success',
+      summary: t('審核已更新'),
+      detail: t('許願回報審核狀態已更新'),
+      life: 3000,
+    })
+    await loadWishReports()
+  } catch {
+    toast.add({
+      severity: 'error',
+      summary: t('更新失敗'),
+      detail: t('回報狀態未變更'),
+      life: 3000,
+    })
+  } finally {
+    wishReviewSaving.value = false
+  }
+}
+function confirmDeleteWishReport(report) {
+  if (!report?.id || deletingWishReportId.value !== null) return
+  confirm.require({
+    header: t('永久刪除這筆回報？'),
+    message: t('這筆許願回報將永久刪除且無法復原。'),
+    icon: 'pi pi-exclamation-triangle',
+    rejectLabel: t('取消'),
+    acceptLabel: t('永久刪除'),
+    acceptClass: 'p-button-danger',
+    defaultFocus: 'reject',
+    accept: () => removeWishReport(report),
+  })
+}
+async function removeWishReport(report) {
+  deletingWishReportId.value = report.id
+  try {
+    await wishService.removeReport(report.id)
+    wishReports.value = wishReports.value.filter((item) => item.id !== report.id)
+    wishTotal.value = clampReportPageAfterDelete(wishPage.value, wishTotal.value)
+    if (selectedWishReport.value?.id === report.id) wishReviewVisible.value = false
+    toast.add({
+      severity: 'success',
+      summary: t('回報已永久刪除'),
+      detail: t('許願回報已永久移除'),
+      life: 3000,
+    })
+    await loadWishReports()
+  } catch {
+    toast.add({
+      severity: 'error',
+      summary: t('刪除失敗'),
+      detail: t('許願回報未變更'),
+      life: 3000,
+    })
+  } finally {
+    deletingWishReportId.value = null
+  }
 }
 function clampReportPageAfterDelete(page, total) {
   const nextTotal = Math.max(0, total - 1)
@@ -1983,6 +2461,10 @@ onBeforeUnmount(teardownCardLayout)
   min-width: 0;
   margin-block: 1rem;
 }
+.report-management__filters--compact {
+  grid-template-areas: 'search primary submit';
+  grid-template-columns: minmax(0, 1fr) minmax(9rem, 11rem) auto;
+}
 .report-filter-search {
   grid-area: search;
   width: 100%;
@@ -2021,6 +2503,12 @@ onBeforeUnmount(teardownCardLayout)
       'primary secondary submit';
     grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
   }
+  .report-management__filters--compact {
+    grid-template-areas:
+      'search search'
+      'primary submit';
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
 }
 @container report-section (max-width: 34rem) {
   .report-management__filters {
@@ -2029,6 +2517,11 @@ onBeforeUnmount(teardownCardLayout)
       'primary secondary'
       '. submit';
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .report-management__filters--compact {
+    grid-template-areas:
+      'search search'
+      'primary submit';
   }
 }
 @container report-section (max-width: 20rem) {
@@ -2039,6 +2532,12 @@ onBeforeUnmount(teardownCardLayout)
       'secondary'
       'submit';
     grid-template-columns: minmax(0, 1fr);
+  }
+  .report-management__filters--compact {
+    grid-template-areas:
+      'search'
+      'primary'
+      'submit';
   }
 }
 @container report-section (max-width: 42rem) {
@@ -2523,6 +3022,7 @@ onBeforeUnmount(teardownCardLayout)
   }
   :deep(.report-management__system-table .p-datatable-tbody > tr > td:nth-child(2)),
   :deep(.report-management__comment-table .p-datatable-tbody > tr > td:nth-child(2)),
+  :deep(.report-management__wish-table .p-datatable-tbody > tr > td:nth-child(2)),
   :deep(.report-management__archive-table .p-datatable-tbody > tr > td:nth-child(2)) {
     display: flex !important;
     flex-direction: column;
@@ -2534,6 +3034,7 @@ onBeforeUnmount(teardownCardLayout)
   }
   :deep(.report-management__system-table .p-datatable-tbody > tr > td:nth-child(2)),
   :deep(.report-management__comment-table .p-datatable-tbody > tr > td:nth-child(2)),
+  :deep(.report-management__wish-table .p-datatable-tbody > tr > td:nth-child(2)),
   :deep(.report-management__archive-table .p-datatable-tbody > tr > td:nth-child(2)) {
     order: 1;
   }

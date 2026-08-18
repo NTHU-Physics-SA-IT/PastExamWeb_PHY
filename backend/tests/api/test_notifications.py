@@ -23,6 +23,8 @@ async def _create_notification(session_maker, **overrides):
     data = NotificationCreate(
         title=f"Test Notification {uuid.uuid4().hex[:6]}",
         body="Hello world",
+        title_en="Test notification in English",
+        body_en="Hello world in English",
         severity=NotificationSeverity.INFO,
         is_active=True,
         starts_at=overrides.pop("starts_at", now - timedelta(minutes=5)),
@@ -99,11 +101,18 @@ async def test_admin_can_crud_notifications(
         payload = {
             "title": "Site maintenance",
             "body": "Expected downtime",
+            "title_en": "Site maintenance in English",
+            "body_en": "Expected downtime in English",
             "severity": NotificationSeverity.DANGER.value,
             "is_active": True,
             "starts_at": start_time.isoformat(),
             "ends_at": end_time.isoformat(),
         }
+        missing_english = await client.post(
+            "/notifications/admin/notifications",
+            json={"title": "Missing English", "body": "Missing English body"},
+        )
+        assert missing_english.status_code == 422
         response = await client.post(
             "/notifications/admin/notifications",
             json=payload,
@@ -112,12 +121,19 @@ async def test_admin_can_crud_notifications(
         created = response.json()
         created_id = created["id"]
         assert created["title"] == payload["title"]
+        assert created["title_en"] == payload["title_en"]
+        assert created["body_en"] == payload["body_en"]
         assert created["updated_by_username"] == admin.name
 
         app.dependency_overrides[get_current_user] = _override_user(
             {"id": editor.id, "is_admin": True}
         )
-        update_payload = {"title": "Updated title", "is_active": False}
+        update_payload = {
+            "title": "Updated title",
+            "title_en": "Updated English title",
+            "body_en": "Updated English body",
+            "is_active": False,
+        }
         response = await client.put(
             f"/notifications/admin/notifications/{created_id}",
             json=update_payload,
@@ -125,6 +141,8 @@ async def test_admin_can_crud_notifications(
         assert response.status_code == 200
         updated = response.json()
         assert updated["title"] == "Updated title"
+        assert updated["title_en"] == "Updated English title"
+        assert updated["body_en"] == "Updated English body"
         assert updated["is_active"] is False
         assert updated["updated_by_username"] == editor.name
 

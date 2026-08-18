@@ -17,6 +17,7 @@ from app.models.models import (
     ArchiveSubmission,
     ArchiveSubmissionEvent,
     ArchiveType,
+    ArchiveWish,
     Course,
     CourseCategory,
     CourseCategoryConfig,
@@ -660,6 +661,101 @@ async def test_upload_archive_reuses_existing_course(
             )
             await session.execute(delete(Archive).where(Archive.uploader_id == user.id))
             await session.execute(delete(Course).where(Course.name == subject))
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_help_upload_preserves_source_wish_and_rejects_target_mismatch(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    monkeypatch,
+):
+    user = await make_user()
+    unique = uuid.uuid4().hex[:8]
+    course = await _create_upload_course(
+        session_maker,
+        name=f"Wish Upload Course {unique}",
+    )
+    async with session_maker() as session:
+        wish = ArchiveWish(
+            title=f"Wish Upload {unique}",
+            target_key=f"wish-upload-{unique}",
+            course_id=course.id,
+            subject=course.name,
+            category=course.category,
+            name="midterm1",
+            academic_year=2026,
+            archive_type=ArchiveType.MIDTERM,
+            professor="Professor Wish Upload",
+            creator_id=user.id,
+        )
+        session.add(wish)
+        await session.commit()
+        await session.refresh(wish)
+        wish_id = wish.id
+
+    uploaded_objects = []
+
+    class FakeMinio:
+        def put_object(self, **kwargs):
+            uploaded_objects.append(kwargs["object_name"])
+
+    monkeypatch.setattr(
+        "app.api.services.archives.get_minio_client",
+        lambda: FakeMinio(),
+    )
+    async def fake_get_current_user():
+        return UserRoles(user_id=user.id, is_admin=False)
+
+    app.dependency_overrides[get_current_user] = fake_get_current_user
+    common_data = {
+        "subject": course.name,
+        "category": course.category.value,
+        "course_id": course.id,
+        "professor": "Professor Wish Upload",
+        "archive_type": "midterm",
+        "has_answers": "false",
+        "filename": "midterm1",
+        "academic_year": 2026,
+        "source_wish_id": wish_id,
+    }
+    try:
+        response = await client.post(
+            "/archives/upload",
+            files={"file": ("wish.pdf", io.BytesIO(b"%PDF-1.4 wish"), "application/pdf")},
+            data=common_data,
+        )
+        assert response.status_code == 200
+        submission_id = response.json()["submission"]["id"]
+        async with session_maker() as session:
+            submission = await session.get(ArchiveSubmission, submission_id)
+            assert submission.source_wish_id == wish_id
+
+        mismatch = await client.post(
+            "/archives/upload",
+            files={
+                "file": (
+                    "mismatch.pdf",
+                    io.BytesIO(b"%PDF-1.4 mismatch"),
+                    "application/pdf",
+                )
+            },
+            data={**common_data, "filename": "final"},
+        )
+        assert mismatch.status_code == 409
+        assert mismatch.json()["detail"]["code"] == "wish_upload_target_mismatch"
+        assert len(uploaded_objects) == 1
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(ArchiveSubmission).where(
+                    ArchiveSubmission.requester_id == user.id
+                )
+            )
+            await session.execute(delete(ArchiveWish).where(ArchiveWish.id == wish_id))
+            await session.execute(delete(Course).where(Course.id == course.id))
             await session.commit()
 
 

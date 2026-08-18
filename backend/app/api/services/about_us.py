@@ -59,6 +59,8 @@ async def create_about_us_entry(
     entry = AboutUsEntry(
         title=data.title.strip(),
         body=data.body.strip(),
+        title_en=data.title_en,
+        body_en=data.body_en,
         created_at=now,
         updated_at=now,
         updated_by_id=current_user.user_id,
@@ -82,10 +84,28 @@ async def update_about_us_entry(
     if entry is None:
         raise HTTPException(status_code=404, detail="About Us entry not found")
     for field, value in data.model_dump(exclude_unset=True).items():
-        setattr(entry, field, value.strip())
+        setattr(entry, field, value.strip() if isinstance(value, str) else value)
     entry.updated_at = datetime.now(UTC)
     entry.updated_by_id = current_user.user_id
     db.add(entry)
     await db.commit()
     await db.refresh(entry)
     return _read(entry, await db.get(User, current_user.user_id))
+
+
+@router.delete(
+    "/admin/entries/{entry_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_about_us_entry(
+    entry_id: int,
+    db: AsyncSession = Depends(get_session),
+    current_user: UserRoles = Depends(get_current_user),
+):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    entry = await db.get(AboutUsEntry, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="About Us entry not found")
+    await db.delete(entry)
+    await db.commit()
