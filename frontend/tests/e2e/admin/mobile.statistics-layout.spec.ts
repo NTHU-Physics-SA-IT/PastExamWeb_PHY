@@ -89,6 +89,9 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
       })
     )
   )
+  await page.route('**/api/wishes/admin/reports**', (route) =>
+    route.fulfill(json({ items: [], total: 0 }))
+  )
   await page.route('**/api/courses/admin/categories**', (route) => route.fulfill(json([])))
   await page.route('**/api/settings/contributor-levels', (route) =>
     route.fulfill(
