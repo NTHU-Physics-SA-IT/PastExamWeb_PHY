@@ -126,3 +126,4 @@ not freeze design forever; they require intentional, reviewable replacement.
 | [ADR-0005](0005-main-pr-docs-only-exception.md) | Main pull-request docs-only exception | Accepted | Docs-only classification for pull requests targeting `main` |
 | [ADR-0006](0006-coordination-postmerge-full-evidence-reuse.md) | Coordination postmerge Full-evidence reuse | Accepted | Exact Case-B coordination postmerge evidence reuse |
 | [ADR-0007](0007-retain-full-fallback-for-post-case-b-reconciliation-tails.md) | Retain Full Fallback for Post-Case-B Reconciliation Tails | Accepted | Post-Case-B reconciliation-tail evidence reuse |
+| [ADR-0008](0008-narrow-sibling-migration-convergence-exception.md) | Narrow sibling-migration convergence exception | Proposed | Exact three-revision sibling-migration compatibility boundary |
