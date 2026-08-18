@@ -288,3 +288,35 @@ release only after history and tag checks prove it has not shipped. Extend the
 focused migration safety scenarios whenever a new PostgreSQL enum, persistent
 server default, partial index, or other schema feature changes the head
 manifest.
+
+### ADR-0008 exact sibling-convergence exception
+
+[ADR-0008](decisions/0008-narrow-sibling-migration-convergence-exception.md)
+is the sole accepted exception to the immutability rule above. It applies only
+to the pre-DDL source-compatibility guard behavior of these exact revisions:
+
+- `e8a4c1d7b2f6`;
+- `a9c2e5f7b1d4`; and
+- `a9c4e7b2d6f1`.
+
+Revision IDs, `down_revision` identities and order, `branch_labels`,
+`depends_on`, schema DDL, data backfill or transformation intent, named
+constraint and index intent, locking intent, post-upgrade target-schema
+intent, and downgrade schema and data intent remain immutable.
+
+An implementation may recognize only finite, mechanically enumerated sibling
+states for which it proves both the exact expected migration-ledger or
+transition identity and the exact sibling-specific schema continuity. Ledger
+identity alone is insufficient. Unknown, partial, malformed,
+unexpected-multiple, unreviewed, or schema-inconsistent states fail closed.
+
+The separately reviewed implementation must prove that databases starting at
+`e6a1b3c5d7f9`, `a9c2e5f7b1d4`, or `a9c4e7b2d6f1` converge to one final
+repository head. It must not use `alembic stamp`, manual `alembic_version`
+repair, skipped or fictitious DDL, or reparenting or deletion of accepted
+revisions. This exception does not permit arbitrary future sibling branches
+and does not authorize production or canonical-local migration, deployment,
+or ADR-0003 Case-B execution.
+
+ADR-0008 supplies governance permission for the narrow compatibility design;
+the migration implementation and final merged head are still pending.
