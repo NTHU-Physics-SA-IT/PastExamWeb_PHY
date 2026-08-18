@@ -406,7 +406,35 @@ jobs:
           PLAYWRIGHT_IMAGE: ${{ steps.playwright-image.outputs.image }}
         run: |
           set -euo pipefail
-          docker pull "$PLAYWRIGHT_IMAGE"
+
+          max_attempts=3
+          pull_status=1
+          for attempt in $(seq 1 "$max_attempts"); do
+            echo \
+              "Pulling Playwright image (attempt $attempt/$max_attempts):" \
+              "$PLAYWRIGHT_IMAGE"
+            if docker pull "$PLAYWRIGHT_IMAGE"; then
+              exit 0
+            else
+              pull_status=$?
+            fi
+
+            if [[ "$attempt" -eq "$max_attempts" ]]; then
+              break
+            fi
+
+            delay_seconds=$((attempt * 10))
+            echo \
+              "Playwright image pull failed; retrying in" \
+              "$delay_seconds seconds." \
+              >&2
+            sleep "$delay_seconds"
+          done
+
+          echo \
+            "Playwright image pull failed after $max_attempts attempts." \
+            >&2
+          exit "$pull_status"
 
       - name: Prepare backend env
         run: |
@@ -560,11 +588,20 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: >-
-          docker compose
-          --env-file docker/.env
-          -f docker/docker-compose.dev.yml
-          down --volumes --remove-orphans
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f docker/.env ]]; then
+            echo \
+              "Skipping E2E teardown because docker/.env was never prepared."
+            exit 0
+          fi
+
+          docker compose \
+            --env-file docker/.env \
+            -f docker/docker-compose.dev.yml \
+            down --volumes --remove-orphans
 
   frontend-e2e:
     name: frontend-e2e
