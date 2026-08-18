@@ -714,6 +714,12 @@ For Category permanent-delete authority, only a live pending request is an
 operational blocker; approved, rejected, soft-deleted, and legacy-deleted rows
 are historical and do not own the Category.
 
+Admin Trash clients treat `course_submission` as a first-class history type.
+They render restore and permanent-delete actions only from the backend's
+explicit action-authority booleans, present a missing Course link as valid
+detached history, and do not infer relink, recreation, or alternate lifecycle
+actions from status or relationship display data.
+
 ## Authorization
 
 ### NTHU login policy
