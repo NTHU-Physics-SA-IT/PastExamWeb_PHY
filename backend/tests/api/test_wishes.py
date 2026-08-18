@@ -106,7 +106,7 @@ async def test_wish_duplicate_heart_fulfillment_report_and_admin_delete(
         created = await client.post("/wishes", json=payload)
         assert created.status_code == 201
         wish_id = created.json()["id"]
-        assert created.json()["category"] == course.category.value
+        assert created.json()["category"] == str(course.category)
         assert created.json()["heart_count"] == 0
         duplicate = await client.post("/wishes", json=payload)
         assert duplicate.status_code == 409

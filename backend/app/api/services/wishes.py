@@ -27,6 +27,7 @@ from app.models.models import (
     CommentReportReason,
     CommentReportStatus,
     Course,
+    CourseCategory,
     User,
     UserRoles,
 )
@@ -221,7 +222,13 @@ async def create_wish(
         subject=course.name
         if course is not None
         else format_course_display_name(data.subject),
-        category=course.category.value if course is not None else data.category,
+        category=(
+            course.category.value
+            if course is not None and isinstance(course.category, CourseCategory)
+            else course.category
+            if course is not None
+            else data.category
+        ),
         creator_id=current_user.user_id,
     )
     db.add(wish)

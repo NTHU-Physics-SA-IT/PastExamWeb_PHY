@@ -32,7 +32,12 @@ async def test_about_us_is_readable_and_admin_managed(
         assert (
             await client.post(
                 "/about-us/admin/entries",
-                json={"title": "Forbidden", "body": "Nope"},
+                json={
+                    "title": "Forbidden",
+                    "body": "Nope",
+                    "title_en": "Forbidden in English",
+                    "body_en": "Nope in English",
+                },
             )
         ).status_code == 403
 

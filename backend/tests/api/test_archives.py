@@ -711,7 +711,7 @@ async def test_help_upload_preserves_source_wish_and_rejects_target_mismatch(
     app.dependency_overrides[get_current_user] = fake_get_current_user
     common_data = {
         "subject": course.name,
-        "category": course.category.value,
+        "category": str(course.category),
         "course_id": course.id,
         "professor": "Professor Wish Upload",
         "archive_type": "midterm",

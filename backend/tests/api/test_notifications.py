@@ -247,6 +247,8 @@ async def test_admin_notifications_require_admin(
         payload = {
             "title": "Forbidden",
             "body": "Nope",
+            "title_en": "Forbidden in English",
+            "body_en": "Nope in English",
             "severity": NotificationSeverity.INFO.value,
             "is_active": True,
             "starts_at": start_time.isoformat(),
