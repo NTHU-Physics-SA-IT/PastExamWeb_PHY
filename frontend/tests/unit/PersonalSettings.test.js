@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import PersonalSettings from '@/views/PersonalSettings.vue'
+import personalSettingsSource from '@/views/PersonalSettings.vue?raw'
 
 const userServiceMock = vi.hoisted(() => ({
   getMe: vi.fn(),
@@ -81,6 +82,18 @@ describe('PersonalSettings account visibility', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     delete globalThis.IntersectionObserver
+  })
+
+  it('keeps the page title above section headings without oversized typography', () => {
+    expect(personalSettingsSource).toMatch(
+      /\.settings-header h1\s*\{[^}]*font-size:\s*calc\(var\(--app-font-size-base\) \* 1\.45\);/
+    )
+    expect(personalSettingsSource).toMatch(
+      /\.settings-group-header h2\s*\{[^}]*font-size:\s*calc\(var\(--app-font-size-base\) \* 1\.18\);/
+    )
+    expect(personalSettingsSource).not.toContain(
+      'font-size: calc(var(--app-font-size-base) * 1.75);'
+    )
   })
 
   it.each([

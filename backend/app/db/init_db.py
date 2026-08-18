@@ -22,6 +22,9 @@ from app.models.models import (
     Archive,
     ArchiveDiscussionMessage,
     ArchiveSubmission,
+    ArchiveWish,
+    ArchiveWishHeart,
+    ArchiveWishReport,
     CommentReport,
     Course,
     CourseCategory,
@@ -45,6 +48,23 @@ ALLOWED_BOOTSTRAP_DATABASE_PREFIXES = (
 )
 CANONICAL_LOCAL_BOOTSTRAP_PROJECT = "pastexam-dev"
 CANONICAL_LOCAL_BOOTSTRAP_DATABASE = "archive_db"
+BOOTSTRAP_PROTECTED_MODELS = (
+    AboutUsEntry,
+    User,
+    Course,
+    CourseSubmission,
+    ArchiveSubmission,
+    Archive,
+    ArchiveWish,
+    ArchiveWishHeart,
+    ArchiveWishReport,
+    ArchiveDiscussionMessage,
+    Notification,
+    PersonalNotification,
+    SystemIssueReport,
+    CommentReport,
+    Meme,
+)
 
 
 @lru_cache(maxsize=1)
@@ -268,22 +288,8 @@ async def _validate_bootstrap_contents(session) -> bool:
             "canonical course categories"
         )
 
-    protected_models = (
-        AboutUsEntry,
-        User,
-        Course,
-        CourseSubmission,
-        ArchiveSubmission,
-        Archive,
-        ArchiveDiscussionMessage,
-        Notification,
-        PersonalNotification,
-        SystemIssueReport,
-        CommentReport,
-        Meme,
-    )
     nonempty_tables = []
-    for model in protected_models:
+    for model in BOOTSTRAP_PROTECTED_MODELS:
         count = (
             await session.execute(select(func.count()).select_from(model))
         ).scalar()

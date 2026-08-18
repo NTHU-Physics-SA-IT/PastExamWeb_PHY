@@ -103,7 +103,7 @@ defineOptions({
   name: 'HomeView',
 })
 
-import { ref, onMounted, computed } from 'vue'
+import { ref, onBeforeUnmount, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useTheme } from '../utils/useTheme'
@@ -139,6 +139,16 @@ const animatedValues = ref({
 })
 
 const statsLoaded = ref(false)
+const COUNTER_ANIMATION_DURATION_MS = 1800
+const STATISTIC_KEYS = Object.freeze([
+  'totalUsers',
+  'totalDownloads',
+  'onlineUsers',
+  'totalArchives',
+  'totalCourses',
+  'activeToday',
+])
+let counterAnimationFrameId = 0
 
 const statistics = computed(() => [
   {
@@ -358,9 +368,65 @@ async function fetchStatistics() {
 }
 
 function animateCounters() {
-  Object.keys(statisticsData.value).forEach((key) => {
-    animatedValues.value[key] = formatNumber(statisticsData.value[key])
+  cancelCounterAnimation()
+
+  if (prefersReducedMotion()) {
+    updateAnimatedValues(1)
+    return
+  }
+
+  updateAnimatedValues(0)
+  const hasAnimatedTarget = STATISTIC_KEYS.some((key) => Number(statisticsData.value[key]) > 0)
+  if (!hasAnimatedTarget) return
+
+  let startedAt = null
+  const animateFrame = (timestamp) => {
+    if (startedAt === null) startedAt = timestamp
+
+    const elapsed = Math.max(0, timestamp - startedAt)
+    const progress = Math.min(elapsed / COUNTER_ANIMATION_DURATION_MS, 1)
+    updateAnimatedValues(progress)
+
+    if (progress < 1) {
+      counterAnimationFrameId = window.requestAnimationFrame(animateFrame)
+    } else {
+      counterAnimationFrameId = 0
+    }
+  }
+
+  counterAnimationFrameId = window.requestAnimationFrame(animateFrame)
+}
+
+function updateAnimatedValues(progress) {
+  const easedProgress = 1 - Math.pow(1 - progress, 3)
+  const nextValues = {}
+
+  STATISTIC_KEYS.forEach((key) => {
+    const target = Number(statisticsData.value[key])
+    if (!Number.isFinite(target)) {
+      nextValues[key] = formatNumber(statisticsData.value[key])
+      return
+    }
+
+    const displayValue = progress >= 1 ? target : Math.floor(target * easedProgress)
+    nextValues[key] = formatNumber(displayValue)
   })
+
+  animatedValues.value = nextValues
+}
+
+function prefersReducedMotion() {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
+}
+
+function cancelCounterAnimation() {
+  if (!counterAnimationFrameId) return
+  window.cancelAnimationFrame(counterAnimationFrameId)
+  counterAnimationFrameId = 0
 }
 
 function formatNumber(num) {
@@ -369,6 +435,8 @@ function formatNumber(num) {
   }
   return Number(num).toLocaleString(locale.value)
 }
+
+onBeforeUnmount(cancelCounterAnimation)
 </script>
 
 <style scoped>
@@ -1411,6 +1479,8 @@ h1 {
 .stat-card strong {
   color: #f4fbf4;
   font-size: 1.3rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .physics-home:not(.physics-home-dark) .stat-card strong {

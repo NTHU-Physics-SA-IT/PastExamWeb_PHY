@@ -9,6 +9,10 @@ const archiveServiceMock = vi.hoisted(() => ({
   uploadArchive: vi.fn(),
 }))
 
+const wishServiceMock = vi.hoisted(() => ({
+  create: vi.fn(),
+}))
+
 const trackEventMock = vi.hoisted(() => vi.fn())
 const toastAddMock = vi.hoisted(() => vi.fn())
 const isUnauthorizedErrorMock = vi.hoisted(() => vi.fn(() => false))
@@ -63,6 +67,7 @@ const pdfLoadMock = vi.hoisted(() =>
 vi.mock('@/api', () => ({
   courseService: courseServiceMock,
   archiveService: archiveServiceMock,
+  wishService: wishServiceMock,
 }))
 
 vi.mock('primevue/usetoast', () => ({
@@ -123,12 +128,13 @@ const componentStubs = {
   ProgressSpinner: stubComponent,
 }
 
-function mountDialog() {
+function mountDialog(props = {}) {
   return mount(UploadArchiveDialog, {
     props: {
       modelValue: true,
       coursesList: sampleCourses,
       courseCategories,
+      ...props,
     },
     global: {
       stubs: componentStubs,
@@ -146,6 +152,8 @@ describe('UploadArchiveDialog', () => {
     trackEventMock.mockReset()
     toastAddMock.mockReset()
     archiveServiceMock.uploadArchive.mockResolvedValue()
+    wishServiceMock.create.mockReset()
+    wishServiceMock.create.mockResolvedValue()
     courseServiceMock.getCourseArchives.mockResolvedValue({
       data: [{ professor: 'Prof. Lin' }, { professor: 'Prof. Chen' }, { professor: 'Prof. Lin' }],
     })
@@ -238,6 +246,106 @@ describe('UploadArchiveDialog', () => {
     expect(vm.form.file).toBeNull()
     expect(vm.fileValidationError).toBe('PDF 檔案超過 20 MB 大小上限')
     expect(clear).toHaveBeenCalled()
+  })
+
+  it('reuses new-course and new-category requests in wish mode', async () => {
+    const wrapper = mountDialog({ mode: 'wish' })
+    const vm = wrapper.vm
+
+    expect(wrapper.text()).toContain('申請新增課程')
+    expect(wrapper.text()).toContain('同時申請新增課程分類')
+    expect(wrapper.get('#archive-wish-title').attributes('placeholder')).toBe(
+      '例如: 王道維普物一 midterm1'
+    )
+
+    vm.form.requestNewCourse = true
+    await flushPromises()
+    vm.form.requestNewCategory = true
+    await flushPromises()
+
+    Object.assign(vm.form, {
+      requestedCourseName: '量子資訊',
+      requestedCourseNameEn: 'Quantum Information',
+      requestedCategoryKey: 'quantum-info',
+      requestedCategoryName: '量子資訊',
+      requestedCategoryNameEn: 'Quantum Information',
+      requestedCategoryLabel: '量資',
+      requestedCategoryLabelEn: 'QInfo',
+      academicYear: 1141,
+      type: 'final',
+      wishTitle: '量子資訊期末考',
+    })
+    await flushPromises()
+    vm.form.professor = 'Prof. Lin'
+    await flushPromises()
+
+    expect(Boolean(vm.canGoToStep2)).toBe(true)
+    expect(vm.canUpload).toBe(true)
+    expect(wrapper.text()).toContain('量子資訊（quantum-info）')
+    expect(wrapper.text()).toContain('Quantum Information')
+    expect(wrapper.text()).toContain('量資 / QInfo')
+
+    await vm.handleUpload()
+
+    expect(wishServiceMock.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        course_id: null,
+        subject: '量子資訊',
+        category: 'quantum-info',
+        requested_course_name: '量子資訊',
+        requested_course_name_en: 'Quantum Information',
+        requested_category_key: 'quantum-info',
+        requested_category_name: '量子資訊',
+        requested_category_name_en: 'Quantum Information',
+        requested_category_label: '量資',
+        requested_category_label_en: 'QInfo',
+      })
+    )
+
+    wrapper.unmount()
+  })
+
+  it('preserves requested catalog snapshots when helping upload a wish', async () => {
+    const wrapper = mountDialog({
+      modelValue: false,
+      sourceWishId: 42,
+      prefill: {
+        id: 42,
+        subject: '量子資訊',
+        category: 'quantum-info',
+        requested_course_name: '量子資訊',
+        requested_course_name_en: 'Quantum Information',
+        requested_category_key: 'quantum-info',
+        requested_category_name: '量子資訊',
+        requested_category_name_en: 'Quantum Information',
+        requested_category_label: '量資',
+        requested_category_label_en: 'QInfo',
+        professor: 'Prof. Lin',
+        academic_year: 1141,
+        archive_type: 'final',
+        name: 'final',
+      },
+    })
+
+    await wrapper.setProps({ modelValue: true })
+    await flushPromises()
+
+    expect(wrapper.vm.form).toEqual(
+      expect.objectContaining({
+        requestNewCourse: true,
+        requestNewCategory: true,
+        requestedCourseName: '量子資訊',
+        requestedCourseNameEn: 'Quantum Information',
+        requestedCategoryKey: 'quantum-info',
+        requestedCategoryName: '量子資訊',
+        requestedCategoryNameEn: 'Quantum Information',
+        requestedCategoryLabel: '量資',
+        requestedCategoryLabelEn: 'QInfo',
+        subjectId: null,
+      })
+    )
+
+    wrapper.unmount()
   })
 
   it('covers helper utilities, watchers, and error branches', async () => {

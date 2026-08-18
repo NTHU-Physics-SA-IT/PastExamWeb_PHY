@@ -279,7 +279,7 @@ def test_model_manifest_and_response_boundary_define_previous_status() -> None:
         "DELETED",
         "TAKEDOWN",
     }
-    assert HEAD_SCHEMA_REVISION == "a9c2e5f7b1d4"
+    assert HEAD_SCHEMA_REVISION == "b4d6f8a2c1e3"
 
     source_metadata = metadata_for_revision(PREVIOUS_REVISION)
     head_metadata = metadata_for_revision(NEW_REVISION)

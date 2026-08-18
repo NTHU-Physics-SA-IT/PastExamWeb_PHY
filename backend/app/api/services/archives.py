@@ -45,6 +45,7 @@ from app.models.models import (
     ArchiveSubmissionEvent,
     ArchiveSubmissionRead,
     ArchiveSubmissionUpdate,
+    ArchiveWish,
     Course,
     CourseCategoryConfig,
     SubmissionDecision,
@@ -650,6 +651,7 @@ async def upload_archive(
     requested_category_label: str | None = Form(None),
     requested_category_label_en: str | None = Form(None),
     requested_category_icon: str | None = Form(None),
+    source_wish_id: int | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
@@ -678,6 +680,7 @@ async def upload_archive(
     requested_category_label = _unwrap_form_default(requested_category_label)
     requested_category_label_en = _unwrap_form_default(requested_category_label_en)
     requested_category_icon = _unwrap_form_default(requested_category_icon)
+    source_wish_id = _unwrap_form_default(source_wish_id)
 
     subject = format_course_display_name(subject)
     category = _normalize_category_key(category)
@@ -772,6 +775,38 @@ async def upload_archive(
             )
         subject = canonical_course.name
         snapshot_course_name_en = (canonical_course.name_en or "").strip() or None
+
+    if source_wish_id is not None:
+        wish = await db.get(ArchiveWish, source_wish_id)
+        if wish is None:
+            raise HTTPException(status_code=404, detail="Wish not found")
+        course_matches = (
+            wish.course_id == canonical_course.id
+            if not request_new_course and wish.course_id is not None
+            else normalize_course_search_text(
+                wish.requested_course_name or wish.subject
+            )
+            == normalize_course_search_text(requested_course_name or subject)
+        )
+        target_matches = all(
+            (
+                course_matches,
+                _normalize_match_text(wish.category) == _normalize_match_text(category),
+                _normalize_match_text(wish.professor)
+                == _normalize_match_text(professor),
+                wish.academic_year == academic_year,
+                wish.archive_type.value == archive_type,
+                _normalize_match_text(wish.name) == _normalize_match_text(filename),
+            )
+        )
+        if not target_matches:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "wish_upload_target_mismatch",
+                    "message": "Help Upload target must match the selected wish",
+                },
+            )
 
     course = None
     if current_user.is_admin:
@@ -869,6 +904,7 @@ async def upload_archive(
                 if request_new_category
                 else None,
                 requester_id=current_user.user_id,
+                source_wish_id=source_wish_id,
             )
             db.add(submission)
             await db.flush()
@@ -938,6 +974,7 @@ async def upload_archive(
             is_admin_upload=True,
             created_archive_id=archive.id,
             reviewed_at=datetime.now(UTC),
+            source_wish_id=source_wish_id,
         )
         db.add(submission)
         await db.flush()
