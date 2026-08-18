@@ -167,6 +167,7 @@ def test_bilingual_head_audit_is_new_version_and_preserves_lifecycle_classifier(
 
     assert adapter.accepted_source_revisions == frozenset(
         {
+            "a9c4e7b2d6f1",
             "c2a8e4f6b9d1",
             "d4b7e2a9c6f1",
             "e6a1b3c5d7f9",

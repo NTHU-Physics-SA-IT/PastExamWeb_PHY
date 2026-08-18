@@ -52,6 +52,7 @@
       "tests/api/test_meme.py",
       "tests/api/test_notifications.py",
       "tests/api/test_seo.py",
+      "tests/api/test_wishes.py",
       "tests/integration/test_archive_submission_one_to_one_migration.py",
       "tests/integration/test_category_canonicalization_migration.py",
       "tests/integration/test_nthu_oauth_identity_migration.py",
