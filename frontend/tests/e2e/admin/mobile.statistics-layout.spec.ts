@@ -63,7 +63,7 @@ test.use({
 })
 
 test('keeps mobile statistics tabs and duration summaries aligned', async ({ page }) => {
-  test.setTimeout(90_000)
+  test.setTimeout(45_000)
 
   const token = buildJwt({
     uid: 1,
@@ -78,7 +78,17 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
     window.localStorage.setItem('admin-current-tab', '1')
   }, token)
 
+  await page.route('**/api/auth/heartbeat', (route) => route.fulfill(json({})))
   await page.route('**/api/notifications/active', (route) => route.fulfill(json([])))
+  await page.route('**/api/notifications/unread-summary**', (route) =>
+    route.fulfill(
+      json({
+        announcements: [],
+        personal_notifications: [],
+        counts: { announcements: 0, personal_notifications: 0, total: 0 },
+      })
+    )
+  )
   await page.route('**/api/courses/admin/categories**', (route) => route.fulfill(json([])))
   await page.route('**/api/settings/contributor-levels', (route) =>
     route.fulfill(
