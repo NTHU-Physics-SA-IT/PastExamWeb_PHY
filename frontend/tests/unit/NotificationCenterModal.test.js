@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import NotificationCenterModal from '@/components/NotificationCenterModal.vue'
+import { setLocale } from '@/i18n'
 
 const slotStub = { template: '<div><slot /><slot name="header" /></div>' }
 const tabsStub = { template: '<div><slot /></div>' }
@@ -14,6 +15,8 @@ const announcements = [
     id: 1,
     title: '公告一',
     body: '內容',
+    title_en: 'Announcement one',
+    body_en: 'Announcement body',
     severity: 'info',
     is_read: false,
     updated_at: '2026-01-01T00:00:00Z',
@@ -31,6 +34,116 @@ const personal = [
 ]
 
 describe('NotificationCenterModal', () => {
+  it('uses canonical Chinese announcement content in zh-TW', async () => {
+    const wrapper = mount(NotificationCenterModal, {
+      props: { visible: true, announcements },
+      global: {
+        stubs: {
+          Dialog: slotStub,
+          Tabs: tabsStub,
+          TabList: tabsStub,
+          Tab: tabsStub,
+          TabPanels: tabsStub,
+          TabPanel: tabsStub,
+          Button: buttonStub,
+          Tag: true,
+          Badge: true,
+        },
+      },
+    })
+
+    expect(wrapper.get('.notification-announcement-groups').text()).toContain('公告一')
+    expect(wrapper.get('.notification-announcement-groups').text()).not.toContain(
+      'Announcement one'
+    )
+    wrapper.vm.openAnnouncement(announcements[0])
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.notification-detail').text()).toContain('內容')
+    expect(wrapper.get('.notification-detail').text()).not.toContain('Announcement body')
+  })
+
+  it('uses English announcement content in the list and detail modal', async () => {
+    setLocale('en')
+    const wrapper = mount(NotificationCenterModal, {
+      props: { visible: true, announcements },
+      global: {
+        stubs: {
+          Dialog: slotStub,
+          Tabs: tabsStub,
+          TabList: tabsStub,
+          Tab: tabsStub,
+          TabPanels: tabsStub,
+          TabPanel: tabsStub,
+          Button: buttonStub,
+          Tag: true,
+          Badge: true,
+        },
+      },
+    })
+
+    expect(wrapper.get('.notification-announcement-groups').text()).toContain('Announcement one')
+    expect(wrapper.get('.notification-announcement-groups').text()).not.toContain('公告一')
+    wrapper.vm.openAnnouncement(announcements[0])
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.notification-detail').text()).toContain('Announcement one')
+    expect(wrapper.get('.notification-detail').text()).toContain('Announcement body')
+    expect(wrapper.get('.notification-detail').text()).not.toContain('內容')
+  })
+
+  it('falls back to canonical announcement content for blank legacy English fields', async () => {
+    setLocale('en')
+    const legacyAnnouncement = {
+      ...announcements[0],
+      title_en: null,
+      body_en: '   ',
+    }
+    const wrapper = mount(NotificationCenterModal, {
+      props: { visible: true, announcements: [legacyAnnouncement] },
+      global: {
+        stubs: {
+          Dialog: slotStub,
+          Tabs: tabsStub,
+          TabList: tabsStub,
+          Tab: tabsStub,
+          TabPanels: tabsStub,
+          TabPanel: tabsStub,
+          Button: buttonStub,
+          Tag: true,
+          Badge: true,
+        },
+      },
+    })
+
+    expect(wrapper.get('.notification-announcement-groups').text()).toContain('公告一')
+    wrapper.vm.openAnnouncement(legacyAnnouncement)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.notification-detail').text()).toContain('內容')
+  })
+
+  it('updates announcement presentation when the locale changes', async () => {
+    const wrapper = mount(NotificationCenterModal, {
+      props: { visible: true, announcements },
+      global: {
+        stubs: {
+          Dialog: slotStub,
+          Tabs: tabsStub,
+          TabList: tabsStub,
+          Tab: tabsStub,
+          TabPanels: tabsStub,
+          TabPanel: tabsStub,
+          Button: buttonStub,
+          Tag: true,
+          Badge: true,
+        },
+      },
+    })
+
+    expect(wrapper.get('.notification-announcement-groups').text()).toContain('公告一')
+    setLocale('en')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.notification-announcement-groups').text()).toContain('Announcement one')
+  })
+
   it('uses the report warning severity for unread tags and keeps read tags secondary', () => {
     const wrapper = mount(NotificationCenterModal, {
       props: {

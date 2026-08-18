@@ -65,9 +65,7 @@
                         item.is_read ? $t('已讀') : $t('未讀')
                       }}</Tag>
                     </div>
-                    <strong class="notification-card__title">{{
-                      localizedAnnouncementField(item, 'title')
-                    }}</strong>
+                    <strong class="notification-card__title">{{ announcementTitle(item) }}</strong>
                     <div class="notification-card__tags">
                       <Tag :severity="severity(item.severity)">{{
                         severityLabel(item.severity)
@@ -198,9 +196,7 @@
       <div v-if="selectedItem" class="notification-detail">
         <h3>
           {{
-            selectedType === 'announcement'
-              ? localizedAnnouncementField(selectedItem, 'title')
-              : selectedItem.title
+            selectedType === 'announcement' ? announcementTitle(selectedItem) : selectedItem.title
           }}
         </h3>
         <small class="text-500">{{
@@ -225,6 +221,10 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import {
+  localizedAnnouncementBody,
+  localizedAnnouncementTitle,
+} from '@/utils/announcementNotificationPresentation'
 import { renderMarkdown } from '@/utils/markdown'
 import { localizedPersonalNotification } from '@/utils/personalNotificationPresentation'
 import { formatExactDateTime24h } from '@/utils/time'
@@ -255,12 +255,9 @@ const activeTab = ref('announcements')
 const detailVisible = ref(false)
 const selectedItem = ref(null)
 const selectedType = ref('announcement')
-const localizedAnnouncementField = (item, field) =>
-  locale.value.toLowerCase().startsWith('en')
-    ? item?.[`${field}_en`]?.trim() || item?.[field] || ''
-    : item?.[field] || ''
+const announcementTitle = (item) => localizedAnnouncementTitle(item, locale.value)
 const renderedBody = computed(() =>
-  renderMarkdown(localizedAnnouncementField(selectedItem.value, 'body'))
+  renderMarkdown(localizedAnnouncementBody(selectedItem.value, locale.value))
 )
 const groupedAnnouncements = computed(() => groupItemsByMonth(props.announcements, 'updated_at'))
 const localizedPersonalNotifications = computed(() =>
