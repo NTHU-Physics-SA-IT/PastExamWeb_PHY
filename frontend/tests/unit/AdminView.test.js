@@ -137,6 +137,8 @@ const sampleNotifications = [
     id: 1,
     title: '維護通知',
     body: '系統維護中',
+    title_en: 'Maintenance notice',
+    body_en: 'Maintenance in progress',
     severity: 'info',
     is_active: true,
     starts_at: new Date(now.getTime() - 3600_000).toISOString(),
@@ -148,6 +150,8 @@ const sampleNotifications = [
     id: 2,
     title: '過期公告',
     body: '過期',
+    title_en: 'Expired notice',
+    body_en: 'Expired',
     severity: 'danger',
     is_active: true,
     starts_at: new Date(now.getTime() - 7200_000).toISOString(),
@@ -416,6 +420,8 @@ describe('AdminView', () => {
     wrapper.vm.openNotificationCreateDialog()
     wrapper.vm.notificationForm.title = '新公告'
     wrapper.vm.notificationForm.body = '內容'
+    wrapper.vm.notificationForm.title_en = 'New announcement'
+    wrapper.vm.notificationForm.body_en = 'Content'
     wrapper.vm.notificationForm.starts_at = new Date(now.getTime() - 1000)
     wrapper.vm.notificationForm.ends_at = new Date(now.getTime() + 1000)
     await wrapper.vm.saveNotification()
@@ -1544,6 +1550,8 @@ describe('AdminView', () => {
     wrapper.vm.openNotificationCreateDialog()
     wrapper.vm.notificationForm.title = 'System Notice'
     wrapper.vm.notificationForm.body = 'Content'
+    wrapper.vm.notificationForm.title_en = 'System Notice'
+    wrapper.vm.notificationForm.body_en = 'Content'
     notificationCreateMock.mockRejectedValueOnce(new Error('notify-fail'))
     isUnauthorizedErrorMock.mockReturnValueOnce(false)
     await wrapper.vm.saveNotification()

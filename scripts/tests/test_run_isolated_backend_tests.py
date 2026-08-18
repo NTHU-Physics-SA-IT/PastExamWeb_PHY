@@ -228,7 +228,7 @@ def test_success_has_stable_json_and_complete_cleanup() -> None:
 
 
 def test_runner_uses_canonical_schema_manifest_head() -> None:
-    assert runner_module.EXPECTED_ALEMBIC_HEAD == "e6a1b3c5d7f9"
+    assert runner_module.EXPECTED_ALEMBIC_HEAD == "a9c4e7b2d6f1"
 
 
 @pytest.mark.parametrize(

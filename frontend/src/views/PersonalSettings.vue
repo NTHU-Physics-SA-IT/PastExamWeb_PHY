@@ -562,10 +562,10 @@ export default {
   margin-bottom: 1.25rem;
 }
 
-h1 {
+.settings-header h1 {
   margin: 0;
   color: var(--text-primary);
-  font-size: calc(var(--app-font-size-base) * 1.75);
+  font-size: calc(var(--app-font-size-base) * 1.45);
   font-weight: 760;
   letter-spacing: 0;
 }

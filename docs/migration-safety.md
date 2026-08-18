@@ -63,7 +63,9 @@ Reviewed manifests currently cover:
 - `c2a8e4f6b9d1`: the reviewed schema before bilingual ArchiveSubmission
   presentation snapshots; and
 - `d4b7e2a9c6f1`: the reviewed schema before About Us entries; and
-- `e6a1b3c5d7f9`: the current repository head and SQLModel metadata contract.
+- `e6a1b3c5d7f9`: the reviewed schema before bilingual managed content and the
+  persisted Wish Pool; and
+- `a9c4e7b2d6f1`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,

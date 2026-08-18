@@ -65,13 +65,22 @@
                 icon="pi pi-cloud-upload"
                 :label="$t('上傳考古題')"
                 severity="success"
-                @click="showUploadDialog = true"
+                @click="openUploadDialog"
+                class="w-full"
+                size="small"
+              />
+              <Button
+                icon="pi pi-sparkles"
+                :label="$t('考古許願池')"
+                severity="secondary"
+                outlined
+                @click="wishPoolActive = true"
                 class="w-full"
                 size="small"
               />
               <Button
                 icon="pi pi-list-check"
-                :label="$t('我的投稿狀態')"
+                :label="$t('我的考古投稿')"
                 severity="secondary"
                 outlined
                 @click="openSubmissionStatus"
@@ -165,8 +174,17 @@
                 size="small"
               />
               <Button
+                icon="pi pi-sparkles"
+                :label="$t('考古許願池')"
+                severity="secondary"
+                outlined
+                @click="openWishPoolFromMobileMenu"
+                class="w-full"
+                size="small"
+              />
+              <Button
                 icon="pi pi-list-check"
-                :label="$t('我的投稿狀態')"
+                :label="$t('我的考古投稿')"
                 severity="secondary"
                 outlined
                 @click="openSubmissionStatusFromMobileMenu"
@@ -180,215 +198,226 @@
 
       <div class="main-content flex-1 h-full overflow-auto">
         <div class="card h-full flex flex-col">
-          <div v-if="selectedSubject" class="subject-header">
-            <div class="subject-heading-row">
-              <Tag severity="secondary" class="subject-tag">
-                {{ currentCategoryLabel }}
-              </Tag>
-              <div class="subject-title-stack">
-                <div class="subject-title">{{ selectedSubject }}</div>
-                <div v-if="currentCourseEnglishName" class="subject-english-name">
-                  {{ currentCourseEnglishName }}
-                </div>
-              </div>
-              <div class="subject-summary">
-                <span class="subject-summary-item">{{
-                  $t('共 {count} 份考古題', { count: archiveTotalCount })
-                }}</span>
-                <span class="subject-summary-separator" aria-hidden="true">・</span>
-                <span class="subject-summary-item">{{
-                  $t('最新：{year}', { year: latestAcademicTerm })
-                }}</span>
-              </div>
-            </div>
-          </div>
-          <Toolbar v-if="selectedSubject" class="archive-filter-bar mx-3 mt-3 mb-2">
-            <template #start>
-              <div class="archive-filter-shell">
-                <div class="filter-summary">
-                  {{
-                    $t('目前顯示：{course} · 共 {count} 份考古題', {
-                      course: selectedSubject,
-                      count: filteredArchiveCount,
-                    })
-                  }}
-                </div>
-                <div class="archive-filter-controls">
-                  <Select
-                    inputId="archive-filter-year"
-                    name="archive-filter-year"
-                    v-model="filters.year"
-                    :options="years"
-                    optionLabel="name"
-                    optionValue="code"
-                    :placeholder="$t('學期')"
-                    class="filter-select"
-                    showClear
-                    filter
-                  />
-                  <Select
-                    inputId="archive-filter-professor"
-                    name="archive-filter-professor"
-                    v-model="filters.professor"
-                    :options="professors"
-                    optionLabel="name"
-                    optionValue="code"
-                    :placeholder="$t('教授')"
-                    class="filter-select"
-                    showClear
-                    filter
-                  />
-                  <Select
-                    inputId="archive-filter-type"
-                    name="archive-filter-type"
-                    v-model="filters.type"
-                    :options="archiveTypes"
-                    optionLabel="name"
-                    optionValue="code"
-                    :placeholder="$t('類型')"
-                    class="filter-select"
-                    showClear
-                  />
-                  <div class="answer-filter">
-                    <Checkbox
-                      v-model="filters.hasAnswers"
-                      :binary="true"
-                      inputId="hasAnswersFilter"
-                      name="has-answers-filter"
-                    />
-                    <label for="hasAnswersFilter">{{ $t('附解答') }}</label>
+          <WishPool
+            v-if="wishPoolActive"
+            :coursesList="coursesList"
+            :courseCategories="courseCategories"
+            @add-wish="showWishDialog = true"
+            @help-upload="openWishHelpUpload"
+          />
+          <template v-else>
+            <div v-if="selectedSubject" class="subject-header">
+              <div class="subject-heading-row">
+                <Tag severity="secondary" class="subject-tag">
+                  {{ currentCategoryLabel }}
+                </Tag>
+                <div class="subject-title-stack">
+                  <div class="subject-title">{{ selectedSubject }}</div>
+                  <div v-if="currentCourseEnglishName" class="subject-english-name">
+                    {{ currentCourseEnglishName }}
                   </div>
                 </div>
+                <div class="subject-summary">
+                  <span class="subject-summary-item">{{
+                    $t('共 {count} 份考古題', { count: archiveTotalCount })
+                  }}</span>
+                  <span class="subject-summary-separator" aria-hidden="true">・</span>
+                  <span class="subject-summary-item">{{
+                    $t('最新：{year}', { year: latestAcademicTerm })
+                  }}</span>
+                </div>
               </div>
-            </template>
-          </Toolbar>
+            </div>
+            <Toolbar v-if="selectedSubject" class="archive-filter-bar mx-3 mt-3 mb-2">
+              <template #start>
+                <div class="archive-filter-shell">
+                  <div class="filter-summary">
+                    {{
+                      $t('目前顯示：{course} · 共 {count} 份考古題', {
+                        course: selectedSubject,
+                        count: filteredArchiveCount,
+                      })
+                    }}
+                  </div>
+                  <div class="archive-filter-controls">
+                    <Select
+                      inputId="archive-filter-year"
+                      name="archive-filter-year"
+                      v-model="filters.year"
+                      :options="years"
+                      optionLabel="name"
+                      optionValue="code"
+                      :placeholder="$t('學期')"
+                      class="filter-select"
+                      showClear
+                      filter
+                    />
+                    <Select
+                      inputId="archive-filter-professor"
+                      name="archive-filter-professor"
+                      v-model="filters.professor"
+                      :options="professors"
+                      optionLabel="name"
+                      optionValue="code"
+                      :placeholder="$t('教授')"
+                      class="filter-select"
+                      showClear
+                      filter
+                    />
+                    <Select
+                      inputId="archive-filter-type"
+                      name="archive-filter-type"
+                      v-model="filters.type"
+                      :options="archiveTypes"
+                      optionLabel="name"
+                      optionValue="code"
+                      :placeholder="$t('類型')"
+                      class="filter-select"
+                      showClear
+                    />
+                    <div class="answer-filter">
+                      <Checkbox
+                        v-model="filters.hasAnswers"
+                        :binary="true"
+                        inputId="hasAnswersFilter"
+                        name="has-answers-filter"
+                      />
+                      <label for="hasAnswersFilter">{{ $t('附解答') }}</label>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </Toolbar>
 
-          <ProgressSpinner
-            v-if="loading"
-            class="w-full flex justify-content-center mt-4"
-            strokeWidth="4"
-          />
+            <ProgressSpinner
+              v-if="loading"
+              class="w-full flex justify-content-center mt-4"
+              strokeWidth="4"
+            />
 
-          <div v-else>
-            <div v-if="selectedSubject">
-              <Accordion
-                v-model:value="expandedPanels"
-                multiple
-                class="max-w-[calc(100%-2rem)] mx-auto"
-              >
-                <AccordionPanel
-                  v-for="group in groupedArchives"
-                  :key="group.year"
-                  :value="group.year.toString()"
+            <div v-else>
+              <div v-if="selectedSubject">
+                <Accordion
+                  v-model:value="expandedPanels"
+                  multiple
+                  class="max-w-[calc(100%-2rem)] mx-auto"
                 >
-                  <AccordionHeader>
-                    <div class="term-header-content">
-                      <span class="term-title">{{ formatAcademicTerm(group.year) }}</span>
-                      <span class="term-count">{{
-                        $t('共 {count} 份', { count: group.list.length })
-                      }}</span>
-                    </div>
-                  </AccordionHeader>
-                  <AccordionContent>
-                    <div class="archive-card-grid">
-                      <article
-                        v-for="data in group.list"
-                        :key="data.id"
-                        class="archive-record-card"
-                      >
-                        <div class="archive-record-content">
-                          <div class="archive-record-line archive-record-primary-line">
-                            <div class="archive-record-title-group">
-                              <Tag
-                                :severity="archiveTypeConfig[data.type]?.severity || 'secondary'"
-                                class="exam-type-tag"
-                              >
-                                {{ archiveTypeConfig[data.type]?.name || data.type }}
-                              </Tag>
-                              <h3>{{ data.name }}</h3>
+                  <AccordionPanel
+                    v-for="group in groupedArchives"
+                    :key="group.year"
+                    :value="group.year.toString()"
+                  >
+                    <AccordionHeader>
+                      <div class="term-header-content">
+                        <span class="term-title">{{ formatAcademicTerm(group.year) }}</span>
+                        <span class="term-count">{{
+                          $t('共 {count} 份', { count: group.list.length })
+                        }}</span>
+                      </div>
+                    </AccordionHeader>
+                    <AccordionContent>
+                      <div class="archive-card-grid">
+                        <article
+                          v-for="data in group.list"
+                          :key="data.id"
+                          class="archive-record-card"
+                        >
+                          <div class="archive-record-content">
+                            <div class="archive-record-line archive-record-primary-line">
+                              <div class="archive-record-title-group">
+                                <Tag
+                                  :severity="archiveTypeConfig[data.type]?.severity || 'secondary'"
+                                  class="exam-type-tag"
+                                >
+                                  {{ archiveTypeConfig[data.type]?.name || data.type }}
+                                </Tag>
+                                <h3>{{ data.name }}</h3>
+                              </div>
+                              <div class="archive-record-actions">
+                                <Button
+                                  icon="pi pi-eye"
+                                  @click="previewArchive(data)"
+                                  size="small"
+                                  severity="secondary"
+                                  :label="$t('預覽')"
+                                  outlined
+                                  :aria-label="$t('預覽')"
+                                  :title="$t('預覽')"
+                                  class="archive-action-preview"
+                                />
+                                <Button
+                                  icon="pi pi-download"
+                                  @click="downloadArchive(data)"
+                                  size="small"
+                                  severity="success"
+                                  :label="$t('下載')"
+                                  :loading="downloadingId === data.id"
+                                  :aria-label="$t('下載')"
+                                  :title="$t('下載')"
+                                  class="archive-action-download"
+                                />
+                                <Button
+                                  v-if="canEditArchive(data)"
+                                  icon="pi pi-pencil"
+                                  @click="openEditDialog(data)"
+                                  size="small"
+                                  severity="secondary"
+                                  :label="$t('編輯')"
+                                  outlined
+                                  :aria-label="$t('編輯')"
+                                  :title="$t('編輯')"
+                                  class="archive-action-edit"
+                                />
+                                <Button
+                                  v-if="canDeleteArchive(data)"
+                                  icon="pi pi-trash"
+                                  @click="confirmDelete(data)"
+                                  size="small"
+                                  severity="danger"
+                                  :label="$t('刪除')"
+                                  outlined
+                                  :aria-label="$t('刪除')"
+                                  :title="$t('刪除')"
+                                  class="archive-action-delete archive-action-danger admin-danger-outline-button danger-outline-button"
+                                />
+                              </div>
                             </div>
-                            <div class="archive-record-actions">
-                              <Button
-                                icon="pi pi-eye"
-                                @click="previewArchive(data)"
-                                size="small"
-                                severity="secondary"
-                                :label="$t('預覽')"
-                                outlined
-                                :aria-label="$t('預覽')"
-                                :title="$t('預覽')"
-                                class="archive-action-preview"
-                              />
-                              <Button
-                                icon="pi pi-download"
-                                @click="downloadArchive(data)"
-                                size="small"
-                                severity="success"
-                                :label="$t('下載')"
-                                :loading="downloadingId === data.id"
-                                :aria-label="$t('下載')"
-                                :title="$t('下載')"
-                                class="archive-action-download"
-                              />
-                              <Button
-                                v-if="canEditArchive(data)"
-                                icon="pi pi-pencil"
-                                @click="openEditDialog(data)"
-                                size="small"
-                                severity="secondary"
-                                :label="$t('編輯')"
-                                outlined
-                                :aria-label="$t('編輯')"
-                                :title="$t('編輯')"
-                                class="archive-action-edit"
-                              />
-                              <Button
-                                v-if="canDeleteArchive(data)"
-                                icon="pi pi-trash"
-                                @click="confirmDelete(data)"
-                                size="small"
-                                severity="danger"
-                                :label="$t('刪除')"
-                                outlined
-                                :aria-label="$t('刪除')"
-                                :title="$t('刪除')"
-                                class="archive-action-delete archive-action-danger admin-danger-outline-button danger-outline-button"
-                              />
+                            <div class="archive-record-line archive-record-meta-line">
+                              <span>{{ data.professor }}</span>
+                              <span>{{ formatAnswerStatus(data) }}</span>
+                              <span>{{
+                                $t('{count} 次下載', {
+                                  count: formatDownloadCount(data.downloadCount),
+                                })
+                              }}</span>
+                              <span v-if="formatSourceSubmissionIds(data)">
+                                {{
+                                  $t('投稿編號：{ids}', { ids: formatSourceSubmissionIds(data) })
+                                }}
+                              </span>
                             </div>
                           </div>
-                          <div class="archive-record-line archive-record-meta-line">
-                            <span>{{ data.professor }}</span>
-                            <span>{{ formatAnswerStatus(data) }}</span>
-                            <span>{{
-                              $t('{count} 次下載', {
-                                count: formatDownloadCount(data.downloadCount),
-                              })
-                            }}</span>
-                            <span v-if="formatSourceSubmissionIds(data)">
-                              {{ $t('投稿編號：{ids}', { ids: formatSourceSubmissionIds(data) }) }}
-                            </span>
-                          </div>
-                        </div>
-                      </article>
-                    </div>
-                  </AccordionContent>
-                </AccordionPanel>
-              </Accordion>
-            </div>
-            <div
-              v-else
-              class="flex flex-column align-items-center justify-content-center h-full"
-              style="min-height: calc(100vh - 200px)"
-            >
-              <i class="pi pi-book text-6xl" style="color: var(--text-secondary)"></i>
-              <div class="text-xl font-medium mt-4" style="color: var(--text-secondary)">
-                {{ $t('請從左側選單選擇課程') }}
+                        </article>
+                      </div>
+                    </AccordionContent>
+                  </AccordionPanel>
+                </Accordion>
               </div>
-              <div class="text-sm mt-2" style="color: var(--text-secondary)">
-                {{ $t('選擇課程後即可瀏覽相關考古題') }}
+              <div
+                v-else
+                class="flex flex-column align-items-center justify-content-center h-full"
+                style="min-height: calc(100vh - 200px)"
+              >
+                <i class="pi pi-book text-6xl" style="color: var(--text-secondary)"></i>
+                <div class="text-xl font-medium mt-4" style="color: var(--text-secondary)">
+                  {{ $t('請從左側選單選擇課程') }}
+                </div>
+                <div class="text-sm mt-2" style="color: var(--text-secondary)">
+                  {{ $t('選擇課程後即可瀏覽相關考古題') }}
+                </div>
               </div>
             </div>
-          </div>
+          </template>
 
           <PdfPreviewModal
             :visible="showPreview"
@@ -413,12 +442,22 @@
             v-model="showUploadDialog"
             :coursesList="coursesList"
             :courseCategories="courseCategories"
+            :prefill="wishUploadPrefill"
+            :sourceWishId="wishUploadPrefill?.id || null"
             @upload-success="handleUploadSuccess"
+          />
+
+          <UploadArchiveDialog
+            v-model="showWishDialog"
+            mode="wish"
+            :coursesList="coursesList"
+            :courseCategories="courseCategories"
+            @upload-success="handleWishCreated"
           />
 
           <Dialog
             v-model:visible="showSubmissionStatusDialog"
-            :header="$t('我的投稿狀態')"
+            :header="$t('我的考古投稿')"
             class="submission-typography-dialog"
             modal
             :draggable="false"
@@ -786,12 +825,13 @@ defineOptions({
   name: 'ArchiveView',
 })
 
-import { ref, computed, onMounted, watch, inject, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, watch, inject, onBeforeUnmount, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { routeLocationKey } from 'vue-router'
 import { courseService, archiveService } from '../api'
 import PdfPreviewModal from '../components/PdfPreviewModal.vue'
 import UploadArchiveDialog from '../components/UploadArchiveDialog.vue'
+import WishPool from '../components/WishPool.vue'
 import ContributorLevelBadge from '../components/ContributorLevelBadge.vue'
 import { getCurrentUser, isAuthenticated } from '../utils/auth'
 import { useTheme } from '../utils/useTheme'
@@ -905,6 +945,9 @@ const selectedArchive = ref(null)
 const selectedSubject = ref(null)
 const selectedCourse = ref(null)
 const showUploadDialog = ref(false)
+const showWishDialog = ref(false)
+const wishPoolActive = ref(false)
+const wishUploadPrefill = ref(null)
 const showSubmissionStatusDialog = ref(false)
 const submissionStatusLoading = ref(false)
 const archiveSubmissions = ref([])
@@ -1470,6 +1513,21 @@ async function openRequestedSource() {
 
 function openUploadFromMobileMenu() {
   sidebarVisible.value = false
+  openUploadDialog()
+}
+
+function openUploadDialog() {
+  wishUploadPrefill.value = null
+  showUploadDialog.value = true
+}
+
+function openWishPoolFromMobileMenu() {
+  sidebarVisible.value = false
+  wishPoolActive.value = true
+}
+
+function openWishHelpUpload(wish) {
+  wishUploadPrefill.value = wish
   showUploadDialog.value = true
 }
 
@@ -1479,6 +1537,7 @@ async function openSubmissionStatusFromMobileMenu() {
 }
 
 function filterBySubject(course) {
+  wishPoolActive.value = false
   trackEvent(EVENTS.SELECT_COURSE, {
     courseName: course.label,
     courseId: course.id,
@@ -2111,6 +2170,14 @@ async function handleUploadSuccess() {
   if (selectedCourse.value) {
     await fetchArchives()
   }
+}
+
+function handleWishCreated() {
+  showWishDialog.value = false
+  wishPoolActive.value = false
+  nextTick(() => {
+    wishPoolActive.value = true
+  })
 }
 
 function getCategoryTag(categoryLabel) {
