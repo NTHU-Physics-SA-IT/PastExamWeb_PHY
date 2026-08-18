@@ -20,6 +20,8 @@ RUN_ATTEMPT = 2
 EXECUTION_HEAD_SHA = "a" * 40
 ATTESTED_SHA = "b" * 40
 BASE_SHA = "c" * 40
+BASE_REF = "main"
+HISTORICAL_BASE_SHA = "9" * 40
 REQUIRED_JOBS = frozenset({"Detect CI mode", "build / frontend"})
 
 
@@ -289,6 +291,43 @@ def test_commit_object_uses_exact_repository_and_commit_endpoint() -> None:
     ]
 
 
+def test_ref_sha_uses_encoded_live_branch_endpoint() -> None:
+    api = ci.GitHubActionsAPI(
+        api_url="https://api.github.invalid",
+        repository="NTHU-Physics-SA-IT/PastExamWeb_PHY",
+        token="fixture-token",
+    )
+    calls: list[str] = []
+
+    def get(url: str) -> tuple[dict[str, Any], str]:
+        calls.append(url)
+        return {"object": {"sha": BASE_SHA}}, ""
+
+    api._get = get  # type: ignore[method-assign]
+
+    assert api.ref_sha("release/current") == BASE_SHA
+    assert calls == [
+        "https://api.github.invalid/repos/NTHU-Physics-SA-IT/"
+        "PastExamWeb_PHY/git/ref/heads/release%2Fcurrent"
+    ]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ({}, {"object": None}, {"object": {}}, {"object": {"sha": "bad"}}),
+)
+def test_ref_sha_rejects_malformed_live_authority(payload: dict[str, Any]) -> None:
+    api = ci.GitHubActionsAPI(
+        api_url="https://api.github.invalid",
+        repository="NTHU-Physics-SA-IT/PastExamWeb_PHY",
+        token="fixture-token",
+    )
+    api._get = lambda _: (payload, "")  # type: ignore[method-assign]
+
+    with pytest.raises(ci.ClassificationFailure, match="ref.*malformed"):
+        api.ref_sha(BASE_REF)
+
+
 @pytest.mark.parametrize("commit", (None, "", "f" * 39, "g" * 40))
 def test_commit_object_rejects_malformed_identity(commit: Any) -> None:
     api = ci.GitHubActionsAPI(
@@ -389,6 +428,7 @@ class _AttestationAPI:
         run_overrides: dict[str, Any] | None = None,
         jobs: list[dict[str, Any]] | None = None,
         commit_objects: dict[str, dict[str, Any] | Exception] | None = None,
+        live_base_sha: str | Exception = BASE_SHA,
     ) -> None:
         self.run = {
             "id": RUN_ID,
@@ -404,6 +444,8 @@ class _AttestationAPI:
         self.pull_request_payload = pull_request
         self.commit_objects = commit_objects or {}
         self.commit_object_calls: list[str] = []
+        self.live_base_sha = live_base_sha
+        self.ref_sha_calls: list[str] = []
 
     def workflow_run(self, run_id: int) -> dict[str, Any]:
         assert run_id == RUN_ID
@@ -422,6 +464,12 @@ class _AttestationAPI:
         assert number == 68
         assert self.pull_request_payload is not None
         return deepcopy(self.pull_request_payload)
+
+    def ref_sha(self, ref_name: str) -> str:
+        self.ref_sha_calls.append(ref_name)
+        if isinstance(self.live_base_sha, Exception):
+            raise self.live_base_sha
+        return self.live_base_sha
 
     def commit_object(self, commit: str) -> dict[str, Any]:
         self.commit_object_calls.append(commit)
@@ -463,7 +511,7 @@ def _attestation_arguments(
     attested_sha: str,
     execution_head_sha: str,
     pr_number: int = 0,
-    base_sha: str = "",
+    base_ref: str = "",
 ) -> SimpleNamespace:
     return SimpleNamespace(
         mode="full",
@@ -479,7 +527,7 @@ def _attestation_arguments(
         attested_sha=attested_sha,
         execution_head_sha=execution_head_sha,
         pr_number=pr_number,
-        base_sha=base_sha,
+        base_ref=base_ref,
         repository_root=tmp_path,
         github_output=tmp_path / "github-output",
     )
@@ -491,6 +539,7 @@ def _pull_request_payload() -> dict[str, Any]:
         "state": "open",
         "merge_commit_sha": ATTESTED_SHA,
         "base": {
+            "ref": BASE_REF,
             "sha": BASE_SHA,
             "repo": {"full_name": "NTHU-Physics-SA-IT/PastExamWeb_PHY"},
         },
@@ -566,7 +615,7 @@ def test_pull_request_separates_tested_merge_from_execution_head(
         attested_sha=ATTESTED_SHA,
         execution_head_sha=EXECUTION_HEAD_SHA,
         pr_number=68,
-        base_sha=BASE_SHA,
+        base_ref=BASE_REF,
     )
 
     gate.attest_full_ci(arguments)
@@ -577,6 +626,92 @@ def test_pull_request_separates_tested_merge_from_execution_head(
     assert git.tree_calls == [ATTESTED_SHA]
     assert git.blob_calls == [(ATTESTED_SHA, ci.APPROVED_WORKFLOW_PATH)]
     assert api.commit_object_calls == []
+
+
+def test_pull_request_accepts_current_merge_when_event_base_sha_is_historical(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pull_request = _pull_request_payload()
+    pull_request["base"]["sha"] = HISTORICAL_BASE_SHA
+    api = _AttestationAPI(
+        event_name="pull_request",
+        execution_head_sha=EXECUTION_HEAD_SHA,
+        pull_request=pull_request,
+    )
+    git = _AttestationGit((BASE_SHA, EXECUTION_HEAD_SHA))
+    _install_attestation_fakes(monkeypatch, api=api, git=git)
+    arguments = _attestation_arguments(
+        tmp_path,
+        event_name="pull_request",
+        attested_sha=ATTESTED_SHA,
+        execution_head_sha=EXECUTION_HEAD_SHA,
+        pr_number=68,
+        base_ref=BASE_REF,
+    )
+
+    gate.attest_full_ci(arguments)
+
+    assert api.ref_sha_calls == [BASE_REF]
+
+
+def test_pull_request_rejects_attested_merge_when_live_base_moved(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api = _AttestationAPI(
+        event_name="pull_request",
+        execution_head_sha=EXECUTION_HEAD_SHA,
+        pull_request=_pull_request_payload(),
+        live_base_sha="f" * 40,
+    )
+    _install_attestation_fakes(
+        monkeypatch,
+        api=api,
+        git=_AttestationGit((BASE_SHA, EXECUTION_HEAD_SHA)),
+    )
+    arguments = _attestation_arguments(
+        tmp_path,
+        event_name="pull_request",
+        attested_sha=ATTESTED_SHA,
+        execution_head_sha=EXECUTION_HEAD_SHA,
+        pr_number=68,
+        base_ref=BASE_REF,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="attested pull request merge parents do not match",
+    ):
+        gate.attest_full_ci(arguments)
+
+
+def test_pull_request_live_base_lookup_failure_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api = _AttestationAPI(
+        event_name="pull_request",
+        execution_head_sha=EXECUTION_HEAD_SHA,
+        pull_request=_pull_request_payload(),
+        live_base_sha=ci.ClassificationFailure("GitHub ref evidence unavailable"),
+    )
+    _install_attestation_fakes(
+        monkeypatch,
+        api=api,
+        git=_AttestationGit((BASE_SHA, EXECUTION_HEAD_SHA)),
+    )
+    arguments = _attestation_arguments(
+        tmp_path,
+        event_name="pull_request",
+        attested_sha=ATTESTED_SHA,
+        execution_head_sha=EXECUTION_HEAD_SHA,
+        pr_number=68,
+        base_ref=BASE_REF,
+    )
+
+    with pytest.raises(ci.ClassificationFailure, match="unavailable"):
+        gate.attest_full_ci(arguments)
 
 
 def test_pull_request_accepts_regenerated_merge_with_same_parents_and_tree(
@@ -600,7 +735,7 @@ def test_pull_request_accepts_regenerated_merge_with_same_parents_and_tree(
         attested_sha=ATTESTED_SHA,
         execution_head_sha=EXECUTION_HEAD_SHA,
         pr_number=68,
-        base_sha=BASE_SHA,
+        base_ref=BASE_REF,
     )
 
     gate.attest_full_ci(arguments)
@@ -674,7 +809,7 @@ def test_regenerated_pull_request_merge_mismatch_fails_closed(
         attested_sha=ATTESTED_SHA,
         execution_head_sha=EXECUTION_HEAD_SHA,
         pr_number=68,
-        base_sha=BASE_SHA,
+        base_ref=BASE_REF,
     )
 
     with pytest.raises(RuntimeError, match=message):
@@ -707,7 +842,7 @@ def test_regenerated_pull_request_merge_lookup_failure_fails_closed(
         attested_sha=ATTESTED_SHA,
         execution_head_sha=EXECUTION_HEAD_SHA,
         pr_number=68,
-        base_sha=BASE_SHA,
+        base_ref=BASE_REF,
     )
 
     with pytest.raises(ci.ClassificationFailure, match="unavailable"):
@@ -766,15 +901,15 @@ def test_workflow_run_identity_mismatch_fails(
         gate.attest_full_ci(arguments)
 
 
-@pytest.mark.parametrize("stale_authority", ("base", "head"))
+@pytest.mark.parametrize("stale_authority", ("base ref", "head SHA"))
 def test_stale_pull_request_authority_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     stale_authority: str,
 ) -> None:
     pull_request = _pull_request_payload()
-    if stale_authority == "base":
-        pull_request["base"]["sha"] = "f" * 40
+    if stale_authority == "base ref":
+        pull_request["base"]["ref"] = "release"
     else:
         pull_request["head"]["sha"] = "f" * 40
     api = _AttestationAPI(
@@ -793,10 +928,10 @@ def test_stale_pull_request_authority_fails(
         attested_sha=ATTESTED_SHA,
         execution_head_sha=EXECUTION_HEAD_SHA,
         pr_number=68,
-        base_sha=BASE_SHA,
+        base_ref=BASE_REF,
     )
 
-    with pytest.raises(RuntimeError, match=f"pull request {stale_authority} SHA"):
+    with pytest.raises(RuntimeError, match=f"pull request {stale_authority}"):
         gate.attest_full_ci(arguments)
 
 
@@ -824,7 +959,7 @@ def test_current_pull_request_merge_sha_must_be_well_formed(
         attested_sha=ATTESTED_SHA,
         execution_head_sha=EXECUTION_HEAD_SHA,
         pr_number=68,
-        base_sha=BASE_SHA,
+        base_ref=BASE_REF,
     )
 
     with pytest.raises(RuntimeError, match="current pull request merge SHA.*malformed"):
@@ -863,7 +998,7 @@ def test_current_pull_request_identity_mismatch_fails_closed(
         attested_sha=ATTESTED_SHA,
         execution_head_sha=EXECUTION_HEAD_SHA,
         pr_number=68,
-        base_sha=BASE_SHA,
+        base_ref=BASE_REF,
     )
 
     with pytest.raises(RuntimeError):
@@ -896,7 +1031,7 @@ def test_pull_request_synthetic_merge_parent_mismatch_fails(
         attested_sha=ATTESTED_SHA,
         execution_head_sha=EXECUTION_HEAD_SHA,
         pr_number=68,
-        base_sha=BASE_SHA,
+        base_ref=BASE_REF,
     )
 
     with pytest.raises(RuntimeError, match="merge parents do not match"):
@@ -925,14 +1060,14 @@ def test_push_rejects_different_attested_and_execution_head_shas(
 
 
 @pytest.mark.parametrize(
-    ("event_name", "extra", "expected_pr_number", "expected_base_sha"),
+    ("event_name", "extra", "expected_pr_number", "expected_base_ref"),
     (
         ("push", [], 0, ""),
         (
             "pull_request",
-            ["--pr-number", "68", "--base-sha", BASE_SHA],
+            ["--pr-number", "68", "--base-ref", BASE_REF],
             68,
-            BASE_SHA,
+            BASE_REF,
         ),
     ),
 )
@@ -940,7 +1075,7 @@ def test_full_attestation_parser_keeps_event_aware_sha_roles(
     event_name: str,
     extra: list[str],
     expected_pr_number: int,
-    expected_base_sha: str,
+    expected_base_ref: str,
 ) -> None:
     arguments = gate._parser().parse_args(
         [
@@ -979,4 +1114,4 @@ def test_full_attestation_parser_keeps_event_aware_sha_roles(
     )
     assert arguments.execution_head_sha == EXECUTION_HEAD_SHA
     assert arguments.pr_number == expected_pr_number
-    assert arguments.base_sha == expected_base_sha
+    assert arguments.base_ref == expected_base_ref

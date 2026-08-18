@@ -129,7 +129,7 @@ def _require_pull_request_authority(
     git: GitRepository,
     repository: str,
     pr_number: int,
-    base_sha: str,
+    base_ref: str,
     execution_head_sha: str,
     attested_sha: str,
 ) -> None:
@@ -152,12 +152,13 @@ def _require_pull_request_authority(
         or head_repository.get("full_name") != repository
     ):
         raise RuntimeError("current pull request repository does not match")
-    if base.get("sha") != base_sha:
-        raise RuntimeError("current pull request base SHA does not match")
+    if base.get("ref") != base_ref:
+        raise RuntimeError("current pull request base ref does not match")
     if head.get("sha") != execution_head_sha:
         raise RuntimeError("current pull request head SHA does not match")
 
-    expected_parents = (base_sha, execution_head_sha)
+    live_base_sha = api.ref_sha(base_ref)
+    expected_parents = (live_base_sha, execution_head_sha)
     attested_parents = git.commit_object_parents(attested_sha)
     if attested_parents != expected_parents:
         raise RuntimeError(
@@ -346,12 +347,13 @@ def attest_full_ci(arguments: argparse.Namespace) -> None:
     if event_name == "push":
         if attested_sha != execution_head_sha:
             raise RuntimeError("push attested SHA and execution-head SHA differ")
-        if arguments.pr_number != 0 or arguments.base_sha:
+        if arguments.pr_number != 0 or arguments.base_ref:
             raise RuntimeError("push Full CI received pull request identity")
     else:
         if arguments.pr_number < 1:
             raise RuntimeError("pull request number must be positive")
-        _require_sha(arguments.base_sha, "pull request base SHA")
+        if not arguments.base_ref:
+            raise RuntimeError("pull request base ref is required")
 
     api = GitHubActionsAPI(
         api_url=arguments.api_url,
@@ -374,7 +376,7 @@ def attest_full_ci(arguments: argparse.Namespace) -> None:
             git=git,
             repository=arguments.repository,
             pr_number=arguments.pr_number,
-            base_sha=arguments.base_sha,
+            base_ref=arguments.base_ref,
             execution_head_sha=execution_head_sha,
             attested_sha=attested_sha,
         )
@@ -403,7 +405,7 @@ def attest_full_ci(arguments: argparse.Namespace) -> None:
     print(f"sha={attested_sha}")
     print(f"execution_head_sha={execution_head_sha}")
     if event_name == "pull_request":
-        print(f"pull_request_base_sha={arguments.base_sha}")
+        print(f"pull_request_base_ref={arguments.base_ref}")
     print(f"tree_sha={tree}")
     print(f"workflow_revision={revision}")
 
@@ -443,7 +445,7 @@ def _parser() -> argparse.ArgumentParser:
     attestation.add_argument("--attested-sha", required=True)
     attestation.add_argument("--execution-head-sha", required=True)
     attestation.add_argument("--pr-number", type=int, default=0)
-    attestation.add_argument("--base-sha", default="")
+    attestation.add_argument("--base-ref", default="")
     attestation.add_argument("--repository-root", type=Path, default=Path.cwd())
     attestation.add_argument("--github-output", type=Path)
 
