@@ -26,6 +26,7 @@ from app.db.audit.registry import (
     ABOUT_US_REVISION,
     BILINGUAL_COURSE_CATALOG_REVISION,
     BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
+    WISH_POOL_REVISION,
     AuditAdapter,
     get_audit_adapter,
 )
@@ -123,6 +124,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         BILINGUAL_COURSE_CATALOG_REVISION,
         BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
         ABOUT_US_REVISION,
+        WISH_POOL_REVISION,
     }
     owner_delete_column_condition = (
         """
@@ -157,6 +159,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         BILINGUAL_COURSE_CATALOG_REVISION,
         BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
         ABOUT_US_REVISION,
+        WISH_POOL_REVISION,
     }
     previous_status_column_condition = (
         """
@@ -185,6 +188,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         BILINGUAL_COURSE_CATALOG_REVISION,
         BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
         ABOUT_US_REVISION,
+        WISH_POOL_REVISION,
     }
     bilingual_catalog_condition = (
         """
@@ -222,6 +226,7 @@ def _continuity_cte(request: AuditRequest) -> str:
     expects_bilingual_snapshots = request.expected_ledger in {
         BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
         ABOUT_US_REVISION,
+        WISH_POOL_REVISION,
     }
     bilingual_snapshot_condition = (
         """

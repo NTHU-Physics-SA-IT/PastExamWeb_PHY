@@ -15,6 +15,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import (
     CheckConstraint,
+    ForeignKeyConstraint,
     Index,
     MetaData,
     UniqueConstraint,
@@ -231,6 +232,7 @@ def _metadata_for_variant(variant: str) -> MetaData:
     if variant == "head":
         return metadata
     if variant not in {
+        "pre_wish_pool_and_bilingual_content",
         "pre_about_us_entries",
         "pre_bilingual_submission_snapshots",
         "pre_bilingual_course_catalog",
@@ -244,6 +246,30 @@ def _metadata_for_variant(variant: str) -> MetaData:
         "pre_category_canonicalization",
     }:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
+
+    metadata.remove(metadata.tables["archive_wish_reports"])
+    metadata.remove(metadata.tables["archive_wish_hearts"])
+    metadata.remove(metadata.tables["archive_wishes"])
+    archive_submissions = metadata.tables["archive_submissions"]
+    for index in list(archive_submissions.indexes):
+        if "source_wish_id" in index.columns:
+            archive_submissions.indexes.remove(index)
+    for constraint in list(archive_submissions.constraints):
+        if isinstance(constraint, ForeignKeyConstraint) and "source_wish_id" in {
+            column.name for column in constraint.columns
+        }:
+            archive_submissions.constraints.remove(constraint)
+    for foreign_key in list(archive_submissions.foreign_keys):
+        if foreign_key.parent.name == "source_wish_id":
+            archive_submissions.foreign_keys.discard(foreign_key)
+            foreign_key.parent.foreign_keys.discard(foreign_key)
+    archive_submissions._columns.remove(archive_submissions.c.source_wish_id)
+    for table_name in ("notifications", "about_us_entries"):
+        table = metadata.tables[table_name]
+        table._columns.remove(table.c.title_en)
+        table._columns.remove(table.c.body_en)
+    if variant == "pre_wish_pool_and_bilingual_content":
+        return metadata
 
     metadata.remove(metadata.tables["about_us_entries"])
     if variant == "pre_about_us_entries":

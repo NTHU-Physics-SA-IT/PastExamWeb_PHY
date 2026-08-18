@@ -13,6 +13,7 @@ from app.api.services import (
     statistics,
     trash,
     users,
+    wishes,
 )
 
 api_router = APIRouter()
@@ -31,3 +32,5 @@ api_router.include_router(
     notifications.router, prefix="/notifications", tags=["notifications"]
 )
 api_router.include_router(reports.router, prefix="/reports", tags=["reports"])
+api_router.include_router(wishes.admin_router, prefix="/wishes", tags=["wishes-admin"])
+api_router.include_router(wishes.router, prefix="/wishes", tags=["wishes"])

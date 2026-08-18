@@ -7,10 +7,10 @@ from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.api.services.courses import _public_archive_conditions
 from app.core.config import settings
 from app.db.session import get_session
 from app.models.models import Archive, Course, CourseCategoryConfig
+from app.services.archive_visibility import public_archive_conditions
 
 router = APIRouter()
 
@@ -45,7 +45,7 @@ async def get_sitemap(
                 Course.deleted_at.is_(None),
                 CourseCategoryConfig.is_active.is_(True),
                 CourseCategoryConfig.deleted_at.is_(None),
-                *_public_archive_conditions(),
+                *public_archive_conditions(),
             )
             .group_by(Archive.course_id)
             .order_by(Archive.course_id)

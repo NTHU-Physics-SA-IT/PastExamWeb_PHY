@@ -18,6 +18,10 @@ const mocks = vi.hoisted(() => ({
   getArchive: vi.fn(),
   reviewArchive: vi.fn(),
   deleteArchive: vi.fn(),
+  listWishReports: vi.fn(),
+  getWishReport: vi.fn(),
+  reviewWishReport: vi.fn(),
+  deleteWishReport: vi.fn(),
   confirm: vi.fn((options) => options.accept?.()),
   toast: vi.fn(),
   push: vi.fn(),
@@ -37,6 +41,12 @@ vi.mock('@/api', () => ({
     getArchiveReport: mocks.getArchive,
     reviewArchiveReport: mocks.reviewArchive,
     deleteArchiveReport: mocks.deleteArchive,
+  },
+  wishService: {
+    listReports: mocks.listWishReports,
+    getReport: mocks.getWishReport,
+    reviewReport: mocks.reviewWishReport,
+    removeReport: mocks.deleteWishReport,
   },
 }))
 vi.mock('@/utils/auth', () => ({ getCurrentUser: () => ({ id: 1, is_admin: true }) }))
@@ -95,7 +105,15 @@ function mountPanel({ renderRows = false, cardLayout = false, mediaQuery = null 
         TabPanels: slotStub,
         TabPanel: slotStub,
         DataTable: renderRows ? rowDataTableStub : slotStub,
-        Column: { props: ['header'], template: '<div class="column-header">{{ header }}</div>' },
+        Column: {
+          props: {
+            header: String,
+            sortable: Boolean,
+            sortField: String,
+          },
+          template:
+            '<div class="column-header" :data-sortable="String(Boolean(sortable))" :data-sort-field="sortField || \'\'">{{ header }}</div>',
+        },
         Dialog: slotStub,
         Button: { props: ['label'], template: '<button>{{ label }}</button>' },
         InputText: true,
@@ -117,12 +135,13 @@ describe('ReportManagementPanel', () => {
     mocks.updateSystemReadState.mockResolvedValue({ data: { id: 1, is_read: true } })
     mocks.listComments.mockResolvedValue({ data: { items: [], total: 0 } })
     mocks.listArchives.mockResolvedValue({ data: { items: [], total: 0 } })
+    mocks.listWishReports.mockResolvedValue({ data: { items: [], total: 0 } })
     mocks.deleteSystem.mockResolvedValue({ data: { success: true } })
     mocks.deleteComment.mockResolvedValue({ data: { success: true } })
     mocks.confirm.mockImplementation((options) => options.accept?.())
   })
 
-  it('keeps the three report sources separated without per-row GitHub presentation', async () => {
+  it('keeps the four report sources separated without per-row GitHub presentation', async () => {
     const wrapper = mountPanel()
     await flushPromises()
 
@@ -133,7 +152,7 @@ describe('ReportManagementPanel', () => {
     expect(mocks.listSystem).toHaveBeenCalled()
     expect(mocks.listComments).toHaveBeenCalled()
     expect(mocks.listArchives).toHaveBeenCalled()
-    expect(wrapper.findAll('.report-section')).toHaveLength(3)
+    expect(wrapper.findAll('.report-section')).toHaveLength(4)
     expect(wrapper.find('.report-management__header').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('檢視系統問題摘要並審核留言回報')
     const systemHeaders = wrapper
@@ -156,6 +175,11 @@ describe('ReportManagementPanel', () => {
       '審核',
       '操作',
     ])
+    const wishHeaders = wrapper
+      .findAll('.report-section')[3]
+      .findAll('.column-header')
+      .map((header) => header.text())
+    expect(wishHeaders).toEqual(['回報者', '回報原因', '許願者', '許願目標', '狀態', '操作'])
     for (const removedHeader of ['回報時間', '回報者', '留言作者', '審核人', '審核時間']) {
       expect(commentHeaders).not.toContain(removedHeader)
     }
@@ -171,6 +195,82 @@ describe('ReportManagementPanel', () => {
     expect(reportManagementSource).not.toContain('label="前往 GitHub"')
     expect(reportManagementSource).toContain(':label="$t(\'前往專案 Issues\')"')
     expect(reportManagementSource).toContain('rel="noopener noreferrer"')
+  })
+
+  it('keeps wish report inspect, review, and permanent-delete actions wired', async () => {
+    const report = {
+      id: 303,
+      reporter_name: '許願回報者',
+      wisher_name: '原始許願者',
+      created_at: '2026-08-18T01:00:00Z',
+      reason: 'misinformation',
+      wish_title: '普通物理期中考',
+      target_summary: '普通物理 · 王老師 · midterm1',
+      status: 'pending',
+      admin_response: null,
+    }
+    mocks.listWishReports.mockResolvedValueOnce({ data: { items: [report], total: 1 } })
+    mocks.getWishReport.mockResolvedValueOnce({ data: report })
+    mocks.reviewWishReport.mockResolvedValueOnce({
+      data: { ...report, status: 'upheld', admin_response: '已確認' },
+    })
+    mocks.deleteWishReport.mockResolvedValueOnce({ data: { success: true } })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.vm.openWishReport(report.id)
+    expect(mocks.getWishReport).toHaveBeenCalledWith(report.id)
+    expect(wrapper.vm.wishReviewVisible).toBe(true)
+
+    wrapper.vm.wishReviewForm = { status: 'upheld', admin_response: '已確認' }
+    wrapper.vm.confirmSaveWishReview()
+    await flushPromises()
+    expect(mocks.reviewWishReport).toHaveBeenCalledWith(report.id, {
+      status: 'upheld',
+      admin_response: '已確認',
+    })
+
+    wrapper.vm.confirmDeleteWishReport(report)
+    await flushPromises()
+    expect(mocks.deleteWishReport).toHaveBeenCalledWith(report.id)
+  })
+
+  it('renders a readable mobile wish report card with distinct reporter and wisher', async () => {
+    mocks.listWishReports.mockResolvedValueOnce({
+      data: {
+        total: 1,
+        items: [
+          {
+            id: 304,
+            reporter_name: '回報者乙',
+            wisher_name: '許願者甲',
+            created_at: '2026-08-18T01:00:00Z',
+            reason: 'misinformation',
+            wish_title: '普通物理期中考',
+            target_summary: '普通物理 · 王老師 · midterm1',
+            status: 'pending',
+            reviewer_name: null,
+            reviewed_at: null,
+          },
+        ],
+      },
+    })
+
+    const wrapper = mountPanel({ renderRows: true, cardLayout: true })
+    await flushPromises()
+
+    const row = wrapper.get('.report-management__wish-table .test-report-row')
+    const card = row.get('.report-mobile-card')
+    expect(row.findAll('.report-mobile-card')).toHaveLength(1)
+    expect(card.text()).toContain('回報者乙')
+    expect(card.text()).toContain('許願者甲')
+    expect(card.text()).toContain('普通物理期中考')
+    expect(card.text()).toContain('王老師')
+    expect(card.text()).toContain('待審核')
+    expect(row.findAll('.report-person-time')).toHaveLength(0)
+    expect(row.findAll('.comment-report-content')).toHaveLength(0)
+    expect(card.findAll('button').map((button) => button.text())).toEqual(['檢視／審核', '刪除'])
   })
 
   it('renders archive reports on mobile and wires optional takedown review', async () => {
@@ -487,11 +587,11 @@ describe('ReportManagementPanel', () => {
   })
 
   it('keeps all report action groups aligned without wrapping button labels', () => {
-    expect(reportManagementSource.match(/class="report-row-actions"/g)).toHaveLength(6)
+    expect(reportManagementSource.match(/class="report-row-actions"/g)).toHaveLength(8)
     expect(
       reportManagementSource.match(/v-if="!isCardLayout" class="report-desktop-actions"/g)
-    ).toHaveLength(2)
-    expect(reportManagementSource.match(/class="report-mobile-card__footer"/g)).toHaveLength(3)
+    ).toHaveLength(3)
+    expect(reportManagementSource.match(/class="report-mobile-card__footer"/g)).toHaveLength(4)
     expect(reportManagementSource).toContain(
       'headerClass="report-actions-column report-actions-column--system"'
     )
@@ -507,7 +607,7 @@ describe('ReportManagementPanel', () => {
       ':deep(.report-management__table .p-datatable-tbody > tr > td:last-child)'
     )
     expect(reportManagementSource).not.toContain('justify-content: flex-end;\n  flex-wrap: nowrap')
-    expect(reportManagementSource.match(/breakpoint="1399\.98px"/g)).toHaveLength(3)
+    expect(reportManagementSource.match(/breakpoint="1399\.98px"/g)).toHaveLength(4)
   })
 
   it('keeps pagination and server sorting independent for each report list', async () => {
@@ -516,21 +616,29 @@ describe('ReportManagementPanel', () => {
 
     expect(wrapper.vm.systemPage).toMatchObject({ sortField: 'read_state', sortOrder: 1 })
     expect(wrapper.vm.commentPage).toMatchObject({ sortField: 'status', sortOrder: 1 })
+    expect(wrapper.vm.wishPage).toMatchObject({ sortField: 'created_at', sortOrder: -1 })
     expect(mocks.listSystem).toHaveBeenCalledWith(
       expect.objectContaining({ sort_by: 'read_state', sort_order: 'asc' })
     )
     expect(mocks.listComments).toHaveBeenCalledWith(
       expect.objectContaining({ sort_by: 'status', sort_order: 'asc' })
     )
+    expect(mocks.listWishReports).toHaveBeenCalledWith(
+      expect.objectContaining({ sort_by: 'created_at', sort_order: 'desc' })
+    )
 
     mocks.listSystem.mockClear()
     mocks.listComments.mockClear()
+    mocks.listWishReports.mockClear()
 
     await wrapper.vm.onSystemPage({ first: 10, rows: 10 })
     wrapper.vm.systemFilters.readState = 'unread'
     await wrapper.vm.applySystemFilters()
     await wrapper.vm.onSystemSort({ sortField: 'read_state', sortOrder: 1 })
     await wrapper.vm.onCommentSort({ sortField: 'reviewed_at', sortOrder: -1 })
+    wrapper.vm.wishFilters = { search: '普通物理', status: 'pending' }
+    await wrapper.vm.onWishSort({ sortField: 'wisher', sortOrder: 1 })
+    await wrapper.vm.onWishPage({ first: 10, rows: 10 })
 
     expect(mocks.listSystem).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -546,6 +654,22 @@ describe('ReportManagementPanel', () => {
     )
     expect(wrapper.vm.systemPage.first).toBe(0)
     expect(wrapper.vm.commentPage.first).toBe(0)
+    expect(wrapper.vm.wishPage).toMatchObject({
+      first: 10,
+      rows: 10,
+      sortField: 'wisher',
+      sortOrder: 1,
+    })
+    expect(mocks.listWishReports).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        search: '普通物理',
+        status: 'pending',
+        offset: 10,
+        limit: 10,
+        sort_by: 'wisher',
+        sort_order: 'asc',
+      })
+    )
     expect(reportManagementSource).toMatch(
       /field="read_state"[\s\S]*?sortField="read_state"[\s\S]*?:header="\$t\('狀態'\)"[\s\S]*?sortable/
     )
@@ -559,6 +683,45 @@ describe('ReportManagementPanel', () => {
     expect(mocks.listComments).toHaveBeenLastCalledWith(
       expect.objectContaining({ offset: 0, sort_by: 'status', sort_order: 'asc' })
     )
+    expect(wrapper.vm.wishPage).toMatchObject({
+      first: 0,
+      sortField: 'created_at',
+      sortOrder: -1,
+    })
+    expect(mocks.listWishReports).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 0, sort_by: 'created_at', sort_order: 'desc' })
+    )
+  })
+
+  it('marks meaningful wish report headers sortable but keeps actions static', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const wishHeaders = wrapper.find('.report-management__wish-table').findAll('.column-header')
+    expect(wishHeaders.map((header) => header.text())).toEqual([
+      '回報者',
+      '回報原因',
+      '許願者',
+      '許願目標',
+      '狀態',
+      '操作',
+    ])
+    expect(wishHeaders.slice(0, 5).map((header) => header.attributes('data-sortable'))).toEqual([
+      'true',
+      'true',
+      'true',
+      'true',
+      'true',
+    ])
+    expect(wishHeaders[5].attributes('data-sortable')).toBe('false')
+    expect(wishHeaders.map((header) => header.attributes('data-sort-field'))).toEqual([
+      'created_at',
+      'reason',
+      'wisher',
+      'wish_target',
+      'status',
+      '',
+    ])
   })
 
   it('shares admin page-size options while keeping report pagination state independent', async () => {
@@ -570,9 +733,10 @@ describe('ReportManagementPanel', () => {
     expect(ADMIN_PAGE_SIZE_OPTIONS).toEqual([5, 10, 15, 25, 50])
     expect(
       reportManagementSource.match(/:rowsPerPageOptions="ADMIN_PAGE_SIZE_OPTIONS"/g)
-    ).toHaveLength(3)
+    ).toHaveLength(4)
     expect(wrapper.vm.systemPage).toMatchObject({ first: 0, rows: 10 })
     expect(wrapper.vm.commentPage).toMatchObject({ first: 0, rows: 10 })
+    expect(wrapper.vm.wishPage).toMatchObject({ first: 0, rows: 10 })
 
     await wrapper.vm.onSystemPage({ first: 20, rows: 5 })
     expect(wrapper.vm.systemPage).toMatchObject({ first: 0, rows: 5 })
@@ -829,7 +993,7 @@ describe('ReportManagementPanel', () => {
   })
 
   it('scopes personalized font tokens across report lists, controls, and dialogs', () => {
-    expect(reportManagementSource.match(/class="report-management-dialog"/g)).toHaveLength(3)
+    expect(reportManagementSource.match(/class="report-management-dialog"/g)).toHaveLength(4)
     expect(reportManagementSource).toMatch(
       /\.report-management :deep\(\.p-inputtext\)[\s\S]*?font-size:\s*var\(--app-font-size-sm\) !important;/
     )
@@ -870,7 +1034,7 @@ describe('ReportManagementPanel', () => {
   })
 
   it('scales source and finalized review messages through their PrimeVue text nodes', () => {
-    expect(reportManagementSource.match(/class="report-review__message"/g)).toHaveLength(2)
+    expect(reportManagementSource.match(/class="report-review__message"/g)).toHaveLength(3)
     expect(reportManagementSource).toMatch(
       /:global\(\.report-management-dialog \.report-review__message \.p-message-text\)\s*\{[^}]*font-size:\s*var\(--app-font-size-sm\) !important;[^}]*line-height:\s*1\.4;/
     )
@@ -883,20 +1047,20 @@ describe('ReportManagementPanel', () => {
   })
 
   it('uses responsive filter grids and dedicated full-width mobile summaries', () => {
-    expect(reportManagementSource.match(/breakpoint="1399\.98px"/g)).toHaveLength(3)
+    expect(reportManagementSource.match(/breakpoint="1399\.98px"/g)).toHaveLength(4)
     expect(reportManagementSource).toContain('@media (max-width: 1399.98px)')
     expect(reportManagementSource).toContain(
       "const REPORT_CARD_MEDIA_QUERY = '(max-width: 1399.98px)'"
     )
     expect(reportManagementSource).not.toContain('@media (max-width: 899px)')
-    expect(reportManagementSource.match(/class="report-filter-search"/g)).toHaveLength(3)
+    expect(reportManagementSource.match(/class="report-filter-search"/g)).toHaveLength(4)
     expect(
       reportManagementSource.match(/class="report-filter-select report-filter-select--primary"/g)
-    ).toHaveLength(3)
+    ).toHaveLength(4)
     expect(
       reportManagementSource.match(/class="report-filter-select report-filter-select--secondary"/g)
     ).toHaveLength(3)
-    expect(reportManagementSource.match(/class="report-filter-submit"/g)).toHaveLength(3)
+    expect(reportManagementSource.match(/class="report-filter-submit"/g)).toHaveLength(4)
     expect(reportManagementSource).toContain('container-name: report-section;')
     expect(reportManagementSource).toContain(
       "grid-template-areas: 'search primary secondary submit';"
@@ -909,16 +1073,16 @@ describe('ReportManagementPanel', () => {
     )
     expect(
       reportManagementSource.match(/class="report-mobile-card report-mobile-card-content"/g)
-    ).toHaveLength(3)
+    ).toHaveLength(4)
     expect(
       reportManagementSource.match(/class="report-mobile-card__header report-mobile-card-header"/g)
-    ).toHaveLength(3)
+    ).toHaveLength(4)
     expect(reportManagementSource).toContain('class="report-mobile-card-badges"')
     expect(
       reportManagementSource.match(
         /class="report-mobile-card__summary report-mobile-summary-preview"/g
       )
-    ).toHaveLength(3)
+    ).toHaveLength(4)
     expect(reportManagementSource).toContain('class="report-mobile-summary-preview__label"')
     expect(reportManagementSource).toContain("data.description || $t('未提供詳細描述')")
     expect(reportManagementSource).toContain("data.comment_content_snapshot || $t('無留言摘要')")

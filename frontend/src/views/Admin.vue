@@ -1892,7 +1892,13 @@
                   />
                 </div>
               </div>
-              <div class="review-section">
+              <Tabs v-model:value="activeReviewGroup" class="mb-4">
+                <TabList>
+                  <Tab value="new">{{ $t('新課程 / 新分類考古申請') }}</Tab>
+                  <Tab value="existing">{{ $t('既有課程考古申請') }}</Tab>
+                </TabList>
+              </Tabs>
+              <div v-show="activeReviewGroup === 'new'" class="review-section">
                 <div class="review-section-header">
                   <h3>{{ $t('新課程 / 新分類考古申請') }}</h3>
                 </div>
@@ -2302,7 +2308,7 @@
                 </DataTable>
               </div>
 
-              <div class="review-section mt-5">
+              <div v-show="activeReviewGroup === 'existing'" class="review-section mt-5">
                 <div class="review-section-header">
                   <h3>{{ $t('既有課程考古申請') }}</h3>
                 </div>
@@ -4371,6 +4377,20 @@
             </small>
           </div>
 
+          <div class="flex flex-column gap-2">
+            <label for="admin-notification-title-en">{{ $t('英文標題') }}</label>
+            <InputText
+              id="admin-notification-title-en"
+              v-model="notificationForm.title_en"
+              maxlength="150"
+              class="w-full"
+              :class="{ 'p-invalid': notificationFormErrors.title_en }"
+            />
+            <small v-if="notificationFormErrors.title_en" class="p-error">{{
+              notificationFormErrors.title_en
+            }}</small>
+          </div>
+
           <div class="flex flex-column md:flex-row gap-3">
             <div class="flex-1 flex flex-column gap-2">
               <label>{{ $t('重要程度') }}</label>
@@ -4412,6 +4432,21 @@
             <small v-if="notificationFormErrors.body" class="p-error">
               {{ notificationFormErrors.body }}
             </small>
+          </div>
+
+          <div class="flex flex-column gap-2">
+            <label for="admin-notification-body-en">{{ $t('英文內容') }}</label>
+            <Textarea
+              id="admin-notification-body-en"
+              v-model="notificationForm.body_en"
+              rows="6"
+              autoResize
+              class="w-full"
+              :class="{ 'p-invalid': notificationFormErrors.body_en }"
+            />
+            <small v-if="notificationFormErrors.body_en" class="p-error">{{
+              notificationFormErrors.body_en
+            }}</small>
           </div>
 
           <div class="flex flex-column gap-3">
@@ -5001,6 +5036,8 @@ const notificationSaveLoading = ref(false)
 const notificationForm = ref({
   title: '',
   body: '',
+  title_en: '',
+  body_en: '',
   severity: 'info',
   is_active: true,
   starts_at: null,
@@ -5018,6 +5055,7 @@ const reviewSubmissionStatisticsLoading = ref(false)
 const reviewSubmissionStatisticsError = ref('')
 let reviewSubmissionStatisticsRequestId = 0
 const reviewSearchQuery = ref('')
+const activeReviewGroup = ref('new')
 const reviewStatusFilter = ref(null)
 const newSubmissionFirst = ref(0)
 const newSubmissionRows = ref(10)
@@ -6559,6 +6597,8 @@ const resetNotificationForm = () => {
   notificationForm.value = {
     title: '',
     body: '',
+    title_en: '',
+    body_en: '',
     severity: 'info',
     is_active: true,
     starts_at: null,
@@ -8982,6 +9022,8 @@ const openNotificationEditDialog = (notification) => {
   notificationForm.value = {
     title: notification.title,
     body: notification.body,
+    title_en: notification.title_en || '',
+    body_en: notification.body_en || '',
     severity: notification.severity,
     is_active: notification.is_active,
     starts_at: toDate(notification.starts_at),
@@ -9012,6 +9054,14 @@ const validateNotificationForm = () => {
     errors.body = t('公告內容是必填欄位')
   }
 
+  if (!notificationForm.value.title_en.trim()) {
+    errors.title_en = t('英文標題是必填欄位')
+  }
+
+  if (!notificationForm.value.body_en.trim()) {
+    errors.body_en = t('英文內容是必填欄位')
+  }
+
   if (notificationForm.value.starts_at && notificationForm.value.ends_at) {
     if (notificationForm.value.ends_at.getTime() < notificationForm.value.starts_at.getTime()) {
       errors.ends_at = t('結束時間需晚於生效時間')
@@ -9031,6 +9081,8 @@ const saveNotification = async () => {
   const payload = {
     title: notificationForm.value.title.trim(),
     body: notificationForm.value.body.trim(),
+    title_en: notificationForm.value.title_en.trim(),
+    body_en: notificationForm.value.body_en.trim(),
     severity: notificationForm.value.severity,
     is_active: notificationForm.value.is_active,
     starts_at: notificationForm.value.starts_at

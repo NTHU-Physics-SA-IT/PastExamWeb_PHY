@@ -25,7 +25,9 @@ export type User = {
 export type Notification = {
   id: number
   title: string
+  title_en: string
   body: string
+  body_en: string
   severity: string
   is_active: boolean
   created_at: string
@@ -111,7 +113,9 @@ export const defaultNotifications: Notification[] = [
   {
     id: 1,
     title: '系統維護公告',
+    title_en: 'System Maintenance',
     body: '系統將於週末進行維護',
+    body_en: 'The system will undergo maintenance this weekend.',
     severity: 'danger',
     is_active: true,
     created_at: '2025-10-30T15:00:00Z',
@@ -269,9 +273,7 @@ export const mockAdminUserEndpoints = async (
     const bucketCount = 144
     const rangeEnd = new Date('2025-10-31T00:00:00Z')
     const points = Array.from({ length: bucketCount }, (_, index) => {
-      const start = new Date(
-        rangeEnd.getTime() - (bucketCount - index) * bucketMinutes * 60_000
-      )
+      const start = new Date(rangeEnd.getTime() - (bucketCount - index) * bucketMinutes * 60_000)
       const end = new Date(start.getTime() + bucketMinutes * 60_000)
       return {
         start: start.toISOString(),
