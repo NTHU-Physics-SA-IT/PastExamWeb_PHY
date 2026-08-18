@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from enum import Enum as PyEnum
 from typing import Any, Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -499,6 +499,15 @@ class ArchiveSubmission(SQLModel, table=True):
     requested_category_icon: str | None = Field(
         default=None, sa_column=Column(String, nullable=True)
     )
+    source_wish_id: int | None = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("archive_wishes.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
     status: SubmissionStatus = Field(default=SubmissionStatus.PENDING, index=True)
     previous_status: SubmissionStatus | None = Field(default=None)
     requester_id: int = Field(foreign_key="users.id", index=True)
@@ -655,6 +664,10 @@ class Notification(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     title: str = Field(sa_column=Column(String(150), nullable=False))
     body: str = Field(sa_column=Column(Text, nullable=False))
+    title_en: str | None = Field(
+        default=None, sa_column=Column(String(150), nullable=True)
+    )
+    body_en: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     severity: NotificationSeverity = Field(default=NotificationSeverity.INFO)
     is_active: bool = Field(default=True)
     deleted_at: datetime | None = Field(
@@ -705,6 +718,10 @@ class AboutUsEntry(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     title: str = Field(sa_column=Column(String(150), nullable=False))
     body: str = Field(sa_column=Column(Text, nullable=False))
+    title_en: str | None = Field(
+        default=None, sa_column=Column(String(150), nullable=True)
+    )
+    body_en: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     created_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False)
     )
@@ -719,6 +736,188 @@ class AboutUsEntry(SQLModel, table=True):
             nullable=True,
             index=True,
         ),
+    )
+
+
+class ArchiveWish(SQLModel, table=True):
+    __tablename__ = "archive_wishes"
+    __table_args__ = (
+        UniqueConstraint("target_key", name="uq_archive_wishes_target_key"),
+        Index("ix_archive_wishes_created_id", "created_at", "id"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    title: str = Field(sa_column=Column(String(150), nullable=False))
+    target_key: str = Field(sa_column=Column(String(64), nullable=False))
+    course_id: int | None = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("courses.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    subject: str = Field(sa_column=Column(String(200), nullable=False))
+    category: str = Field(sa_column=Column(String(100), nullable=False, index=True))
+    name: str = Field(sa_column=Column(String(100), nullable=False))
+    academic_year: int = Field(sa_column=Column(Integer, nullable=False, index=True))
+    archive_type: ArchiveType = Field(index=True)
+    professor: str = Field(sa_column=Column(String(200), nullable=False, index=True))
+    requested_course_name: str | None = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
+    requested_course_name_en: str | None = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
+    requested_category_key: str | None = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
+    requested_category_name: str | None = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
+    requested_category_name_en: str | None = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
+    requested_category_label: str | None = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
+    requested_category_label_en: str | None = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
+    requested_category_icon: str | None = Field(
+        default=None, sa_column=Column(String, nullable=True)
+    )
+    creator_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    created_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(UTC),
+            nullable=False,
+            index=True,
+            server_default=text("now()"),
+        )
+    )
+
+
+class ArchiveWishHeart(SQLModel, table=True):
+    __tablename__ = "archive_wish_hearts"
+    __table_args__ = (
+        UniqueConstraint("wish_id", "user_id", name="uq_archive_wish_hearts_wish_user"),
+        Index("ix_archive_wish_hearts_wish_created", "wish_id", "created_at"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    wish_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("archive_wishes.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    user_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    created_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(UTC),
+            nullable=False,
+            server_default=text("now()"),
+        )
+    )
+
+
+class ArchiveWishReport(SQLModel, table=True):
+    __tablename__ = "archive_wish_reports"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'upheld', 'dismissed')",
+            name="ck_archive_wish_reports_status",
+        ),
+        UniqueConstraint(
+            "wish_id",
+            "reporter_user_id",
+            name="uq_archive_wish_reports_wish_reporter",
+        ),
+        Index("ix_archive_wish_reports_status_created", "status", "created_at"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    wish_id: int | None = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("archive_wishes.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    reporter_user_id: int | None = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    wish_title_snapshot: str = Field(sa_column=Column(String(150), nullable=False))
+    target_summary_snapshot: str = Field(sa_column=Column(Text, nullable=False))
+    reason: str = Field(sa_column=Column(String(50), nullable=False, index=True))
+    custom_message: str | None = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
+    status: str = Field(
+        default=CommentReportStatus.PENDING.value,
+        sa_column=Column(
+            String(30), nullable=False, index=True, server_default=text("'pending'")
+        ),
+    )
+    admin_response: str | None = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
+    reviewed_by: int | None = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    reviewed_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), nullable=True)
+    )
+    created_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(UTC),
+            nullable=False,
+            index=True,
+            server_default=text("now()"),
+        )
+    )
+    updated_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(UTC),
+            nullable=False,
+            server_default=text("now()"),
+        )
     )
 
 
@@ -1373,8 +1572,10 @@ class MemeRead(BaseModel):
 
 
 class NotificationBase(BaseModel):
-    title: str
-    body: str
+    title: str = Field(min_length=1, max_length=150)
+    body: str = Field(min_length=1)
+    title_en: str | None = Field(default=None, max_length=150)
+    body_en: str | None = None
     severity: NotificationSeverity = NotificationSeverity.INFO
     is_active: bool = True
     starts_at: datetime | None = None
@@ -1382,12 +1583,15 @@ class NotificationBase(BaseModel):
 
 
 class NotificationCreate(NotificationBase):
-    pass
+    title_en: str = Field(min_length=1, max_length=150)
+    body_en: str = Field(min_length=1)
 
 
 class NotificationUpdate(BaseModel):
-    title: str | None = None
-    body: str | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=150)
+    body: str | None = Field(default=None, min_length=1)
+    title_en: str | None = Field(default=None, max_length=150)
+    body_en: str | None = None
     severity: NotificationSeverity | None = None
     is_active: bool | None = None
     starts_at: datetime | None = None
@@ -1416,20 +1620,43 @@ def validate_about_us_text(value: str) -> str:
     return value
 
 
+def normalize_optional_bilingual_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return value.strip() or None
+
+
 class AboutUsEntryBase(BaseModel):
     title: str = Field(min_length=1, max_length=150)
     body: str = Field(min_length=1)
+    title_en: str | None = Field(default=None, max_length=150)
+    body_en: str | None = None
     _normalize_text = field_validator("title", "body")(validate_about_us_text)
+    _normalize_optional_text = field_validator("title_en", "body_en")(
+        normalize_optional_bilingual_text
+    )
 
 
 class AboutUsEntryCreate(AboutUsEntryBase):
-    pass
+    title_en: str = Field(min_length=1, max_length=150)
+    body_en: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_required_english_text(self):
+        if self.title_en is None or self.body_en is None:
+            raise ValueError("About Us English fields must not be blank")
+        return self
 
 
 class AboutUsEntryUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=150)
     body: str | None = Field(default=None, min_length=1)
+    title_en: str | None = Field(default=None, max_length=150)
+    body_en: str | None = None
     _normalize_text = field_validator("title", "body")(validate_about_us_text)
+    _normalize_optional_text = field_validator("title_en", "body_en")(
+        normalize_optional_bilingual_text
+    )
 
 
 class AboutUsEntryRead(AboutUsEntryBase):
@@ -1440,6 +1667,149 @@ class AboutUsEntryRead(AboutUsEntryBase):
 
     class Config:
         from_attributes = True
+
+
+class ArchiveWishCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=150)
+    course_id: int | None = Field(default=None, ge=1)
+    subject: str = Field(min_length=1, max_length=200)
+    category: str = Field(min_length=1, max_length=100)
+    name: str = Field(min_length=1, max_length=100)
+    academic_year: int
+    archive_type: ArchiveType
+    professor: str = Field(min_length=1, max_length=200)
+    requested_course_name: str | None = None
+    requested_course_name_en: str | None = None
+    requested_category_key: str | None = None
+    requested_category_name: str | None = None
+    requested_category_name_en: str | None = None
+    requested_category_label: str | None = None
+    requested_category_label_en: str | None = None
+    requested_category_icon: str | None = None
+
+    @field_validator(
+        "title",
+        "subject",
+        "category",
+        "name",
+        "professor",
+    )
+    @classmethod
+    def normalize_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Wish fields must not be blank")
+        return value
+
+    @field_validator(
+        "requested_course_name",
+        "requested_course_name_en",
+        "requested_category_key",
+        "requested_category_name",
+        "requested_category_name_en",
+        "requested_category_label",
+        "requested_category_label_en",
+        "requested_category_icon",
+    )
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        return normalize_optional_bilingual_text(value)
+
+    @model_validator(mode="after")
+    def validate_parent_request(self):
+        if self.course_id is None and not self.requested_course_name:
+            raise ValueError("A course or requested course snapshot is required")
+        if self.course_id is not None and self.requested_course_name:
+            raise ValueError("A wish cannot select and request a course together")
+        if self.requested_course_name and not self.requested_course_name_en:
+            raise ValueError("Requested course Chinese and English names are required")
+        category_snapshot = (
+            self.requested_category_key,
+            self.requested_category_name,
+            self.requested_category_name_en,
+            self.requested_category_label,
+            self.requested_category_label_en,
+        )
+        if any(category_snapshot) and not all(category_snapshot):
+            raise ValueError("Requested category bilingual snapshot is incomplete")
+        if self.requested_category_key and not self.requested_course_name:
+            raise ValueError("A new category wish must also request a new course")
+        return self
+
+
+class ArchiveWishRead(BaseModel):
+    id: int
+    title: str
+    course_id: int | None = None
+    subject: str
+    category: str
+    name: str
+    academic_year: int
+    archive_type: ArchiveType
+    professor: str
+    requested_course_name: str | None = None
+    requested_course_name_en: str | None = None
+    requested_category_key: str | None = None
+    requested_category_name: str | None = None
+    requested_category_name_en: str | None = None
+    requested_category_label: str | None = None
+    requested_category_label_en: str | None = None
+    requested_category_icon: str | None = None
+    creator_id: int
+    creator_name: str
+    heart_count: int = 0
+    hearted_by_me: bool = False
+    fulfilled: bool = False
+    created_at: datetime
+
+
+class ArchiveWishListRead(BaseModel):
+    items: list[ArchiveWishRead] = Field(default_factory=list)
+    total: int
+    limit: int
+    offset: int
+
+
+class ArchiveWishHeartRead(BaseModel):
+    hearted: bool
+    heart_count: int
+
+
+class ArchiveWishReportCreate(BaseModel):
+    report_reason: CommentReportReason
+    custom_message: str | None = Field(default=None, max_length=1000)
+
+
+class ArchiveWishReportAdminUpdate(BaseModel):
+    status: CommentReportStatus
+    admin_response: str | None = Field(default=None, max_length=1000)
+
+
+class ArchiveWishReportRead(BaseModel):
+    id: int
+    wish_id: int | None = None
+    reporter_user_id: int | None = None
+    reporter_name: str
+    wisher_name: str | None = None
+    wish_title: str
+    target_summary: str
+    reason: str
+    custom_message: str | None = None
+    status: str
+    admin_response: str | None = None
+    reviewed_by: int | None = None
+    reviewer_name: str | None = None
+    reviewed_at: datetime | None = None
+    source_exists: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class ArchiveWishReportListRead(BaseModel):
+    items: list[ArchiveWishReportRead] = Field(default_factory=list)
+    total: int
+    limit: int
+    offset: int
 
 
 class PersonalNotificationRead(BaseModel):

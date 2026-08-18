@@ -202,6 +202,7 @@ test('renders visible report content frames in light and dark themes', async ({ 
   await page.evaluate(() => document.documentElement.classList.remove('dark'))
   await expect(page.locator('html')).not.toHaveClass(/dark/)
 
+  await page.getByRole('tab', { name: '系統問題回報' }).click()
   const systemSection = page.locator('.report-section').filter({ hasText: '系統問題回報' })
   await systemSection.getByRole('button', { name: '檢視系統問題回報' }).click()
   const systemDialog = page.getByRole('dialog', { name: '系統問題回報詳情' })
@@ -215,6 +216,7 @@ test('renders visible report content frames in light and dark themes', async ({ 
   )
   await systemDialog.getByRole('button', { name: '關閉' }).click()
 
+  await page.getByRole('tab', { name: '留言回報' }).click()
   const commentSection = page.locator('.report-section').filter({ hasText: '留言回報' })
   await commentSection.getByRole('button', { name: '檢視或審核留言回報' }).click()
   const commentDialog = page.getByRole('dialog', { name: '留言回報審核' })
@@ -228,6 +230,7 @@ test('renders visible report content frames in light and dark themes', async ({ 
   )
   await commentDialog.getByRole('button', { name: '關閉' }).click()
 
+  await page.getByRole('tab', { name: '考古題回報' }).click()
   const archiveSection = page.locator('.report-section').filter({ hasText: '考古題回報' })
   await archiveSection.getByRole('button', { name: '檢視或審核考古題回報' }).first().click()
   let archiveDialog = page.getByRole('dialog', { name: '考古題回報審核' })
@@ -247,6 +250,7 @@ test('renders visible report content frames in light and dark themes', async ({ 
 
   await page.evaluate(() => document.documentElement.classList.add('dark'))
   await expect(page.locator('html')).toHaveClass(/dark/)
+  await page.getByRole('tab', { name: '系統問題回報' }).click()
   await systemSection.getByRole('button', { name: '檢視系統問題回報' }).click()
   await expectVisibleContentFrame(
     page

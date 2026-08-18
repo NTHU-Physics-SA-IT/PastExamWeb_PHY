@@ -48,7 +48,9 @@ test.describe('Admin Dashboard › Notifications', () => {
     await expect(createDialog).toBeVisible()
 
     await createDialog.getByPlaceholder('輸入公告標題').fill('版本更新公告')
+    await createDialog.getByLabel('英文標題').fill('Product Update')
     await createDialog.getByPlaceholder('輸入公告內容').fill('新版功能已上線，歡迎使用。')
+    await createDialog.getByLabel('英文內容').fill('New features are now available.')
 
     const severitySelect = createDialog
       .locator('label', { hasText: '重要程度' })

@@ -34,19 +34,31 @@
         <Card v-for="entry in entries" :key="entry.id" class="about-us-entry">
           <template #title>
             <div class="about-us-entry-title">
-              <h2>{{ entry.title }}</h2>
-              <Button
-                v-if="isAdmin"
-                :label="$t('編輯')"
-                icon="pi pi-pencil"
-                size="small"
-                text
-                @click="openEdit(entry)"
-              />
+              <h2>{{ localizedField(entry, 'title') }}</h2>
+              <div v-if="isAdmin" class="flex gap-2">
+                <Button
+                  :label="$t('編輯')"
+                  icon="pi pi-pencil"
+                  size="small"
+                  text
+                  @click="openEdit(entry)"
+                />
+                <Button
+                  :label="$t('永久刪除')"
+                  icon="pi pi-trash"
+                  severity="danger"
+                  size="small"
+                  text
+                  @click="requestDelete(entry)"
+                />
+              </div>
             </div>
           </template>
           <template #content>
-            <div class="markdown-content" v-html="renderMarkdown(entry.body)"></div>
+            <div
+              class="markdown-content"
+              v-html="renderMarkdown(localizedField(entry, 'body'))"
+            ></div>
           </template>
         </Card>
       </div>
@@ -76,6 +88,21 @@
           </small>
         </div>
         <div class="field">
+          <label for="about-us-title-en">{{ $t('英文標題') }}</label>
+          <InputText
+            id="about-us-title-en"
+            v-model="form.title_en"
+            class="w-full"
+            maxlength="150"
+            :class="{ 'p-invalid': errors.title_en }"
+            :aria-invalid="Boolean(errors.title_en)"
+            :aria-describedby="errors.title_en ? 'about-us-title-en-error' : undefined"
+          />
+          <small v-if="errors.title_en" id="about-us-title-en-error" class="p-error" role="alert">{{
+            errors.title_en
+          }}</small>
+        </div>
+        <div class="field">
           <label for="about-us-body">{{ $t('Markdown 內容') }}</label>
           <Textarea
             id="about-us-body"
@@ -90,6 +117,22 @@
           <small v-if="errors.body" id="about-us-body-error" class="p-error" role="alert">
             {{ errors.body }}
           </small>
+        </div>
+        <div class="field">
+          <label for="about-us-body-en">{{ $t('英文 Markdown 內容') }}</label>
+          <Textarea
+            id="about-us-body-en"
+            v-model="form.body_en"
+            class="w-full"
+            rows="10"
+            autoResize
+            :class="{ 'p-invalid': errors.body_en }"
+            :aria-invalid="Boolean(errors.body_en)"
+            :aria-describedby="errors.body_en ? 'about-us-body-en-error' : undefined"
+          />
+          <small v-if="errors.body_en" id="about-us-body-en-error" class="p-error" role="alert">{{
+            errors.body_en
+          }}</small>
         </div>
         <section v-if="form.body.trim()" class="about-us-preview" :aria-label="$t('Markdown 預覽')">
           <h3>{{ $t('預覽') }}</h3>
@@ -117,7 +160,7 @@ import { aboutUsService } from '@/api'
 import { getCurrentUser } from '@/utils/auth.js'
 import { renderMarkdown } from '@/utils/markdown.js'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const isAdmin = Boolean(getCurrentUser()?.is_admin)
 const entries = ref([])
 const loading = ref(true)
@@ -126,8 +169,8 @@ const saving = ref(false)
 const saveError = ref('')
 const dialogVisible = ref(false)
 const editingEntry = ref(null)
-const form = reactive({ title: '', body: '' })
-const errors = reactive({ title: '', body: '' })
+const form = reactive({ title: '', body: '', title_en: '', body_en: '' })
+const errors = reactive({ title: '', body: '', title_en: '', body_en: '' })
 
 async function loadEntries() {
   loading.value = true
@@ -145,8 +188,12 @@ async function loadEntries() {
 function resetForm() {
   form.title = ''
   form.body = ''
+  form.title_en = ''
+  form.body_en = ''
   errors.title = ''
   errors.body = ''
+  errors.title_en = ''
+  errors.body_en = ''
   saveError.value = ''
 }
 
@@ -161,20 +208,29 @@ function openEdit(entry) {
   resetForm()
   form.title = entry.title
   form.body = entry.body
+  form.title_en = entry.title_en || ''
+  form.body_en = entry.body_en || ''
   dialogVisible.value = true
 }
 
 function validate() {
   errors.title = form.title.trim() ? '' : t('標題是必填欄位')
   errors.body = form.body.trim() ? '' : t('內容是必填欄位')
-  return !errors.title && !errors.body
+  errors.title_en = form.title_en.trim() ? '' : t('英文標題是必填欄位')
+  errors.body_en = form.body_en.trim() ? '' : t('英文內容是必填欄位')
+  return !errors.title && !errors.body && !errors.title_en && !errors.body_en
 }
 
 async function saveEntry() {
   if (!validate() || saving.value) return
   saving.value = true
   saveError.value = ''
-  const payload = { title: form.title.trim(), body: form.body.trim() }
+  const payload = {
+    title: form.title.trim(),
+    body: form.body.trim(),
+    title_en: form.title_en.trim(),
+    body_en: form.body_en.trim(),
+  }
   try {
     if (editingEntry.value) {
       await aboutUsService.update(editingEntry.value.id, payload)
@@ -187,6 +243,31 @@ async function saveEntry() {
     saveError.value = t('關於我們內容儲存失敗，請稍後再試。')
   } finally {
     saving.value = false
+  }
+}
+
+function localizedField(entry, field) {
+  if (locale.value.toLowerCase().startsWith('en'))
+    return entry[`${field}_en`]?.trim() || entry[field]
+  return entry[field]
+}
+
+async function deleteEntry(entry) {
+  try {
+    await aboutUsService.remove(entry.id)
+    entries.value = entries.value.filter((item) => item.id !== entry.id)
+  } catch {
+    loadError.value = t('關於我們內容永久刪除失敗，請稍後再試。')
+  }
+}
+
+function requestDelete(entry) {
+  if (
+    window.confirm(
+      t('確定要永久刪除「{title}」嗎？此動作無法復原。', { title: localizedField(entry, 'title') })
+    )
+  ) {
+    void deleteEntry(entry)
   }
 }
 

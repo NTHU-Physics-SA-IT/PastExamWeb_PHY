@@ -1,12 +1,8 @@
 <template>
-  <form
-    class="comment-inline-report"
-    :aria-label="$t('回報這則留言')"
-    @submit.prevent="submitReport"
-  >
+  <form class="comment-inline-report" :aria-label="reportHeading" @submit.prevent="submitReport">
     <div class="comment-inline-report__heading">
       <i class="pi pi-flag" aria-hidden="true" />
-      <span>{{ $t('回報這則留言') }}</span>
+      <span>{{ reportHeading }}</span>
     </div>
 
     <blockquote class="comment-inline-report__target">
@@ -65,7 +61,7 @@
         size="small"
         :loading="loading"
         :disabled="!canSubmit"
-        :title="$t('送出留言回報')"
+        :title="submitTitle"
       />
     </div>
   </form>
@@ -88,10 +84,14 @@ const props = defineProps({
   reason: { type: String, default: null },
   customMessage: { type: String, default: '' },
   loading: { type: Boolean, default: false },
+  targetType: { type: String, default: 'comment' },
 })
 const { t } = useI18n()
+const supportsCustomMessage = computed(() => props.targetType !== 'wish')
 const commentReportReasons = computed(() =>
-  COMMENT_REPORT_REASONS.map((option) => ({ ...option, label: t(option.label) }))
+  COMMENT_REPORT_REASONS.filter(
+    (option) => supportsCustomMessage.value || option.value !== COMMENT_REPORT_OTHER_REASON
+  ).map((option) => ({ ...option, label: t(option.label) }))
 )
 
 const emit = defineEmits(['update:reason', 'update:customMessage', 'cancel', 'submit'])
@@ -99,13 +99,21 @@ const emit = defineEmits(['update:reason', 'update:customMessage', 'cancel', 'su
 const reasonInputId = computed(() => `comment-report-reason-${props.message.id}`)
 const customMessageInputId = computed(() => `comment-report-message-${props.message.id}`)
 const formattedTime = computed(() => formatRelativeTime(props.message.created_at))
+const reportHeading = computed(() =>
+  props.targetType === 'wish' ? t('回報這筆許願') : t('回報這則留言')
+)
+const submitTitle = computed(() =>
+  props.targetType === 'wish' ? t('送出許願回報') : t('送出留言回報')
+)
 const contentPreview = computed(() => {
   const content = props.message.is_deleted
     ? t('此留言已刪除')
     : String(props.message.content || '').trim()
   return content.length > 120 ? `${content.slice(0, 120)}…` : content
 })
-const isOtherReason = computed(() => props.reason === COMMENT_REPORT_OTHER_REASON)
+const isOtherReason = computed(
+  () => supportsCustomMessage.value && props.reason === COMMENT_REPORT_OTHER_REASON
+)
 const customMessageLength = computed(() => String(props.customMessage || '').length)
 const hasValidCustomMessage = computed(
   () =>
@@ -115,7 +123,7 @@ const hasValidCustomMessage = computed(
 )
 const isFormValid = computed(
   () =>
-    COMMENT_REPORT_REASONS.some((option) => option.value === props.reason) &&
+    commentReportReasons.value.some((option) => option.value === props.reason) &&
     hasValidCustomMessage.value
 )
 const reportPayload = computed(() =>

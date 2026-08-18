@@ -7,7 +7,6 @@ from sqlalchemy.orm import aliased
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.api.services.courses import _public_archive_conditions
 from app.db.session import get_session
 from app.models.models import (
     AnnouncementReadReceipt,
@@ -30,6 +29,7 @@ from app.models.models import (
     User,
     UserRoles,
 )
+from app.services.archive_visibility import public_archive_conditions
 from app.utils.auth import get_current_user
 
 router = APIRouter()
@@ -161,7 +161,7 @@ async def _list_personal_notifications(
                         ArchiveReport.deleted_at.is_(None),
                         ArchiveReport.reporter_user_id == user_id,
                         Course.deleted_at.is_(None),
-                        *_public_archive_conditions(),
+                        *public_archive_conditions(),
                     )
                 )
             ).all()
@@ -193,7 +193,7 @@ async def _list_personal_notifications(
                         message.deleted_at.is_(None),
                         or_(message.id == root.id, message.parent_id == root.id),
                         Course.deleted_at.is_(None),
-                        *_public_archive_conditions(),
+                        *public_archive_conditions(),
                     )
                 )
             ).all()

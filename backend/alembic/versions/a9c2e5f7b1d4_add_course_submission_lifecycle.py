@@ -25,6 +25,12 @@ DELETED_AT_INDEX = "ix_course_submissions_deleted_at"
 PREVIOUS_STATUS_CHECK = "ck_course_submissions_previous_status_not_deleted"
 ACTIVE_STATUS_CHECK = "ck_course_submissions_active_previous_status_null"
 TABLE_LOCK_SQL = "LOCK TABLE course_submissions IN SHARE ROW EXCLUSIVE MODE"
+MAIN_SIBLING_REVISION = "a9c4e7b2d6f1"
+WISH_TABLES = {
+    "archive_wishes",
+    "archive_wish_hearts",
+    "archive_wish_reports",
+}
 
 SUBMISSION_STATUS_TYPE = postgresql.ENUM(
     "PENDING",
@@ -55,15 +61,125 @@ def _source_foreign_key(connection: sa.Connection) -> dict[str, object]:
     return matching[0]
 
 
-def _verify_upgrade_source(connection: sa.Connection) -> str:
-    versions = list(
-        connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalars()
+def _versions(connection: sa.Connection) -> list[str]:
+    return sorted(
+        str(version)
+        for version in connection.execute(
+            sa.text("SELECT version_num FROM alembic_version")
+        ).scalars()
     )
-    if versions != [down_revision]:
+
+
+def _require_category_source_schema(connection: sa.Connection) -> None:
+    columns = {
+        column["name"]: column
+        for column in sa.inspect(connection).get_columns(
+            "course_category_configs", schema="public"
+        )
+    }
+    if (
+        "pre_delete_is_active" not in columns
+        or columns["pre_delete_is_active"]["nullable"] is not True
+    ):
+        raise RuntimeError(
+            "CourseSubmission lifecycle Category sibling schema is incomplete"
+        )
+
+
+def _require_main_sibling_schema(connection: sa.Connection) -> None:
+    inspector = sa.inspect(connection)
+    if not all(inspector.has_table(table, schema="public") for table in WISH_TABLES):
+        raise RuntimeError(
+            "CourseSubmission lifecycle main-sibling Wish schema is incomplete"
+        )
+    required_unique_columns = {
+        "archive_wishes": {("target_key",)},
+        "archive_wish_hearts": {("wish_id", "user_id")},
+        "archive_wish_reports": {("wish_id", "reporter_user_id")},
+    }
+    required_indexes = {
+        "archive_wishes": {"ix_archive_wishes_course_id", "ix_archive_wishes_creator_id"},
+        "archive_wish_hearts": {
+            "ix_archive_wish_hearts_wish_id",
+            "ix_archive_wish_hearts_user_id",
+        },
+        "archive_wish_reports": {
+            "ix_archive_wish_reports_wish_id",
+            "ix_archive_wish_reports_status",
+        },
+    }
+    for table_name in WISH_TABLES:
+        unique_columns = {
+            tuple(item["column_names"])
+            for item in inspector.get_unique_constraints(table_name, schema="public")
+        }
+        indexes = {
+            item["name"]
+            for item in inspector.get_indexes(table_name, schema="public")
+        }
+        if not required_unique_columns[table_name].issubset(
+            unique_columns
+        ) or not required_indexes[table_name].issubset(indexes):
+            raise RuntimeError(
+                "CourseSubmission lifecycle main-sibling Wish constraints are incomplete"
+            )
+    for table_name, column_names in {
+        "notifications": {"title_en", "body_en"},
+        "about_us_entries": {"title_en", "body_en"},
+    }.items():
+        columns = {
+            column["name"]: column
+            for column in inspector.get_columns(table_name, schema="public")
+        }
+        if not column_names.issubset(columns) or any(
+            columns[name]["nullable"] is not True for name in column_names
+        ):
+            raise RuntimeError(
+                "CourseSubmission lifecycle main-sibling bilingual schema is incomplete"
+            )
+    submission_columns = {
+        column["name"]: column
+        for column in inspector.get_columns("archive_submissions", schema="public")
+    }
+    if (
+        "source_wish_id" not in submission_columns
+        or submission_columns["source_wish_id"]["nullable"] is not True
+    ):
+        raise RuntimeError(
+            "CourseSubmission lifecycle main-sibling source-wish schema is incomplete"
+        )
+    matching_fks = [
+        foreign_key
+        for foreign_key in inspector.get_foreign_keys(
+            "archive_submissions", schema="public"
+        )
+        if foreign_key["constrained_columns"] == ["source_wish_id"]
+        and foreign_key["referred_table"] == "archive_wishes"
+        and foreign_key["referred_columns"] == ["id"]
+        and (foreign_key.get("options") or {}).get("ondelete") == "SET NULL"
+    ]
+    indexes = {
+        index["name"]
+        for index in inspector.get_indexes("archive_submissions", schema="public")
+    }
+    if len(matching_fks) != 1 or "ix_archive_submissions_source_wish_id" not in indexes:
+        raise RuntimeError(
+            "CourseSubmission lifecycle main-sibling source-wish continuity is incomplete"
+        )
+
+
+def _verify_upgrade_source(connection: sa.Connection) -> str:
+    versions = _versions(connection)
+    expected_sibling_transition = sorted([str(down_revision), MAIN_SIBLING_REVISION])
+    if versions == expected_sibling_transition:
+        _require_main_sibling_schema(connection)
+    elif versions != [down_revision]:
         raise RuntimeError(
             "CourseSubmission lifecycle migration requires the reviewed source "
-            f"revision {down_revision}; found {versions!r}"
+            f"revision {down_revision} or exact sibling transition "
+            f"{expected_sibling_transition!r}; found {versions!r}"
         )
+    _require_category_source_schema(connection)
     columns = {
         column["name"]: column
         for column in sa.inspect(connection).get_columns(TABLE_NAME, schema="public")

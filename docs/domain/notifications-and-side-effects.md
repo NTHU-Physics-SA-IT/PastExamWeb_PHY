@@ -24,6 +24,16 @@ Related documents:
 These mechanisms must not be described or tested as if they provide the same
 guarantee.
 
+Announcement and About Us locale selection is a read-time presentation effect:
+English uses the optional English field when nonblank and otherwise falls back
+to the required Chinese field. Both bodies pass through the same sanitized
+Markdown renderer. Creating, hearting, reporting, fulfilling, or permanently
+deleting an Archive Wish currently produces API/UI feedback only; it does not
+enqueue a `PersonalNotification`, publish a WebSocket event, touch Redis, or
+mutate MinIO. Help Upload deliberately reuses the ordinary Archive upload and
+review pipeline, so its storage and later review side effects remain those of
+an ordinary upload.
+
 ## Current notification inventory
 
 | Event | Durable notification | Recipient/source | Current transaction evidence |

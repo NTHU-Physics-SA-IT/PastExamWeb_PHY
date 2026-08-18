@@ -63,8 +63,14 @@ Reviewed manifests currently cover:
 - `c2a8e4f6b9d1`: the reviewed schema before bilingual ArchiveSubmission
   presentation snapshots; and
 - `d4b7e2a9c6f1`: the reviewed schema before About Us entries; and
-- `e6a1b3c5d7f9`: the reviewed schema before Category state preservation; and
-- `e8a4c1d7b2f6`: the current repository head and SQLModel metadata contract.
+- `e6a1b3c5d7f9`: the reviewed schema before both known sibling branches;
+- `e8a4c1d7b2f6`: the reviewed Category-state sibling source before
+  CourseSubmission lifecycle independence;
+- `a9c2e5f7b1d4`: the reviewed Stage 5D sibling head;
+- `a9c4e7b2d6f1`: the reviewed bilingual managed-content and Wish Pool sibling
+  head; and
+- `b4d6f8a2c1e3`: the merged current repository head and combined SQLModel
+  metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,
@@ -308,3 +314,45 @@ release only after history and tag checks prove it has not shipped. Extend the
 focused migration safety scenarios whenever a new PostgreSQL enum, persistent
 server default, partial index, or other schema feature changes the head
 manifest.
+
+### ADR-0008 exact sibling-convergence exception
+
+[ADR-0008](decisions/0008-narrow-sibling-migration-convergence-exception.md)
+is the sole accepted exception to the immutability rule above. It applies only
+to the pre-DDL source-compatibility guard behavior of these exact revisions:
+
+- `e8a4c1d7b2f6`;
+- `a9c2e5f7b1d4`; and
+- `a9c4e7b2d6f1`.
+
+Revision IDs, `down_revision` identities and order, `branch_labels`,
+`depends_on`, schema DDL, data backfill or transformation intent, named
+constraint and index intent, locking intent, post-upgrade target-schema
+intent, and downgrade schema and data intent remain immutable.
+
+An implementation may recognize only finite, mechanically enumerated sibling
+states for which it proves both the exact expected migration-ledger or
+transition identity and the exact sibling-specific schema continuity. Ledger
+identity alone is insufficient. Unknown, partial, malformed,
+unexpected-multiple, unreviewed, or schema-inconsistent states fail closed.
+
+The implemented finite compatibility states are:
+
+- `e8a4c1d7b2f6` accepts its normal exact `e6a1b3c5d7f9` source or the exact
+  `a9c4e7b2d6f1` sibling ledger with complete Wish Pool/bilingual continuity;
+- `a9c2e5f7b1d4` accepts its normal exact `e8a4c1d7b2f6` source or the exact
+  two-row `e8a4c1d7b2f6` plus `a9c4e7b2d6f1` Alembic transition with complete
+  Category and Wish Pool continuity; and
+- `a9c4e7b2d6f1` accepts its normal exact `e6a1b3c5d7f9` source or the exact
+  `a9c2e5f7b1d4` sibling ledger with complete Category and CourseSubmission
+  lifecycle continuity.
+
+The no-op topology revision `b4d6f8a2c1e3` joins the two sibling heads. Tests
+prove that databases starting at `e6a1b3c5d7f9`, `a9c2e5f7b1d4`, or
+`a9c4e7b2d6f1` converge to that single head without `alembic stamp`, manual
+`alembic_version` repair, skipped or fictitious DDL, or reparenting or deletion
+of accepted revisions. Unknown, partial, malformed, or schema-inconsistent
+states still fail closed.
+
+This exception does not permit arbitrary future sibling branches and does not
+authorize production or canonical-local migration or deployment.

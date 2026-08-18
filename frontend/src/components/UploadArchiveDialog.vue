@@ -8,26 +8,26 @@
       :closeOnEscape="false"
       :style="{ width: '700px', maxWidth: '90vw' }"
       :autoFocus="false"
-      :pt="{ root: { 'aria-label': $t('上傳考古題'), 'aria-labelledby': null } }"
+      :pt="{ root: { 'aria-label': dialogTitle, 'aria-labelledby': null } }"
     >
       <template #header>
         <div class="flex align-items-center gap-2.5">
           <i class="pi pi-cloud-upload text-2xl" />
-          <div class="text-xl leading-tight font-semibold">{{ $t('上傳考古題') }}</div>
+          <div class="text-xl leading-tight font-semibold">{{ dialogTitle }}</div>
         </div>
       </template>
       <Stepper :value="uploadStep" @update:value="uploadStep = $event" linear>
         <StepList>
           <Step value="1">{{ $t('選擇課程') }}</Step>
           <Step value="2">{{ $t('考試資訊') }}</Step>
-          <Step value="3">{{ $t('上傳檔案') }}</Step>
+          <Step value="3">{{ isWishMode ? $t('許願標題') : $t('上傳檔案') }}</Step>
           <Step value="4">{{ $t('確認資訊') }}</Step>
         </StepList>
 
         <StepPanels>
           <StepPanel v-slot="{ activateCallback }" value="1">
             <div class="flex flex-column gap-4">
-              <div class="request-mode-panel">
+              <div v-if="!sourceWishId" class="request-mode-panel">
                 <div class="flex align-items-start gap-2">
                   <Checkbox
                     v-model="form.requestNewCourse"
@@ -42,7 +42,13 @@
                     }}</label>
                     <div class="text-sm text-500 mt-1">
                       {{
-                        $t('勾選後，這份考古會先進入審核；管理者通過後才建立新課程並公開考古題。')
+                        isWishMode
+                          ? $t(
+                              '勾選後，許願會保存課程申請資訊；協助上傳後仍須經審核，通過後才建立新課程。'
+                            )
+                          : $t(
+                              '勾選後，這份考古會先進入審核；管理者通過後才建立新課程並公開考古題。'
+                            )
                       }}
                     </div>
                     <div v-if="form.requestNewCategory" class="text-sm text-500 mt-1">
@@ -140,7 +146,7 @@
                   optionValue="value"
                   :placeholder="$t('選擇課程類別')"
                   class="w-full"
-                  :disabled="form.requestNewCategory"
+                  :disabled="form.requestNewCategory || Boolean(sourceWishId)"
                 />
                 <small v-if="form.requestNewCategory" class="text-gray-500">
                   {{ $t('已改為申請新分類，這份考古會歸到上方的新分類。') }}
@@ -183,7 +189,7 @@
                   optionLabel="name"
                   :placeholder="$t('選擇課程名稱')"
                   class="w-full"
-                  :disabled="!form.category"
+                  :disabled="!form.category || Boolean(sourceWishId)"
                   filter
                   showClear
                 >
@@ -211,7 +217,7 @@
                   optionLabel="name"
                   :placeholder="$t('搜尋或輸入授課教授')"
                   class="w-full"
-                  :disabled="!effectiveSubject"
+                  :disabled="!effectiveSubject || Boolean(sourceWishId)"
                   dropdown
                   completeOnFocus
                   :minLength="0"
@@ -253,6 +259,7 @@
                         type="button"
                         class="semester-option"
                         :class="{ selected: form.academicYear === semester.code }"
+                        :disabled="Boolean(sourceWishId)"
                         @click="form.academicYear = semester.code"
                       >
                         {{ semester.label }}
@@ -278,6 +285,7 @@
                   optionValue="value"
                   :placeholder="$t('選擇考試類型')"
                   class="w-full"
+                  :disabled="Boolean(sourceWishId)"
                 />
               </div>
 
@@ -292,6 +300,7 @@
                   optionValue="value"
                   :placeholder="$t('選擇次數')"
                   class="w-full"
+                  :disabled="Boolean(sourceWishId)"
                 />
                 <small class="text-gray-500">
                   {{
@@ -311,6 +320,7 @@
                     v-model="form.otherName"
                     :placeholder="$t('例如 retake1')"
                     class="w-full pr-8"
+                    :disabled="Boolean(sourceWishId)"
                     :class="{
                       'p-invalid': form.otherName && !isFilenameValid,
                     }"
@@ -345,7 +355,7 @@
                 />
               </div>
 
-              <div class="flex align-items-center gap-2">
+              <div v-if="!isWishMode" class="flex align-items-center gap-2">
                 <Checkbox
                   inputId="upload-has-answers"
                   name="upload-has-answers"
@@ -372,7 +382,17 @@
           </StepPanel>
 
           <StepPanel v-slot="{ activateCallback }" value="3">
-            <div class="flex flex-column gap-4">
+            <div v-if="isWishMode" class="flex flex-column gap-2">
+              <label for="archive-wish-title">{{ $t('許願標題') }}</label>
+              <InputText
+                id="archive-wish-title"
+                v-model="form.wishTitle"
+                maxlength="150"
+                class="w-full"
+                :placeholder="$t('例如: 王道維普物一 midterm1')"
+              />
+            </div>
+            <div v-else class="flex flex-column gap-4">
               <FileUpload
                 ref="fileUpload"
                 accept="application/pdf"
@@ -464,7 +484,7 @@
                 :label="$t('下一步')"
                 icon="pi pi-arrow-right"
                 @click="activateCallback('4')"
-                :disabled="!form.file"
+                :disabled="isWishMode ? !form.wishTitle.trim() : !form.file"
               />
             </div>
           </StepPanel>
@@ -472,6 +492,9 @@
           <StepPanel v-slot="{ activateCallback }" value="4">
             <div class="flex flex-column gap-4">
               <div class="flex flex-column gap-2 p-3 surface-ground border-round">
+                <div v-if="isWishMode">
+                  <strong>{{ $t('許願標題：') }}</strong> {{ form.wishTitle }}
+                </div>
                 <div>
                   <strong>{{ $t('投稿類型：') }}</strong>
                   {{ submissionKindLabel }}
@@ -516,7 +539,7 @@
                 <div>
                   <strong>{{ $t('考試名稱：') }}</strong> {{ generatedFilename }}
                 </div>
-                <div>
+                <div v-if="!isWishMode">
                   <strong>{{ $t('附解答：') }}</strong>
                   {{ form.hasAnswers ? $t('是') : $t('否') }}
                 </div>
@@ -531,14 +554,15 @@
               />
               <div class="flex gap-2.5">
                 <Button
+                  v-if="!isWishMode"
                   icon="pi pi-eye"
                   :label="$t('預覽')"
                   severity="secondary"
                   @click="previewUploadFile"
                 />
                 <Button
-                  :label="$t('上傳')"
-                  icon="pi pi-upload"
+                  :label="isWishMode ? $t('送出許願') : $t('上傳')"
+                  :icon="isWishMode ? 'pi pi-sparkles' : 'pi pi-upload'"
                   severity="success"
                   @click="handleUpload"
                   :loading="uploading"
@@ -575,7 +599,7 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from 'primevue/usetoast'
-import { courseService, archiveService } from '../api'
+import { courseService, archiveService, wishService } from '../api'
 import PdfPreviewModal from './PdfPreviewModal.vue'
 import { PDFDocument } from 'pdf-lib'
 import { trackEvent, EVENTS } from '../utils/analytics'
@@ -598,6 +622,9 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  prefill: { type: Object, default: null },
+  sourceWishId: { type: Number, default: null },
+  mode: { type: String, default: 'upload' },
 })
 
 const emit = defineEmits(['update:modelValue', 'upload-success'])
@@ -605,6 +632,11 @@ const emit = defineEmits(['update:modelValue', 'upload-success'])
 const toast = useToast()
 const { t } = useI18n()
 const NEW_CATEGORY_REQUIRES_COURSE_MESSAGE = '新增分類必須同時申請新增課程。'
+const isWishMode = computed(() => props.mode === 'wish')
+const dialogTitle = computed(() =>
+  isWishMode.value ? t('新增考古許願') : props.sourceWishId ? t('協助上傳考古題') : t('上傳考古題')
+)
+let applyingPrefill = false
 
 const form = ref({
   category: null,
@@ -627,6 +659,7 @@ const form = ref({
   hasAnswers: false,
   academicYear: null,
   file: null,
+  wishTitle: '',
 })
 
 const uploadStep = ref('1')
@@ -782,6 +815,14 @@ const canGoToStep3 = computed(() => {
 })
 
 const canUpload = computed(() => {
+  if (isWishMode.value) {
+    return Boolean(
+      form.value.wishTitle.trim() &&
+      canGoToStep2.value &&
+      canGoToStep3.value &&
+      (form.value.requestNewCourse || form.value.subjectId)
+    )
+  }
   return (
     form.value.file &&
     effectiveCategory.value &&
@@ -865,6 +906,61 @@ async function fetchProfessorsForSubject(subjectId) {
 }
 
 const handleUpload = async () => {
+  if (isWishMode.value) {
+    try {
+      uploading.value = true
+      await wishService.create({
+        title: form.value.wishTitle.trim(),
+        course_id: form.value.requestNewCourse ? null : form.value.subjectId,
+        subject: canonicalSubject.value,
+        category: effectiveCategory.value,
+        professor:
+          typeof form.value.professor === 'string'
+            ? form.value.professor.trim()
+            : form.value.professor?.name,
+        archive_type: form.value.type,
+        name: generatedFilename.value,
+        academic_year: form.value.academicYear,
+        requested_course_name: form.value.requestNewCourse ? effectiveSubject.value : null,
+        requested_course_name_en: form.value.requestNewCourse ? effectiveSubjectEn.value : null,
+        requested_category_key: form.value.requestNewCategory ? effectiveCategory.value : null,
+        requested_category_name: form.value.requestNewCategory
+          ? form.value.requestedCategoryName.trim()
+          : null,
+        requested_category_name_en: form.value.requestNewCategory
+          ? form.value.requestedCategoryNameEn.trim()
+          : null,
+        requested_category_label: form.value.requestNewCategory
+          ? form.value.requestedCategoryLabel.trim()
+          : null,
+        requested_category_label_en: form.value.requestNewCategory
+          ? form.value.requestedCategoryLabelEn.trim()
+          : null,
+      })
+      emit('update:modelValue', false)
+      emit('upload-success')
+      toast.add({
+        severity: 'success',
+        summary: t('許願已送出'),
+        detail: t('你的考古許願已加入許願池。'),
+        life: 3000,
+      })
+    } catch (error) {
+      const detail = error?.response?.data?.detail
+      toast.add({
+        severity: 'error',
+        summary: t('許願送出失敗'),
+        detail:
+          detail?.code === 'wish_already_exists'
+            ? t('相同目標的許願已存在。')
+            : t('發生錯誤，請稍後再試'),
+        life: 3000,
+      })
+    } finally {
+      uploading.value = false
+    }
+    return
+  }
   if (!form.value.file || form.value.file.size > MAX_PDF_SIZE_BYTES) {
     fileValidationError.value = t('PDF 檔案超過 20 MB 大小上限')
     uploadStep.value = '3'
@@ -927,6 +1023,7 @@ const handleUpload = async () => {
       formData.append('requested_category_label_en', form.value.requestedCategoryLabelEn.trim())
       formData.append('requested_category_icon', 'pi pi-fw pi-book')
     }
+    if (props.sourceWishId) formData.append('source_wish_id', props.sourceWishId)
 
     const response = await archiveService.uploadArchive(formData)
     const uploadResult = response?.data || {}
@@ -1059,6 +1156,7 @@ const onProfessorSelect = (event) => {
 watch(
   () => form.value.category,
   () => {
+    if (applyingPrefill) return
     if (form.value.requestNewCategory) return
     form.value.subject = null
     form.value.subjectId = null
@@ -1076,6 +1174,7 @@ watch(
 watch(
   () => effectiveSubject.value,
   (newSubject) => {
+    if (applyingPrefill) return
     form.value.professor = null
     if (newSubject && !form.value.requestNewCourse) {
       fetchProfessorsForSubject(form.value.subjectId)
@@ -1088,6 +1187,7 @@ watch(
 watch(
   () => form.value.requestNewCategory,
   (enabled) => {
+    if (applyingPrefill) return
     if (enabled) {
       form.value.requestNewCourse = true
       form.value.category = null
@@ -1106,6 +1206,7 @@ watch(
 watch(
   () => form.value.requestNewCourse,
   (enabled) => {
+    if (applyingPrefill) return
     if (!enabled && form.value.requestNewCategory) {
       form.value.requestNewCourse = true
       return
@@ -1140,11 +1241,47 @@ watch(generatedFilename, (filename) => {
 watch(
   () => props.modelValue,
   (newValue, oldValue) => {
-    if (oldValue === true && newValue === false) {
+    if (newValue === true && props.prefill) {
+      applyPrefill()
+    } else if (oldValue === true && newValue === false) {
       resetForm()
     }
   }
 )
+
+function applyPrefill() {
+  applyingPrefill = true
+  const value = props.prefill || {}
+  form.value.requestNewCourse = Boolean(value.requested_course_name)
+  form.value.requestNewCategory = Boolean(value.requested_category_key)
+  form.value.requestedCourseName = value.requested_course_name || ''
+  form.value.requestedCourseNameEn = value.requested_course_name_en || ''
+  form.value.requestedCategoryKey = value.requested_category_key || ''
+  form.value.requestedCategoryName = value.requested_category_name || ''
+  form.value.requestedCategoryNameEn = value.requested_category_name_en || ''
+  form.value.requestedCategoryLabel = value.requested_category_label || ''
+  form.value.requestedCategoryLabelEn = value.requested_category_label_en || ''
+  form.value.category = form.value.requestNewCategory ? null : value.category || null
+  const course = (props.coursesList[form.value.category] || []).find(
+    (item) => item.id === value.course_id
+  )
+  form.value.subject = form.value.requestNewCourse
+    ? null
+    : course
+      ? { name: localizedCourseName(course), canonicalName: course.name, code: course.id }
+      : value.subject || null
+  form.value.subjectId = form.value.requestNewCourse ? null : course?.id || value.course_id || null
+  form.value.professor = value.professor || null
+  form.value.academicYear = value.academic_year || null
+  form.value.type = value.archive_type || null
+  const match = /^(midterm|quiz)(\d+)$/.exec(value.name || '')
+  form.value.examNumber = match ? Number(match[2]) : null
+  form.value.otherName = value.archive_type === 'other' ? value.name || '' : ''
+  nextTick(() => {
+    applyingPrefill = false
+    validateFilename()
+  })
+}
 
 function resetForm() {
   form.value = {
@@ -1168,6 +1305,7 @@ function resetForm() {
     hasAnswers: false,
     academicYear: null,
     file: null,
+    wishTitle: '',
   }
   fileValidationError.value = ''
   uploadStep.value = '1'
