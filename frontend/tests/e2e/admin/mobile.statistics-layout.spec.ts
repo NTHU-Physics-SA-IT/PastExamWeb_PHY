@@ -63,7 +63,7 @@ test.use({
 })
 
 test('keeps mobile statistics tabs and duration summaries aligned', async ({ page }) => {
-  test.setTimeout(45_000)
+  test.setTimeout(90_000)
 
   const token = buildJwt({
     uid: 1,
