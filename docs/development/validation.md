@@ -175,6 +175,14 @@ same signature fails again, move to targeted diagnosis. Stop for user direction
 when resolution requires broader scope, workflow policy, product decisions,
 permissions, secrets, or destructive operations.
 
+A workflow rerun request becomes an accepted logical retry only after GitHub
+accepts the request and the run's `run_attempt` increments. A transport-level
+502, 503, or 504 with an unchanged attempt is an unavailable control-plane
+operation, not new CI evidence. Before any separately authorized resubmission,
+re-read the run attempt to avoid creating duplicate retries. A future
+repository-owned rerun helper may use only a small bounded transport retry with
+backoff and this attempt recheck; task-specific retry limits remain authority.
+
 ## Verification reporting
 
 Report checks under:
