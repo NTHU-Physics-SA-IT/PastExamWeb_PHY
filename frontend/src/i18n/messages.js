@@ -127,6 +127,11 @@ const en = {
   無阻擋: 'No blockers',
   永久刪除: 'Delete Permanently',
   目前無可用操作: 'No actions available',
+  課程申請: 'Course Request',
+  歷史紀錄: 'History',
+  '未連結課程（保留為獨立歷史紀錄）':
+    'No linked course (retained as an independent historical record)',
+  舊資料缺少可驗證的原始審核狀態: 'Legacy data lacks a verifiable original review state',
   分類標籤顏色: 'Category Label Color',
   分類標籤: 'Category Label',
   考古題投稿詳情: 'Exam Submission Details',
@@ -682,11 +687,11 @@ const en = {
   '最近更新：{time}': 'Updated: {time}',
   '{count} 則未讀': '{count} unread',
   目前沒有個人通知: 'No personal notifications',
-  來源已不存在: 'Source no longer exists',
+  來源目前無法開啟: 'Source currently unavailable',
   刪除通知: 'Delete notification',
   公告內容: 'Announcement',
-  '來源已不存在，無法開啟原留言。':
-    'The source no longer exists, so the original message cannot be opened.',
+  '來源目前無法開啟，但通知內容仍可查看。':
+    'The source is currently unavailable, but the notification details remain available.',
   重要: 'Important',
   一般: 'Normal',
   日期未明: 'Unknown date',
@@ -921,6 +926,21 @@ const en = {
   投稿等級設定: 'Submission Level Settings',
   投稿統計範圍: 'Submission statistics range',
   按鈕規則: 'Button Rules',
+  '操作按鈕以後端回傳的可用操作為準；依賴與阻擋文字只用來說明原因。':
+    'Action buttons follow the operations returned by the backend; dependency and blocker text only explains why.',
+  '顯示還原或永久刪除，代表後端已授權該筆項目的對應操作。':
+    'A visible restore or permanent-delete action means the backend authorized that operation for this item.',
+  '未顯示的操作不可由前端依項目類型、狀態或關聯自行推定。':
+    'The frontend does not infer unavailable actions from item type, status, or relationships.',
+  課程申請歷史: 'Course Request History',
+  '課程申請是獨立歷史紀錄；關聯課程不存在時仍可正常保留，不代表資料異常。':
+    'Course requests are independent historical records. A missing linked course is valid retained history, not a data error.',
+  '是否能還原與永久刪除由後端回傳；舊資料缺少可信原始狀態時不會顯示還原。':
+    'The backend determines restore and permanent-delete availability. Restore is hidden when legacy data lacks a trusted prior state.',
+  '刪除課程不會刪除課程申請；永久刪除課程申請也不會刪除課程。':
+    'Deleting a course does not delete its course request, and permanently deleting a course request does not delete a course.',
+  '前端不會提供重新連結或重建課程的動作。':
+    'The frontend does not offer actions to relink or recreate a course.',
   '搜尋投稿紀錄……': 'Search submission records…',
   搜尋此帳號投稿紀錄: 'Search this account’s submission records',
   教職員開放方式: 'Staff access method',
@@ -929,9 +949,6 @@ const en = {
   '既有考卷 PDF 預覽': 'Existing Exam PDF Preview',
   最近在線統計範圍: 'Recent online statistics range',
   最高等級: 'Maximum Level',
-  '有「阻擋永久刪除」 → 不顯示永久刪除。':
-    'If permanent deletion is blocked, the permanently delete action is hidden.',
-  '有「阻擋還原」 → 不顯示還原。': 'If restoration is blocked, the restore action is hidden.',
   此使用者目前沒有投稿: 'This user has no submissions',
   此帳號投稿紀錄: 'This Account’s Submission Records',
   此帳號投稿紀錄分頁: 'Account submission record pagination',
@@ -1391,8 +1408,6 @@ const en = {
   展開投稿等級選單與設定: 'Expand contributor level options and settings',
   '相關性顯示僅適用於「全部」篩選。':
     'Relationship display is available only with the “All” filter.',
-  '只有「一併永久刪除」或「關聯」時，按鈕不會自動隱藏。':
-    'Buttons remain visible when only “Permanently Deleted Together” or “Related” applies.',
   '{count} 小時': '{count} hours',
   '每 {count} 分鐘取樣一次': 'sampled every {count} minutes',
   '每 {count} 小時取樣一次': 'sampled every {count} hours',

@@ -87,6 +87,7 @@ class TrashEntityType(str, PyEnum):
     ARCHIVE_SUBMISSION = "archive_submission"
     COURSE_CATEGORY = "course_category"
     COURSE = "course"
+    COURSE_SUBMISSION = "course_submission"
     SYSTEM_ISSUE_REPORT = "system_issue_report"
     COMMENT_REPORT = "comment_report"
     ARCHIVE_REPORT = "archive_report"
@@ -280,6 +281,10 @@ class CourseCategoryConfig(SQLModel, table=True):
     deleted_at: datetime | None = Field(
         sa_column=Column(DateTime(timezone=True), nullable=True)
     )
+    pre_delete_is_active: bool | None = Field(
+        default=None,
+        sa_column=Column(Boolean, nullable=True),
+    )
     deleted_by_id: int | None = Field(default=None)
     restored_at: datetime | None = Field(
         sa_column=Column(DateTime(timezone=True), nullable=True)
@@ -392,16 +397,34 @@ class Archive(SQLModel, table=True):
 
 class CourseSubmission(SQLModel, table=True):
     __tablename__ = "course_submissions"
+    __table_args__ = (
+        CheckConstraint(
+            "previous_status IS NULL OR CAST(previous_status AS TEXT) <> 'DELETED'",
+            name="ck_course_submissions_previous_status_not_deleted",
+        ),
+        CheckConstraint(
+            "deleted_at IS NOT NULL "
+            "OR CAST(status AS TEXT) = 'DELETED' "
+            "OR previous_status IS NULL",
+            name="ck_course_submissions_active_previous_status_null",
+        ),
+    )
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True)
     category: str = Field(index=True)
     status: SubmissionStatus = Field(default=SubmissionStatus.PENDING, index=True)
+    previous_status: SubmissionStatus | None = Field(default=None)
     requester_id: int = Field(foreign_key="users.id", index=True)
     reviewer_id: int | None = Field(default=None, foreign_key="users.id")
-    review_note: str | None = Field(
-        default=None, sa_column=Column(Text, nullable=True)
+    review_note: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    created_course_id: int | None = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("courses.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
     )
-    created_course_id: int | None = Field(default=None, foreign_key="courses.id")
     created_at: datetime = Field(
         sa_column=Column(
             DateTime(timezone=True),
@@ -412,6 +435,16 @@ class CourseSubmission(SQLModel, table=True):
     reviewed_at: datetime | None = Field(
         sa_column=Column(DateTime(timezone=True), nullable=True)
     )
+    deleted_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    deleted_by_id: int | None = Field(default=None)
+    restored_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    restored_by_id: int | None = Field(default=None)
 
 
 class ArchiveSubmission(SQLModel, table=True):
@@ -488,9 +521,7 @@ class ArchiveSubmission(SQLModel, table=True):
         ),
     )
     reviewer_id: int | None = Field(default=None, foreign_key="users.id")
-    review_note: str | None = Field(
-        default=None, sa_column=Column(Text, nullable=True)
-    )
+    review_note: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     is_admin_upload: bool = Field(
         default=False,
         sa_column=Column(
@@ -2103,12 +2134,17 @@ class CourseSubmissionRead(BaseModel):
     name: str
     category: str
     status: SubmissionStatus
+    previous_status: SubmissionStatus | None = None
     requester_id: int
     reviewer_id: int | None = None
     review_note: str | None = None
     created_course_id: int | None = None
     created_at: datetime
     reviewed_at: datetime | None = None
+    deleted_at: datetime | None = None
+    deleted_by_id: int | None = None
+    restored_at: datetime | None = None
+    restored_by_id: int | None = None
 
     class Config:
         from_attributes = True
@@ -2193,7 +2229,7 @@ class TrashItem(BaseModel):
     display_name_en: str | None = None
     academic_year: int | None = None
     academic_term: str | None = None
-    deleted_at: datetime
+    deleted_at: datetime | None = None
     deleted_by_id: int | None = None
     deleted_by_name: str | None = None
     user_email: str | None = None

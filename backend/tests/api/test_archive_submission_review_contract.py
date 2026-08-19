@@ -644,6 +644,102 @@ async def test_direct_review_true_transitions_return_flat_changed_response(
 
 
 @pytest.mark.asyncio
+async def test_repeated_review_cycles_create_distinct_durable_notifications(
+    client,
+    session_maker,
+    make_user,
+):
+    requester = await make_user(name="repeated-review-requester")
+    admin = await make_user(name="repeated-review-admin", is_admin=True)
+    course, _, submission = await _create_review_context(
+        session_maker,
+        requester_id=requester.id,
+        reviewer_id=admin.id,
+        submission_status=SubmissionStatus.PENDING,
+    )
+    transitions = [
+        ("approve", SubmissionStatus.PENDING, SubmissionStatus.APPROVED),
+        ("reject", SubmissionStatus.APPROVED, SubmissionStatus.REJECTED),
+        ("approve", SubmissionStatus.REJECTED, SubmissionStatus.APPROVED),
+        ("reject", SubmissionStatus.APPROVED, SubmissionStatus.REJECTED),
+        ("approve", SubmissionStatus.REJECTED, SubmissionStatus.APPROVED),
+    ]
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        for action, expected_status, resulting_status in transitions:
+            response = await client.post(
+                f"/archives/admin/submissions/{submission.id}/{action}",
+                json={
+                    "note": f"cycle {action}",
+                    "expected_status": expected_status.value,
+                },
+            )
+
+            assert response.status_code == 200
+            assert response.json()["changed"] is True
+            assert response.json()["status"] == resulting_status.value
+
+        async with session_maker() as session:
+            stored_submission = await session.get(ArchiveSubmission, submission.id)
+            notifications = list(
+                (
+                    await session.execute(
+                        select(PersonalNotification)
+                        .where(
+                            PersonalNotification.user_id == requester.id,
+                            PersonalNotification.source_type
+                            == "archive_submission",
+                            PersonalNotification.source_id == submission.id,
+                        )
+                        .order_by(PersonalNotification.id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+        approved_notifications = [
+            notification
+            for notification in notifications
+            if notification.notification_type == "archive_submission_approved"
+        ]
+        rejected_notifications = [
+            notification
+            for notification in notifications
+            if notification.notification_type == "archive_submission_rejected"
+        ]
+        assert len(approved_notifications) == 3
+        assert len(rejected_notifications) == 2
+        assert len(notifications) == 5
+        assert {
+            notification.notification_type for notification in notifications
+        } == {
+            "archive_submission_approved",
+            "archive_submission_rejected",
+        }
+        assert len(
+            {notification.dedupe_key for notification in approved_notifications}
+        ) == 3
+        for notification in approved_notifications:
+            assert notification.metadata_json == {
+                "submission_id": submission.id,
+                "archive_id": stored_submission.created_archive_id,
+                "course_name": course.name,
+                "course_name_en": None,
+                "archive_name": submission.name,
+                "status": SubmissionStatus.APPROVED.value,
+                "destination": "my_submission_status",
+            }
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_review_context(
+            session_maker,
+            course_id=course.id,
+            submission_id=submission.id,
+        )
+
+
+@pytest.mark.asyncio
 async def test_admin_submission_list_projects_stable_available_actions(
     client,
     session_maker,

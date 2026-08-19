@@ -4,13 +4,12 @@ import argparse
 import importlib.util
 import json
 import os
-from pathlib import Path
 import signal
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
-
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
 SCRIPT = REPOSITORY_ROOT / "scripts" / "run-isolated-backend-tests.py"
@@ -24,18 +23,25 @@ POSTGRES_ID = "a" * 64
 BACKEND_ID = "b" * 64
 
 
-def schema_status(*, checksum: str = "state-checksum") -> str:
+def schema_status(
+    *,
+    checksum: str = "state-checksum",
+    expected_ledger: str = "d4b7e2a9c6f1",
+) -> str:
     return "\n".join(
         (
             "audit=archive-submission-self-delete-eligibility@4",
             "status=complete",
-            "expected_ledger=e6a1b3c5d7f9",
+            f"expected_ledger={expected_ledger}",
             "explicit_rollback=true",
-            "aggregates=total:30,active:26,deleted:4,"
-            "created_archive_id_non_null:19,created_archive_id_null:11,"
-            "max_created_archive_cardinality:1,dangling_created_archive_links:0,"
-            "created_archive_link_checksum:link-checksum,"
-            f"submission_state_checksum:{checksum}",
+            (
+                "aggregates=total:30,active:26,deleted:4,"
+                "created_archive_id_non_null:19,created_archive_id_null:11,"
+                "max_created_archive_cardinality:1,"
+                "dangling_created_archive_links:0,"
+                "created_archive_link_checksum:link-checksum,"
+                f"submission_state_checksum:{checksum}"
+            ),
         )
     )
 
@@ -82,6 +88,8 @@ class FakeExecutor:
         docker_run_timeout: bool = False,
         post_checksum: str = "state-checksum",
         volume_mount: bool = False,
+        schema_expected_ledger: str | None = None,
+        isolated_head: str | None = None,
     ) -> None:
         self.pytest_exit = pytest_exit
         self.migration_exit = migration_exit
@@ -91,6 +99,8 @@ class FakeExecutor:
         self.docker_run_timeout = docker_run_timeout
         self.post_checksum = post_checksum
         self.volume_mount = volume_mount
+        self.schema_expected_ledger = schema_expected_ledger
+        self.isolated_head = isolated_head
         self.commands: list[tuple[str, ...]] = []
         self.inputs: list[str] = []
         self.schema_calls = 0
@@ -117,10 +127,21 @@ class FakeExecutor:
             BACKEND_ID,
         }:
             return runner_module.CommandResult(0, inspect_payload(command[-1]))
-        if command[-1:] == ("schema-status",):
+        if "schema-status" in command:
             self.schema_calls += 1
             checksum = self.post_checksum if self.schema_calls > 1 else "state-checksum"
-            return runner_module.CommandResult(0, schema_status(checksum=checksum))
+            expected_ledger = self.schema_expected_ledger or (
+                command[command.index("--expected-ledger") + 1]
+                if "--expected-ledger" in command
+                else runner_module.EPHEMERAL_TARGET_HEAD
+            )
+            return runner_module.CommandResult(
+                0,
+                schema_status(
+                    checksum=checksum,
+                    expected_ledger=expected_ledger,
+                ),
+            )
         if command[:3] == ("docker", "image", "inspect"):
             return runner_module.CommandResult(self.image_exit, "sha256:image\n")
         if command[:2] == ("docker", "ps"):
@@ -148,7 +169,10 @@ class FakeExecutor:
         if command[:2] == ("docker", "exec") and "psql" in command:
             sql = input_text or ""
             if "SELECT version_num FROM alembic_version" in sql:
-                return runner_module.CommandResult(0, "e6a1b3c5d7f9\n")
+                return runner_module.CommandResult(
+                    0,
+                    f"{self.isolated_head or runner_module.EPHEMERAL_TARGET_HEAD}\n",
+                )
             if "CREATE ROLE" in sql:
                 return runner_module.CommandResult(self.bootstrap_exit, "")
             database = next(
@@ -183,10 +207,14 @@ class FakeExecutor:
         raise AssertionError(f"unexpected command: {command}")
 
 
-def args(*pytest_args: str) -> argparse.Namespace:
+def args(
+    *pytest_args: str,
+    canonical_expected_ledger: str = "d4b7e2a9c6f1",
+) -> argparse.Namespace:
     return argparse.Namespace(
         postgres_container_id=POSTGRES_ID,
         backend_container_id=BACKEND_ID,
+        canonical_expected_ledger=canonical_expected_ledger,
         output="json",
         pytest_args=list(
             pytest_args or ("backend/tests/unit/test_submission_decision.py", "-q")
@@ -194,8 +222,18 @@ def args(*pytest_args: str) -> argparse.Namespace:
     )
 
 
-def run(fake: FakeExecutor, *pytest_args: str):
-    runner = runner_module.IsolatedPostgresRunner(args(*pytest_args), executor=fake)
+def run(
+    fake: FakeExecutor,
+    *pytest_args: str,
+    canonical_expected_ledger: str = "d4b7e2a9c6f1",
+):
+    runner = runner_module.IsolatedPostgresRunner(
+        args(
+            *pytest_args,
+            canonical_expected_ledger=canonical_expected_ledger,
+        ),
+        executor=fake,
+    )
     runner.execute()
     return runner
 
@@ -222,13 +260,113 @@ def test_success_has_stable_json_and_complete_cleanup() -> None:
     runner = run(FakeExecutor())
     payload = json.loads(json.dumps(runner_module.asdict(runner.evidence)))
     assert runner.evidence.exit_code == 0
-    assert payload["schema_version"] == 1
-    assert payload["migration_head"] == "e6a1b3c5d7f9"
+    assert payload["schema_version"] == 2
+    assert payload["canonical_expected_ledger"] == "d4b7e2a9c6f1"
+    assert payload["ephemeral_target_head"] == "b4d6f8a2c1e3"
+    assert payload["migration_head"] == "b4d6f8a2c1e3"
     assert all(payload["cleanup"].values())
 
 
 def test_runner_uses_canonical_schema_manifest_head() -> None:
-    assert runner_module.EXPECTED_ALEMBIC_HEAD == "a9c4e7b2d6f1"
+    assert runner_module.EPHEMERAL_TARGET_HEAD == "b4d6f8a2c1e3"
+
+
+def test_explicit_canonical_baseline_is_distinct_from_ephemeral_target() -> None:
+    parsed = runner_module.parse_args(
+        [
+            "--postgres-container-id",
+            POSTGRES_ID,
+            "--backend-container-id",
+            BACKEND_ID,
+            "--canonical-expected-ledger",
+            "c2a8e4f6b9d1",
+            "--",
+            "backend/tests/unit/test_submission_decision.py",
+        ]
+    )
+
+    assert parsed.canonical_expected_ledger == "c2a8e4f6b9d1"
+    assert runner_module.EPHEMERAL_TARGET_HEAD == runner_module.HEAD_SCHEMA_REVISION
+
+
+def test_ephemeral_target_head_has_no_cli_override() -> None:
+    with pytest.raises(SystemExit):
+        runner_module.parse_args(
+            [
+                "--postgres-container-id",
+                POSTGRES_ID,
+                "--backend-container-id",
+                BACKEND_ID,
+                "--ephemeral-target-head",
+                "c2a8e4f6b9d1",
+                "--",
+                "backend/tests/unit/test_submission_decision.py",
+            ]
+        )
+
+
+def test_unknown_and_nonancestor_canonical_baselines_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(runner_module.RunnerFailure, match="malformed"):
+        runner_module.validate_canonical_expected_ledger("bad")
+
+    with pytest.raises(runner_module.RunnerFailure, match="reviewed"):
+        runner_module.validate_canonical_expected_ledger("ffffffffffff")
+
+    monkeypatch.setattr(
+        runner_module,
+        "is_revision_ancestor",
+        lambda *_args, **_kwargs: False,
+    )
+    with pytest.raises(runner_module.RunnerFailure, match="ancestor"):
+        runner_module.validate_canonical_expected_ledger("c2a8e4f6b9d1")
+
+
+def test_invalid_baselines_are_rejected_before_ephemeral_resource(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unknown = FakeExecutor()
+    unknown_runner = run(
+        unknown,
+        canonical_expected_ledger="ffffffffffff",
+    )
+    assert unknown_runner.evidence.exit_code == 20
+    assert not any(command[:2] == ("docker", "run") for command in unknown.commands)
+
+    monkeypatch.setattr(
+        runner_module,
+        "is_revision_ancestor",
+        lambda *_args, **_kwargs: False,
+    )
+    nonancestor = FakeExecutor()
+    nonancestor_runner = run(
+        nonancestor,
+        canonical_expected_ledger="c2a8e4f6b9d1",
+    )
+    assert nonancestor_runner.evidence.exit_code == 20
+    assert not any(command[:2] == ("docker", "run") for command in nonancestor.commands)
+
+
+def test_older_canonical_baseline_never_changes_ephemeral_target() -> None:
+    fake = FakeExecutor()
+    runner = run(fake, canonical_expected_ledger="c2a8e4f6b9d1")
+
+    assert runner.evidence.exit_code == 0
+    assert runner.evidence.canonical_expected_ledger == "c2a8e4f6b9d1"
+    assert runner.evidence.canonical_pre["alembic_head"] == "c2a8e4f6b9d1"
+    assert runner.evidence.migration_head == runner_module.EPHEMERAL_TARGET_HEAD
+
+
+def test_persistent_baseline_and_ephemeral_head_mismatches_fail_closed() -> None:
+    persistent_mismatch = run(FakeExecutor(schema_expected_ledger="c2a8e4f6b9d1"))
+    assert persistent_mismatch.evidence.exit_code == 20
+    assert persistent_mismatch.evidence.generated_resource_name is None
+
+    ephemeral_mismatch = run(FakeExecutor(isolated_head="c2a8e4f6b9d1"))
+    assert ephemeral_mismatch.evidence.exit_code == 21
+    assert ephemeral_mismatch.evidence.migration_status == "not_started"
+    assert ephemeral_mismatch.evidence.cleanup["container_absent"] is True
 
 
 @pytest.mark.parametrize(
@@ -283,6 +421,18 @@ def test_dev_compose_command_matches_the_platform_execution_boundary() -> None:
         assert Path(command[1]) == runner_module.DEV_COMPOSE
     else:
         assert command == (str(runner_module.DEV_COMPOSE), "schema-status")
+
+
+def test_dev_compose_command_passes_exact_canonical_baseline() -> None:
+    command = runner_module.dev_compose_command(
+        "schema-status", expected_ledger="c2a8e4f6b9d1"
+    )
+
+    assert command[-3:] == (
+        "schema-status",
+        "--expected-ledger",
+        "c2a8e4f6b9d1",
+    )
 
 
 def test_cleanup_targets_only_exact_generated_resource() -> None:

@@ -33,8 +33,8 @@ observable contract remains stable.
 
 `ArchiveSubmission` contains the submission and stored-object metadata, while
 `Archive` is the current public record. `created_archive_id` links them
-optionally. Current queries and lifecycle helpers sometimes treat several
-submissions linked to one `Archive` as a group.
+optionally and uniquely. Public projection and reversible soft-lifecycle
+operations follow that exact link; matching metadata is not ownership.
 
 ### Intended invariant
 
@@ -42,11 +42,13 @@ The four concepts above remain distinct even if the current model names and
 tables do not yet express that separation. Multiple approved files may belong
 to one logical exam group without sharing review or delete outcomes.
 
-### Known gap
+### Current safety-net status
 
-The current data model and lifecycle code do not consistently preserve
-independent public items for sibling submissions. The contract is documented
-before the safety tests and conformance changes planned for later stages.
+Focused public-catalog, authenticated source-projection, file-action, and
+frontend tests now protect independent Archive identities when exam metadata
+matches. Focused submission-initiated and Archive-initiated trash/restore tests
+also protect the exact pair while a same-metadata sibling remains unchanged and
+publicly visible.
 
 ## Evidence and status labels
 

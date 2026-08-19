@@ -63,9 +63,14 @@ Reviewed manifests currently cover:
 - `c2a8e4f6b9d1`: the reviewed schema before bilingual ArchiveSubmission
   presentation snapshots; and
 - `d4b7e2a9c6f1`: the reviewed schema before About Us entries; and
-- `e6a1b3c5d7f9`: the reviewed schema before bilingual managed content and the
-  persisted Wish Pool; and
-- `a9c4e7b2d6f1`: the current repository head and SQLModel metadata contract.
+- `e6a1b3c5d7f9`: the reviewed schema before both known sibling branches;
+- `e8a4c1d7b2f6`: the reviewed Category-state sibling source before
+  CourseSubmission lifecycle independence;
+- `a9c2e5f7b1d4`: the reviewed Stage 5D sibling head;
+- `a9c4e7b2d6f1`: the reviewed bilingual managed-content and Wish Pool sibling
+  head; and
+- `b4d6f8a2c1e3`: the merged current repository head and combined SQLModel
+  metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,
@@ -203,6 +208,14 @@ its update-order/editor indexes. It backfills or rewrites no existing rows,
 keeps its editor reference nullable with `ON DELETE SET NULL`, and downgrade
 removes only that new table and its indexes.
 
+The Category state-preservation migration follows the About Us revision. It
+adds nullable `course_category_configs.pre_delete_is_active`, leaves live rows
+unchanged, snapshots the prior active state of deleted rows, and makes every
+deleted Category inactive. Upgrade and downgrade reject malformed lifecycle
+rows rather than guessing. Downgrade returns only to the About Us revision:
+it restores deleted rows' representable pre-D1 active state, removes only the
+snapshot column, and preserves the About Us table and its contents.
+
 On the first bootstrap, one missing canonical key or any extra custom category
 is evidence that the database is not the expected clean initialized target,
 so bootstrap fails without creating an administrator or marker. After the
@@ -238,11 +251,13 @@ reviewed migration classifier. Adding a classifier requires a new registered
 version and synthetic PostgreSQL evidence.
 
 Adapter version 4 supports the reviewed bilingual revisions
-`c2a8e4f6b9d1`, `d4b7e2a9c6f1`, and `e6a1b3c5d7f9`. It preserves the version 3
-ArchiveSubmission lifecycle classifier and aggregate fingerprints, while its
-continuity gate additionally requires the revision-appropriate nullable
-English catalog and submission-snapshot columns. Versions 1 through 3 retain
-their historical revision bounds.
+`c2a8e4f6b9d1`, `d4b7e2a9c6f1`, `e6a1b3c5d7f9`, and `e8a4c1d7b2f6`. It
+preserves the version 3 ArchiveSubmission lifecycle classifier and aggregate
+fingerprints, while its continuity gate additionally requires the
+revision-appropriate nullable English catalog and submission-snapshot columns.
+The e8 revision also requires the nullable Category lifecycle snapshot; e6 and
+all older revisions require that column to be absent. Versions 1 through 3
+retain their historical revision bounds.
 
 Every execution sends one complete input stream to non-interactive `psql` and
 uses `ON_ERROR_STOP`, `REPEATABLE READ READ ONLY`, statement/lock/idle
@@ -279,6 +294,17 @@ gate before starting an existing paused backend; it never creates a container
 or performs an upgrade. `backend-pause` and `backend-resume` are deliberate
 schema-branch controls, not general restart shortcuts.
 
+For isolated validation on a schema-changing branch only,
+`schema-status --expected-ledger <revision>` exposes the audit runner's existing
+read-only ledger selection. The isolated test runner first requires that the
+revision have a reviewed manifest, be a legal Alembic ancestor of the single
+repository head, and be supported by the sealed audit. The selected value is
+the canonical persistent pre/post baseline only; callers cannot override the
+ephemeral migration target, which remains the repository head. Unknown,
+unreviewed, non-ancestor, schema-drifting, or checksum-changing baselines fail
+before or during the guarded run. Persistent migration remains a later,
+separately authorized operation after isolated branch evidence is Green.
+
 ## Migration-chain rule
 
 Published or deployed revision files are immutable. Add a new revision for
@@ -310,13 +336,23 @@ transition identity and the exact sibling-specific schema continuity. Ledger
 identity alone is insufficient. Unknown, partial, malformed,
 unexpected-multiple, unreviewed, or schema-inconsistent states fail closed.
 
-The separately reviewed implementation must prove that databases starting at
-`e6a1b3c5d7f9`, `a9c2e5f7b1d4`, or `a9c4e7b2d6f1` converge to one final
-repository head. It must not use `alembic stamp`, manual `alembic_version`
-repair, skipped or fictitious DDL, or reparenting or deletion of accepted
-revisions. This exception does not permit arbitrary future sibling branches
-and does not authorize production or canonical-local migration, deployment,
-or ADR-0003 Case-B execution.
+The implemented finite compatibility states are:
 
-ADR-0008 supplies governance permission for the narrow compatibility design;
-the migration implementation and final merged head are still pending.
+- `e8a4c1d7b2f6` accepts its normal exact `e6a1b3c5d7f9` source or the exact
+  `a9c4e7b2d6f1` sibling ledger with complete Wish Pool/bilingual continuity;
+- `a9c2e5f7b1d4` accepts its normal exact `e8a4c1d7b2f6` source or the exact
+  two-row `e8a4c1d7b2f6` plus `a9c4e7b2d6f1` Alembic transition with complete
+  Category and Wish Pool continuity; and
+- `a9c4e7b2d6f1` accepts its normal exact `e6a1b3c5d7f9` source or the exact
+  `a9c2e5f7b1d4` sibling ledger with complete Category and CourseSubmission
+  lifecycle continuity.
+
+The no-op topology revision `b4d6f8a2c1e3` joins the two sibling heads. Tests
+prove that databases starting at `e6a1b3c5d7f9`, `a9c2e5f7b1d4`, or
+`a9c4e7b2d6f1` converge to that single head without `alembic stamp`, manual
+`alembic_version` repair, skipped or fictitious DDL, or reparenting or deletion
+of accepted revisions. Unknown, partial, malformed, or schema-inconsistent
+states still fail closed.
+
+This exception does not permit arbitrary future sibling branches and does not
+authorize production or canonical-local migration or deployment.

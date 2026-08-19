@@ -1,4 +1,6 @@
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -262,6 +264,10 @@ _SUBMISSION_NOTIFICATION_COPY = {
     SubmissionStatus.TAKEDOWN: ("考古題已下架", "已下架"),
 }
 
+_SUBMISSION_NOTIFICATION_DEDUPE_KEYS_INFO = (
+    "archive_submission_status_notification_dedupe_keys"
+)
+
 
 def normalize_submission_status(value) -> SubmissionStatus | None:
     if isinstance(value, SubmissionStatus):
@@ -321,11 +327,68 @@ def resolve_archive_submission_actual_status(
     return normalize_submission_status(value)
 
 
+def build_submission_status_notification_dedupe_key(
+    *,
+    submission_id: int,
+    new_status: SubmissionStatus,
+    reviewed_at: datetime | None,
+    created_at: datetime | None,
+) -> str:
+    source_state_generation = reviewed_at or created_at
+    if source_state_generation is None:
+        raise ValueError("Submission source-state generation is required")
+    if source_state_generation.tzinfo is None:
+        source_state_generation = source_state_generation.replace(tzinfo=UTC)
+    normalized_generation = (
+        source_state_generation.astimezone(UTC)
+        .isoformat(timespec="microseconds")
+        .replace("+00:00", "Z")
+    )
+    return (
+        "archive_submission_status:v2:"
+        f"{submission_id}:{new_status.value}:{normalized_generation}"
+    )
+
+
+@contextmanager
+def capture_submission_status_notification_identity(
+    db: AsyncSession,
+    submission: ArchiveSubmission,
+    new_status: SubmissionStatus,
+) -> Iterator[None]:
+    """Capture the persisted source-state generation before transition mutation."""
+
+    identity = (submission.id, new_status)
+    dedupe_keys = db.info.setdefault(_SUBMISSION_NOTIFICATION_DEDUPE_KEYS_INFO, {})
+    if identity in dedupe_keys:
+        raise RuntimeError("Submission notification identity is already captured")
+    dedupe_keys[identity] = build_submission_status_notification_dedupe_key(
+        submission_id=submission.id,
+        new_status=new_status,
+        reviewed_at=submission.reviewed_at,
+        created_at=submission.created_at,
+    )
+    try:
+        yield
+    finally:
+        dedupe_keys.pop(identity, None)
+        if not dedupe_keys:
+            db.info.pop(_SUBMISSION_NOTIFICATION_DEDUPE_KEYS_INFO, None)
+
+
 async def enqueue_submission_status_notification(
     db: AsyncSession,
     submission: ArchiveSubmission,
     new_status: SubmissionStatus,
 ) -> None:
+    identity = (submission.id, new_status)
+    dedupe_key = db.info.get(_SUBMISSION_NOTIFICATION_DEDUPE_KEYS_INFO, {}).get(
+        identity
+    )
+    if dedupe_key is None:
+        raise RuntimeError(
+            "Submission notification identity must be captured before mutation"
+        )
     title, status_label = _SUBMISSION_NOTIFICATION_COPY[new_status]
     type_by_status = {
         SubmissionStatus.APPROVED: PersonalNotificationType.ARCHIVE_SUBMISSION_APPROVED,
@@ -356,7 +419,7 @@ async def enqueue_submission_status_notification(
             "status": new_status.value,
             "destination": "my_submission_status",
         },
-        dedupe_key=f"archive_submission_status:{submission.id}:{new_status.value}",
+        dedupe_key=dedupe_key,
     )
 
 
@@ -376,13 +439,18 @@ async def take_down_archive_submission(
             status_code=status.HTTP_409_CONFLICT,
             detail="Submission cannot be taken down from its current status",
         )
-    submission.status = SubmissionStatus.TAKEDOWN
-    submission.reviewer_id = reviewer_id
-    submission.review_note = note if note is not None else submission.review_note
-    submission.reviewed_at = datetime.now(UTC)
-    await enqueue_submission_status_notification(
-        db, submission, SubmissionStatus.TAKEDOWN
-    )
+    with capture_submission_status_notification_identity(
+        db,
+        submission,
+        SubmissionStatus.TAKEDOWN,
+    ):
+        submission.status = SubmissionStatus.TAKEDOWN
+        submission.reviewer_id = reviewer_id
+        submission.review_note = note if note is not None else submission.review_note
+        submission.reviewed_at = datetime.now(UTC)
+        await enqueue_submission_status_notification(
+            db, submission, SubmissionStatus.TAKEDOWN
+        )
 
 
 async def republish_archive_submission(

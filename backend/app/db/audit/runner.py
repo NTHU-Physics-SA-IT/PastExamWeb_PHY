@@ -26,6 +26,9 @@ from app.db.audit.registry import (
     ABOUT_US_REVISION,
     BILINGUAL_COURSE_CATALOG_REVISION,
     BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
+    CATEGORY_STATE_PRESERVATION_REVISION,
+    COURSE_SUBMISSION_LIFECYCLE_REVISION,
+    SIBLING_MERGE_REVISION,
     WISH_POOL_REVISION,
     AuditAdapter,
     get_audit_adapter,
@@ -124,7 +127,10 @@ def _continuity_cte(request: AuditRequest) -> str:
         BILINGUAL_COURSE_CATALOG_REVISION,
         BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
         ABOUT_US_REVISION,
+        CATEGORY_STATE_PRESERVATION_REVISION,
+        COURSE_SUBMISSION_LIFECYCLE_REVISION,
         WISH_POOL_REVISION,
+        SIBLING_MERGE_REVISION,
     }
     owner_delete_column_condition = (
         """
@@ -159,7 +165,10 @@ def _continuity_cte(request: AuditRequest) -> str:
         BILINGUAL_COURSE_CATALOG_REVISION,
         BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
         ABOUT_US_REVISION,
+        CATEGORY_STATE_PRESERVATION_REVISION,
+        COURSE_SUBMISSION_LIFECYCLE_REVISION,
         WISH_POOL_REVISION,
+        SIBLING_MERGE_REVISION,
     }
     previous_status_column_condition = (
         """
@@ -188,7 +197,10 @@ def _continuity_cte(request: AuditRequest) -> str:
         BILINGUAL_COURSE_CATALOG_REVISION,
         BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
         ABOUT_US_REVISION,
+        CATEGORY_STATE_PRESERVATION_REVISION,
+        COURSE_SUBMISSION_LIFECYCLE_REVISION,
         WISH_POOL_REVISION,
+        SIBLING_MERGE_REVISION,
     }
     bilingual_catalog_condition = (
         """
@@ -226,7 +238,10 @@ def _continuity_cte(request: AuditRequest) -> str:
     expects_bilingual_snapshots = request.expected_ledger in {
         BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
         ABOUT_US_REVISION,
+        CATEGORY_STATE_PRESERVATION_REVISION,
+        COURSE_SUBMISSION_LIFECYCLE_REVISION,
         WISH_POOL_REVISION,
+        SIBLING_MERGE_REVISION,
     }
     bilingual_snapshot_condition = (
         """
@@ -256,6 +271,105 @@ def _continuity_cte(request: AuditRequest) -> str:
                 'requested_category_name_en',
                 'requested_category_label_en'
               )
+        )
+        """
+    )
+    expects_category_state_snapshot = request.expected_ledger in {
+        CATEGORY_STATE_PRESERVATION_REVISION,
+        COURSE_SUBMISSION_LIFECYCLE_REVISION,
+        SIBLING_MERGE_REVISION,
+    }
+    category_state_snapshot_condition = (
+        """
+        EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'course_category_configs'
+              AND column_name = 'pre_delete_is_active'
+              AND data_type = 'boolean'
+              AND is_nullable = 'YES'
+        )
+        """
+        if expects_category_state_snapshot
+        else """
+        NOT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'course_category_configs'
+              AND column_name = 'pre_delete_is_active'
+        )
+        """
+    )
+    expects_course_submission_lifecycle = request.expected_ledger in {
+        COURSE_SUBMISSION_LIFECYCLE_REVISION,
+        SIBLING_MERGE_REVISION,
+    }
+    course_submission_lifecycle_condition = (
+        """
+        (
+            SELECT count(*) = 5
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'course_submissions'
+              AND column_name IN (
+                  'previous_status',
+                  'deleted_at',
+                  'deleted_by_id',
+                  'restored_at',
+                  'restored_by_id'
+              )
+              AND is_nullable = 'YES'
+        )
+        """
+        if expects_course_submission_lifecycle
+        else """
+        NOT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'course_submissions'
+              AND column_name IN (
+                  'previous_status',
+                  'deleted_at',
+                  'deleted_by_id',
+                  'restored_at',
+                  'restored_by_id'
+              )
+        )
+        """
+    )
+    expects_wish_pool = request.expected_ledger in {
+        WISH_POOL_REVISION,
+        SIBLING_MERGE_REVISION,
+    }
+    wish_pool_condition = (
+        """
+        to_regclass('public.archive_wishes') IS NOT NULL
+        AND to_regclass('public.archive_wish_hearts') IS NOT NULL
+        AND to_regclass('public.archive_wish_reports') IS NOT NULL
+        AND EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'archive_submissions'
+              AND column_name = 'source_wish_id'
+              AND data_type = 'integer'
+              AND is_nullable = 'YES'
+        )
+        """
+        if expects_wish_pool
+        else """
+        to_regclass('public.archive_wishes') IS NULL
+        AND to_regclass('public.archive_wish_hearts') IS NULL
+        AND to_regclass('public.archive_wish_reports') IS NULL
+        AND NOT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'archive_submissions'
+              AND column_name = 'source_wish_id'
         )
         """
     )
@@ -300,7 +414,10 @@ schema_state AS (
         AND ({owner_delete_column_condition})
         AND ({previous_status_column_condition})
         AND ({bilingual_catalog_condition})
-        AND ({bilingual_snapshot_condition}) AS schema_ok
+        AND ({bilingual_snapshot_condition})
+        AND ({category_state_snapshot_condition})
+        AND ({course_submission_lifecycle_condition})
+        AND ({wish_pool_condition}) AS schema_ok
     FROM required_columns
 ),
 enum_state AS (

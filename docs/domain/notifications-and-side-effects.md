@@ -174,12 +174,22 @@ test evidence.
   (`changed=true`).
 - A dedupe key distinguishes a retry of one event from a later real cycle.
 
-### Implementation gap
+### Current implementation and safety net
 
-`enqueue_submission_status_notification` currently uses a permanent
-`submission_id + target status` dedupe key for approve/reject/takedown. It can
-suppress a legitimate later cycle. Republish includes transition-time context,
-so the strategies are inconsistent.
+Approve, reject, and takedown capture the persisted source-state generation
+before transition mutation: the prior `reviewed_at`, or stable `created_at` for
+the initial generation. Their versioned v2 dedupe key combines the Submission,
+target status, and UTC-normalized source-state generation. A retry of the same
+logical transition therefore keeps one identity, while leaving and later
+returning to the same target uses a new identity and creates another durable
+notification. Historical v1 rows coexist without backfill or migration.
+
+Focused pure-key and PostgreSQL API coverage protects deterministic identity,
+target separation, initial-generation fallback, repeated leave-and-return
+cycles, metadata preservation, and same-target silence. No-op, stale, illegal,
+concurrent-loser, and rolled-back requests retain their existing
+notification-free behavior. Republish keeps its existing pre-republish
+takedown-transition identity and has separate repeated-cycle characterization.
 
 ## Report notifications
 
@@ -223,22 +233,54 @@ leaves Report, Archive or Submission, and notification state unchanged.
 | --- | --- |
 | Active and authorized | Link may open the source |
 | Soft-deleted | Do not expose an active link; an authorized historical view may be designed separately |
-| Hard-deleted | Retain the notification, mark the source unavailable, display `來源已不存在`, and expose no active source action or navigation |
+| Hard-deleted | Retain the notification, mark the source unavailable with neutral wording, and expose no active source action or navigation |
 | Missing or unauthorized | Mark unavailable without revealing protected existence |
 
 Permanent source deletion does not delete durable notification history. A
 replacement or historical source view may be designed later, but no operation
 may continue to navigate to the deleted source.
 
-### Current implementation and gap
+### Current implementation
 
-`backend/app/api/services/notifications.py` resolves source availability by
-notification type. Discussion, submission, and archive-report sources use
-different queries and soft-delete checks. Frontend handling in
-`NotificationCenterModal.vue` opens only selected available source types.
-Hard-delete and legacy-source behavior is not yet one consistent contract.
-The complete source-availability API and `來源已不存在` UI presentation remain
-an implementation gap and are not yet protected by a focused test.
+`backend/app/api/services/notifications.py` treats `source_available` as a
+recipient-safe live-destination projection, not raw backing-row existence. A
+bounded notification page resolves recognized source families with at most
+three batched queries and fails closed without distinguishing missing,
+unauthorized, deleted, inaccessible, or malformed sources:
+
+- `archive_submission` requires the recipient to own an active Submission;
+  rejected and takedown history remains available through the requester's
+  existing status destination, while soft-deleted and `DELETED` rows do not;
+- `archive_report` requires reporter ownership, live and coherent
+  Archive/Course references, and the existing effective-public Archive
+  conditions; stored route identifiers must match that destination;
+- `comment_report` remains readable notification detail but is never projected
+  as an available source because no ordinary-recipient destination exists;
+- `archive_discussion_thread` requires a coherent active root/message pair on
+  an effective-public Archive and active Course, with matching stored route
+  identifiers; and
+- a valid source-less notification has no source identifiers and remains
+  available as durable detail-only history, while stray identifiers, unknown
+  types, and incomplete recognized references fail closed.
+
+The notification row and its stored historical title, message, and metadata
+remain readable after the live source disappears. The API exposes no
+missing-versus-unauthorized reason, newly queried protected metadata, or
+historical-source view. Focused notification API tests protect ownership,
+lifecycle, coherence, malformed-reference, and durability cases. This change
+requires no migration.
+
+The frontend treats this backend projection as the sole live-source authority:
+it does not distinguish missing, unauthorized, or otherwise inaccessible
+sources. `source_available=false` prevents active navigation while the stored
+notification detail remains readable with neutral unavailable wording. A
+recognized navigable source also needs a valid route-metadata shape; malformed
+identifiers fail closed without closing the notification center or calling the
+router. This shape validation is not an authorization check. Detail-only,
+source-less, and unsupported notifications remain readable without inventing
+another recipient route. The C1 notification identity and C2 backend projection
+boundaries remain unchanged, and this frontend behavior requires no backend or
+migration change.
 
 ## ArchiveSubmissionEvent side effect
 

@@ -252,6 +252,9 @@ describe('ArchiveView', () => {
         data: { url: `https://example.com/${archiveId}.pdf` },
       })
     )
+    getArchivePreviewUrlMock.mockImplementation((_courseId, archiveId) =>
+      Promise.resolve({ data: `${archiveId}-preview` })
+    )
     globalThis.fetch = vi.fn(() =>
       Promise.resolve({
         ok: true,
@@ -292,6 +295,14 @@ describe('ArchiveView', () => {
     expect(getArchiveDownloadUrlMock).toHaveBeenNthCalledWith(2, 'c1', 'matching-b')
     expect(globalThis.fetch).toHaveBeenNthCalledWith(1, 'https://example.com/matching-a.pdf')
     expect(globalThis.fetch).toHaveBeenNthCalledWith(2, 'https://example.com/matching-b.pdf')
+
+    await wrapper.vm.previewArchive(wrapper.vm.groupedArchives[0].list[0])
+    await wrapper.vm.previewArchive(wrapper.vm.groupedArchives[0].list[1])
+    await flushPromises()
+
+    expect(getArchivePreviewUrlMock).toHaveBeenNthCalledWith(1, 'c1', 'matching-a')
+    expect(getArchivePreviewUrlMock).toHaveBeenNthCalledWith(2, 'c1', 'matching-b')
+    expect(wrapper.vm.selectedArchive.id).toBe('matching-b')
 
     vi.runAllTimers()
     wrapper.unmount()

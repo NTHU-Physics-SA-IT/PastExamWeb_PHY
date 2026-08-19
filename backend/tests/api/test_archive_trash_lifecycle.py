@@ -91,6 +91,103 @@ async def _notification_count(session_maker, *, user_ids: list[int]) -> int:
         )
 
 
+async def _create_same_metadata_approved_pairs(
+    session_maker,
+    *,
+    requester_a_id: int,
+    requester_b_id: int,
+):
+    unique = uuid.uuid4().hex
+    async with session_maker() as session:
+        course = Course(
+            name=f"Same Metadata Lifecycle Course {unique}",
+            category=CourseCategory.FRESHMAN,
+        )
+        session.add(course)
+        await session.flush()
+
+        archives = [
+            Archive(
+                name="Shared Lifecycle Exam",
+                academic_year=2026,
+                archive_type=ArchiveType.FINAL,
+                professor="Shared Lifecycle Professor",
+                has_answers=True,
+                object_name=f"private/lifecycle-{unique}-{label}.pdf",
+                uploader_id=requester_id,
+                course_id=course.id,
+            )
+            for label, requester_id in (
+                ("a", requester_a_id),
+                ("b", requester_b_id),
+            )
+        ]
+        session.add_all(archives)
+        await session.flush()
+
+        submissions = [
+            ArchiveSubmission(
+                subject=course.name,
+                category=CourseCategory.FRESHMAN.value,
+                name=archive.name,
+                academic_year=archive.academic_year,
+                archive_type=archive.archive_type,
+                professor=archive.professor,
+                has_answers=archive.has_answers,
+                object_name=f"submissions/lifecycle-{unique}-{label}.pdf",
+                requester_id=requester_id,
+                status=SubmissionStatus.APPROVED,
+                created_archive_id=archive.id,
+            )
+            for label, requester_id, archive in (
+                ("a", requester_a_id, archives[0]),
+                ("b", requester_b_id, archives[1]),
+            )
+        ]
+        session.add_all(submissions)
+        await session.commit()
+        for row in (course, *archives, *submissions):
+            await session.refresh(row)
+
+        return course, submissions[0], archives[0], submissions[1], archives[1]
+
+
+def _pair_lifecycle_snapshot(submission: ArchiveSubmission, archive: Archive):
+    return {
+        "submission": {
+            "status": submission.status,
+            "previous_status": submission.previous_status,
+            "created_archive_id": submission.created_archive_id,
+            "object_name": submission.object_name,
+            "deleted_at": submission.deleted_at,
+            "deleted_by_id": submission.deleted_by_id,
+            "delete_reason": submission.delete_reason,
+            "restored_at": submission.restored_at,
+            "restored_by_id": submission.restored_by_id,
+            "lifecycle_reason": submission.lifecycle_reason,
+        },
+        "archive": {
+            "object_name": archive.object_name,
+            "deleted_at": archive.deleted_at,
+            "deleted_by_id": archive.deleted_by_id,
+            "deleted_reason": archive.deleted_reason,
+            "restored_at": archive.restored_at,
+            "restored_by_id": archive.restored_by_id,
+        },
+    }
+
+
+async def _public_archive_ids(client: AsyncClient, *, course_id: int) -> set[int]:
+    auth_override = app.dependency_overrides.pop(get_current_user, None)
+    try:
+        response = await client.get(f"/courses/public/{course_id}/archives")
+        assert response.status_code == 200
+        return {row["id"] for row in response.json()}
+    finally:
+        if auth_override is not None:
+            app.dependency_overrides[get_current_user] = auth_override
+
+
 async def _cleanup_pairs(
     session_maker,
     *,
@@ -319,6 +416,216 @@ async def test_submission_trash_moves_only_its_paired_archive_to_trash(
         await _cleanup_pairs(
             session_maker,
             course_ids=[course_a.id, course_b.id],
+            archive_ids=[archive_a.id, archive_b.id],
+            submission_ids=[submission_a.id, submission_b.id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_submission_trash_restore_preserves_same_metadata_sibling(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    requester_a = await make_user()
+    requester_b = await make_user()
+    admin = await make_user(is_admin=True)
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    course, submission_a, archive_a, submission_b, archive_b = (
+        await _create_same_metadata_approved_pairs(
+            session_maker,
+            requester_a_id=requester_a.id,
+            requester_b_id=requester_b.id,
+        )
+    )
+    sibling_baseline = _pair_lifecycle_snapshot(submission_b, archive_b)
+    notification_baseline = await _notification_count(
+        session_maker,
+        user_ids=[requester_a.id, requester_b.id],
+    )
+
+    try:
+        response = await client.delete(
+            f"/archives/admin/submissions/{submission_a.id}"
+        )
+        assert response.status_code == 200
+        assert response.json()["deleted"] == {
+            "archives": 1,
+            "submissions": 1,
+            "warnings": [],
+        }
+
+        async with session_maker() as session:
+            trashed_submission_a = await session.get(
+                ArchiveSubmission, submission_a.id
+            )
+            trashed_archive_a = await session.get(Archive, archive_a.id)
+            stored_submission_b = await session.get(
+                ArchiveSubmission, submission_b.id
+            )
+            stored_archive_b = await session.get(Archive, archive_b.id)
+            assert trashed_submission_a.status == SubmissionStatus.DELETED
+            assert trashed_submission_a.previous_status == SubmissionStatus.APPROVED
+            assert trashed_submission_a.created_archive_id == archive_a.id
+            assert trashed_submission_a.object_name == submission_a.object_name
+            assert trashed_archive_a.deleted_at is not None
+            assert trashed_archive_a.object_name == archive_a.object_name
+            assert (
+                _pair_lifecycle_snapshot(stored_submission_b, stored_archive_b)
+                == sibling_baseline
+            )
+
+        assert await _public_archive_ids(client, course_id=course.id) == {
+            archive_b.id
+        }
+
+        restore_response = await client.post(
+            "/trash/restore",
+            json={"item_type": "archive_submission", "item_id": submission_a.id},
+        )
+        assert restore_response.status_code == 200
+        assert restore_response.json()["restoredSubmissionsCount"] == 1
+
+        async with session_maker() as session:
+            restored_submission_a = await session.get(
+                ArchiveSubmission, submission_a.id
+            )
+            restored_archive_a = await session.get(Archive, archive_a.id)
+            stored_submission_b = await session.get(
+                ArchiveSubmission, submission_b.id
+            )
+            stored_archive_b = await session.get(Archive, archive_b.id)
+            assert restored_submission_a.status == SubmissionStatus.APPROVED
+            assert restored_submission_a.previous_status is None
+            assert restored_submission_a.created_archive_id == archive_a.id
+            assert restored_submission_a.object_name == submission_a.object_name
+            assert restored_archive_a.deleted_at is None
+            assert restored_archive_a.object_name == archive_a.object_name
+            assert (
+                _pair_lifecycle_snapshot(stored_submission_b, stored_archive_b)
+                == sibling_baseline
+            )
+
+        assert await _public_archive_ids(client, course_id=course.id) == {
+            archive_a.id,
+            archive_b.id,
+        }
+        assert (
+            await _notification_count(
+                session_maker,
+                user_ids=[requester_a.id, requester_b.id],
+            )
+            == notification_baseline
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_pairs(
+            session_maker,
+            course_ids=[course.id],
+            archive_ids=[archive_a.id, archive_b.id],
+            submission_ids=[submission_a.id, submission_b.id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_archive_trash_restore_preserves_same_metadata_sibling(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    requester_a = await make_user()
+    requester_b = await make_user()
+    admin = await make_user(is_admin=True)
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    course, submission_a, archive_a, submission_b, archive_b = (
+        await _create_same_metadata_approved_pairs(
+            session_maker,
+            requester_a_id=requester_a.id,
+            requester_b_id=requester_b.id,
+        )
+    )
+    sibling_baseline = _pair_lifecycle_snapshot(submission_b, archive_b)
+    notification_baseline = await _notification_count(
+        session_maker,
+        user_ids=[requester_a.id, requester_b.id],
+    )
+
+    try:
+        response = await client.delete(
+            f"/courses/{course.id}/archives/{archive_a.id}"
+        )
+        assert response.status_code == 200
+        assert response.json()["deleted"]["archives"] == 1
+        assert response.json()["deleted"]["submissions_takedown"] == 1
+
+        async with session_maker() as session:
+            temporary_submission_a = await session.get(
+                ArchiveSubmission, submission_a.id
+            )
+            trashed_archive_a = await session.get(Archive, archive_a.id)
+            stored_submission_b = await session.get(
+                ArchiveSubmission, submission_b.id
+            )
+            stored_archive_b = await session.get(Archive, archive_b.id)
+            assert temporary_submission_a.status == SubmissionStatus.TAKEDOWN
+            assert temporary_submission_a.lifecycle_reason == LIFECYCLE_ARCHIVE_TRASHED
+            assert temporary_submission_a.created_archive_id == archive_a.id
+            assert temporary_submission_a.object_name == submission_a.object_name
+            assert trashed_archive_a.deleted_at is not None
+            assert trashed_archive_a.object_name == archive_a.object_name
+            assert (
+                _pair_lifecycle_snapshot(stored_submission_b, stored_archive_b)
+                == sibling_baseline
+            )
+
+        assert await _public_archive_ids(client, course_id=course.id) == {
+            archive_b.id
+        }
+
+        restore_response = await client.post(
+            "/trash/restore",
+            json={"item_type": "archive", "item_id": archive_a.id},
+        )
+        assert restore_response.status_code == 200
+        assert restore_response.json()["restoredArchivesCount"] == 1
+        assert restore_response.json()["restoredSubmissionsCount"] == 1
+
+        async with session_maker() as session:
+            restored_submission_a = await session.get(
+                ArchiveSubmission, submission_a.id
+            )
+            restored_archive_a = await session.get(Archive, archive_a.id)
+            stored_submission_b = await session.get(
+                ArchiveSubmission, submission_b.id
+            )
+            stored_archive_b = await session.get(Archive, archive_b.id)
+            assert restored_submission_a.status == SubmissionStatus.APPROVED
+            assert restored_submission_a.lifecycle_reason is None
+            assert restored_submission_a.created_archive_id == archive_a.id
+            assert restored_submission_a.object_name == submission_a.object_name
+            assert restored_archive_a.deleted_at is None
+            assert restored_archive_a.object_name == archive_a.object_name
+            assert (
+                _pair_lifecycle_snapshot(stored_submission_b, stored_archive_b)
+                == sibling_baseline
+            )
+
+        assert await _public_archive_ids(client, course_id=course.id) == {
+            archive_a.id,
+            archive_b.id,
+        }
+        assert (
+            await _notification_count(
+                session_maker,
+                user_ids=[requester_a.id, requester_b.id],
+            )
+            == notification_baseline
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_pairs(
+            session_maker,
+            course_ids=[course.id],
             archive_ids=[archive_a.id, archive_b.id],
             submission_ids=[submission_a.id, submission_b.id],
         )
