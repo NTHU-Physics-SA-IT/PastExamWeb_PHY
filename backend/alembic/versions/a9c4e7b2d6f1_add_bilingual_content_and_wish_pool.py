@@ -17,14 +17,91 @@ down_revision: str | Sequence[str] | None = "e6a1b3c5d7f9"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+COORDINATION_SIBLING_REVISION = "a9c2e5f7b1d4"
+COURSE_SUBMISSION_LIFECYCLE_COLUMNS = {
+    "previous_status",
+    "deleted_at",
+    "deleted_by_id",
+    "restored_at",
+    "restored_by_id",
+}
+
+
+def _versions(connection: sa.Connection) -> list[str]:
+    return sorted(
+        str(version)
+        for version in connection.execute(
+            sa.text("SELECT version_num FROM alembic_version")
+        ).scalars()
+    )
+
+
+def _require_coordination_sibling_schema(connection: sa.Connection) -> None:
+    inspector = sa.inspect(connection)
+    category_columns = {
+        column["name"]: column
+        for column in inspector.get_columns(
+            "course_category_configs", schema="public"
+        )
+    }
+    if (
+        "pre_delete_is_active" not in category_columns
+        or category_columns["pre_delete_is_active"]["nullable"] is not True
+    ):
+        raise RuntimeError("Wish Pool coordination-sibling Category schema is incomplete")
+
+    submission_columns = {
+        column["name"]: column
+        for column in inspector.get_columns("course_submissions", schema="public")
+    }
+    if not COURSE_SUBMISSION_LIFECYCLE_COLUMNS.issubset(submission_columns) or any(
+        submission_columns[name]["nullable"] is not True
+        for name in COURSE_SUBMISSION_LIFECYCLE_COLUMNS
+    ):
+        raise RuntimeError(
+            "Wish Pool coordination-sibling CourseSubmission columns are incomplete"
+        )
+    indexes = {
+        index["name"]
+        for index in inspector.get_indexes("course_submissions", schema="public")
+    }
+    checks = {
+        check["name"]
+        for check in inspector.get_check_constraints(
+            "course_submissions", schema="public"
+        )
+    }
+    matching_fks = [
+        foreign_key
+        for foreign_key in inspector.get_foreign_keys(
+            "course_submissions", schema="public"
+        )
+        if foreign_key["constrained_columns"] == ["created_course_id"]
+        and foreign_key["referred_table"] == "courses"
+        and foreign_key["referred_columns"] == ["id"]
+        and (foreign_key.get("options") or {}).get("ondelete") == "SET NULL"
+    ]
+    if (
+        "ix_course_submissions_deleted_at" not in indexes
+        or not {
+            "ck_course_submissions_previous_status_not_deleted",
+            "ck_course_submissions_active_previous_status_null",
+        }.issubset(checks)
+        or len(matching_fks) != 1
+    ):
+        raise RuntimeError(
+            "Wish Pool coordination-sibling CourseSubmission continuity is incomplete"
+        )
+
 
 def _verify_source_schema(connection: sa.Connection) -> None:
-    versions = list(
-        connection.execute(sa.text("SELECT version_num FROM alembic_version")).scalars()
-    )
-    if versions != [down_revision]:
+    versions = _versions(connection)
+    if versions == [COORDINATION_SIBLING_REVISION]:
+        _require_coordination_sibling_schema(connection)
+    elif versions != [down_revision]:
         raise RuntimeError(
-            f"Wish Pool migration requires reviewed source revision {down_revision}; "
+            f"Wish Pool migration requires reviewed source revision {down_revision} "
+            f"or exact coordination sibling {COORDINATION_SIBLING_REVISION}; "
             f"found {versions!r}"
         )
     inspector = sa.inspect(connection)

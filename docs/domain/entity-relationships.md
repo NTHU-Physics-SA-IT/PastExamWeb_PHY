@@ -23,9 +23,9 @@ current implementation separately from the intended product relation.
 | `User` | Owns uploads, submissions, reports, discussion activity, and personal notifications through user IDs; many actor/deleter FKs use `SET NULL`, while some owned rows cascade | Authentication identity and audit actor; deletion must preserve required history without exposing unnecessary identity | Confirmed by code; deletion policy varies by entity |
 | `CourseCategoryConfig` | `Course.category` stores its key as a string rather than an FK; submissions also retain category snapshots | Category controls discovery and creation choices, but its soft-delete lifecycle is independent from historical submissions | Confirmed by code; no DB FK means application checks carry integrity |
 | `Course` | Required parent of `Archive`; category is a string key; has soft-delete metadata | Groups archives for navigation; course trash may hide/deactivate children but must not rewrite independent submission review results | Confirmed by code in `courses.py` and `trash.py` |
-| `CourseSubmission` | Separate legacy course-request record with requester/reviewer and optional `created_course_id`; no soft-delete metadata in the current model | Not the ownership model for an ArchiveSubmission that requests missing parent metadata | Independent legacy flow; it must not be used to add permanent Category/Course ownership to ArchiveSubmission |
+| `CourseSubmission` | Separate historical course-request record with requester/reviewer, independent soft-delete metadata, and nullable `created_course_id` using `ON DELETE SET NULL` | Retains the request and review history without owning the resulting Category/Course | Course deletion detaches the optional historical link; submission deletion never cascades to Course |
 | `Archive` | Required `course_id`, optional uploader, one `object_name`, optional soft-delete metadata; at most one submission points to it through the named nullable unique `created_archive_id` constraint | One independently accessible approved public file for authenticated system users, optionally created by exactly one submission | Administrator-created Archives may have no source submission; approval, exact restore, and source projection fail closed on occupancy or cardinality violations |
-| `ArchiveSubmission` | Required requester and object name; optional reviewer, legacy owner, nullable unique `created_archive_id`, and nullable `source_wish_id`; review/trash fields and monotonic owner-self-delete eligibility coexist | One independent submission and PDF, optionally paired with exactly one Archive. Help Upload retains its source wish without creating a separate upload lifecycle | Database uniqueness and application fail-fast guards are enforced; deleting a wish sets the optional source link null |
+| `ArchiveSubmission` | Required requester and object name; optional reviewer, legacy owner, nullable unique `created_archive_id`, and nullable `source_wish_id`; review/trash fields and monotonic owner-self-delete eligibility coexist | One independent submission and PDF, optionally paired with exactly one Archive. Ownership survives eligibility consumption, and Help Upload retains its source wish without creating a separate upload lifecycle | Database uniqueness, application fail-fast guards, and exact-pair soft-lifecycle coverage are enforced; deleting a wish sets the optional source link null |
 | `ArchiveSubmissionEvent` | Unique `submission_id` integer and timestamp, without a declared FK | Immutable statistical event retained after submission deletion, with active link/PII detached as needed | Implementation gap: permanent-delete helper currently deletes events |
 | `ArchiveDiscussionMessage` / `ArchiveDiscussionLike` | Message requires archive and user IDs; parent/reply references form a thread; likes cascade with message/user deletion | Discussion belongs to the referenced public item; soft-deleted messages should not remain an active source | Confirmed by code and `test_archive_discussion.py` |
 | `CommentReport` | Reporter FK cascades; target and actor/resource FKs mostly `SET NULL`; snapshots preserve context; independent soft delete | Report history survives source changes while active uniqueness and source availability remain explicit | Partially implemented |
@@ -98,6 +98,12 @@ submission IDs. `archive_submission_lifecycle.py` resolves exact
 `created_archive_id` links during delete/restore. Report-source resolution in
 `reports.py` also considers the linked submission.
 
+`test_public_catalog_keeps_same_metadata_approved_sibling_independent` protects
+the effective-public query across approved, pending, rejected, takedown, and
+soft-deleted same-metadata siblings. Authenticated coverage confirms exact
+`source_submission_ids` and exact preview, preview-file, and download object
+resolution for two independent one-to-one pairs.
+
 ### Known gap
 
 Historical data with multiple submissions pointing to one Archive is an
@@ -164,8 +170,9 @@ and two independent approvals reusing one concurrently created Course.
 `renders_each_archive_when_exam_metadata_matches_but_ids_differ` confirms that,
 when the Archive list response contains two records with matching exam
 metadata but different Archive identities, the frontend preserves two cards
-and two identity-specific download operations. This test does not protect the
-backend sibling-visibility query or object-storage availability.
+and identity-specific preview and download operations. Backend tests separately
+protect sibling visibility and exact object-name resolution; object-storage
+availability remains outside this repository safety net.
 
 ## ArchiveSubmission comparison candidates
 
@@ -220,12 +227,10 @@ protects two independent pairs: trashing Submission A trashes Archive A while
 Submission B, Archive B, and B's object identity remain unchanged. These tests
 cover the supported independent one-to-one pairs. Multiple submissions sharing
 one Archive are an invariant violation, not an additional lifecycle case.
-
-### Known gap
-
-Submission-group restore can set a linked submission to approved without
-preserving every prior review state, and group operations can affect siblings.
-Characterization and transition tests are required before changing this code.
+The same-metadata sibling tests additionally protect both reversible paths:
+Submission A trash/restore and Archive A trash/restore retain the exact link
+and object identity, leave pair B byte-for-byte unchanged in lifecycle fields,
+keep Archive B publicly visible throughout, and emit no lifecycle notification.
 
 ## ArchiveSubmission ownership and self-delete eligibility
 
@@ -304,15 +309,19 @@ intended invariant.
 
 ### Current implementation
 
-`CourseSubmission` has requester, reviewer, status, and `created_course_id`.
-Archive approval instead carries requested course/category snapshots directly
-on `ArchiveSubmission`; it does not create or link a `CourseSubmission`.
+`CourseSubmission` has requester/reviewer history plus `deleted_at`, exact
+`previous_status`, delete/restore actor metadata, and a nullable
+`created_course_id`. New deletions snapshot the exact non-deleted state;
+restore consumes only that snapshot. Legacy `DELETED` rows without an
+authoritative snapshot remain non-restorable but may be permanently deleted.
 
-### Known gap
-
-The two representations are not a single explicit lifecycle. `CourseSubmission`
-does not currently have trash metadata, and idempotent restore behavior is not
-fully specified by code/tests.
+The database link to `Course` uses `ON DELETE SET NULL`. Course soft trash and
+restore do not rewrite the request, permanent Course deletion preserves the
+request as detached history, and permanent CourseSubmission deletion does not
+mutate the Course. An active pending request may block Category permanent
+deletion; approved, rejected, and deleted history does not. Archive approval
+continues to carry its own requested-parent snapshots and does not create or
+link a `CourseSubmission`.
 
 ## Legacy Archive without ArchiveSubmission
 
@@ -342,13 +351,15 @@ transaction.
 - `SET NULL` report/source FKs preserve history, but a permanently deleted
   source must render as `來源已不存在` without an active source action or
   navigation. The complete API/UI treatment remains an implementation gap.
-- Shared archive/object references create sibling-deletion risk until the
-  independent-file model is enforced.
+- Historical shared Archive references are an integrity anomaly and must fail
+  closed; supported exact one-to-one pairs do not borrow sibling lifecycle.
 - PostgreSQL rows and MinIO objects can diverge because no atomic transaction
   spans them.
 
 ## Required follow-up
 
-Add characterization tests for sibling visibility and lifecycle grouping before
-schema or service refactoring. Any schema change must follow
+Public sibling visibility, exact file-action identity, and exact-pair reversible
+soft lifecycle are characterized. Preserve these boundaries before schema or
+service refactoring.
+Any schema change must follow
 [Migration safety](../migration-safety.md).

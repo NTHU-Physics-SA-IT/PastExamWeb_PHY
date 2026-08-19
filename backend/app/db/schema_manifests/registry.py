@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-HEAD_SCHEMA_REVISION = "a9c4e7b2d6f1"
+HEAD_SCHEMA_REVISION = "b4d6f8a2c1e3"
 
 
 @dataclass(frozen=True)
@@ -104,8 +104,23 @@ MANIFESTS = {
     ),
     "e6a1b3c5d7f9": ManifestSpec(
         revision="e6a1b3c5d7f9",
-        description="schema before bilingual managed content and Wish Pool",
-        metadata_variant="pre_wish_pool_and_bilingual_content",
+        description="schema before both reviewed sibling branches",
+        metadata_variant="pre_sibling_branches",
+    ),
+    "e8a4c1d7b2f6": ManifestSpec(
+        revision="e8a4c1d7b2f6",
+        description="schema before CourseSubmission lifecycle independence",
+        metadata_variant="pre_course_submission_lifecycle",
+    ),
+    "a9c2e5f7b1d4": ManifestSpec(
+        revision="a9c2e5f7b1d4",
+        description="Stage 5D sibling head before Wish Pool convergence",
+        metadata_variant="coordination_sibling_head",
+    ),
+    "a9c4e7b2d6f1": ManifestSpec(
+        revision="a9c4e7b2d6f1",
+        description="Wish Pool sibling head before Stage 5D convergence",
+        metadata_variant="main_sibling_head",
     ),
     HEAD_SCHEMA_REVISION: ManifestSpec(
         revision=HEAD_SCHEMA_REVISION,

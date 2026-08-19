@@ -48,6 +48,10 @@ ARCHIVE_SUBMISSION_PREVIOUS_STATUS_CHECKS = {
     "ck_archive_submissions_active_previous_status_null",
 }
 ARCHIVE_SUBMISSION_CREATED_ARCHIVE_UNIQUE = "uq_archive_submissions_created_archive_id"
+COURSE_SUBMISSION_LIFECYCLE_CHECKS = {
+    "ck_course_submissions_previous_status_not_deleted",
+    "ck_course_submissions_active_previous_status_null",
+}
 USER_OAUTH_IDENTITY_UNIQUE = "uq_users_oauth_provider_sub"
 IDENTIFIER_TEXT_CAST = re.compile(
     r"\bcast\(\s*(?P<identifier>[a-z_]\w*(?:\.[a-z_]\w*)?)"
@@ -227,26 +231,39 @@ def head_metadata() -> MetaData:
     return metadata
 
 
-def _metadata_for_variant(variant: str) -> MetaData:
-    metadata = head_metadata()
-    if variant == "head":
-        return metadata
-    if variant not in {
-        "pre_wish_pool_and_bilingual_content",
-        "pre_about_us_entries",
-        "pre_bilingual_submission_snapshots",
-        "pre_bilingual_course_catalog",
-        "pre_nthu_student_id",
-        "pre_user_oauth_identity_unique",
-        "pre_archive_submission_one_to_one",
-        "pre_archive_submission_previous_status",
-        "pre_owner_self_delete_eligibility",
-        "pre_archive_reports",
-        "pre_metadata_alignment",
-        "pre_category_canonicalization",
-    }:
-        raise ValueError(f"Unknown schema metadata variant: {variant}")
+def _remove_course_submission_lifecycle(metadata: MetaData) -> None:
+    course_submissions = metadata.tables["course_submissions"]
+    for constraint in list(course_submissions.constraints):
+        if (
+            isinstance(constraint, CheckConstraint)
+            and constraint.name in COURSE_SUBMISSION_LIFECYCLE_CHECKS
+        ):
+            course_submissions.constraints.remove(constraint)
+        if isinstance(constraint, ForeignKeyConstraint) and tuple(
+            constraint.columns.keys()
+        ) == ("created_course_id",):
+            constraint.ondelete = None
+            for element in constraint.elements:
+                element.ondelete = None
+    for index in list(course_submissions.indexes):
+        if index.name == "ix_course_submissions_deleted_at":
+            course_submissions.indexes.remove(index)
+    for column_name in (
+        "previous_status",
+        "deleted_at",
+        "deleted_by_id",
+        "restored_at",
+        "restored_by_id",
+    ):
+        course_submissions._columns.remove(course_submissions.c[column_name])
 
+
+def _remove_category_state_preservation(metadata: MetaData) -> None:
+    categories = metadata.tables["course_category_configs"]
+    categories._columns.remove(categories.c.pre_delete_is_active)
+
+
+def _remove_wish_pool_and_bilingual_content(metadata: MetaData) -> None:
     metadata.remove(metadata.tables["archive_wish_reports"])
     metadata.remove(metadata.tables["archive_wish_hearts"])
     metadata.remove(metadata.tables["archive_wishes"])
@@ -268,7 +285,46 @@ def _metadata_for_variant(variant: str) -> MetaData:
         table = metadata.tables[table_name]
         table._columns.remove(table.c.title_en)
         table._columns.remove(table.c.body_en)
-    if variant == "pre_wish_pool_and_bilingual_content":
+
+
+def _metadata_for_variant(variant: str) -> MetaData:
+    metadata = head_metadata()
+    if variant == "head":
+        return metadata
+    if variant not in {
+        "main_sibling_head",
+        "coordination_sibling_head",
+        "pre_course_submission_lifecycle",
+        "pre_sibling_branches",
+        "pre_about_us_entries",
+        "pre_bilingual_submission_snapshots",
+        "pre_bilingual_course_catalog",
+        "pre_nthu_student_id",
+        "pre_user_oauth_identity_unique",
+        "pre_archive_submission_one_to_one",
+        "pre_archive_submission_previous_status",
+        "pre_owner_self_delete_eligibility",
+        "pre_archive_reports",
+        "pre_metadata_alignment",
+        "pre_category_canonicalization",
+    }:
+        raise ValueError(f"Unknown schema metadata variant: {variant}")
+
+    if variant == "main_sibling_head":
+        _remove_course_submission_lifecycle(metadata)
+        _remove_category_state_preservation(metadata)
+        return metadata
+
+    _remove_wish_pool_and_bilingual_content(metadata)
+    if variant == "coordination_sibling_head":
+        return metadata
+
+    _remove_course_submission_lifecycle(metadata)
+    if variant == "pre_course_submission_lifecycle":
+        return metadata
+
+    _remove_category_state_preservation(metadata)
+    if variant == "pre_sibling_branches":
         return metadata
 
     metadata.remove(metadata.tables["about_us_entries"])

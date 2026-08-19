@@ -327,6 +327,7 @@ import { useToast } from 'primevue/usetoast'
 import { useConfirm } from 'primevue/useconfirm'
 import { trackEvent, EVENTS } from '../utils/analytics'
 import { useNotifications } from '../utils/useNotifications'
+import { buildPersonalNotificationRoute } from '../utils/personalNotificationNavigation'
 import { useLocale } from '../i18n'
 import NotificationModal from './NotificationModal.vue'
 import NotificationCenterModal from './NotificationCenterModal.vue'
@@ -570,39 +571,11 @@ export default {
     },
 
     async handlePersonalNotificationSource(item) {
-      const metadata = item?.metadata || {}
+      const route = buildPersonalNotificationRoute(item)
+      if (!route) return
+
       this.notificationStore.state.centerVisible = false
-      if (item?.source_type === 'archive_submission') {
-        await this.$router.push({
-          path: '/archive',
-          query: {
-            showSubmissionStatus: '1',
-            submissionId: metadata.submission_id || item.source_id,
-          },
-        })
-        return
-      }
-      if (item?.source_type === 'archive_discussion_thread') {
-        await this.$router.push({
-          path: '/archive',
-          query: {
-            courseId: metadata.course_id,
-            archiveId: metadata.archive_id,
-            threadId: metadata.thread_id || item.source_id,
-            messageId: metadata.message_id || metadata.reply_message_id || item.source_message_id,
-          },
-        })
-        return
-      }
-      if (item?.source_type === 'archive_report') {
-        await this.$router.push({
-          path: '/archive',
-          query: {
-            courseId: metadata.course_id,
-            archiveId: metadata.archive_id,
-          },
-        })
-      }
+      await this.$router.push(route)
     },
 
     async deletePersonalNotification(item) {

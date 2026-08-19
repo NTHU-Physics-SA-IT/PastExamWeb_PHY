@@ -434,6 +434,13 @@ For a NTHU OAuth User, provider-synchronized `name` and `email` remain provider-
 - An item may be hidden when that public item, its Course, or a required parent
   is explicitly trashed or blocked.
 
+Focused safety-net coverage confirms that the anonymous catalog keeps
+same-metadata Archive identities independent across approved, pending,
+rejected, takedown, and soft-deleted sibling states. Authenticated coverage
+confirms exact source-submission projection and exact Archive/object selection
+for preview, preview-file, and download actions. These tests do not change the
+lifecycle transition matrix.
+
 ### One-to-one corruption boundary
 
 The schema and application contract permit at most one source submission for
@@ -514,6 +521,12 @@ Focused PostgreSQL coverage protects exact pending, approved, rejected, and
 takedown restoration, the null-to-pending compatibility fallback, linked
 Archive visibility, owner-eligibility preservation, exact one-to-one
 membership, canonical lock order, and delete-versus-restore serialization.
+Two same-metadata approved-pair scenarios protect the public boundary during
+reversible soft lifecycle. Submission A trash/restore mutates only Submission A
+and its exact Archive A; Archive A trash/restore temporarily takes down and
+restores only its exact Submission A. In both paths pair B's persisted
+lifecycle, link, and object identity remain unchanged, Archive B stays public,
+and no lifecycle notification is emitted.
 
 Deterministic independent-session PostgreSQL coverage closes the remaining
 submission lifecycle races. Direct review and owner/admin deletion, direct
@@ -572,17 +585,30 @@ application milestone and are not claimed as implemented here.
 
 ### Intended invariant
 
-Soft delete sets `deleted_at` and `is_active=false`. Public category queries and
-submission choices exclude both deleted and inactive categories. Restore
-recovers the pre-delete active state rather than always enabling the category.
+Soft delete snapshots the Category's current `is_active` value, then sets
+`deleted_at` and `is_active=false` in the same transaction. Restore requires
+that snapshot, restores the exact prior active state, clears the deletion
+metadata and snapshot, and records the restore metadata in one transaction.
+Thus an active Category restores active and an inactive Category restores
+inactive; malformed deleted rows without a snapshot fail closed.
 
-### Current implementation and gap
+New Course creation, CourseSubmission creation or Category editing, and
+CourseSubmission approval may target a Category only when it is both live
+(`deleted_at IS NULL`) and active (`is_active IS TRUE`). The persisted Category
+row is authoritative: a stored inactive or deleted default key cannot fall
+through to the synthesized-default compatibility path. Rejection happens
+before Course lookup, reuse, or creation, leaving the pending request and
+related rows unchanged.
 
-Public queries commonly filter `is_active=true`; admin queries use
-`deleted_at`. `delete_course_category` sets `deleted_at` but does not set
-`is_active=false`, while category restore in `trash.py` unconditionally assigns
-`is_active=true`. This is an implementation gap. The category canonicalization
-migration tests protect metadata preservation but not this full lifecycle.
+### Current implementation
+
+`CourseCategoryConfig.pre_delete_is_active` stores the nullable lifecycle
+snapshot. The additive migration preserves live active/inactive rows, snapshots
+the previous state of existing deleted rows, and makes every deleted Category
+inactive. Upgrade and downgrade validate the lifecycle shape and abort on
+ambiguous rows rather than guessing. Focused API and migration tests protect
+active/inactive delete-and-restore behavior, new-work eligibility, default-key
+fail-closed behavior, reversible backfill, and anomaly rejection.
 
 ## Pending report uniqueness
 
@@ -647,18 +673,65 @@ this legacy `CourseSubmission` endpoint.
 - Approval is deduplicated and idempotent at the business boundary.
 - Created category/course lifecycle is independent after approval.
 
-### Current implementation
+### Approval transaction
 
-The legacy Course request approval path normalizes category/course identities
-and reuses existing rows. It remains separate from the ArchiveSubmission
-approval caller transaction above and has its own lifecycle and idempotency
-scope.
-`test_course_request_approval_reuses_existing_course_without_duplicates`
-directly protects the separate `CourseSubmission` model's first
-`pending`-to-`approved` path when a matching Course exists by approval time:
-the request resolves to that Course and matching Category/Course counts do not
-increase. It does not prescribe repeat-approval responses, notification
-behavior, request trash, or the later lifecycle of the resolved Course.
+The legacy Course request approval path uses the same normalized
+Category/Course approval-namespace mutex as ArchiveSubmission approval. It
+discovers the request identity without a row lock, acquires that namespace,
+then locks and revalidates the exact CourseSubmission row. An identity change
+between discovery and lock fails closed with a reload-required conflict; the
+transaction never acquires a second namespace while holding the request row.
+
+For a pending request, the transaction revalidates the D1 live-and-active
+Category requirement and the normalized Course identity while holding the
+namespace. Exactly one live match is reused, no match is created with
+`flush()`, and multiple matches fail closed as ambiguous. Course creation and
+the request's approved review fields are owned by one caller transaction and
+one final commit. Any exception before that commit rolls both back.
+
+A repeated approval is a business-idempotent no-op only when the existing
+approved request has a linked Course whose normalized Category/name identity
+matches and whose reviewer and review timestamp are present. It does not
+replace review metadata or commit a new mutation. An incoherent approved row
+fails closed; rejected and other illegal states remain non-approvable.
+
+Admin direct-approved request creation follows the same namespace and
+transaction boundary: it rechecks Course and pending-request identity under
+the mutex, flushes the new Course to obtain its ID, adds the approved request,
+and commits once. These guarantees do not make CourseSubmission the permanent
+owner of the resulting Course.
+
+### Independent request history lifecycle
+
+Administrator trash of an active CourseSubmission records the exact current
+non-`DELETED` status in `previous_status`, changes the row to `DELETED`, and
+records delete time and actor without changing the linked Course. Active
+request lists exclude trashed and legacy-deleted rows. Restore is permitted
+only when the exact snapshot exists: it restores that status, consumes the
+snapshot, clears delete metadata, and records restore metadata. It never
+searches for, recreates, or relinks a Course or Category.
+
+A legacy `DELETED` row without `previous_status` is preserved as an explicit
+unknown-history state. It is visible to backend Trash authority, cannot be
+restored, and can be permanently deleted without inventing a prior status or
+deletion timestamp. A restored pending row whose Category is now missing,
+deleted, or inactive remains pending; the existing D1 approval eligibility
+check rejects later approval.
+
+Course soft trash/restore does not rewrite CourseSubmission state. The optional
+`created_course_id` foreign key uses `ON DELETE SET NULL`, so permanent Course
+deletion preserves an approved request as valid detached history. Re-approving
+that detached approved row remains a fail-closed conflict under D2A and never
+repairs the link. Permanent CourseSubmission deletion deletes only the request.
+For Category permanent-delete authority, only a live pending request is an
+operational blocker; approved, rejected, soft-deleted, and legacy-deleted rows
+are historical and do not own the Category.
+
+Admin Trash clients treat `course_submission` as a first-class history type.
+They render restore and permanent-delete actions only from the backend's
+explicit action-authority booleans, present a missing Course link as valid
+detached history, and do not infer relink, recreation, or alternate lifecycle
+actions from status or relationship display data.
 
 ## Authorization
 
@@ -764,6 +837,7 @@ frontend handling, and tests.
 
 ## Required follow-up
 
-The first safety-net slice should characterize the current submission matrix,
-sibling visibility, pending-report trash uniqueness, and category
-delete/restore behavior before implementation changes.
+The public sibling-visibility and exact-pair reversible soft-lifecycle safety
+nets are characterized. Follow-up slices should characterize the remaining
+submission matrix, pending-report trash uniqueness, and category delete/restore
+behavior before implementation changes.

@@ -251,7 +251,9 @@ describe('NotificationCenterModal', () => {
     const item = {
       ...personal[0],
       source_type: 'archive_discussion_thread',
-      metadata: { course_id: 1, archive_id: 2, thread_id: 3 },
+      source_id: 3,
+      source_message_id: 4,
+      metadata: { course_id: 1, archive_id: 2 },
     }
     const wrapper = mount(NotificationCenterModal, {
       props: { visible: true, personalNotifications: [item] },
@@ -269,6 +271,69 @@ describe('NotificationCenterModal', () => {
     })
     wrapper.vm.openPersonal(item)
     expect(wrapper.emitted('open-personal-source')).toEqual([[item]])
+  })
+
+  it('keeps unavailable notification detail readable with neutral wording', async () => {
+    const item = {
+      ...personal[0],
+      source_available: false,
+    }
+    const wrapper = mount(NotificationCenterModal, {
+      props: { visible: true, personalNotifications: [item] },
+      global: {
+        stubs: {
+          Dialog: slotStub,
+          Tabs: tabsStub,
+          TabList: tabsStub,
+          Tab: tabsStub,
+          TabPanels: tabsStub,
+          TabPanel: tabsStub,
+          Button: buttonStub,
+          Tag: true,
+          Badge: true,
+        },
+      },
+    })
+
+    wrapper.vm.openPersonal(item)
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.text()).toContain('來源目前無法開啟')
+    expect(wrapper.text()).toContain('來源目前無法開啟，但通知內容仍可查看。')
+    expect(wrapper.text()).not.toContain('來源已不存在')
+    expect(wrapper.emitted('open-personal-source')).toBeUndefined()
+    expect(wrapper.emitted('mark-personal-read')).toEqual([[item.id]])
+  })
+
+  it('opens readable detail for a recognized source with malformed route metadata', async () => {
+    const item = {
+      ...personal[0],
+      source_type: 'archive_report',
+      metadata: { course_id: 1 },
+    }
+    const wrapper = mount(NotificationCenterModal, {
+      props: { visible: true, personalNotifications: [item] },
+      global: {
+        stubs: {
+          Dialog: slotStub,
+          Tabs: tabsStub,
+          TabList: tabsStub,
+          Tab: tabsStub,
+          TabPanels: tabsStub,
+          TabPanel: tabsStub,
+          Button: buttonStub,
+          Tag: true,
+          Badge: true,
+        },
+      },
+    })
+
+    wrapper.vm.openPersonal(item)
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.text()).toContain(item.message)
+    expect(wrapper.text()).toContain('來源目前無法開啟')
+    expect(wrapper.emitted('open-personal-source')).toBeUndefined()
   })
 
   it('uses a visible icon for republished archive submission notifications', () => {

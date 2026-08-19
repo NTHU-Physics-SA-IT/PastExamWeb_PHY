@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
+import sys
 from pathlib import Path
 from urllib.parse import quote, quote_plus
 
@@ -26,6 +28,22 @@ from app.db.test_database_guard import (
     validate_connected_test_database,
     validate_test_database_target,
 )
+
+MERGED_HEAD = "b4d6f8a2c1e3"
+E6_REVISION = "e6a1b3c5d7f9"
+E8_REVISION = "e8a4c1d7b2f6"
+COORDINATION_SIBLING = "a9c2e5f7b1d4"
+MAIN_SIBLING = "a9c4e7b2d6f1"
+
+
+def _load_revision_module(revision: str, filename: str):
+    path = Path(__file__).parents[2] / "alembic" / "versions" / filename
+    spec = importlib.util.spec_from_file_location(f"revision_{revision}", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture(autouse=True)
@@ -125,6 +143,140 @@ def insert_course(engine: Engine, name: str = "Migration safety marker") -> int:
                 {"name": name},
             )
         )
+
+
+def _ledger(engine: Engine) -> list[str]:
+    with engine.connect() as connection:
+        return sorted(
+            str(value)
+            for value in connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalars()
+        )
+
+
+def _schema_signature(engine: Engine) -> dict[str, tuple[str, ...]]:
+    inspector = sa_inspect(engine)
+    return {
+        table_name: tuple(
+            column["name"]
+            for column in inspector.get_columns(table_name, schema="public")
+        )
+        for table_name in sorted(inspector.get_table_names(schema="public"))
+        if table_name != "alembic_version"
+    }
+
+
+@pytest.mark.parametrize(
+    "source_revision",
+    [None, E6_REVISION, COORDINATION_SIBLING, MAIN_SIBLING],
+    ids=("empty", "e6", "coordination-a9c2", "main-a9c4"),
+)
+def test_known_sibling_baselines_converge_to_merged_head(
+    clean_public_schema: Engine,
+    source_revision: str | None,
+) -> None:
+    if source_revision is not None:
+        upgrade(source_revision)
+        with clean_public_schema.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO about_us_entries "
+                    "(title, body, created_at, updated_at, updated_by_id) "
+                    "VALUES ('sibling convergence sentinel', :body, "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)"
+                ),
+                {"body": source_revision},
+            )
+
+    command.upgrade(alembic_config(), MERGED_HEAD)
+
+    assert _ledger(clean_public_schema) == [MERGED_HEAD]
+    assert inspect_database().schema_matches_head is True
+    if source_revision is not None:
+        with clean_public_schema.connect() as connection:
+            assert connection.scalar(
+                text(
+                    "SELECT body FROM about_us_entries "
+                    "WHERE title = 'sibling convergence sentinel'"
+                )
+            ) == source_revision
+
+
+def test_merge_revision_upgrade_and_downgrade_are_schema_no_ops(
+    clean_public_schema: Engine,
+) -> None:
+    upgrade(MERGED_HEAD)
+    before = _schema_signature(clean_public_schema)
+    revision = _load_revision_module(
+        MERGED_HEAD,
+        "b4d6f8a2c1e3_merge_stage5d_and_wish_pool_heads.py",
+    )
+
+    assert revision.down_revision == (COORDINATION_SIBLING, MAIN_SIBLING)
+    revision.downgrade()
+    revision.upgrade()
+
+    assert _ledger(clean_public_schema) == [MERGED_HEAD]
+    assert _schema_signature(clean_public_schema) == before
+
+
+def test_main_sibling_requires_complete_coordination_schema(
+    clean_public_schema: Engine,
+) -> None:
+    upgrade(COORDINATION_SIBLING)
+    with clean_public_schema.begin() as connection:
+        connection.execute(text("DROP INDEX ix_course_submissions_deleted_at"))
+        revision = _load_revision_module(
+            MAIN_SIBLING,
+            "a9c4e7b2d6f1_add_bilingual_content_and_wish_pool.py",
+        )
+        with pytest.raises(RuntimeError, match="continuity is incomplete"):
+            revision._verify_source_schema(connection)
+
+
+def test_category_transition_requires_complete_main_sibling_schema(
+    clean_public_schema: Engine,
+) -> None:
+    upgrade(MAIN_SIBLING)
+    with clean_public_schema.begin() as connection:
+        connection.execute(text("DROP INDEX ix_archive_wishes_course_id"))
+        revision = _load_revision_module(
+            E8_REVISION,
+            "e8a4c1d7b2f6_add_category_pre_delete_active_state.py",
+        )
+        with pytest.raises(RuntimeError, match="Wish constraints are incomplete"):
+            revision._verify_upgrade_source(connection)
+
+
+def test_coordination_transition_requires_complete_main_sibling_schema(
+    clean_public_schema: Engine,
+) -> None:
+    upgrade(MAIN_SIBLING)
+    command.upgrade(alembic_config(), E8_REVISION)
+    assert _ledger(clean_public_schema) == sorted([E8_REVISION, MAIN_SIBLING])
+    with clean_public_schema.begin() as connection:
+        connection.execute(text("DROP TABLE archive_wish_reports"))
+        revision = _load_revision_module(
+            COORDINATION_SIBLING,
+            "a9c2e5f7b1d4_add_course_submission_lifecycle.py",
+        )
+        with pytest.raises(RuntimeError, match="Wish schema is incomplete"):
+            revision._verify_upgrade_source(connection)
+
+
+def test_unknown_sibling_ledger_fails_closed(clean_public_schema: Engine) -> None:
+    upgrade(E6_REVISION)
+    with clean_public_schema.begin() as connection:
+        connection.execute(
+            text("UPDATE alembic_version SET version_num = 'unknown_sibling'")
+        )
+        revision = _load_revision_module(
+            E8_REVISION,
+            "e8a4c1d7b2f6_add_category_pre_delete_active_state.py",
+        )
+        with pytest.raises(RuntimeError, match=r"found \['unknown_sibling'\]"):
+            revision._verify_upgrade_source(connection)
 
 
 def test_empty_database_upgrade_is_idempotent() -> None:
@@ -457,8 +609,9 @@ def test_unknown_and_multiple_ledger_revisions_fail(
 
 def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
     script, _ = revision_graph()
-    previous_revision = script.get_revision(head_revision()).down_revision
-    assert isinstance(previous_revision, str)
+    parent_revisions = script.get_revision(head_revision()).down_revision
+    assert parent_revisions == (COORDINATION_SIBLING, MAIN_SIBLING)
+    previous_revision = MAIN_SIBLING
     upgrade(previous_revision)
 
     before = inspect_database()
@@ -543,6 +696,189 @@ def test_archive_report_revision_is_additive_and_reversible(
             connection.scalar(text("SELECT version_num FROM alembic_version"))
             == new_revision
         )
+
+
+def test_category_state_preservation_revision_backfills_and_fails_closed(
+    clean_public_schema: Engine,
+) -> None:
+    baseline_revision = "d4b7e2a9c6f1"
+    previous_revision = "e6a1b3c5d7f9"
+    new_revision = "e8a4c1d7b2f6"
+    config = alembic_config()
+    upgrade(baseline_revision)
+
+    rows = (
+        ("d1-live-active", True, None),
+        ("d1-live-inactive", False, None),
+        ("d1-deleted-active", True, "2026-08-15T00:00:00+00:00"),
+        ("d1-deleted-inactive", False, "2026-08-15T00:00:00+00:00"),
+    )
+    with clean_public_schema.begin() as connection:
+        for order_index, (key, is_active, deleted_at) in enumerate(rows):
+            connection.execute(
+                text(
+                    "INSERT INTO course_category_configs "
+                    "(key, name, label, icon, badge_color, order_index, "
+                    "is_active, deleted_at) "
+                    "VALUES (:key, :name, '', 'pi pi-book', 'blue', "
+                    ":order_index, :is_active, :deleted_at)"
+                ),
+                {
+                    "key": key,
+                    "name": key,
+                    "order_index": order_index,
+                    "is_active": is_active,
+                    "deleted_at": deleted_at,
+                },
+            )
+
+    command.upgrade(config, new_revision)
+    with clean_public_schema.connect() as connection:
+        assert (
+            connection.scalar(text("SELECT version_num FROM alembic_version"))
+            == new_revision
+        )
+        assert sa_inspect(connection).has_table("about_us_entries", schema="public")
+        migrated = {
+            row.key: (row.is_active, row.pre_delete_is_active)
+            for row in connection.execute(
+                text(
+                    "SELECT key, is_active, pre_delete_is_active "
+                    "FROM course_category_configs WHERE key LIKE 'd1-%'"
+                )
+            )
+        }
+    assert migrated == {
+        "d1-live-active": (True, None),
+        "d1-live-inactive": (False, None),
+        "d1-deleted-active": (False, True),
+        "d1-deleted-inactive": (False, False),
+    }
+
+    with clean_public_schema.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO about_us_entries "
+                "(title, body, created_at, updated_at, updated_by_id) "
+                "VALUES ('D1 migration sentinel', 'preserve across downgrade', "
+                "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL)"
+            )
+        )
+
+    command.downgrade(config, previous_revision)
+    with clean_public_schema.connect() as connection:
+        assert (
+            connection.scalar(text("SELECT version_num FROM alembic_version"))
+            == previous_revision
+        )
+        inspector = sa_inspect(connection)
+        assert inspector.has_table("about_us_entries", schema="public")
+        assert "pre_delete_is_active" not in {
+            column["name"]
+            for column in inspector.get_columns(
+                "course_category_configs", schema="public"
+            )
+        }
+        assert (
+            connection.scalar(
+                text(
+                    "SELECT count(*) FROM about_us_entries "
+                    "WHERE title = 'D1 migration sentinel'"
+                )
+            )
+            == 1
+        )
+        downgraded = {
+            row.key: row.is_active
+            for row in connection.execute(
+                text(
+                    "SELECT key, is_active FROM course_category_configs "
+                    "WHERE key LIKE 'd1-%'"
+                )
+            )
+        }
+    assert downgraded == {key: is_active for key, is_active, _ in rows}
+    source_report = inspect_database()
+    assert source_report.current_revision == previous_revision
+    assert source_report.schema_candidate_revision == previous_revision
+    assert source_report.upgrade_allowed is True
+
+    command.upgrade(config, new_revision)
+    with clean_public_schema.connect() as connection:
+        assert (
+            connection.scalar(
+                text(
+                    "SELECT count(*) FROM about_us_entries "
+                    "WHERE title = 'D1 migration sentinel'"
+                )
+            )
+            == 1
+        )
+    with clean_public_schema.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE course_category_configs SET pre_delete_is_active = NULL "
+                "WHERE key = 'd1-deleted-active'"
+            )
+        )
+    with pytest.raises(RuntimeError, match="snapshot validation failed"):
+        command.downgrade(config, previous_revision)
+
+
+def test_course_submission_lifecycle_revision_is_additive_and_reversible(
+    clean_public_schema: Engine,
+) -> None:
+    previous_revision = "e8a4c1d7b2f6"
+    new_revision = "a9c2e5f7b1d4"
+    config = alembic_config()
+    upgrade(previous_revision)
+
+    def lifecycle_shape(connection) -> tuple[set[str], str | None]:
+        inspector = sa_inspect(connection)
+        columns = {
+            column["name"]
+            for column in inspector.get_columns("course_submissions", schema="public")
+        }
+        matching_foreign_keys = [
+            foreign_key
+            for foreign_key in inspector.get_foreign_keys(
+                "course_submissions", schema="public"
+            )
+            if foreign_key["constrained_columns"] == ["created_course_id"]
+            and foreign_key["referred_table"] == "courses"
+        ]
+        assert len(matching_foreign_keys) == 1
+        return columns, (matching_foreign_keys[0].get("options") or {}).get("ondelete")
+
+    lifecycle_columns = {
+        "previous_status",
+        "deleted_at",
+        "deleted_by_id",
+        "restored_at",
+        "restored_by_id",
+    }
+    with clean_public_schema.connect() as connection:
+        source_columns, source_ondelete = lifecycle_shape(connection)
+    assert lifecycle_columns.isdisjoint(source_columns)
+    assert source_ondelete is None
+
+    command.upgrade(config, new_revision)
+    with clean_public_schema.connect() as connection:
+        upgraded_columns, upgraded_ondelete = lifecycle_shape(connection)
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
+            new_revision
+        )
+    assert lifecycle_columns.issubset(upgraded_columns)
+    assert upgraded_ondelete == "SET NULL"
+
+    command.downgrade(config, previous_revision)
+    with clean_public_schema.connect() as connection:
+        downgraded_columns, downgraded_ondelete = lifecycle_shape(connection)
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
+            previous_revision
+        )
+    assert lifecycle_columns.isdisjoint(downgraded_columns)
+    assert downgraded_ondelete is None
 
 
 def test_known_revision_without_manifest_is_blocked() -> None:

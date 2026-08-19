@@ -158,7 +158,9 @@ def _course_category_value(course: Course) -> str:
     return getattr(course.category, "value", course.category)
 
 
-def _course_sort_key(course: Course, category_order: dict[str, int] | None = None) -> tuple[int, int, int]:
+def _course_sort_key(
+    course: Course, category_order: dict[str, int] | None = None
+) -> tuple[int, int, int]:
     order = category_order or DEFAULT_CATEGORY_ORDER
     category = _course_category_value(course)
     return (
@@ -168,11 +170,15 @@ def _course_sort_key(course: Course, category_order: dict[str, int] | None = Non
     )
 
 
-def _visible_courses(courses: list[Course], category_order: dict[str, int] | None = None) -> list[Course]:
+def _visible_courses(
+    courses: list[Course], category_order: dict[str, int] | None = None
+) -> list[Course]:
     seen: set[tuple[str, str]] = set()
     selected: list[Course] = []
     allowed_categories = set((category_order or DEFAULT_CATEGORY_ORDER).keys())
-    for course in sorted(courses, key=lambda item: _course_sort_key(item, category_order)):
+    for course in sorted(
+        courses, key=lambda item: _course_sort_key(item, category_order)
+    ):
         category = _course_category_value(course)
         if category not in allowed_categories:
             continue
@@ -238,12 +244,16 @@ async def _ensure_category(db: AsyncSession, category_key: str) -> CourseCategor
     result = await db.execute(
         select(CourseCategoryConfig).where(
             CourseCategoryConfig.key == category_key,
-            CourseCategoryConfig.is_active.is_(True),
         )
     )
     category = result.scalar_one_or_none()
-    if category:
+    if category and category.deleted_at is None and category.is_active:
         return category
+    if category:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Course category is not available",
+        )
     if category_key in DEFAULT_CATEGORY_ORDER:
         return CourseCategoryConfig(
             key=category_key,
@@ -255,7 +265,9 @@ async def _ensure_category(db: AsyncSession, category_key: str) -> CourseCategor
             ),
             order_index=DEFAULT_CATEGORY_ORDER[category_key],
         )
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Course category does not exist")
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST, detail="Course category does not exist"
+    )
 
 
 def _validated_admin_category_key(value: str) -> str:
@@ -308,6 +320,78 @@ async def _next_order_index(db: AsyncSession, category) -> int:
     )
     current_max = result.scalar()
     return 0 if current_max is None else int(current_max) + 1
+
+
+COURSE_SUBMISSION_APPROVAL_IDENTITY_CONFLICT = {
+    "code": "course_submission_approval_identity_conflict",
+    "message": "Course request identity changed; reload and retry.",
+    "reload_required": True,
+}
+COURSE_SUBMISSION_APPROVAL_RESULT_CONFLICT = {
+    "code": "course_submission_approval_result_conflict",
+    "message": "Approved course request has an inconsistent result.",
+    "reload_required": False,
+}
+COURSE_SUBMISSION_COURSE_IDENTITY_CONFLICT = {
+    "code": "course_submission_course_identity_conflict",
+    "message": "Course identity is ambiguous.",
+    "reload_required": False,
+}
+
+
+def _course_submission_identity(submission: CourseSubmission) -> tuple[str, str]:
+    return (
+        canonicalize_course_category_key(submission.category),
+        normalize_course_search_text(submission.name),
+    )
+
+
+async def _live_courses_for_submission_identity(
+    db: AsyncSession,
+    *,
+    category_key: str,
+    normalized_course_name: str,
+) -> list[Course]:
+    return list(
+        (
+            await db.execute(
+                select(Course)
+                .where(
+                    normalized_course_text_expr(Course.name) == normalized_course_name,
+                    Course.category == category_key,
+                    Course.deleted_at.is_(None),
+                )
+                .order_by(Course.id.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def _coherent_approved_course_submission(
+    db: AsyncSession,
+    submission: CourseSubmission,
+    *,
+    expected_category_key: str,
+    expected_normalized_course_name: str,
+) -> CourseSubmissionRead | None:
+    if (
+        submission.created_course_id is None
+        or submission.reviewer_id is None
+        or submission.reviewed_at is None
+    ):
+        return None
+    course = await db.get(Course, submission.created_course_id)
+    if course is None:
+        return None
+    course_category = canonicalize_course_category_key(_course_category_value(course))
+    if (
+        course_category != expected_category_key
+        or normalize_course_search_text(course.name) != expected_normalized_course_name
+    ):
+        return None
+    return CourseSubmissionRead.model_validate(submission)
 
 
 def _discussion_public_display_name(
@@ -466,31 +550,85 @@ async def create_course_request(
     db: AsyncSession = Depends(get_session),
 ):
     normalized_category = canonicalize_course_category_key(course_data.category)
-    await _ensure_category(db, normalized_category)
     normalized_name = normalize_course_search_text(course_data.name)
     formatted_name = format_course_display_name(course_data.name)
 
-    existing_course = (
-        await db.execute(
-            select(Course).where(
-                normalized_course_text_expr(Course.name) == normalized_name,
-                Course.category == normalized_category,
-                Course.deleted_at.is_(None),
+    if current_user.is_admin:
+        try:
+            await archive_lifecycle_locks.acquire_approval_namespace_mutex(
+                db,
+                category_key=normalized_category,
+                course_name=normalized_name,
             )
-        )
-    ).scalar_one_or_none()
-    if existing_course:
+            await _ensure_category(db, normalized_category)
+            existing_courses = await _live_courses_for_submission_identity(
+                db,
+                category_key=normalized_category,
+                normalized_course_name=normalized_name,
+            )
+            if existing_courses:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Course already exists",
+                )
+            existing_pending = (
+                await db.execute(
+                    select(CourseSubmission).where(
+                        normalized_course_text_expr(CourseSubmission.name)
+                        == normalized_name,
+                        CourseSubmission.category == normalized_category,
+                        CourseSubmission.status == SubmissionStatus.PENDING,
+                        CourseSubmission.deleted_at.is_(None),
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing_pending:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Course request already pending",
+                )
+
+            course = Course(
+                name=formatted_name,
+                category=normalized_category,
+                order_index=await _next_order_index(db, normalized_category),
+            )
+            db.add(course)
+            await db.flush()
+            submission = CourseSubmission(
+                name=course.name,
+                category=course.category,
+                requester_id=current_user.user_id,
+                reviewer_id=current_user.user_id,
+                status=SubmissionStatus.APPROVED,
+                created_course_id=course.id,
+                reviewed_at=datetime.now(UTC),
+            )
+            db.add(submission)
+            await db.commit()
+            return submission
+        except Exception:
+            await db.rollback()
+            raise
+
+    await _ensure_category(db, normalized_category)
+    existing_courses = await _live_courses_for_submission_identity(
+        db,
+        category_key=normalized_category,
+        normalized_course_name=normalized_name,
+    )
+    if existing_courses:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Course already exists",
         )
-
     existing_pending = (
         await db.execute(
             select(CourseSubmission).where(
                 normalized_course_text_expr(CourseSubmission.name) == normalized_name,
                 CourseSubmission.category == normalized_category,
                 CourseSubmission.status == SubmissionStatus.PENDING,
+                CourseSubmission.deleted_at.is_(None),
             )
         )
     ).scalar_one_or_none()
@@ -500,30 +638,11 @@ async def create_course_request(
             detail="Course request already pending",
         )
 
-    if current_user.is_admin:
-        course = Course(
-            name=formatted_name,
-            category=normalized_category,
-            order_index=await _next_order_index(db, normalized_category),
-        )
-        db.add(course)
-        await db.commit()
-        await db.refresh(course)
-        submission = CourseSubmission(
-            name=course.name,
-            category=course.category,
-            requester_id=current_user.user_id,
-            reviewer_id=current_user.user_id,
-            status=SubmissionStatus.APPROVED,
-            created_course_id=course.id,
-            reviewed_at=datetime.now(UTC),
-        )
-    else:
-        submission = CourseSubmission(
-            name=formatted_name,
-            category=normalized_category,
-            requester_id=current_user.user_id,
-        )
+    submission = CourseSubmission(
+        name=formatted_name,
+        category=normalized_category,
+        requester_id=current_user.user_id,
+    )
 
     db.add(submission)
     await db.commit()
@@ -538,7 +657,11 @@ async def list_my_course_requests(
 ):
     result = await db.execute(
         select(CourseSubmission)
-        .where(CourseSubmission.requester_id == current_user.user_id)
+        .where(
+            CourseSubmission.requester_id == current_user.user_id,
+            CourseSubmission.deleted_at.is_(None),
+            CourseSubmission.status != SubmissionStatus.DELETED,
+        )
         .order_by(CourseSubmission.created_at.desc())
     )
     return result.scalars().all()
@@ -550,10 +673,17 @@ async def list_course_requests_for_admin(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
 
     result = await db.execute(
-        select(CourseSubmission).order_by(
+        select(CourseSubmission)
+        .where(
+            CourseSubmission.deleted_at.is_(None),
+            CourseSubmission.status != SubmissionStatus.DELETED,
+        )
+        .order_by(
             CourseSubmission.status.asc(),
             CourseSubmission.created_at.desc(),
         )
@@ -569,26 +699,77 @@ async def update_course_request_for_admin(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
 
     submission = await db.get(CourseSubmission, request_id)
-    if not submission:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
+    if (
+        not submission
+        or submission.deleted_at is not None
+        or submission.status == SubmissionStatus.DELETED
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Request not found"
+        )
     if submission.status != SubmissionStatus.PENDING:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Request already reviewed")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Request already reviewed"
+        )
 
     if request_data.name is not None:
         submission.name = format_course_display_name(request_data.name)
     if request_data.category is not None:
-        await _ensure_category(db, request_data.category)
-        submission.category = request_data.category
+        category = await _ensure_category(db, request_data.category)
+        submission.category = category.key
 
     await db.commit()
     await db.refresh(submission)
     return submission
 
 
-@router.post("/admin/requests/{request_id}/approve", response_model=CourseSubmissionRead)
+@router.delete("/admin/requests/{request_id}")
+async def delete_course_request_for_admin(
+    request_id: int,
+    current_user: UserRoles = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+
+    submission = (
+        await db.execute(
+            select(CourseSubmission)
+            .where(CourseSubmission.id == request_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if (
+        submission is None
+        or submission.deleted_at is not None
+        or submission.status == SubmissionStatus.DELETED
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Request not found",
+        )
+
+    submission.previous_status = submission.status
+    submission.status = SubmissionStatus.DELETED
+    submission.deleted_at = datetime.now(UTC)
+    submission.deleted_by_id = current_user.user_id
+    submission.restored_at = None
+    submission.restored_by_id = None
+    await db.commit()
+    return {"message": "Course request moved to trash"}
+
+
+@router.post(
+    "/admin/requests/{request_id}/approve", response_model=CourseSubmissionRead
+)
 async def approve_course_request(
     request_id: int,
     decision: SubmissionDecision | None = None,
@@ -596,43 +777,109 @@ async def approve_course_request(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
 
-    submission = await db.get(CourseSubmission, request_id)
-    if not submission:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
-    if submission.status != SubmissionStatus.PENDING:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Request already reviewed")
-
-    normalized_course_name = normalize_course_search_text(submission.name)
-    formatted_course_name = format_course_display_name(submission.name)
-    course = (
+    discovered_submission = (
         await db.execute(
-            select(Course).where(
-                normalized_course_text_expr(Course.name) == normalized_course_name,
-                Course.category == submission.category,
-                Course.deleted_at.is_(None),
+            select(CourseSubmission).where(
+                CourseSubmission.id == request_id,
+                CourseSubmission.deleted_at.is_(None),
+                CourseSubmission.status != SubmissionStatus.DELETED,
             )
         )
     ).scalar_one_or_none()
-    if not course:
-        course = Course(
-            name=formatted_course_name,
-            category=submission.category,
-            order_index=await _next_order_index(db, submission.category),
+    if not discovered_submission:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Request not found"
         )
-        db.add(course)
-        await db.commit()
-        await db.refresh(course)
+    discovered_identity = _course_submission_identity(discovered_submission)
 
-    submission.status = SubmissionStatus.APPROVED
-    submission.reviewer_id = current_user.user_id
-    submission.review_note = decision.note if decision else None
-    submission.created_course_id = course.id
-    submission.reviewed_at = datetime.now(UTC)
-    await db.commit()
-    await db.refresh(submission)
-    return submission
+    try:
+        await archive_lifecycle_locks.acquire_approval_namespace_mutex(
+            db,
+            category_key=discovered_identity[0],
+            course_name=discovered_identity[1],
+        )
+        submission = (
+            await db.execute(
+                select(CourseSubmission)
+                .where(
+                    CourseSubmission.id == request_id,
+                    CourseSubmission.deleted_at.is_(None),
+                    CourseSubmission.status != SubmissionStatus.DELETED,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if submission is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Request not found",
+            )
+
+        locked_identity = _course_submission_identity(submission)
+        if locked_identity != discovered_identity:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=COURSE_SUBMISSION_APPROVAL_IDENTITY_CONFLICT,
+            )
+
+        if submission.status == SubmissionStatus.APPROVED:
+            approved_result = await _coherent_approved_course_submission(
+                db,
+                submission,
+                expected_category_key=locked_identity[0],
+                expected_normalized_course_name=locked_identity[1],
+            )
+            if approved_result is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=COURSE_SUBMISSION_APPROVAL_RESULT_CONFLICT,
+                )
+            await db.rollback()
+            return approved_result
+        if submission.status != SubmissionStatus.PENDING:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Request already reviewed",
+            )
+
+        await _ensure_category(db, locked_identity[0])
+        matching_courses = await _live_courses_for_submission_identity(
+            db,
+            category_key=locked_identity[0],
+            normalized_course_name=locked_identity[1],
+        )
+        if len(matching_courses) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=COURSE_SUBMISSION_COURSE_IDENTITY_CONFLICT,
+            )
+        if matching_courses:
+            course = matching_courses[0]
+        else:
+            course = Course(
+                name=format_course_display_name(submission.name),
+                category=locked_identity[0],
+                order_index=await _next_order_index(db, locked_identity[0]),
+            )
+            db.add(course)
+            await db.flush()
+
+        submission.status = SubmissionStatus.APPROVED
+        submission.reviewer_id = current_user.user_id
+        submission.review_note = decision.note if decision else None
+        submission.created_course_id = course.id
+        submission.reviewed_at = datetime.now(UTC)
+        await db.commit()
+        return submission
+    except Exception:
+        await db.rollback()
+        raise
 
 
 @router.post("/admin/requests/{request_id}/reject", response_model=CourseSubmissionRead)
@@ -643,13 +890,23 @@ async def reject_course_request(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
 
     submission = await db.get(CourseSubmission, request_id)
-    if not submission:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
+    if (
+        not submission
+        or submission.deleted_at is not None
+        or submission.status == SubmissionStatus.DELETED
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Request not found"
+        )
     if submission.status != SubmissionStatus.PENDING:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Request already reviewed")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Request already reviewed"
+        )
 
     submission.status = SubmissionStatus.REJECTED
     submission.reviewer_id = current_user.user_id
@@ -703,9 +960,7 @@ async def get_course_archives(
                     ArchiveSubmission.id,
                     ArchiveSubmission.created_archive_id,
                     ArchiveSubmission.requester_id,
-                ).where(
-                    *submission_visibility_conditions
-                )
+                ).where(*submission_visibility_conditions)
             )
         ).all()
         validated_sources = validate_archive_source_submission_rows(
@@ -716,12 +971,8 @@ async def get_course_archives(
             operation="source_lookup",
         )
         for submission_id, created_archive_id, requester_id in linked_submissions:
-            if (
-                created_archive_id in validated_sources
-                and (
-                    current_user.is_admin
-                    or requester_id == current_user.user_id
-                )
+            if created_archive_id in validated_sources and (
+                current_user.is_admin or requester_id == current_user.user_id
             ):
                 source_submission_ids_by_archive[created_archive_id] = (
                     validated_sources[created_archive_id]
@@ -729,7 +980,11 @@ async def get_course_archives(
 
     return [
         ArchiveRead.model_validate(archive).model_copy(
-            update={"source_submission_ids": source_submission_ids_by_archive.get(archive.id, [])}
+            update={
+                "source_submission_ids": source_submission_ids_by_archive.get(
+                    archive.id, []
+                )
+            }
         )
         for archive in archives
     ]
@@ -1071,7 +1326,9 @@ async def _fetch_archive_discussion_messages(
             created_at=msg.created_at,
         )
 
-    roots = [messages_by_id[root_id] for root_id in root_ids if root_id in messages_by_id]
+    roots = [
+        messages_by_id[root_id] for root_id in root_ids if root_id in messages_by_id
+    ]
     for message in messages_by_id.values():
         if message.parent_id in messages_by_id:
             messages_by_id[message.parent_id].replies.append(message)
@@ -1404,9 +1661,7 @@ async def like_archive_discussion_message(
     like_id = await db.scalar(
         pg_insert(ArchiveDiscussionLike)
         .values(message_id=message_id, user_id=current_user.user_id)
-        .on_conflict_do_nothing(
-            constraint="uq_archive_discussion_likes_message_user"
-        )
+        .on_conflict_do_nothing(constraint="uq_archive_discussion_likes_message_user")
         .returning(ArchiveDiscussionLike.id)
     )
     if like_id is not None and message.user_id != current_user.user_id:
@@ -1422,7 +1677,9 @@ async def like_archive_discussion_message(
             user_id=message.user_id,
             notification_type=PersonalNotificationType.DISCUSSION_LIKE,
             title=f"{actor_name} 對你的留言按了愛心",
-            message=(message.content[:80] + "…") if len(message.content) > 80 else message.content,
+            message=(message.content[:80] + "…")
+            if len(message.content) > 80
+            else message.content,
             source_type="archive_discussion_thread",
             source_id=message.parent_id or message.id,
             source_message_id=message.id,
@@ -1528,7 +1785,9 @@ async def pin_archive_discussion_message(
 ):
     await _ensure_archive_exists_for_discussion(course_id, archive_id, db)
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
 
     message = (
         await db.execute(
@@ -1560,7 +1819,9 @@ async def pin_archive_discussion_message(
             user_id=message.user_id,
             notification_type=PersonalNotificationType.DISCUSSION_PIN,
             title="你的留言已被管理員置頂",
-            message=(message.content[:80] + "…") if len(message.content) > 80 else message.content,
+            message=(message.content[:80] + "…")
+            if len(message.content) > 80
+            else message.content,
             source_type="archive_discussion_thread",
             source_id=message.id,
             source_message_id=message.id,
@@ -1624,11 +1885,7 @@ async def update_archive(
         raise archive_lifecycle_conflict_error()
     archive = locked.archive(archive_id) if locked is not None else None
 
-    if (
-        not archive
-        or archive.course_id != course_id
-        or archive.deleted_at is not None
-    ):
+    if not archive or archive.course_id != course_id or archive.deleted_at is not None:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Archive not found"
@@ -1926,7 +2183,10 @@ async def update_course(
             else course.category
         )
 
-        if normalized_new_name != normalized_current_name or new_category != course.category:
+        if (
+            normalized_new_name != normalized_current_name
+            or new_category != course.category
+        ):
             check_query = select(Course).where(
                 normalized_course_text_expr(Course.name) == normalized_new_name,
                 Course.category == new_category,
@@ -1949,7 +2209,10 @@ async def update_course(
     if course_data.category is not None:
         await _ensure_category(db, course_data.category)
         course.category = course_data.category
-        if course_data.category != original_category and course_data.order_index is None:
+        if (
+            course_data.category != original_category
+            and course_data.order_index is None
+        ):
             course.order_index = await _next_order_index(db, course_data.category)
     if course_data.order_index is not None:
         course.order_index = course_data.order_index
@@ -1987,7 +2250,9 @@ async def reorder_courses(
     courses_by_id = {course.id: course for course in courses}
 
     requested_ids = list(dict.fromkeys(reorder_data.course_ids))
-    missing_ids = [course_id for course_id in requested_ids if course_id not in courses_by_id]
+    missing_ids = [
+        course_id for course_id in requested_ids if course_id not in courses_by_id
+    ]
     if missing_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2035,12 +2300,13 @@ async def delete_course(
     budget = PlanRebuildBudget()
     locked_course_plan = None
     while True:
-        locked_course_plan, revalidation = (
-            await course_lifecycle_locks.acquire_course_lifecycle_plan_once(
-                db,
-                course_id=course_id,
-                operation=CourseLifecycleOperation.TRASH,
-            )
+        (
+            locked_course_plan,
+            revalidation,
+        ) = await course_lifecycle_locks.acquire_course_lifecycle_plan_once(
+            db,
+            course_id=course_id,
+            operation=CourseLifecycleOperation.TRASH,
         )
         if locked_course_plan is None:
             raise HTTPException(
@@ -2138,7 +2404,9 @@ async def list_admin_course_categories(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
     result = await db.execute(
         select(CourseCategoryConfig)
         .where(CourseCategoryConfig.deleted_at.is_(None))
@@ -2157,16 +2425,23 @@ async def create_course_category(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
 
     key = _validated_admin_category_key(category_data.key)
     name = await _ensure_unique_category_name(db, category_data.name)
 
     existing = (
-        await db.execute(select(CourseCategoryConfig).where(CourseCategoryConfig.key == key))
+        await db.execute(
+            select(CourseCategoryConfig).where(CourseCategoryConfig.key == key)
+        )
     ).scalar_one_or_none()
     if existing:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category key already exists")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category key already exists",
+        )
 
     order_index = category_data.order_index
     if order_index is None:
@@ -2207,11 +2482,15 @@ async def update_course_category(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
 
     category = await db.get(CourseCategoryConfig, category_id)
     if not category:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Category not found"
+        )
 
     old_key = category.key
     if category_data.key is not None:
@@ -2225,7 +2504,10 @@ async def update_course_category(
             )
         ).scalar_one_or_none()
         if existing:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category key already exists")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Category key already exists",
+            )
         category.key = new_key
         if new_key != old_key:
             for model in (Course, CourseSubmission, ArchiveSubmission):
@@ -2255,7 +2537,9 @@ async def update_course_category(
     if category_data.icon is not None:
         category.icon = category_data.icon.strip() or "pi pi-fw pi-book"
     if category_data.badge_color is not None:
-        category.badge_color = _normalize_category_badge_color(category_data.badge_color)
+        category.badge_color = _normalize_category_badge_color(
+            category_data.badge_color
+        )
     if category_data.order_index is not None:
         category.order_index = category_data.order_index
     if category_data.is_active is not None:
@@ -2290,15 +2574,24 @@ async def reorder_course_categories(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
 
     result = await db.execute(select(CourseCategoryConfig))
     categories = result.scalars().all()
     categories_by_id = {category.id: category for category in categories}
     requested_ids = list(dict.fromkeys(reorder_data.category_ids))
-    missing = [category_id for category_id in requested_ids if category_id not in categories_by_id]
+    missing = [
+        category_id
+        for category_id in requested_ids
+        if category_id not in categories_by_id
+    ]
     if missing:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Category order includes unknown categories")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Category order includes unknown categories",
+        )
 
     ordered = [categories_by_id[category_id] for category_id in requested_ids]
     ordered_ids = set(requested_ids)
@@ -2327,24 +2620,35 @@ async def delete_course_category(
     db: AsyncSession = Depends(get_session),
 ):
     if not current_user.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
 
     category = await db.get(CourseCategoryConfig, category_id)
-    if not category:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+    if not category or category.deleted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Category not found"
+        )
 
     active_courses = (
-        await db.execute(
-            select(Course).where(
-                Course.category == category.key,
-                Course.deleted_at.is_(None),
+        (
+            await db.execute(
+                select(Course).where(
+                    Course.category == category.key,
+                    Course.deleted_at.is_(None),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     if active_courses:
         if len(active_courses) > 5:
-            sample_names = ", ".join(course.name for course in active_courses[:5]) + f" 等 {len(active_courses)} 門課程"
+            sample_names = (
+                ", ".join(course.name for course in active_courses[:5])
+                + f" 等 {len(active_courses)} 門課程"
+            )
         else:
             sample_names = ", ".join(course.name for course in active_courses)
         raise HTTPException(
@@ -2352,6 +2656,8 @@ async def delete_course_category(
             detail=f"此分類仍有啟用中的課程，請先刪除或移動這些課程後再刪除分類。({len(active_courses)} 門，包含：{sample_names})",
         )
 
+    category.pre_delete_is_active = category.is_active
+    category.is_active = False
     category.deleted_at = datetime.now(UTC)
     category.deleted_by_id = current_user.user_id
 

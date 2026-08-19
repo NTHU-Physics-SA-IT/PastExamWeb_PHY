@@ -72,6 +72,7 @@ from app.services.archive_submission_status import (
     ArchiveSubmissionTransitionClassification,
     archive_submission_self_delete_consumed_error,
     available_archive_submission_admin_actions,
+    capture_submission_status_notification_identity,
     classify_archive_submission_expected_state,
     classify_archive_submission_review_transition,
     enqueue_submission_status_notification,
@@ -1693,16 +1694,21 @@ async def approve_archive_submission(
             operation="approval",
         )
 
-        submission.status = SubmissionStatus.APPROVED
-        submission.reviewer_id = current_user.user_id
-        submission.review_note = decision.note if decision else None
-        submission.created_archive_id = archive.id
-        submission.reviewed_at = datetime.now(UTC)
-        await enqueue_submission_status_notification(
+        with capture_submission_status_notification_identity(
             db,
             submission,
             SubmissionStatus.APPROVED,
-        )
+        ):
+            submission.status = SubmissionStatus.APPROVED
+            submission.reviewer_id = current_user.user_id
+            submission.review_note = decision.note if decision else None
+            submission.created_archive_id = archive.id
+            submission.reviewed_at = datetime.now(UTC)
+            await enqueue_submission_status_notification(
+                db,
+                submission,
+                SubmissionStatus.APPROVED,
+            )
         await db.flush()
         await db.refresh(submission)
         await db.commit()
@@ -1748,15 +1754,20 @@ async def reject_archive_submission(
         if no_op_response is not None:
             return no_op_response
 
-        submission.status = SubmissionStatus.REJECTED
-        submission.reviewer_id = current_user.user_id
-        submission.review_note = decision.note if decision else None
-        submission.reviewed_at = datetime.now(UTC)
-        await enqueue_submission_status_notification(
+        with capture_submission_status_notification_identity(
             db,
             submission,
             SubmissionStatus.REJECTED,
-        )
+        ):
+            submission.status = SubmissionStatus.REJECTED
+            submission.reviewer_id = current_user.user_id
+            submission.review_note = decision.note if decision else None
+            submission.reviewed_at = datetime.now(UTC)
+            await enqueue_submission_status_notification(
+                db,
+                submission,
+                SubmissionStatus.REJECTED,
+            )
         await db.commit()
         await db.refresh(submission)
         return _serialize_archive_submission_action(submission, changed=True)

@@ -9,6 +9,7 @@ from app.models.models import TrashEntityType
 
 HARD_DELETE_CASES = (
     (TrashEntityType.COURSE_CATEGORY, "_hard_delete_category"),
+    (TrashEntityType.COURSE_SUBMISSION, None),
     (TrashEntityType.COURSE, "_hard_delete_course"),
     (TrashEntityType.ARCHIVE, "_hard_delete_archive"),
     (TrashEntityType.ARCHIVE_SUBMISSION, "_hard_delete_submission"),
@@ -62,6 +63,4 @@ async def test_every_materialized_trash_type_dispatches_to_hard_delete(
 def test_reserved_archive_report_filter_has_no_fake_delete_dispatch():
     materialized_types = {case[0] for case in HARD_DELETE_CASES}
 
-    assert materialized_types == set(TrashEntityType) - {
-        TrashEntityType.ARCHIVE_REPORT
-    }
+    assert materialized_types == set(TrashEntityType) - {TrashEntityType.ARCHIVE_REPORT}

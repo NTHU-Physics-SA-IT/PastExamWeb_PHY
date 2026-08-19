@@ -4556,13 +4556,17 @@
           <section class="trash-dependency-help-section">
             <h4 class="trash-dependency-help-title">{{ $t('按鈕規則') }}</h4>
             <div class="trash-dependency-help-rule-list">
-              <p><span aria-hidden="true">-</span> {{ $t('有「阻擋還原」 → 不顯示還原。') }}</p>
               <p>
-                <span aria-hidden="true">-</span> {{ $t('有「阻擋永久刪除」 → 不顯示永久刪除。') }}
+                <span aria-hidden="true">-</span>
+                {{ $t('操作按鈕以後端回傳的可用操作為準；依賴與阻擋文字只用來說明原因。') }}
               </p>
               <p>
                 <span aria-hidden="true">-</span>
-                {{ $t('只有「一併永久刪除」或「關聯」時，按鈕不會自動隱藏。') }}
+                {{ $t('顯示還原或永久刪除，代表後端已授權該筆項目的對應操作。') }}
+              </p>
+              <p>
+                <span aria-hidden="true">-</span>
+                {{ $t('未顯示的操作不可由前端依項目類型、狀態或關聯自行推定。') }}
               </p>
             </div>
           </section>
@@ -4675,6 +4679,28 @@
               <p>
                 <span aria-hidden="true">-</span>
                 {{ $t('留言：不再阻擋考古題永久刪除，會隨考古題一併永久刪除。') }}
+              </p>
+            </div>
+          </section>
+
+          <section class="trash-dependency-help-section">
+            <h4 class="trash-dependency-help-title">{{ $t('課程申請歷史') }}</h4>
+            <div class="trash-dependency-help-rule-list">
+              <p>
+                <span aria-hidden="true">-</span>
+                {{ $t('課程申請是獨立歷史紀錄；關聯課程不存在時仍可正常保留，不代表資料異常。') }}
+              </p>
+              <p>
+                <span aria-hidden="true">-</span>
+                {{ $t('是否能還原與永久刪除由後端回傳；舊資料缺少可信原始狀態時不會顯示還原。') }}
+              </p>
+              <p>
+                <span aria-hidden="true">-</span>
+                {{ $t('刪除課程不會刪除課程申請；永久刪除課程申請也不會刪除課程。') }}
+              </p>
+              <p>
+                <span aria-hidden="true">-</span>
+                {{ $t('前端不會提供重新連結或重建課程的動作。') }}
               </p>
             </div>
           </section>
@@ -5130,6 +5156,7 @@ const trashFilterOptions = computed(() => [
   { label: t('考古題投稿'), value: 'archive_submission' },
   { label: t('課程分類'), value: 'course_category' },
   { label: t('課程'), value: 'course' },
+  { label: t('課程申請'), value: 'course_submission' },
   { label: t('公告'), value: 'notification' },
   { label: t('使用者'), value: 'user' },
   { label: t('系統問題回報'), value: 'system_issue_report' },
@@ -5759,6 +5786,14 @@ const getTrashContext = (item) => {
     return { label: t('課程'), value: localizedTrashCourseName(item) }
   if (item.item_type === 'course' && item.parent_name)
     return { label: t('隸屬分類'), value: localizedTrashParentName(item) }
+  if (item.item_type === 'course_submission') {
+    if (item.parent_type === 'course' && item.parent_name)
+      return { label: t('關聯課程'), value: localizedTrashParentName(item) }
+    return {
+      label: t('歷史紀錄'),
+      value: t('未連結課程（保留為獨立歷史紀錄）'),
+    }
+  }
   if (item.item_type === 'archive_submission') {
     if (item.parent_type === 'course' && item.parent_name)
       return { label: t('關聯課程'), value: localizedTrashParentName(item) }
@@ -7607,7 +7642,8 @@ const formatTrashDependency = (dependency, itemType = '') => {
     }
   }
 
-  const unrecoverablePrefix = matchDependencyPrefix(raw, '無法復原：')
+  const unrecoverablePrefix =
+    matchDependencyPrefix(raw, '無法還原：') || matchDependencyPrefix(raw, '無法復原：')
   if (unrecoverablePrefix) {
     return {
       key: `restore-blocking-${raw}`,
