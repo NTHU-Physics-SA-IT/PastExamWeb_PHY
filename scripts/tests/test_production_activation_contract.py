@@ -766,10 +766,11 @@ def test_backup_rejects_invalid_explicit_release_sha(
     assert not (tmp_path / "logical-backups").exists()
 
 
-def test_full_ci_executes_production_release_and_nginx_contract_tests() -> None:
+def test_full_ci_executes_runtime_release_and_nginx_contract_tests() -> None:
     workflow = TEST_WORKFLOW.read_text(encoding="utf-8")
 
     for test_file in (
+        "test_backend_runtime_health.py",
         "test_nginx_oauth_access_logging.py",
         "test_production_activation_contract.py",
         "test_release_workflow_contract.py",

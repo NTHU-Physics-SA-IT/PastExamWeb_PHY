@@ -116,6 +116,7 @@ jobs:
             --repository-revision "${GITHUB_SHA}" \
             --output json
           uv run python -m pytest -q \
+            ../scripts/tests/test_backend_runtime_health.py \
             ../scripts/tests/test_dev_compose_schema_controls.py \
             ../scripts/tests/test_nginx_oauth_access_logging.py \
             ../scripts/tests/test_postgres_test_bootstrap_contract.py \

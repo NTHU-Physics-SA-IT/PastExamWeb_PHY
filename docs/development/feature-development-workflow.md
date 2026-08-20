@@ -421,11 +421,22 @@ semantic as well as textual conflicts before claiming merge readiness.
 Normal independent implementation starts from fresh `main`. A task or milestone
 uses the optional coordination branch only when its authority explicitly
 requires coordinated work; resolve that branch from canonical project
-governance. Returning a coordinated milestone to main uses a separately
-authorized immutable candidate based on fresh `main`, a true merge from the
-final coordination SHA, candidate Full CI, and a candidate pull request whose
-base is `main`. Main never uses Equivalent validation, and neither workflow
-family recognition nor release metadata transfers coordination, production, or
+governance. For an ordinary independent main-target change, once the final
+source head, base, and pull request content are ready, push the head and
+promptly open the ready pull request; selected Source and PR evidence may run
+independently and overlap, while merge still requires every exact result
+selected by the repository to succeed.
+
+Returning a coordinated milestone to main first uses a separately authorized
+immutable candidate based on fresh `main` and a true merge from the final
+coordination SHA. Once the candidate topology, freshness, and pull request
+content are ready, push it and promptly open the ready main-target pull request
+rather than waiting merely for Source Full to finish. Follow the detailed
+[pull request rules](../../CONTRIBUTING.md#pull-requests) and preserve
+[ADR-0006](../decisions/0006-coordination-postmerge-full-evidence-reuse.md)'s
+exact Case-B reconciliation, dual-Full evidence, provenance, and fail-closed
+contract. Main never uses Equivalent validation, and neither workflow family
+recognition nor release metadata transfers coordination, production, or
 deployment authority.
 
 ## Backend implementation task contract

@@ -144,14 +144,34 @@ docs-only. For the configured coordination branch, the Repository classifier
 applies its existing exact-ref, provenance, governance-path, and fail-closed
 rules.
 
+For an ordinary independent main-target change, once the final source head,
+base freshness, and pull request content are ready, push that head and promptly
+open the ready pull request. When Source and PR workflows are both selected,
+they run as independent evidence and may overlap. Every exact result required
+by the repository must still be terminal successful before merge.
+
 Returning a coordinated milestone to main uses a separately authorized
 immutable candidate based on fresh `main`. The final coordination SHA is
-true-merged into that candidate,
-the candidate completes exact-SHA Full CI, and a candidate pull request targets
-`main`. Pull requests targeting `main` never use Equivalent evidence;
-governance, CI, configuration, application, mixed, and unknown changes run Full
-CI, while only conclusively docs-only changes use the narrow lightweight path.
-Merging that pull request is a separate owner-authorized operation.
+true-merged into that candidate. Once its source identity, topology, base
+freshness, and pull request content are ready, push the exact candidate and
+promptly open its ready pull request to `main`; do not wait merely for candidate
+Source CI to finish. Selected Source and PR evidence may run independently and
+overlap, but all exact evidence required by the repository must be terminal
+successful before merge. [ADR-0006](docs/decisions/0006-coordination-postmerge-full-evidence-reuse.md)
+governs the narrower exact Case-B reconciliation, provenance, and fail-closed
+contract.
+
+Do not use no-op commits, extra pushes, workflow reruns, pull request
+close/reopen actions, or Draft/Ready transitions solely to manufacture overlap.
+Lack of overlap caused by natural scheduling is not a policy failure and does
+not authorize a rerun. If source identity, base freshness, candidate topology,
+semantic conflicts, owner decisions, or other genuine readiness requirements
+remain unresolved, the pull request is not ready and must not be opened merely
+to chase parallelism. Pull requests targeting `main` never use Equivalent
+evidence; governance, CI, configuration, application, mixed, and unknown
+changes run Full CI, while only conclusively docs-only changes use the narrow
+lightweight path. Merging that pull request is a separate owner-authorized
+operation.
 
 Before merge, the pushed final commit must reach a terminal successful CI
 result for the checks selected by the repository workflows. A pull request
