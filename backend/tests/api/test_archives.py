@@ -717,7 +717,7 @@ async def test_help_upload_preserves_source_wish_and_rejects_target_mismatch(
         "archive_type": "midterm",
         "has_answers": "false",
         "filename": "midterm1",
-        "academic_year": 2026,
+        "academic_year": 2027,
         "source_wish_id": wish_id,
     }
     try:
@@ -731,6 +731,7 @@ async def test_help_upload_preserves_source_wish_and_rejects_target_mismatch(
         async with session_maker() as session:
             submission = await session.get(ArchiveSubmission, submission_id)
             assert submission.source_wish_id == wish_id
+            assert submission.academic_year == 2027
 
         mismatch = await client.post(
             "/archives/upload",

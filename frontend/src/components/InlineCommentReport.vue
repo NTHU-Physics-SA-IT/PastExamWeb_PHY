@@ -87,11 +87,8 @@ const props = defineProps({
   targetType: { type: String, default: 'comment' },
 })
 const { t } = useI18n()
-const supportsCustomMessage = computed(() => props.targetType !== 'wish')
 const commentReportReasons = computed(() =>
-  COMMENT_REPORT_REASONS.filter(
-    (option) => supportsCustomMessage.value || option.value !== COMMENT_REPORT_OTHER_REASON
-  ).map((option) => ({ ...option, label: t(option.label) }))
+  COMMENT_REPORT_REASONS.map((option) => ({ ...option, label: t(option.label) }))
 )
 
 const emit = defineEmits(['update:reason', 'update:customMessage', 'cancel', 'submit'])
@@ -111,9 +108,7 @@ const contentPreview = computed(() => {
     : String(props.message.content || '').trim()
   return content.length > 120 ? `${content.slice(0, 120)}…` : content
 })
-const isOtherReason = computed(
-  () => supportsCustomMessage.value && props.reason === COMMENT_REPORT_OTHER_REASON
-)
+const isOtherReason = computed(() => props.reason === COMMENT_REPORT_OTHER_REASON)
 const customMessageLength = computed(() => String(props.customMessage || '').length)
 const hasValidCustomMessage = computed(
   () =>

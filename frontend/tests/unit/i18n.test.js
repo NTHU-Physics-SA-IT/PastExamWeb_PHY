@@ -75,4 +75,14 @@ describe('locale authority', () => {
     expect(i18n.global.t('本地帳號登入')).toBe('本地帳號登入')
     expect(i18n.global.t('瀏覽公開課程目錄')).toBe('瀏覽公開課程目錄')
   })
+
+  it('localizes optional Wish semester presentation', () => {
+    setLocale('en')
+    expect(i18n.global.t('考試學期（選填）')).toBe('Exam Semester (Optional)')
+    expect(i18n.global.t('不限學期')).toBe('Any Semester')
+
+    setLocale('zh-TW')
+    expect(i18n.global.t('考試學期（選填）')).toBe('考試學期（選填）')
+    expect(i18n.global.t('不限學期')).toBe('不限學期')
+  })
 })

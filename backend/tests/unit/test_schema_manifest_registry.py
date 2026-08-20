@@ -16,7 +16,7 @@ from app.models.models import ArchiveSubmission, User
 
 
 def test_reviewed_manifest_registry_has_required_revisions() -> None:
-    assert HEAD_SCHEMA_REVISION == "b4d6f8a2c1e3"
+    assert HEAD_SCHEMA_REVISION == "f3a7c1e9d5b2"
     assert reviewed_manifest_revisions() == (
         "c4d8e2f1a6b9",
         "a4c7e9d2f6b1",
@@ -35,6 +35,7 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
         "a9c2e5f7b1d4",
         "a9c4e7b2d6f1",
         "b4d6f8a2c1e3",
+        "f3a7c1e9d5b2",
     )
     assert get_manifest_spec("d4b7e2a9c6f1").metadata_variant == (
         "pre_about_us_entries"
@@ -51,7 +52,10 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
     assert get_manifest_spec("a9c4e7b2d6f1").metadata_variant == (
         "main_sibling_head"
     )
-    assert get_manifest_spec("b4d6f8a2c1e3").metadata_variant == "head"
+    assert get_manifest_spec("b4d6f8a2c1e3").metadata_variant == (
+        "pre_wish_optional_semester"
+    )
+    assert get_manifest_spec("f3a7c1e9d5b2").metadata_variant == "head"
 
 
 def test_recovery_manifest_is_versioned_and_revision_bound() -> None:
@@ -69,7 +73,8 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     column_name = "owner_self_delete_consumed"
     previous_status_column = "previous_status"
     constraint_name = "uq_archive_submissions_created_archive_id"
-    head = metadata_for_revision("b4d6f8a2c1e3")
+    head = metadata_for_revision("f3a7c1e9d5b2")
+    previous_wish_head = metadata_for_revision("b4d6f8a2c1e3")
     coordination_head = metadata_for_revision("a9c2e5f7b1d4")
     main_head = metadata_for_revision("a9c4e7b2d6f1")
     pre_course_submission_lifecycle = metadata_for_revision("e8a4c1d7b2f6")
@@ -87,6 +92,9 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     a4 = metadata_for_revision("a4c7e9d2f6b1")
 
     assert head is not None
+    assert previous_wish_head is not None
+    assert head.tables["archive_wishes"].c.academic_year.nullable is True
+    assert previous_wish_head.tables["archive_wishes"].c.academic_year.nullable is False
     assert coordination_head is not None
     assert main_head is not None
     assert pre_course_submission_lifecycle is not None
@@ -245,7 +253,7 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     )
 
     # Building older variants must never mutate current SQLModel metadata.
-    rebuilt_head = metadata_for_revision("b4d6f8a2c1e3")
+    rebuilt_head = metadata_for_revision("f3a7c1e9d5b2")
     assert rebuilt_head is not None
     assert column_name in rebuilt_head.tables["archive_submissions"].c
     assert previous_status_column in rebuilt_head.tables["archive_submissions"].c

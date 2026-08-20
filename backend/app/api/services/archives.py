@@ -794,7 +794,6 @@ async def upload_archive(
                 _normalize_match_text(wish.category) == _normalize_match_text(category),
                 _normalize_match_text(wish.professor)
                 == _normalize_match_text(professor),
-                wish.academic_year == academic_year,
                 wish.archive_type.value == archive_type,
                 _normalize_match_text(wish.name) == _normalize_match_text(filename),
             )

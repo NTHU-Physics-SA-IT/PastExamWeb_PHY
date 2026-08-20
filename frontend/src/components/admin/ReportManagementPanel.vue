@@ -994,11 +994,11 @@
               <div class="report-mobile-card__body">
                 <section
                   class="report-mobile-card__summary report-mobile-summary-preview"
-                  :aria-label="$t('許願目標')"
+                  :aria-label="$t('許願標題')"
                 >
-                  <span class="report-mobile-summary-preview__label">{{ $t('許願目標') }}</span>
+                  <span class="report-mobile-summary-preview__label">{{ $t('許願標題') }}</span>
                   <p class="report-mobile-summary-preview__text">
-                    {{ data.wish_title }} · {{ data.target_summary }}
+                    {{ data.wish_title }}
                   </p>
                 </section>
                 <dl
@@ -1022,7 +1022,7 @@
                   </div>
                   <div class="report-mobile-info-item report-mobile-info-item--wide">
                     <dt>{{ $t('許願目標') }}</dt>
-                    <dd>{{ data.wish_title }} · {{ data.target_summary }}</dd>
+                    <dd>{{ data.target_summary }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
                     <dt>{{ $t('審核') }}</dt>
@@ -3217,9 +3217,14 @@ onBeforeUnmount(teardownCardLayout)
 @container report-card (min-width: 42rem) {
   .report-mobile-card__body {
     grid-template-areas: 'summary metadata';
-    grid-template-columns: minmax(18rem, 0.9fr) minmax(0, 1.1fr);
+    grid-template-columns: minmax(15rem, 0.72fr) minmax(0, 1.28fr);
     grid-template-rows: auto;
-    gap: 1rem;
+    align-items: stretch;
+    gap: 1.15rem;
+  }
+  .report-mobile-card__summary {
+    display: grid;
+    align-content: center;
   }
 }
 @container report-section (max-width: 25rem) {
@@ -3229,8 +3234,12 @@ onBeforeUnmount(teardownCardLayout)
   }
 }
 @container report-card (max-width: 25rem) {
+  .report-mobile-card__body {
+    gap: 0.8rem;
+  }
   .report-mobile-info-grid {
     grid-template-columns: minmax(0, 1fr);
+    gap: 0.55rem;
   }
   .report-mobile-info-item--wide {
     grid-column: auto;

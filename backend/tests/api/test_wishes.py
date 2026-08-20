@@ -1,6 +1,6 @@
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from app.main import app
 from app.models.models import (
@@ -167,7 +167,8 @@ async def test_wish_duplicate_heart_fulfillment_report_and_admin_delete(
             session.add(submission)
             await session.commit()
         listed = await client.get("/wishes")
-        assert listed.json()["items"][0]["fulfilled"] is True
+        assert listed.json()["items"] == []
+        assert listed.json()["total"] == 0
 
         app.dependency_overrides[get_current_user] = _override_user(reporter.id)
         report = await client.post(
@@ -175,6 +176,7 @@ async def test_wish_duplicate_heart_fulfillment_report_and_admin_delete(
             json={"report_reason": "misinformation", "custom_message": "Wrong target"},
         )
         assert report.status_code == 201
+        assert report.json()["custom_message"] is None
         first_report_id = report.json()["id"]
 
         app.dependency_overrides[get_current_user] = _override_user(reporter.id)
@@ -239,6 +241,161 @@ async def test_wish_duplicate_heart_fulfillment_report_and_admin_delete(
             await session.execute(delete(ArchiveWish))
             await session.execute(
                 delete(ArchiveSubmission).where(ArchiveSubmission.requester_id == wisher.id)
+            )
+            await session.execute(delete(Archive).where(Archive.course_id == course.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_optional_wish_term_fulfillment_filter_pagination_and_report_text(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    wisher = await make_user(name="optional-term-wisher")
+    reporter = await make_user(name="optional-term-reporter")
+    async with session_maker() as session:
+        course = Course(name="Optional Term Course", category="required")
+        session.add(course)
+        await session.commit()
+        await session.refresh(course)
+    base_payload = {
+        "title": "Any-term midterm",
+        "course_id": course.id,
+        "subject": course.name,
+        "category": course.category,
+        "professor": "Professor Term",
+        "academic_year": None,
+        "archive_type": "midterm",
+        "name": "midterm1",
+    }
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(wisher.id)
+        any_term = await client.post("/wishes", json=base_payload)
+        specified = await client.post(
+            "/wishes",
+            json={**base_payload, "title": "1141 midterm", "academic_year": 1141},
+        )
+        different_term = await client.post(
+            "/wishes",
+            json={**base_payload, "title": "1142 midterm", "academic_year": 1142},
+        )
+        later_term = await client.post(
+            "/wishes",
+            json={**base_payload, "title": "1143 midterm", "academic_year": 1143},
+        )
+        assert (
+            any_term.status_code
+            == specified.status_code
+            == different_term.status_code
+            == later_term.status_code
+            == 201
+        )
+        assert any_term.json()["academic_year"] is None
+        any_id, specified_id = any_term.json()["id"], specified.json()["id"]
+        different_id, later_id = different_term.json()["id"], later_term.json()["id"]
+        async with session_maker() as session:
+            keys = (
+                await session.execute(
+                    select(ArchiveWish.target_key).where(
+                        ArchiveWish.id.in_(
+                            (any_id, specified_id, different_id, later_id)
+                        )
+                    )
+                )
+            ).scalars().all()
+            assert len(set(keys)) == 4
+            session.add(
+                Archive(
+                    course_id=course.id,
+                    name="midterm1",
+                    professor="Professor Term",
+                    archive_type="midterm",
+                    academic_year=1142,
+                    object_name="optional-term-1142.pdf",
+                )
+            )
+            await session.commit()
+        first_page = await client.get("/wishes", params={"limit": 1, "offset": 0})
+        second_page = await client.get("/wishes", params={"limit": 1, "offset": 1})
+        assert first_page.json()["total"] == second_page.json()["total"] == 2
+        assert [item["id"] for item in first_page.json()["items"]] == [later_id]
+        assert [item["id"] for item in second_page.json()["items"]] == [specified_id]
+
+        app.dependency_overrides[get_current_user] = _override_user(reporter.id)
+        blank_other = await client.post(
+            f"/wishes/{any_id}/reports",
+            json={"report_reason": "other", "custom_message": "   "},
+        )
+        assert blank_other.status_code == 400
+        too_long_other = await client.post(
+            f"/wishes/{any_id}/reports",
+            json={"report_reason": "other", "custom_message": "x" * 201},
+        )
+        assert too_long_other.status_code == 422
+        other = await client.post(
+            f"/wishes/{any_id}/reports",
+            json={"report_reason": "other", "custom_message": "  details  "},
+        )
+        assert other.status_code == 201
+        assert other.json()["custom_message"] == "details"
+        non_other = await client.post(
+            f"/wishes/{specified_id}/reports",
+            json={"report_reason": "misinformation", "custom_message": "discard me"},
+        )
+        assert non_other.status_code == 201
+        assert non_other.json()["custom_message"] is None
+
+        async with session_maker() as session:
+            session.add(
+                Archive(
+                    course_id=course.id,
+                    name="midterm1",
+                    professor="Professor Term",
+                    archive_type="midterm",
+                    academic_year=1141,
+                    object_name="optional-term-1141.pdf",
+                )
+            )
+            session.add(
+                Archive(
+                    course_id=course.id,
+                    name="midterm1",
+                    professor="Professor Term",
+                    archive_type="midterm",
+                    academic_year=1143,
+                    object_name="optional-term-1143.pdf",
+                )
+            )
+            await session.commit()
+        listed = await client.get("/wishes")
+        assert listed.json()["total"] == 0
+        async with session_maker() as session:
+            assert await session.scalar(
+                select(func.count(ArchiveWish.id)).where(
+                    ArchiveWish.id.in_(
+                        (any_id, specified_id, different_id, later_id)
+                    )
+                )
+            ) == 4
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(ArchiveWishReport).where(
+                    ArchiveWishReport.wish_id.in_(
+                        (
+                            locals().get("any_id", -1),
+                            locals().get("specified_id", -1),
+                            locals().get("different_id", -1),
+                            locals().get("later_id", -1),
+                        )
+                    )
+                )
+            )
+            await session.execute(
+                delete(ArchiveWish).where(ArchiveWish.creator_id == wisher.id)
             )
             await session.execute(delete(Archive).where(Archive.course_id == course.id))
             await session.execute(delete(Course).where(Course.id == course.id))

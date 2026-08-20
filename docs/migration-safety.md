@@ -69,8 +69,8 @@ Reviewed manifests currently cover:
 - `a9c2e5f7b1d4`: the reviewed Stage 5D sibling head;
 - `a9c4e7b2d6f1`: the reviewed bilingual managed-content and Wish Pool sibling
   head; and
-- `b4d6f8a2c1e3`: the merged current repository head and combined SQLModel
-  metadata contract.
+- `b4d6f8a2c1e3`: the merged schema before optional Wish academic year; and
+- `f3a7c1e9d5b2`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,
@@ -207,6 +207,12 @@ The About Us migration adds only the dedicated `about_us_entries` table and
 its update-order/editor indexes. It backfills or rewrites no existing rows,
 keeps its editor reference nullable with `ON DELETE SET NULL`, and downgrade
 removes only that new table and its indexes.
+
+The optional Wish-semester migration changes only
+`archive_wishes.academic_year` from non-null to nullable. It adds no sentinel,
+default, or backfill, so every existing value and target meaning is preserved.
+Downgrade fails closed while Any Semester rows exist instead of deleting or
+rewriting them.
 
 The Category state-preservation migration follows the About Us revision. It
 adds nullable `course_category_configs.pre_delete_is_active`, leaves live rows

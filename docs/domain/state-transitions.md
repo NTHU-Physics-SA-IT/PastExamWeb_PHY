@@ -335,9 +335,25 @@ links through `SET NULL`, and does not delete a matching Archive or submission.
 An Archive Wish itself has no fulfilled state column. Its `fulfilled` projection
 is derived on every read from a matching effective-public Archive. Pending,
 rejected, taken-down, soft-deleted, or parent-hidden Archives do not fulfill a
-wish. Once a public match exists the Wish remains visible with a fulfilled
-badge. Duplicate canonical targets fail with `409 wish_already_exists` and the
-database unique constraint is the concurrency arbiter.
+wish. A term-specific Wish additionally requires the same `academic_year`; an
+Any Semester Wish accepts any Archive term while retaining the same course,
+professor, archive type, exam name, and effective-public visibility predicates.
+The two term scopes have distinct deterministic target identities.
+
+`source_wish_id` preserves Help Upload history but never establishes
+fulfillment. A helper may change the Archive term; the resulting public Archive
+fulfills only Wishes whose complete canonical predicate matches. The
+user-facing Wish list filters fulfilled rows before counting and pagination,
+while the Wish, hearts, reports, and source linkage remain persisted. Duplicate
+canonical targets still fail with `409 wish_already_exists` and the database
+unique constraint is the concurrency arbiter.
+
+Archive Wish reporting uses the same reason and custom-message contract as
+comment reporting. `other` requires nonblank trimmed text of at most 200
+characters. Every non-`other` reason persists `custom_message = NULL` even when
+a client sends text. This product decision supersedes the previous Wish-only
+reason-without-supplementary-text behavior; report lifecycle and deletion
+semantics are unchanged.
 
 Both comment and archive reports use:
 

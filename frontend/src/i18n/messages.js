@@ -192,6 +192,8 @@ const en = {
   重試: 'Try again',
   搜尋: 'Search',
   清除: 'Clear',
+  '考試學期（選填）': 'Exam Semester (Optional)',
+  不限學期: 'Any Semester',
   新增: 'Add',
   分類: 'Category',
   編輯課程: 'Edit Course',
