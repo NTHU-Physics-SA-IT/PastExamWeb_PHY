@@ -127,3 +127,4 @@ not freeze design forever; they require intentional, reviewable replacement.
 | [ADR-0006](0006-coordination-postmerge-full-evidence-reuse.md) | Coordination postmerge Full-evidence reuse | Accepted | Exact Case-B coordination postmerge evidence reuse |
 | [ADR-0007](0007-retain-full-fallback-for-post-case-b-reconciliation-tails.md) | Retain Full Fallback for Post-Case-B Reconciliation Tails | Accepted | Post-Case-B reconciliation-tail evidence reuse |
 | [ADR-0008](0008-narrow-sibling-migration-convergence-exception.md) | Narrow sibling-migration convergence exception | Accepted | Exact three-revision sibling-migration compatibility boundary |
+| [ADR-0009](0009-retain-fail-closed-vite-readiness-under-playwright-api-limits.md) | Retain Fail-Closed Vite Readiness Under Playwright Public-API Limits | Accepted | Vite 8 / Playwright Firefox frontend-readiness safety boundary |
