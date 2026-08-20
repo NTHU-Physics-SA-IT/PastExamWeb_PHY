@@ -41,7 +41,12 @@ directions, and coherent updates to affected operating documents or code.
 - Fetch current remote refs before choosing a development base.
 - Normal independent work starts from fresh `main` unless the task or milestone
   explicitly declares coordinated work.
-- Coordinated work starts from the optional coordination branch resolved by
+- `main` publishes repository-wide authority. A `null` coordination branch in
+  canonical project governance means that no repository-wide coordinated
+  milestone is active; it does not prohibit a later separately authorized
+  milestone from activating coordination.
+- Coordinated work starts from the optional configured coordination branch,
+  when one is active, resolved by
   `python3 scripts/ci/project_governance.py coordination-branch`; its existence
   does not make it the universal development base.
 - A dormant coordination branch may lag `main`, but it is not a valid base for

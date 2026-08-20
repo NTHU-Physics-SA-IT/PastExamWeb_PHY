@@ -30,19 +30,19 @@ def _valid_payload(*, coordination_branch: str | None = "integration/current") -
     }
 
 
-def test_repository_config_resolves_main_and_optional_coordination() -> None:
+def test_repository_config_resolves_main_without_active_coordination() -> None:
     resolved = governance.load_project_governance(REPOSITORY_ROOT)
 
     assert resolved.schema_version == 1
     assert resolved.default_development_base == "main"
     assert resolved.default_development_ref == "refs/heads/main"
-    assert resolved.coordination_branch is not None
-    assert resolved.coordination_ref == f"refs/heads/{resolved.coordination_branch}"
+    assert resolved.coordination_branch is None
+    assert resolved.coordination_ref is None
     assert resolved.allows_pr_base("main")
-    assert resolved.allows_pr_base(resolved.coordination_branch)
+    assert not resolved.allows_pr_base("integration/current")
 
 
-def test_coordination_branch_may_be_unconfigured(tmp_path: Path) -> None:
+def test_schema_allows_coordination_branch_to_be_unconfigured(tmp_path: Path) -> None:
     _write_config(tmp_path, _valid_payload(coordination_branch=None))
 
     resolved = governance.load_project_governance(tmp_path)
@@ -85,9 +85,45 @@ def test_missing_and_malformed_config_fail_closed(tmp_path: Path) -> None:
         governance.load_project_governance(tmp_path)
 
 
-def test_cli_accepts_only_exact_configured_bases() -> None:
-    resolved = governance.load_project_governance(REPOSITORY_ROOT)
-    assert resolved.coordination_branch is not None
+def test_cli_reports_current_repository_has_no_active_coordination() -> None:
+    for command in ("coordination-branch", "coordination-ref"):
+        process = subprocess.run(
+            [
+                sys.executable,
+                str(CI_SCRIPTS / "project_governance.py"),
+                "--repository-root",
+                str(REPOSITORY_ROOT),
+                command,
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert process.returncode == 3
+        assert process.stdout == ""
+
+    for base, expected in (("main", 0), ("integration/current", 1)):
+        process = subprocess.run(
+            [
+                sys.executable,
+                str(CI_SCRIPTS / "project_governance.py"),
+                "--repository-root",
+                str(REPOSITORY_ROOT),
+                "validate-pr-base",
+                "--base",
+                base,
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert process.returncode == expected
+
+
+def test_cli_accepts_only_exact_configured_bases(tmp_path: Path) -> None:
+    _write_config(tmp_path, _valid_payload())
+    resolved = governance.load_project_governance(tmp_path)
+    assert resolved.coordination_branch == "integration/current"
 
     for base, expected in (
         ("main", 0),
@@ -100,7 +136,7 @@ def test_cli_accepts_only_exact_configured_bases() -> None:
                 sys.executable,
                 str(CI_SCRIPTS / "project_governance.py"),
                 "--repository-root",
-                str(REPOSITORY_ROOT),
+                str(tmp_path),
                 "validate-pr-base",
                 "--base",
                 base,

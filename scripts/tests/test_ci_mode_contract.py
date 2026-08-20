@@ -21,10 +21,13 @@ ci = importlib.import_module("classify_ci_mode")
 gate = importlib.import_module("validate_ci_gate")
 project_governance = importlib.import_module("project_governance")
 
-PROJECT_GOVERNANCE = project_governance.load_project_governance(REPOSITORY_ROOT)
-assert PROJECT_GOVERNANCE.coordination_branch is not None
-COORDINATION_BRANCH = PROJECT_GOVERNANCE.coordination_branch
-COORDINATION_REF = PROJECT_GOVERNANCE.coordination_ref
+COORDINATION_BRANCH = "integration/current"
+COORDINATION_REF = f"refs/heads/{COORDINATION_BRANCH}"
+ACTIVE_COORDINATION_GOVERNANCE = project_governance.ProjectGovernance(
+    schema_version=1,
+    default_development_base="main",
+    coordination_branch=COORDINATION_BRANCH,
+)
 
 NOW = datetime(2026, 8, 4, 12, tzinfo=UTC)
 REPOSITORY_ID = 12345
@@ -245,6 +248,7 @@ def _classify_equivalent(
         event=_event(fixture, **(event_changes or {})),
         git=git or fixture["git"],
         api=api or FakeAPI(source_sha=fixture["source"], target_sha=fixture["merge"]),
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
         equivalent_allowlist=frozenset({"refs/heads/target"}),
         now=NOW,
     )
@@ -284,6 +288,7 @@ def _classify_pr_equivalent(
         event=_pr_event(fixture, **(event_changes or {})),
         git=git or fixture["git"],
         api=api or FakePRAPI(fixture),
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
         pr_equivalent_allowlist=frozenset({COORDINATION_BRANCH}),
         now=NOW,
     )
@@ -386,7 +391,11 @@ def test_mode_priority(ref: str, paths: tuple[str, ...], expected: str) -> None:
         repository=REPOSITORY,
         repository_id=REPOSITORY_ID,
     )
-    result = ci.classify_ci_mode(event=event, git=ScopeGit(paths))
+    result = ci.classify_ci_mode(
+        event=event,
+        git=ScopeGit(paths),
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
+    )
 
     assert result.ci_mode == expected
 
@@ -451,6 +460,43 @@ def test_project_governance_resolution_failure_falls_back_to_full(
     assert result.reason.startswith("project governance failed closed:")
 
 
+def test_null_governance_grants_no_coordination_or_equivalent_privilege(
+    tmp_path: Path,
+) -> None:
+    fixture = _equivalent_repository(tmp_path)
+    null_governance = project_governance.ProjectGovernance(
+        schema_version=1,
+        default_development_base="main",
+        coordination_branch=None,
+    )
+
+    pull_request_result = ci.classify_ci_mode(
+        event=_pr_event(fixture),
+        git=fixture["git"],
+        api=FakePRAPI(fixture),
+        governance=null_governance,
+        now=NOW,
+    )
+    push_result = ci.classify_ci_mode(
+        event=_event(fixture, ref=COORDINATION_REF),
+        git=GitOverrides(fixture["git"], changed_paths=("docs/guide.md",)),
+        api=FakeAPI(
+            source_sha=fixture["source"],
+            target_sha=fixture["merge"],
+            target_ref=COORDINATION_BRANCH,
+        ),
+        governance=null_governance,
+        now=NOW,
+    )
+
+    assert pull_request_result.ci_mode == "full"
+    assert pull_request_result.reason == (
+        "unapproved pull request base falls back to full CI"
+    )
+    assert push_result.ci_mode == "docs-only"
+    assert push_result.reason == "all changed paths are documentation-only"
+
+
 def test_valid_two_parent_equivalent_merge_is_eligible(tmp_path: Path) -> None:
     fixture = _equivalent_repository(tmp_path)
 
@@ -478,6 +524,7 @@ def test_live_push_allowlist_accepts_valid_equivalent_fixture(
             target_sha=fixture["merge"],
             target_ref=COORDINATION_BRANCH,
         ),
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
         now=NOW,
     )
 
@@ -509,6 +556,7 @@ def test_live_pr_allowlist_accepts_valid_candidate(
         event=_pr_event(fixture, base_ref=COORDINATION_BRANCH),
         git=fixture["git"],
         api=api,
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
         now=NOW,
     )
 
@@ -536,6 +584,7 @@ def test_live_push_governance_merge_falls_back_to_full(
         ),
         git=git,
         api=api,
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
         now=NOW,
     )
 
@@ -557,6 +606,7 @@ def test_pr_governance_change_requires_full_before_allowlist(
         event=_pr_event(fixture),
         git=git,
         api=FakePRAPI(fixture),
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
         pr_equivalent_allowlist=frozenset({COORDINATION_BRANCH}),
         now=NOW,
     )
@@ -1389,12 +1439,12 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
     ("base_branch", "expected_returncode"),
     (
         ("main", 0),
-        (COORDINATION_BRANCH, 0),
+        (COORDINATION_BRANCH, 1),
         (f"{COORDINATION_BRANCH}-near-match", 1),
         ("feat/other", 1),
     ),
 )
-def test_check_branch_accepts_only_approved_bases(
+def test_check_branch_accepts_only_current_repository_bases(
     base_branch: str,
     expected_returncode: int,
 ) -> None:

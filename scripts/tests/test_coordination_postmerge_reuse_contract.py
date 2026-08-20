@@ -19,10 +19,13 @@ sys.path.insert(0, str(CI_SCRIPTS))
 ci = importlib.import_module("classify_ci_mode")
 project_governance = importlib.import_module("project_governance")
 
-PROJECT_GOVERNANCE = project_governance.load_project_governance(REPOSITORY_ROOT)
-assert PROJECT_GOVERNANCE.coordination_branch is not None
-COORDINATION_BRANCH = PROJECT_GOVERNANCE.coordination_branch
-COORDINATION_REF = PROJECT_GOVERNANCE.coordination_ref
+COORDINATION_BRANCH = "integration/current"
+COORDINATION_REF = f"refs/heads/{COORDINATION_BRANCH}"
+ACTIVE_COORDINATION_GOVERNANCE = project_governance.ProjectGovernance(
+    schema_version=1,
+    default_development_base="main",
+    coordination_branch=COORDINATION_BRANCH,
+)
 
 REPOSITORY = "NTHU-Physics-SA-IT/PastExamWeb_PHY"
 REPOSITORY_ID = 12345
@@ -282,6 +285,7 @@ def _classify(
         event=_push_event(**(event_changes or {})),
         git=git or CaseBGit(),
         api=api or DualFullAPI(),
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
         now=NOW,
     )
 
@@ -328,6 +332,7 @@ def test_historical_pr95_git_topology_and_governance_are_eligible() -> None:
         event=_push_event(),
         git=ci.GitRepository(REPOSITORY_ROOT),
         api=DualFullAPI(),
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
         now=NOW,
     )
 
@@ -579,7 +584,13 @@ def test_ordinary_governance_coordination_pr_remains_full() -> None:
         head_repository_id=REPOSITORY_ID,
     )
 
-    result = ci.classify_ci_mode(event=event, git=git, api=DualFullAPI(), now=NOW)
+    result = ci.classify_ci_mode(
+        event=event,
+        git=git,
+        api=DualFullAPI(),
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
+        now=NOW,
+    )
 
     assert result.ci_mode == "full"
 
@@ -616,6 +627,7 @@ def test_generic_full_routes_do_not_call_postmerge_provenance_api(
         event=event,
         git=git,
         api=NoProvenanceAPI(),
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
         now=NOW,
     )
 
@@ -646,6 +658,7 @@ def test_ordinary_governance_pr_full_does_not_call_postmerge_api() -> None:
         event=event,
         git=git,
         api=NoProvenanceAPI(),
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
         now=NOW,
     )
 
@@ -660,6 +673,7 @@ def test_non_candidate_governance_push_does_not_call_postmerge_api() -> None:
         event=_push_event(),
         git=git,
         api=NoProvenanceAPI(),
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
         now=NOW,
     )
 
@@ -690,6 +704,7 @@ def test_main_governance_pr_remains_full_without_postmerge_api() -> None:
         event=event,
         git=git,
         api=NoProvenanceAPI(),
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
         now=NOW,
     )
 

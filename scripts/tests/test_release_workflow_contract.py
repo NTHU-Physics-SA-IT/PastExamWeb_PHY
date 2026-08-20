@@ -120,8 +120,8 @@ def test_governance_documentation_is_main_first_and_branch_decoupled() -> None:
     coordination_branch = config["coordination_branch"]
 
     assert config["default_development_base"] == "main"
-    assert isinstance(coordination_branch, str)
-    assert config_source.count(coordination_branch) == 1
+    assert coordination_branch is None
+    assert config_source.count('"coordination_branch": null') == 1
     for authority_path in (
         CONTRIBUTING,
         VALIDATION,
@@ -132,7 +132,9 @@ def test_governance_documentation_is_main_first_and_branch_decoupled() -> None:
         CLASSIFIER,
         GOVERNANCE_RESOLVER,
     ):
-        assert coordination_branch not in authority_path.read_text(encoding="utf-8")
+        assert "integration/stage-5bd" not in authority_path.read_text(
+            encoding="utf-8"
+        )
 
     assert "Normal independent work starts from fresh `main`" in contributing
     assert "coordination branch" in combined
