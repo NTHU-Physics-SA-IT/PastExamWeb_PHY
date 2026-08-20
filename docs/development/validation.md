@@ -109,9 +109,17 @@ The stable `integration/**` workflow family only starts workflow evaluation. It
 does not approve a base or grant Equivalent eligibility; the classifier and PR
 base policy resolve the exact configured coordination branch at runtime.
 
-An immutable main candidate receives Full CI before its pull request targets
-`main`, and the main pull request reaches the same workflow; it uses Full CI
-unless its entire change is conclusively docs-only.
+Once an immutable main candidate and its pull request are genuinely ready, push
+the exact candidate and promptly open the ready pull request to `main` rather
+than waiting merely for candidate Source CI to finish. Candidate Source and PR
+workflows are independent evidence and may overlap when selected; all exact
+results required by the repository must still be terminal successful before
+merge. Source success is an evidence requirement for merge, not a prerequisite
+for opening an otherwise ready pull request. The main pull request uses Full CI
+unless its entire change is conclusively docs-only. Follow the detailed
+[pull request rules](../../CONTRIBUTING.md#pull-requests) and the narrower
+[ADR-0006 Case-B contract](../decisions/0006-coordination-postmerge-full-evidence-reuse.md)
+where applicable.
 After an authorized main merge, semantic-release is callable only from the
 successful exact-main-SHA CI run after `CI Gate`; it remains version authority
 but does not enable or perform production deployment. Branch-authority transfer
