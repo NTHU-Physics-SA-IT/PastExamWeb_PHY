@@ -1,5 +1,5 @@
 <template>
-  <section class="wish-pool" aria-labelledby="wish-pool-title">
+  <section ref="poolRef" class="wish-pool" aria-labelledby="wish-pool-title">
     <header class="wish-header">
       <div>
         <h2 id="wish-pool-title">{{ $t('考古許願池') }}</h2>
@@ -9,21 +9,30 @@
     </header>
     <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
     <ProgressSpinner v-if="loading" class="wish-spinner" />
-    <div v-else class="wish-cloud" role="list" :aria-label="$t('考古許願池')">
-      <button
-        v-for="wish in wishes"
-        :key="wish.id"
-        type="button"
-        role="listitem"
-        class="wish-word"
-        :class="{ fulfilled: wish.fulfilled }"
-        :style="{ fontSize: fontSize(wish.heart_count) }"
-        @click="selected = wish"
+    <div v-else class="wish-cloud-stage">
+      <div
+        ref="cloudRef"
+        class="wish-cloud"
+        role="list"
+        :aria-label="$t('考古許願池')"
+        :style="cloudStyle"
       >
-        {{ wish.title }}
-        <small>♥ {{ wish.heart_count }}</small>
-        <span v-if="wish.fulfilled" class="fulfilled-label">{{ $t('已實現') }}</span>
-      </button>
+        <button
+          v-for="wish in wishes"
+          :key="wish.id"
+          :ref="(element) => setWordRef(wish.id, element)"
+          type="button"
+          role="listitem"
+          class="wish-word"
+          :class="{ fulfilled: wish.fulfilled }"
+          :style="wordStyle(wish)"
+          @click="selected = wish"
+        >
+          <span class="wish-word__title">{{ wish.title }}</span>
+          <small>♥ {{ wish.heart_count }}</small>
+          <span v-if="wish.fulfilled" class="fulfilled-label">{{ $t('已實現') }}</span>
+        </button>
+      </div>
     </div>
     <Button
       v-if="wishes.length < total"
@@ -43,7 +52,7 @@
     >
       <div v-if="selected" class="wish-detail">
         <p>
-          {{ selected.subject }} · {{ selected.professor }} · {{ selected.academic_year }} ·
+          {{ selected.subject }} · {{ selected.professor }} · {{ semesterLabel(selected) }} ·
           {{ selected.name }}
         </p>
         <Tag v-if="selected.fulfilled" severity="success">{{ $t('已實現') }}</Tag>
@@ -82,8 +91,10 @@
           :message="reportTarget"
           targetType="wish"
           :reason="report.reason"
+          :customMessage="report.customMessage"
           :loading="reportSubmitting"
           @update:reason="report.reason = $event"
+          @update:customMessage="report.customMessage = $event"
           @cancel="closeReport"
           @submit="submitReport"
         />
@@ -93,7 +104,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
@@ -114,17 +125,157 @@ const selected = ref(null)
 const reportVisible = ref(false)
 const reportSubmitting = ref(false),
   deleting = ref(false)
-const report = reactive({ reason: null })
+const report = reactive({ reason: null, customMessage: '' })
+const poolRef = ref(null)
+const cloudRef = ref(null)
+const wordElements = new Map()
+const positions = ref({})
+const fittedFontSizes = ref({})
+const cloudDimensions = ref({ width: 0, height: 0 })
+let resizeObserver
+let layoutFrame
+const semesterLabel = (wish) =>
+  wish?.academic_year == null ? t('不限學期') : formatSemester(wish.academic_year)
+function formatSemester(value) {
+  const numericValue = Number(value)
+  if (numericValue >= 1000 && numericValue < 2000) {
+    const year = Math.floor(numericValue / 10)
+    const semester = numericValue % 10
+    return t(semester === 1 ? '{year}上學期' : '{year}下學期', { year })
+  }
+  return `${value}`
+}
 const reportTarget = computed(() => ({
   id: selected.value?.id,
   user_name: selected.value?.creator_name || t('許願者'),
   created_at: selected.value?.created_at,
   content: selected.value
-    ? `${selected.value.title} · ${selected.value.subject} · ${selected.value.professor} · ${selected.value.academic_year} · ${selected.value.name}`
+    ? `${selected.value.title} · ${selected.value.subject} · ${selected.value.professor} · ${semesterLabel(selected.value)} · ${selected.value.name}`
     : '',
   is_deleted: false,
 }))
-const fontSize = (count) => `${Math.min(2.2, 0.95 + Math.log2(Number(count || 0) + 1) * 0.24)}rem`
+const densityFontBoost = computed(() => Math.max(0, (16 - wishes.value.length) / 16) * 0.22)
+const baseFontSize = (count) =>
+  Math.min(2.5, 1.05 + densityFontBoost.value + Math.log2(Number(count || 0) + 1) * 0.27)
+function stableHash(value) {
+  let hash = 2166136261
+  for (const character of String(value)) {
+    hash ^= character.charCodeAt(0)
+    hash = Math.imul(hash, 16777619)
+  }
+  return hash >>> 0
+}
+function setWordRef(id, element) {
+  if (element) wordElements.set(id, element)
+  else wordElements.delete(id)
+}
+function overlaps(candidate, placed) {
+  const gap = 12
+  return placed.some(
+    (box) =>
+      candidate.x < box.x + box.width + gap &&
+      candidate.x + candidate.width + gap > box.x &&
+      candidate.y < box.y + box.height + gap &&
+      candidate.y + candidate.height + gap > box.y
+  )
+}
+async function layoutCloud() {
+  if (!cloudRef.value || !poolRef.value || !wishes.value.length) {
+    positions.value = {}
+    fittedFontSizes.value = {}
+    cloudDimensions.value = { width: 0, height: 0 }
+    return
+  }
+  const maxWidth = Math.max(140, Math.min(1100, poolRef.value.clientWidth - 32))
+  cloudDimensions.value = { width: maxWidth, height: 1 }
+  positions.value = {}
+  await nextTick()
+  const placed = []
+  const nextPositions = {}
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5))
+  const ordered = [...wishes.value].sort((left, right) => Number(left.id) - Number(right.id))
+  fittedFontSizes.value = Object.fromEntries(
+    ordered.map((wish) => [wish.id, baseFontSize(wish.heart_count)])
+  )
+  await nextTick()
+  const maxTokenWidth = maxWidth - 12
+  const nextFontSizes = { ...fittedFontSizes.value }
+  for (const wish of ordered) {
+    const element = wordElements.get(wish.id)
+    if (!element || element.offsetWidth <= maxTokenWidth) continue
+    nextFontSizes[wish.id] *= (maxTokenWidth / element.offsetWidth) * 0.98
+  }
+  fittedFontSizes.value = nextFontSizes
+  await nextTick()
+  for (const wish of ordered) {
+    const element = wordElements.get(wish.id)
+    if (!element) continue
+    const width = Math.min(element.offsetWidth, maxWidth - 12)
+    const height = element.offsetHeight
+    const hash = stableHash(wish.id)
+    const startAngle = ((hash % 360) * Math.PI) / 180
+    let candidate
+    for (let attempt = 0; attempt < 3000; attempt += 1) {
+      const radius = 8 * Math.sqrt(attempt)
+      const angle = startAngle + attempt * goldenAngle
+      const trial = {
+        x: Math.cos(angle) * radius - width / 2,
+        y: Math.sin(angle) * radius * 0.78 - height / 2,
+        width,
+        height,
+      }
+      if (trial.x < -maxWidth / 2 || trial.x + width > maxWidth / 2) continue
+      if (!overlaps(trial, placed)) {
+        candidate = trial
+        break
+      }
+    }
+    candidate ||= {
+      x: -width / 2,
+      y: placed.reduce((bottom, box) => Math.max(bottom, box.y + box.height), 0) + 10,
+      width,
+      height,
+    }
+    placed.push(candidate)
+    nextPositions[wish.id] = { ...candidate, rotation: (hash % 3) - 1 }
+  }
+  const padding = 24
+  const minX = Math.min(...placed.map((box) => box.x))
+  const maxX = Math.max(...placed.map((box) => box.x + box.width))
+  const minY = Math.min(...placed.map((box) => box.y))
+  const maxY = Math.max(...placed.map((box) => box.y + box.height))
+  for (const position of Object.values(nextPositions)) {
+    position.left = position.x - minX + padding
+    position.top = position.y - minY + padding
+  }
+  positions.value = nextPositions
+  cloudDimensions.value = {
+    width: Math.min(maxWidth, Math.max(140, maxX - minX + padding * 2)),
+    height: Math.max(120, maxY - minY + padding * 2),
+  }
+}
+function scheduleLayout() {
+  if (typeof requestAnimationFrame === 'undefined') {
+    nextTick(layoutCloud)
+    return
+  }
+  if (layoutFrame) cancelAnimationFrame(layoutFrame)
+  layoutFrame = requestAnimationFrame(() => layoutCloud())
+}
+const cloudStyle = computed(() => ({
+  width: cloudDimensions.value.width ? `${cloudDimensions.value.width}px` : '100%',
+  height: cloudDimensions.value.height ? `${cloudDimensions.value.height}px` : 'auto',
+}))
+function wordStyle(wish) {
+  const position = positions.value[wish.id]
+  return {
+    fontSize: `${fittedFontSizes.value[wish.id] || baseFontSize(wish.heart_count)}rem`,
+    left: position ? `${position.left}px` : '50%',
+    top: position ? `${position.top}px` : '50%',
+    transform: position ? `rotate(${position.rotation}deg)` : 'translate(-50%, -50%)',
+    visibility: position ? 'visible' : 'hidden',
+  }
+}
 async function load(reset = true) {
   loading.value = reset
   error.value = ''
@@ -148,11 +299,13 @@ async function toggleHeart() {
 function toggleReport() {
   if (reportVisible.value) return closeReport()
   report.reason = null
+  report.customMessage = ''
   reportVisible.value = true
 }
 function closeReport() {
   reportVisible.value = false
   report.reason = null
+  report.customMessage = ''
 }
 function closeWishDetail() {
   closeReport()
@@ -164,7 +317,7 @@ async function submitReport(payload) {
   try {
     await wishService.report(selected.value.id, {
       report_reason: payload.report_reason,
-      custom_message: null,
+      custom_message: payload.custom_message,
     })
     toast.add({
       severity: 'success',
@@ -225,7 +378,21 @@ async function removeWish() {
     deleting.value = false
   }
 }
-onMounted(() => load())
+watch(
+  () => wishes.value.map((wish) => `${wish.id}:${wish.title}:${wish.heart_count}`).join('|'),
+  scheduleLayout
+)
+onMounted(() => {
+  if (typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver(scheduleLayout)
+    if (poolRef.value) resizeObserver.observe(poolRef.value)
+  }
+  load()
+})
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  if (layoutFrame && typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(layoutFrame)
+})
 </script>
 
 <style scoped>
@@ -235,6 +402,7 @@ onMounted(() => load())
   padding: 1.5rem;
   margin: 0;
   container-type: inline-size;
+  overflow-x: clip;
 }
 .wish-header,
 .dialog-actions {
@@ -261,22 +429,48 @@ onMounted(() => load())
   white-space: nowrap;
 }
 .wish-cloud {
-  display: flex;
+  position: relative;
   max-width: 1100px;
   margin: 0 auto;
-  flex-wrap: wrap;
+  overflow: visible;
+}
+.wish-cloud-stage {
+  display: flex;
+  width: 100%;
+  min-height: clamp(26rem, 58vh, 42rem);
   align-items: center;
   justify-content: center;
-  gap: 0.6rem 1.1rem;
-  padding: 2rem 0.5rem;
+  box-sizing: border-box;
+  padding: clamp(5rem, 11vh, 8rem) 0 clamp(2.5rem, 6vh, 4.5rem);
+  overflow: visible;
 }
 .wish-word {
+  position: absolute;
+  display: inline-flex;
+  width: max-content;
+  max-width: none;
+  align-items: baseline;
+  flex: 0 0 auto;
+  gap: 0.3em;
   border: 0;
   background: transparent;
   color: var(--text-color);
   cursor: pointer;
-  padding: 0.35rem;
-  border-radius: 0.5rem;
+  padding: 0.35em;
+  border-radius: 0.5em;
+  line-height: 1.25;
+  overflow-wrap: normal;
+  white-space: nowrap;
+  transform-origin: center;
+}
+.wish-word__title,
+.wish-word small,
+.fulfilled-label {
+  white-space: nowrap;
+}
+.wish-word small,
+.fulfilled-label {
+  flex: 0 0 auto;
 }
 .wish-word:hover,
 .wish-word:focus-visible {
@@ -285,8 +479,8 @@ onMounted(() => load())
 }
 .wish-word small,
 .fulfilled-label {
-  font-size: 0.7rem;
-  margin-left: 0.3rem;
+  font-size: 0.7em;
+  margin-left: 0;
 }
 .fulfilled-label {
   font-weight: 700;
@@ -324,6 +518,10 @@ onMounted(() => load())
   .wish-header :deep(.p-button) {
     width: 100%;
     justify-content: center;
+  }
+  .wish-cloud-stage {
+    min-height: clamp(20rem, 50vh, 30rem);
+    padding: clamp(3.5rem, 9vh, 5.5rem) 0 clamp(2rem, 5vh, 3rem);
   }
 }
 </style>

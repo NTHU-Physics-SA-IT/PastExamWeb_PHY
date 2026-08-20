@@ -271,7 +271,7 @@ describe('UploadArchiveDialog', () => {
       requestedCategoryNameEn: 'Quantum Information',
       requestedCategoryLabel: '量資',
       requestedCategoryLabelEn: 'QInfo',
-      academicYear: 1141,
+      academicYear: null,
       type: 'final',
       wishTitle: '量子資訊期末考',
     })
@@ -289,6 +289,7 @@ describe('UploadArchiveDialog', () => {
 
     expect(wishServiceMock.create).toHaveBeenCalledWith(
       expect.objectContaining({
+        academic_year: null,
         course_id: null,
         subject: '量子資訊',
         category: 'quantum-info',
@@ -344,6 +345,11 @@ describe('UploadArchiveDialog', () => {
         subjectId: null,
       })
     )
+    expect(
+      wrapper.findAll('.semester-option').every((option) => !option.attributes('disabled'))
+    ).toBe(true)
+    await wrapper.find('.semester-option').trigger('click')
+    expect(wrapper.vm.form.academicYear).not.toBe(1141)
 
     wrapper.unmount()
   })

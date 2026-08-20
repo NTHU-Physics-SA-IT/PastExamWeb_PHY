@@ -64,7 +64,7 @@ def _target_key(data: ArchiveWishCreate, *, course: Course | None) -> str:
         (
             course_identity,
             _normalized_text(data.professor),
-            str(data.academic_year),
+            "term:any" if data.academic_year is None else f"term:{data.academic_year}",
             data.archive_type.value,
             _normalized_text(data.name),
         )
@@ -113,7 +113,10 @@ def _matching_archive_id_subquery():
             == _normalized_text_expr(ArchiveWish.name),
             _normalized_text_expr(Archive.professor)
             == _normalized_text_expr(ArchiveWish.professor),
-            Archive.academic_year == ArchiveWish.academic_year,
+            or_(
+                ArchiveWish.academic_year.is_(None),
+                Archive.academic_year == ArchiveWish.academic_year,
+            ),
             Archive.archive_type == ArchiveWish.archive_type,
         )
         .order_by(Archive.id.asc())
@@ -182,10 +185,14 @@ async def list_wishes(
     db: AsyncSession = Depends(get_session),
     current_user: UserRoles = Depends(get_current_user),
 ):
-    total = int(await db.scalar(select(func.count(ArchiveWish.id))) or 0)
+    unfulfilled = _matching_archive_id_subquery().is_(None)
+    total = int(
+        await db.scalar(select(func.count(ArchiveWish.id)).where(unfulfilled)) or 0
+    )
     rows = (
         await db.execute(
             _wish_select(current_user.user_id)
+            .where(unfulfilled)
             .order_by(ArchiveWish.created_at.desc(), ArchiveWish.id.desc())
             .limit(limit)
             .offset(offset)
@@ -319,12 +326,17 @@ async def create_wish_report(
     custom_message = (payload.custom_message or "").strip() or None
     if payload.report_reason == CommentReportReason.OTHER and not custom_message:
         raise HTTPException(status_code=400, detail="Custom report message is required")
+    if payload.report_reason != CommentReportReason.OTHER:
+        custom_message = None
+    term_identity = (
+        "term:any" if wish.academic_year is None else f"term:{wish.academic_year}"
+    )
     report = ArchiveWishReport(
         wish_id=wish.id,
         reporter_user_id=current_user.user_id,
         wish_title_snapshot=wish.title,
         target_summary_snapshot=(
-            f"{wish.subject} · {wish.professor} · {wish.academic_year} · {wish.name}"
+            f"{wish.subject} · {wish.professor} · {term_identity} · {wish.name}"
         ),
         reason=payload.report_reason.value,
         custom_message=custom_message,

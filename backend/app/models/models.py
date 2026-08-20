@@ -761,7 +761,9 @@ class ArchiveWish(SQLModel, table=True):
     subject: str = Field(sa_column=Column(String(200), nullable=False))
     category: str = Field(sa_column=Column(String(100), nullable=False, index=True))
     name: str = Field(sa_column=Column(String(100), nullable=False))
-    academic_year: int = Field(sa_column=Column(Integer, nullable=False, index=True))
+    academic_year: int | None = Field(
+        default=None, sa_column=Column(Integer, nullable=True, index=True)
+    )
     archive_type: ArchiveType = Field(index=True)
     professor: str = Field(sa_column=Column(String(200), nullable=False, index=True))
     requested_course_name: str | None = Field(
@@ -1675,7 +1677,7 @@ class ArchiveWishCreate(BaseModel):
     subject: str = Field(min_length=1, max_length=200)
     category: str = Field(min_length=1, max_length=100)
     name: str = Field(min_length=1, max_length=100)
-    academic_year: int
+    academic_year: int | None = None
     archive_type: ArchiveType
     professor: str = Field(min_length=1, max_length=200)
     requested_course_name: str | None = None
@@ -1744,7 +1746,7 @@ class ArchiveWishRead(BaseModel):
     subject: str
     category: str
     name: str
-    academic_year: int
+    academic_year: int | None = None
     archive_type: ArchiveType
     professor: str
     requested_course_name: str | None = None
@@ -1777,7 +1779,7 @@ class ArchiveWishHeartRead(BaseModel):
 
 class ArchiveWishReportCreate(BaseModel):
     report_reason: CommentReportReason
-    custom_message: str | None = Field(default=None, max_length=1000)
+    custom_message: str | None = Field(default=None, max_length=200)
 
 
 class ArchiveWishReportAdminUpdate(BaseModel):

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-HEAD_SCHEMA_REVISION = "b4d6f8a2c1e3"
+HEAD_SCHEMA_REVISION = "f3a7c1e9d5b2"
 
 
 @dataclass(frozen=True)
@@ -121,6 +121,11 @@ MANIFESTS = {
         revision="a9c4e7b2d6f1",
         description="Wish Pool sibling head before Stage 5D convergence",
         metadata_variant="main_sibling_head",
+    ),
+    "b4d6f8a2c1e3": ManifestSpec(
+        revision="b4d6f8a2c1e3",
+        description="schema before optional Wish academic year",
+        metadata_variant="pre_wish_optional_semester",
     ),
     HEAD_SCHEMA_REVISION: ManifestSpec(
         revision=HEAD_SCHEMA_REVISION,

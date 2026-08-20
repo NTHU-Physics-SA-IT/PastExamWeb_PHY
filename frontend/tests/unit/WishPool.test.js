@@ -66,6 +66,30 @@ describe('Wish Pool focused interactions', () => {
     )
   })
 
+  it('centers the naturally sized cloud in a responsive breathing-space stage', () => {
+    expect(wishPoolSource).toContain('class="wish-cloud-stage"')
+    expect(wishPoolSource).toMatch(
+      /\.wish-cloud-stage\s*\{[^}]*display:\s*flex;[^}]*min-height:\s*clamp\([^)]*\);[^}]*align-items:\s*center;[^}]*justify-content:\s*center;/
+    )
+    expect(wishPoolSource).toMatch(
+      /@container \(max-width:\s*720px\)[\s\S]*?\.wish-cloud-stage\s*\{[^}]*min-height:\s*clamp\(/
+    )
+    expect(wishPoolSource).toContain('densityFontBoost')
+    expect(wishPoolSource).toContain('Math.min(2.5')
+  })
+
+  it('keeps each title and heart together and fits oversized tokens before packing', () => {
+    expect(wishPoolSource).toContain('class="wish-word__title"')
+    expect(wishPoolSource).toMatch(
+      /\.wish-word\s*\{[^}]*display:\s*inline-flex;[^}]*width:\s*max-content;[^}]*align-items:\s*baseline;[^}]*white-space:\s*nowrap;/
+    )
+    expect(wishPoolSource).toMatch(
+      /\.wish-word small,[\s\S]*?\.fulfilled-label\s*\{[^}]*flex:\s*0 0 auto;/
+    )
+    expect(wishPoolSource).toContain('element.offsetWidth <= maxTokenWidth')
+    expect(wishPoolSource).toContain('(maxTokenWidth / element.offsetWidth) * 0.98')
+  })
+
   it('uses the existing fulfilled state for a theme-safe success treatment', () => {
     expect(wishPoolSource).toContain(':class="{ fulfilled: wish.fulfilled }"')
     expect(wishPoolSource).toContain('v-if="wish.fulfilled" class="fulfilled-label"')
@@ -117,5 +141,21 @@ describe('Wish Pool focused interactions', () => {
     await confirmRequireMock.mock.calls[0][0].accept()
     expect(wishServiceMock.remove).toHaveBeenCalledWith(7)
     expect(wrapper.vm.selected).toBeNull()
+  })
+
+  it('presents Any Semester and paginates the server-filtered pool', async () => {
+    const anySemesterWish = { ...sampleWish, id: 8, title: '不限學期願望', academic_year: null }
+    wishServiceMock.list
+      .mockReset()
+      .mockResolvedValueOnce({ data: { items: [sampleWish], total: 2 } })
+      .mockResolvedValueOnce({ data: { items: [anySemesterWish], total: 2 } })
+
+    const wrapper = await mountPool()
+    expect(wrapper.vm.semesterLabel(sampleWish)).toBe('114上學期')
+    expect(wrapper.vm.semesterLabel(anySemesterWish)).toBe('不限學期')
+
+    await wrapper.vm.loadMore()
+    expect(wishServiceMock.list).toHaveBeenNthCalledWith(2, { limit: 60, offset: 1 })
+    expect(wrapper.vm.wishes.map((wish) => wish.id)).toEqual([7, 8])
   })
 })

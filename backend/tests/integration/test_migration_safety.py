@@ -30,6 +30,7 @@ from app.db.test_database_guard import (
 )
 
 MERGED_HEAD = "b4d6f8a2c1e3"
+CURRENT_HEAD = "f3a7c1e9d5b2"
 E6_REVISION = "e6a1b3c5d7f9"
 E8_REVISION = "e8a4c1d7b2f6"
 COORDINATION_SIBLING = "a9c2e5f7b1d4"
@@ -172,7 +173,7 @@ def _schema_signature(engine: Engine) -> dict[str, tuple[str, ...]]:
     [None, E6_REVISION, COORDINATION_SIBLING, MAIN_SIBLING],
     ids=("empty", "e6", "coordination-a9c2", "main-a9c4"),
 )
-def test_known_sibling_baselines_converge_to_merged_head(
+def test_known_sibling_baselines_converge_to_current_head(
     clean_public_schema: Engine,
     source_revision: str | None,
 ) -> None:
@@ -189,9 +190,9 @@ def test_known_sibling_baselines_converge_to_merged_head(
                 {"body": source_revision},
             )
 
-    command.upgrade(alembic_config(), MERGED_HEAD)
+    command.upgrade(alembic_config(), CURRENT_HEAD)
 
-    assert _ledger(clean_public_schema) == [MERGED_HEAD]
+    assert _ledger(clean_public_schema) == [CURRENT_HEAD]
     assert inspect_database().schema_matches_head is True
     if source_revision is not None:
         with clean_public_schema.connect() as connection:
@@ -219,6 +220,57 @@ def test_merge_revision_upgrade_and_downgrade_are_schema_no_ops(
 
     assert _ledger(clean_public_schema) == [MERGED_HEAD]
     assert _schema_signature(clean_public_schema) == before
+
+
+def test_optional_wish_semester_upgrade_preserves_values_and_allows_null(
+    clean_public_schema: Engine,
+) -> None:
+    upgrade(MERGED_HEAD)
+    with clean_public_schema.begin() as connection:
+        user_id = connection.scalar(
+            text(
+                "INSERT INTO users (email, name, is_admin, is_local) "
+                "VALUES ('wish-migration@example.invalid', 'wish migration', false, true) "
+                "RETURNING id"
+            )
+        )
+        wish_id = connection.scalar(
+            text(
+                "INSERT INTO archive_wishes "
+                "(title, target_key, subject, category, name, academic_year, "
+                "archive_type, professor, creator_id) VALUES "
+                "('specified', :key, 'Physics', 'required', 'midterm1', 1141, "
+                "'MIDTERM', 'Professor', :creator_id) RETURNING id"
+            ),
+            {"key": "a" * 64, "creator_id": user_id},
+        )
+
+    command.upgrade(alembic_config(), CURRENT_HEAD)
+    columns = {
+        column["name"]: column
+        for column in sa_inspect(clean_public_schema).get_columns(
+            "archive_wishes", schema="public"
+        )
+    }
+    assert columns["academic_year"]["nullable"] is True
+    with clean_public_schema.begin() as connection:
+        assert connection.scalar(
+            text("SELECT academic_year FROM archive_wishes WHERE id = :id"),
+            {"id": wish_id},
+        ) == 1141
+        connection.execute(
+            text(
+                "INSERT INTO archive_wishes "
+                "(title, target_key, subject, category, name, academic_year, "
+                "archive_type, professor, creator_id) VALUES "
+                "('any', :key, 'Physics', 'required', 'midterm1', NULL, "
+                "'MIDTERM', 'Professor', :creator_id)"
+            ),
+            {"key": "b" * 64, "creator_id": user_id},
+        )
+
+    with pytest.raises(RuntimeError, match="Any Semester wishes exist"):
+        command.downgrade(alembic_config(), MERGED_HEAD)
 
 
 def test_main_sibling_requires_complete_coordination_schema(

@@ -268,6 +268,13 @@ describe('ReportManagementPanel', () => {
     expect(card.text()).toContain('普通物理期中考')
     expect(card.text()).toContain('王老師')
     expect(card.text()).toContain('待審核')
+    expect(card.text().match(/普通物理期中考/g)).toHaveLength(1)
+    expect(card.get('.report-mobile-summary-preview__label').text()).toBe('許願標題')
+    expect(card.get('.report-mobile-summary-preview__text').text()).toBe('普通物理期中考')
+    const wishTarget = card
+      .findAll('.report-mobile-info-item')
+      .find((item) => item.get('dt').text() === '許願目標')
+    expect(wishTarget.get('dd').text()).toBe('普通物理 · 王老師 · midterm1')
     expect(row.findAll('.report-person-time')).toHaveLength(0)
     expect(row.findAll('.comment-report-content')).toHaveLength(0)
     expect(card.findAll('button').map((button) => button.text())).toEqual(['檢視／審核', '刪除'])
@@ -1106,7 +1113,7 @@ describe('ReportManagementPanel', () => {
       /\.report-mobile-card__summary,[\s\S]*?\.report-mobile-card__metadata\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0;/
     )
     expect(reportManagementSource).toMatch(
-      /@container report-card \(min-width: 42rem\)\s*\{[\s\S]*?grid-template-areas:\s*'summary metadata';[\s\S]*?grid-template-columns:\s*minmax\(18rem, 0\.9fr\) minmax\(0, 1\.1fr\);[\s\S]*?grid-template-rows:\s*auto;/
+      /@container report-card \(min-width: 42rem\)\s*\{[\s\S]*?grid-template-areas:\s*'summary metadata';[\s\S]*?grid-template-columns:\s*minmax\(15rem, 0\.72fr\) minmax\(0, 1\.28fr\);[\s\S]*?grid-template-rows:\s*auto;/
     )
     expect(reportManagementSource).toMatch(
       /\.report-management__table \.p-datatable-tbody > tr > td\)\s*\{[^}]*display:\s*none !important;[^}]*min-height:\s*0;/

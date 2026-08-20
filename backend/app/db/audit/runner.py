@@ -29,6 +29,7 @@ from app.db.audit.registry import (
     CATEGORY_STATE_PRESERVATION_REVISION,
     COURSE_SUBMISSION_LIFECYCLE_REVISION,
     SIBLING_MERGE_REVISION,
+    WISH_OPTIONAL_SEMESTER_REVISION,
     WISH_POOL_REVISION,
     AuditAdapter,
     get_audit_adapter,
@@ -131,6 +132,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         COURSE_SUBMISSION_LIFECYCLE_REVISION,
         WISH_POOL_REVISION,
         SIBLING_MERGE_REVISION,
+        WISH_OPTIONAL_SEMESTER_REVISION,
     }
     owner_delete_column_condition = (
         """
@@ -169,6 +171,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         COURSE_SUBMISSION_LIFECYCLE_REVISION,
         WISH_POOL_REVISION,
         SIBLING_MERGE_REVISION,
+        WISH_OPTIONAL_SEMESTER_REVISION,
     }
     previous_status_column_condition = (
         """
@@ -201,6 +204,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         COURSE_SUBMISSION_LIFECYCLE_REVISION,
         WISH_POOL_REVISION,
         SIBLING_MERGE_REVISION,
+        WISH_OPTIONAL_SEMESTER_REVISION,
     }
     bilingual_catalog_condition = (
         """
@@ -242,6 +246,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         COURSE_SUBMISSION_LIFECYCLE_REVISION,
         WISH_POOL_REVISION,
         SIBLING_MERGE_REVISION,
+        WISH_OPTIONAL_SEMESTER_REVISION,
     }
     bilingual_snapshot_condition = (
         """
@@ -278,6 +283,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         CATEGORY_STATE_PRESERVATION_REVISION,
         COURSE_SUBMISSION_LIFECYCLE_REVISION,
         SIBLING_MERGE_REVISION,
+        WISH_OPTIONAL_SEMESTER_REVISION,
     }
     category_state_snapshot_condition = (
         """
@@ -305,6 +311,7 @@ def _continuity_cte(request: AuditRequest) -> str:
     expects_course_submission_lifecycle = request.expected_ledger in {
         COURSE_SUBMISSION_LIFECYCLE_REVISION,
         SIBLING_MERGE_REVISION,
+        WISH_OPTIONAL_SEMESTER_REVISION,
     }
     course_submission_lifecycle_condition = (
         """
@@ -343,9 +350,15 @@ def _continuity_cte(request: AuditRequest) -> str:
     expects_wish_pool = request.expected_ledger in {
         WISH_POOL_REVISION,
         SIBLING_MERGE_REVISION,
+        WISH_OPTIONAL_SEMESTER_REVISION,
     }
+    wish_year_nullability = (
+        "YES"
+        if request.expected_ledger == WISH_OPTIONAL_SEMESTER_REVISION
+        else "NO"
+    )
     wish_pool_condition = (
-        """
+        f"""
         to_regclass('public.archive_wishes') IS NOT NULL
         AND to_regclass('public.archive_wish_hearts') IS NOT NULL
         AND to_regclass('public.archive_wish_reports') IS NOT NULL
@@ -357,6 +370,15 @@ def _continuity_cte(request: AuditRequest) -> str:
               AND column_name = 'source_wish_id'
               AND data_type = 'integer'
               AND is_nullable = 'YES'
+        )
+        AND EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'archive_wishes'
+              AND column_name = 'academic_year'
+              AND data_type = 'integer'
+              AND is_nullable = '{wish_year_nullability}'
         )
         """
         if expects_wish_pool

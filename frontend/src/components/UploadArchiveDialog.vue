@@ -245,10 +245,23 @@
           <StepPanel v-slot="{ activateCallback }" value="2">
             <div class="flex flex-column gap-4">
               <div class="flex flex-column gap-2">
-                <label>{{ $t('考試學期') }}</label>
+                <div class="flex align-items-center justify-content-between gap-2">
+                  <label>{{ isWishMode ? $t('考試學期（選填）') : $t('考試學期') }}</label>
+                  <Button
+                    v-if="isWishMode && form.academicYear"
+                    type="button"
+                    :label="$t('清除選取')"
+                    text
+                    size="small"
+                    @click="form.academicYear = null"
+                  />
+                </div>
                 <div class="semester-picker">
                   <div class="semester-picker-value">
-                    {{ formatSemester(form.academicYear) || $t('選擇考試學期') }}
+                    {{
+                      formatSemester(form.academicYear) ||
+                      (isWishMode ? $t('不限學期') : $t('選擇考試學期'))
+                    }}
                   </div>
                   <div class="semester-grid" role="listbox" :aria-label="$t('選擇考試學期')">
                     <div v-for="group in semesterGroups" :key="group.year" class="semester-row">
@@ -259,7 +272,6 @@
                         type="button"
                         class="semester-option"
                         :class="{ selected: form.academicYear === semester.code }"
-                        :disabled="Boolean(sourceWishId)"
                         @click="form.academicYear = semester.code"
                       >
                         {{ semester.label }}
@@ -530,7 +542,7 @@
                 </div>
                 <div>
                   <strong>{{ $t('考試學期：') }}</strong>
-                  {{ formatSemester(form.academicYear) }}
+                  {{ formatSemester(form.academicYear) || $t('不限學期') }}
                 </div>
                 <div>
                   <strong>{{ $t('考試類型：') }}</strong>
@@ -810,7 +822,10 @@ const canGoToStep2 = computed(() => {
 
 const canGoToStep3 = computed(() => {
   return (
-    form.value.academicYear && form.value.type && generatedFilename.value && isFilenameValid.value
+    (isWishMode.value || form.value.academicYear) &&
+    form.value.type &&
+    generatedFilename.value &&
+    isFilenameValid.value
   )
 })
 

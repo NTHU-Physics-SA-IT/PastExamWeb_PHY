@@ -292,6 +292,7 @@ def _metadata_for_variant(variant: str) -> MetaData:
     if variant == "head":
         return metadata
     if variant not in {
+        "pre_wish_optional_semester",
         "main_sibling_head",
         "coordination_sibling_head",
         "pre_course_submission_lifecycle",
@@ -310,7 +311,12 @@ def _metadata_for_variant(variant: str) -> MetaData:
     }:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
 
+    if variant == "pre_wish_optional_semester":
+        metadata.tables["archive_wishes"].c.academic_year.nullable = False
+        return metadata
+
     if variant == "main_sibling_head":
+        metadata.tables["archive_wishes"].c.academic_year.nullable = False
         _remove_course_submission_lifecycle(metadata)
         _remove_category_state_preservation(metadata)
         return metadata

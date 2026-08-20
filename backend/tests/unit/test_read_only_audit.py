@@ -174,6 +174,7 @@ def test_bilingual_head_audit_is_new_version_and_preserves_lifecycle_classifier(
                 "e8a4c1d7b2f6",
                 "a9c2e5f7b1d4",
                 "b4d6f8a2c1e3",
+                "f3a7c1e9d5b2",
             }
         )
     previous = get_audit_adapter(ELIGIBILITY_AUDIT_ID, 3)
