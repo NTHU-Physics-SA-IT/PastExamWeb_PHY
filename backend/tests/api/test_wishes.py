@@ -77,6 +77,73 @@ async def test_wish_new_course_category_keeps_review_snapshot_and_requires_bilin
 
 
 @pytest.mark.asyncio
+async def test_wish_create_rejects_targets_already_satisfied_by_public_archive(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    wisher = await make_user(name="available-target-wisher")
+    async with session_maker() as session:
+        course = Course(name="Already Available Course", category="required")
+        session.add(course)
+        await session.flush()
+        session.add(
+            Archive(
+                course_id=course.id,
+                name="midterm1",
+                professor="Professor Available",
+                archive_type="midterm",
+                academic_year=1141,
+                object_name="already-available.pdf",
+            )
+        )
+        await session.commit()
+
+    payload = {
+        "title": "Need midterm one",
+        "course_id": course.id,
+        "subject": course.name,
+        "category": course.category,
+        "professor": "Professor Available",
+        "academic_year": 1141,
+        "archive_type": "midterm",
+        "name": "midterm1",
+    }
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(wisher.id)
+        specified = await client.post("/wishes", json=payload)
+        any_term = await client.post(
+            "/wishes",
+            json={**payload, "title": "Any term", "academic_year": None},
+        )
+        different_term = await client.post(
+            "/wishes",
+            json={**payload, "title": "Different term", "academic_year": 1142},
+        )
+
+        assert specified.status_code == 409
+        assert specified.json()["detail"] == {"code": "wish_target_already_available"}
+        assert any_term.status_code == 409
+        assert any_term.json()["detail"] == {"code": "wish_target_already_available"}
+        assert different_term.status_code == 201
+        async with session_maker() as session:
+            assert await session.scalar(
+                select(func.count(ArchiveWish.id)).where(
+                    ArchiveWish.creator_id == wisher.id
+                )
+            ) == 1
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(ArchiveWish).where(ArchiveWish.creator_id == wisher.id)
+            )
+            await session.execute(delete(Archive).where(Archive.course_id == course.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
+            await session.commit()
+
+
+@pytest.mark.asyncio
 async def test_wish_duplicate_heart_fulfillment_report_and_admin_delete(
     client: AsyncClient,
     session_maker,
