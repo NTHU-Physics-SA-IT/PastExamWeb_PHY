@@ -65,7 +65,7 @@ describe('personal notification presentation', () => {
       'wish_report_result',
       { status: 'upheld', admin_response: '已確認' },
       'Wish report review complete',
-      'Review result: Report upheld. Administrator response: 已確認.',
+      'Review result: Upheld. Administrator response: 已確認.',
     ],
     [
       'wish_fulfilled',

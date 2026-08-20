@@ -856,7 +856,9 @@ describe('ReportManagementPanel', () => {
     )
     expect(reportManagementSource).not.toContain('討論串起始留言')
     expect(reportManagementSource).not.toContain('留言 #${selectedReport.thread_id}')
-    expect(reportManagementSource).toContain('class="report-review__thread-hint"')
+    expect(reportManagementSource).toContain(
+      'class="soft-badge soft-badge--info report-review__thread-hint"'
+    )
     expect(reportManagementSource).toContain('threadId: item.thread_id')
     expect(reportManagementSource).toContain('messageId: item.comment_id')
     expect(wrapper.get('textarea-stub').attributes('placeholder')).toBe(
@@ -914,14 +916,20 @@ describe('ReportManagementPanel', () => {
       expect(thread.get('dt').text()).toBe('Thread')
       expect(threadId.text()).toBe('#31')
       expect(hint.text()).toBe('此識別碼代表該回覆串的第一則留言，用於定位討論串。')
-      expect(hint.element.tagName).toBe('DIV')
+      expect(hint.element.tagName).toBe('SPAN')
+      expect(hint.classes()).toContain('soft-badge')
+      expect(hint.classes()).toContain('soft-badge--info')
       expect(threadId.classes()).not.toContain('report-review__thread-hint')
       expect(hint.classes()).not.toContain('report-review__thread-id')
     }
 
-    expect(reportManagementSource.match(/class="report-review__thread-hint"/g)).toHaveLength(1)
+    expect(
+      reportManagementSource.match(
+        /class="soft-badge soft-badge--info report-review__thread-hint"/g
+      )
+    ).toHaveLength(1)
     expect(reportManagementSource).toMatch(
-      /\.report-review__thread-content > \.report-review__thread-hint\s*\{[^}]*color:\s*var\(--text-secondary\);[^}]*font-size:\s*0\.75em;[^}]*font-weight:\s*400;[^}]*line-height:\s*1\.3;/
+      /report-review__thread-hint\.p-tag\)\s*\{[^}]*display:\s*inline-flex;[^}]*max-width:\s*100%;[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;/
     )
     expect(reportManagementSource).not.toContain('<small class="report-review__thread-hint"')
     expect(reportManagementSource).not.toMatch(

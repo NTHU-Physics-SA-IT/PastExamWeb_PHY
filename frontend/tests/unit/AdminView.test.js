@@ -756,7 +756,6 @@ describe('AdminView', () => {
       label: '下架',
       icon: 'pi pi-eye-slash',
       severity: 'secondary',
-      outlined: true,
     })
 
     confirmRequireMock.mockClear()
