@@ -3,12 +3,11 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
-
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
 SCRIPT = REPOSITORY_ROOT / "scripts" / "check-backend-runtime.py"
@@ -95,7 +94,7 @@ def test_backend_python_sources_use_lf_checkout_policy(path: str) -> None:
 
 
 def test_runtime_checker_tracks_current_schema_head() -> None:
-    assert checker.EXPECTED_ALEMBIC_HEAD == "b4d6f8a2c1e3"
+    assert checker.EXPECTED_ALEMBIC_HEAD == "f3a7c1e9d5b2"
 
 
 def test_posix_source_identity_is_unchanged() -> None:
