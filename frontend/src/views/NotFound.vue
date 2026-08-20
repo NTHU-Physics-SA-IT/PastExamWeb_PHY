@@ -1,5 +1,5 @@
 <template>
-  <div class="not-found physics-background h-full flex align-items-center justify-content-center">
+  <div class="not-found h-full flex align-items-center justify-content-center">
     <div class="text-center px-4 w-full max-w-md" :style="{ color: 'var(--text-secondary)' }">
       <Card class="border-round shadow-2" :style="{ backgroundColor: 'var(--bg-secondary)' }">
         <template #title>
@@ -25,65 +25,20 @@
 </template>
 
 <script>
-import { useTheme } from '../utils/useTheme'
-import { getFieldBgSvg } from '../utils/svgBg'
-
 export default {
-  setup() {
-    const { isDarkTheme } = useTheme()
-    return { isDarkTheme }
-  },
   methods: {
     goToHome() {
       this.$router.push('/')
-    },
-    setBg() {
-      const el = document.querySelector('.physics-background')
-      if (el) {
-        el.style.setProperty('background-image', getFieldBgSvg())
-      }
-    },
-  },
-  mounted() {
-    this.setBg()
-  },
-  watch: {
-    isDarkTheme() {
-      this.setBg()
     },
   },
 }
 </script>
 
 <style scoped>
-.physics-background {
-  position: relative;
-}
-
-.physics-background::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  animation: scrollBackground 120s linear infinite;
-  pointer-events: none;
-  z-index: 0;
-}
-
-@keyframes scrollBackground {
-  from {
-    background-position: 0 0;
-  }
-  to {
-    background-position: 300% 300%;
-  }
-}
-
-.physics-background > div {
-  position: relative;
-  z-index: 1;
+.not-found {
+  min-width: 0;
+  overflow-x: hidden;
+  background: var(--bg-primary);
 }
 
 .not-found-code {

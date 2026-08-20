@@ -137,6 +137,33 @@ function archiveReportPresentation(item) {
   }
 }
 
+function wishPresentation(item) {
+  const metadata = item.metadata || {}
+  if (item.notification_type === 'wish_report_submitted') {
+    return {
+      title: i18n.global.t('許願回報已成功送出'),
+      message: i18n.global.t('原因：{reason}。請等待管理員審核。', {
+        reason: translatedReason(metadata.reason, COMMENT_REASON_KEYS),
+      }),
+    }
+  }
+  if (item.notification_type === 'wish_report_result') {
+    return {
+      title: i18n.global.t('許願回報審核完成'),
+      message: i18n.global.t('審核結果：{result}。管理員答覆：{response}。', {
+        result: reportResultLabel(metadata.status),
+        response: stringValue(metadata.admin_response) || i18n.global.t('未提供答覆'),
+      }),
+    }
+  }
+  return {
+    title: i18n.global.t('考古許願已實現'),
+    message: i18n.global.t('另一位使用者已上傳符合「{wishTitle}」的考古題，現在可以使用了。', {
+      wishTitle: stringValue(metadata.wish_title),
+    }),
+  }
+}
+
 function submissionPresentation(item) {
   const metadata = item.metadata || {}
   const course = stringValue(metadata.course_name_en) || stringValue(metadata.course_name)
@@ -173,5 +200,6 @@ export function localizedPersonalNotification(item) {
   if (item.notification_type?.startsWith('comment_report_')) return commentReportPresentation(item)
   if (item.notification_type?.startsWith('archive_report_')) return archiveReportPresentation(item)
   if (item.notification_type?.startsWith('archive_submission_')) return submissionPresentation(item)
+  if (item.notification_type?.startsWith('wish_')) return wishPresentation(item)
   return { title: item.title || '', message: item.message || '' }
 }

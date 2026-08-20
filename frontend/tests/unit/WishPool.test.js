@@ -88,6 +88,19 @@ describe('Wish Pool focused interactions', () => {
     )
     expect(wishPoolSource).toContain('element.offsetWidth <= maxTokenWidth')
     expect(wishPoolSource).toContain('(maxTokenWidth / element.offsetWidth) * 0.98')
+    expect(wishPoolSource).toContain("font-family: 'Huninn', 'Noto Sans TC', system-ui, sans-serif")
+    expect(wishPoolSource).not.toMatch(/\.wish-cloud(?:-stage)?\s*\{[^}]*font-family:/)
+  })
+
+  it('reuses discussion icon actions in the Wish detail header', () => {
+    expect(wishPoolSource).toContain(
+      'class="discussion-action-button discussion-action-like-button"'
+    )
+    expect(wishPoolSource).toContain('class="discussion-action-button"')
+    expect(wishPoolSource).toContain(':class="{ \'is-active\': selected.hearted_by_me }"')
+    expect(wishPoolSource).toContain(':aria-pressed="selected.hearted_by_me"')
+    expect(wishPoolSource).toContain('@click="toggleHeart"')
+    expect(wishPoolSource).toContain('@click="toggleReport"')
   })
 
   it('uses the existing fulfilled state for a theme-safe success treatment', () => {

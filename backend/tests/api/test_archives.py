@@ -143,6 +143,179 @@ async def _cleanup_review_context(
 
 
 @pytest.mark.parametrize(
+    ("creator_kind", "academic_year", "expected_count"),
+    [
+        ("normal", 2026, 1),
+        ("admin", None, 1),
+        ("self", 2026, 0),
+    ],
+)
+@pytest.mark.asyncio
+async def test_approval_notifies_cross_user_wish_creator_once(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    creator_kind,
+    academic_year,
+    expected_count,
+):
+    requester = await make_user(name=f"wish-publisher-{creator_kind}")
+    reviewer = await make_user(name=f"wish-reviewer-{creator_kind}", is_admin=True)
+    if creator_kind == "self":
+        creator = requester
+    else:
+        creator = await make_user(
+            name=f"wish-owner-{creator_kind}",
+            is_admin=creator_kind == "admin",
+        )
+    course, submission = await _create_pending_review_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    async with session_maker() as session:
+        wish = ArchiveWish(
+            title=f"Approval Wish {creator_kind}",
+            target_key=f"approval-wish-{creator_kind}-{submission.id}",
+            course_id=course.id,
+            subject=course.name,
+            category=course.category,
+            name=submission.name,
+            academic_year=academic_year,
+            archive_type=submission.archive_type,
+            professor=submission.professor,
+            creator_id=creator.id,
+        )
+        session.add(wish)
+        await session.commit()
+        await session.refresh(wish)
+
+    app.dependency_overrides[get_current_user] = _override_admin(reviewer.id)
+    try:
+        async with session_maker() as session:
+            assert await session.scalar(
+                select(func.count(PersonalNotification.id)).where(
+                    PersonalNotification.notification_type == "wish_fulfilled",
+                    PersonalNotification.user_id == creator.id,
+                )
+            ) == 0
+
+        approved = await client.post(
+            f"/archives/admin/submissions/{submission.id}/approve",
+            json={"note": "publish matching archive", "expected_status": "pending"},
+        )
+        assert approved.status_code == 200
+        retry = await client.post(
+            f"/archives/admin/submissions/{submission.id}/approve",
+            json={"note": "retry", "expected_status": "approved"},
+        )
+        assert retry.status_code == 200
+        assert retry.json()["changed"] is False
+
+        async with session_maker() as session:
+            notifications = list(
+                (
+                    await session.execute(
+                        select(PersonalNotification).where(
+                            PersonalNotification.notification_type == "wish_fulfilled",
+                            PersonalNotification.user_id == creator.id,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(notifications) == expected_count
+            if notifications:
+                assert notifications[0].dedupe_key == f"wish_fulfilled:{wish.id}"
+                assert notifications[0].metadata_json["wish_id"] == wish.id
+                assert notifications[0].source_type is None
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(PersonalNotification).where(
+                    PersonalNotification.dedupe_key == f"wish_fulfilled:{wish.id}"
+                )
+            )
+            await session.execute(delete(ArchiveWish).where(ArchiveWish.id == wish.id))
+            await session.commit()
+        await _cleanup_review_context(
+            session_maker,
+            course_id=course.id,
+            submission_id=submission.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_wish_notification_failure_rolls_back_archive_approval(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    monkeypatch,
+):
+    requester = await make_user(name="wish-rollback-publisher")
+    creator = await make_user(name="wish-rollback-owner")
+    reviewer = await make_user(name="wish-rollback-reviewer", is_admin=True)
+    course, submission = await _create_pending_review_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    async with session_maker() as session:
+        wish = ArchiveWish(
+            title="Rollback Wish",
+            target_key=f"rollback-wish-{submission.id}",
+            course_id=course.id,
+            subject=course.name,
+            category=course.category,
+            name=submission.name,
+            academic_year=submission.academic_year,
+            archive_type=submission.archive_type,
+            professor=submission.professor,
+            creator_id=creator.id,
+        )
+        session.add(wish)
+        await session.commit()
+        await session.refresh(wish)
+
+    async def fail_notification(*args, **kwargs):
+        raise RuntimeError("wish notification unavailable")
+
+    monkeypatch.setattr(
+        "app.api.services.archives.enqueue_new_wish_fulfillment_notifications",
+        fail_notification,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(reviewer.id)
+    try:
+        with pytest.raises(RuntimeError, match="wish notification unavailable"):
+            await client.post(
+                f"/archives/admin/submissions/{submission.id}/approve",
+                json={"note": "must roll back", "expected_status": "pending"},
+            )
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, submission.id)
+            assert stored.status == SubmissionStatus.PENDING
+            assert stored.created_archive_id is None
+            assert await session.scalar(
+                select(func.count(Archive.id)).where(Archive.course_id == course.id)
+            ) == 0
+            assert await session.scalar(
+                select(func.count(PersonalNotification.id)).where(
+                    PersonalNotification.dedupe_key == f"wish_fulfilled:{wish.id}"
+                )
+            ) == 0
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(delete(ArchiveWish).where(ArchiveWish.id == wish.id))
+            await session.commit()
+        await _cleanup_review_context(
+            session_maker,
+            course_id=course.id,
+            submission_id=submission.id,
+        )
+
+
+@pytest.mark.parametrize(
     ("action", "target_status", "notification_type"),
     [
         ("reject", SubmissionStatus.REJECTED, "archive_submission_rejected"),

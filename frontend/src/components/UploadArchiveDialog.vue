@@ -962,11 +962,18 @@ const handleUpload = async () => {
       })
     } catch (error) {
       const detail = error?.response?.data?.detail
+      const duplicateWish = detail?.code === 'wish_already_exists'
+      const archiveAvailable = detail?.code === 'wish_target_already_available'
       toast.add({
-        severity: 'error',
-        summary: t('許願送出失敗'),
-        detail:
-          detail?.code === 'wish_already_exists'
+        severity: duplicateWish || archiveAvailable ? 'warn' : 'error',
+        summary: archiveAvailable
+          ? t('考古已存在')
+          : duplicateWish
+            ? t('相同許願已存在')
+            : t('許願送出失敗'),
+        detail: archiveAvailable
+          ? t('這份考古已經存在，不需要再許願。')
+          : duplicateWish
             ? t('相同目標的許願已存在。')
             : t('發生錯誤，請稍後再試'),
         life: 3000,
@@ -1237,6 +1244,7 @@ watch(
 watch(
   () => form.value.type,
   (type) => {
+    if (applyingPrefill) return
     form.value.examNumber = null
     form.value.otherName = ''
     if (type === 'final') {

@@ -348,12 +348,26 @@ while the Wish, hearts, reports, and source linkage remain persisted. Duplicate
 canonical targets still fail with `409 wish_already_exists` and the database
 unique constraint is the concurrency arbiter.
 
+Wish creation also fails before inserting a row with
+`409 {"code": "wish_target_already_available"}` when the same canonical
+effective-public Archive predicate already has a match. A term-specific target
+checks only its term; an Any Semester target checks every term. This create
+guard does not weaken the course, professor, archive type, exam name, or
+visibility predicates.
+
 Archive Wish reporting uses the same reason and custom-message contract as
 comment reporting. `other` requires nonblank trimmed text of at most 200
 characters. Every non-`other` reason persists `custom_message = NULL` even when
 a client sends text. This product decision supersedes the previous Wish-only
 reason-without-supplementary-text behavior; report lifecycle and deletion
 semantics are unchanged.
+
+Wish report creation and one-way final review enqueue reporter-owned submitted
+and result notifications in the same transaction as the report mutation. A
+new Archive publication/approval that changes a Wish from unfulfilled to
+fulfilled enqueues one notification for its owner unless that owner is also
+the publisher. Republish, pre-existing fulfillment, self-fulfillment, and
+retries remain silent through canonical matching and stable dedupe keys.
 
 Both comment and archive reports use:
 

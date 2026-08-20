@@ -1,23 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { ref } from 'vue'
 import NotFound from '@/views/NotFound.vue'
+import notFoundSource from '@/views/NotFound.vue?raw'
 
 const routerMock = {
   push: vi.fn(),
 }
-
-const { getFieldBgSvgMock } = vi.hoisted(() => ({
-  getFieldBgSvgMock: vi.fn(() => 'mocked-bg'),
-}))
-
-vi.mock('@/utils/svgBg', () => ({
-  getFieldBgSvg: getFieldBgSvgMock,
-}))
-
-vi.mock('@/utils/useTheme', () => ({
-  useTheme: () => ({ isDarkTheme: ref(false) }),
-}))
 
 const componentStubs = {
   Card: { template: '<div><slot name="title"></slot><slot name="content"></slot></div>' },
@@ -39,7 +27,6 @@ function mountView() {
 describe('NotFound view', () => {
   beforeEach(() => {
     routerMock.push.mockReset()
-    getFieldBgSvgMock.mockClear()
     document.body.innerHTML = ''
   })
 
@@ -62,20 +49,9 @@ describe('NotFound view', () => {
     wrapper.unmount()
   })
 
-  it('applies the code background style on mount', () => {
-    const backgroundElement = {
-      style: {
-        setProperty: vi.fn(),
-      },
-    }
-    const querySpy = vi.spyOn(document, 'querySelector').mockReturnValue(backgroundElement)
-    const wrapper = mountView()
-    expect(getFieldBgSvgMock).toHaveBeenCalled()
-    expect(backgroundElement.style.setProperty).toHaveBeenCalledWith(
-      'background-image',
-      'mocked-bg'
-    )
-    querySpy.mockRestore()
-    wrapper.unmount()
+  it('uses the theme surface without the decorative physics pattern', () => {
+    expect(notFoundSource).toContain('background: var(--bg-primary)')
+    expect(notFoundSource).not.toContain('physics-background')
+    expect(notFoundSource).not.toContain('getFieldBgSvg')
   })
 })

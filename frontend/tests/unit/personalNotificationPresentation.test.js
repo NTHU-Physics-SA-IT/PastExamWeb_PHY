@@ -53,4 +53,39 @@ describe('personal notification presentation', () => {
       message: '原因：不當或違法內容。請等待管理員審核。',
     })
   })
+
+  it.each([
+    [
+      'wish_report_submitted',
+      { reason: 'inappropriate_or_illegal' },
+      'Wish report submitted',
+      'Reason: Inappropriate or unlawful content. Please wait for administrator review.',
+    ],
+    [
+      'wish_report_result',
+      { status: 'upheld', admin_response: '已確認' },
+      'Wish report review complete',
+      'Review result: Upheld. Administrator response: 已確認.',
+    ],
+    [
+      'wish_fulfilled',
+      { wish_title: '王老師微積分 final' },
+      'Wish Fulfilled',
+      'Another user uploaded a matching past exam for “王老師微積分 final”, and it is now available.',
+    ],
+  ])(
+    'presents %s in English from structured metadata',
+    (notificationType, metadata, title, message) => {
+      i18n.global.locale.value = 'en'
+
+      expect(
+        localizedPersonalNotification({
+          notification_type: notificationType,
+          title: 'canonical title',
+          message: 'canonical message',
+          metadata,
+        })
+      ).toEqual({ title, message })
+    }
+  )
 })

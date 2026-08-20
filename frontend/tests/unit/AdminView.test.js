@@ -756,7 +756,6 @@ describe('AdminView', () => {
       label: '下架',
       icon: 'pi pi-eye-slash',
       severity: 'secondary',
-      outlined: true,
     })
 
     confirmRequireMock.mockClear()
@@ -938,6 +937,20 @@ describe('AdminView', () => {
     )
     expect(adminViewSource).toMatch(
       /review-card-actions \.p-button[\s\S]*?flex: 1 1 0[\s\S]*?min-width: 0/
+    )
+  })
+
+  it('keeps takedown filled, republish outlined, and scopes the dark reject colors', () => {
+    expect(adminViewSource).toContain("'review-takedown-action': action.key === 'takedown'")
+    expect(adminViewSource).toMatch(
+      /takedown:\s*\{[\s\S]*?severity:\s*'secondary',[\s\S]*?\},\s*republish:/
+    )
+    expect(adminViewSource).toMatch(/republish:\s*\{[\s\S]*?outlined:\s*true,[\s\S]*?\}/)
+    expect(adminViewSource).toMatch(
+      /html\.dark \.review-action-reject\.p-button\.p-button-danger\s*\{[^}]*background:\s*var\(--p-red-600,[^;]+;[^}]*color:\s*var\(--p-surface-950, #020617\)/
+    )
+    expect(adminViewSource).toMatch(
+      /\.review-takedown-action\.p-button\)\s*\{[^}]*background:\s*var\(--p-surface-700, #374151\)[^}]*color:\s*var\(--p-surface-0, #ffffff\)/
     )
   })
 

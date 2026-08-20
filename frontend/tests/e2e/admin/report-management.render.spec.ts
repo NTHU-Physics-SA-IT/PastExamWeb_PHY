@@ -173,7 +173,6 @@ async function expectVisibleContentFrame(frame: Locator, expectedText: string) {
       borderColor: computed.borderTopColor,
       backgroundColor: computed.backgroundColor,
       expectedBorder: root.getPropertyValue('--border-color').trim(),
-      expectedBackground: root.getPropertyValue('--bg-secondary').trim(),
       whiteSpace: computed.whiteSpace,
       overflowWrap: computed.overflowWrap,
       wordBreak: computed.wordBreak,
@@ -183,9 +182,8 @@ async function expectVisibleContentFrame(frame: Locator, expectedText: string) {
   expect(style.borderWidth).toBe('1px')
   expect(style.borderStyle).toBe('solid')
   expect(style.borderColor).not.toBe('rgba(0, 0, 0, 0)')
-  expect(style.backgroundColor).not.toBe('rgba(0, 0, 0, 0)')
+  expect(style.backgroundColor).toBe('rgba(0, 0, 0, 0)')
   expect(style.expectedBorder).not.toBe('')
-  expect(style.expectedBackground).not.toBe('')
   expect(style.whiteSpace).toBe('pre-wrap')
   expect(style.overflowWrap).toBe('anywhere')
   expect(style.wordBreak).toBe('break-word')

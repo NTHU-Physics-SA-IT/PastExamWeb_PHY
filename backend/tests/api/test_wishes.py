@@ -10,6 +10,7 @@ from app.models.models import (
     ArchiveWishHeart,
     ArchiveWishReport,
     Course,
+    PersonalNotification,
     SubmissionStatus,
     UserRoles,
 )
@@ -21,6 +22,122 @@ def _override_user(user_id: int, *, is_admin: bool = False):
         return UserRoles(user_id=user_id, is_admin=is_admin)
 
     return _get_current_user
+
+
+@pytest.mark.asyncio
+async def test_wish_report_notifications_are_transactional_and_deduplicated(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    monkeypatch,
+):
+    wisher = await make_user(name="notification-wisher")
+    reporter = await make_user(name="notification-reporter")
+    failing_reporter = await make_user(name="notification-failing-reporter")
+    admin = await make_user(name="notification-admin", is_admin=True)
+    async with session_maker() as session:
+        course = Course(name="Wish Report Notification Course", category="required")
+        session.add(course)
+        await session.flush()
+        wish = ArchiveWish(
+            title="Wish report notification target",
+            target_key="wish-report-notification-target",
+            course_id=course.id,
+            subject=course.name,
+            category=course.category,
+            name="final",
+            academic_year=None,
+            archive_type="final",
+            professor="Professor Report",
+            creator_id=wisher.id,
+        )
+        session.add(wish)
+        await session.commit()
+        await session.refresh(wish)
+
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(reporter.id)
+        created = await client.post(
+            f"/wishes/{wish.id}/reports",
+            json={"report_reason": "other", "custom_message": "  Needs review  "},
+        )
+        assert created.status_code == 201
+        report_id = created.json()["id"]
+
+        duplicate = await client.post(
+            f"/wishes/{wish.id}/reports",
+            json={"report_reason": "misinformation"},
+        )
+        assert duplicate.status_code == 409
+
+        app.dependency_overrides[get_current_user] = _override_user(admin.id, is_admin=True)
+        reviewed = await client.patch(
+            f"/wishes/admin/reports/{report_id}",
+            json={"status": "upheld", "admin_response": " Confirmed "},
+        )
+        assert reviewed.status_code == 200
+        finalized_retry = await client.patch(
+            f"/wishes/admin/reports/{report_id}",
+            json={"status": "dismissed", "admin_response": "retry"},
+        )
+        assert finalized_retry.status_code == 409
+
+        async with session_maker() as session:
+            notifications = list(
+                (
+                    await session.execute(
+                        select(PersonalNotification)
+                        .where(PersonalNotification.user_id == reporter.id)
+                        .order_by(PersonalNotification.id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert [item.notification_type for item in notifications] == [
+                "wish_report_submitted",
+                "wish_report_result",
+            ]
+            assert notifications[0].dedupe_key == f"wish_report_submitted:{report_id}"
+            assert notifications[1].dedupe_key == f"wish_report_result:{report_id}"
+            assert notifications[1].metadata_json["admin_response"] == "Confirmed"
+
+        async def fail_notification(*args, **kwargs):
+            raise RuntimeError("notification unavailable")
+
+        monkeypatch.setattr(
+            "app.api.services.wishes.enqueue_personal_notification",
+            fail_notification,
+        )
+        app.dependency_overrides[get_current_user] = _override_user(failing_reporter.id)
+        with pytest.raises(RuntimeError, match="notification unavailable"):
+            await client.post(
+                f"/wishes/{wish.id}/reports",
+                json={"report_reason": "misinformation"},
+            )
+        async with session_maker() as session:
+            assert await session.scalar(
+                select(func.count(ArchiveWishReport.id)).where(
+                    ArchiveWishReport.reporter_user_id == failing_reporter.id
+                )
+            ) == 0
+            assert await session.scalar(
+                select(func.count(PersonalNotification.id)).where(
+                    PersonalNotification.user_id == failing_reporter.id
+                )
+            ) == 0
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(PersonalNotification).where(
+                    PersonalNotification.user_id.in_((reporter.id, failing_reporter.id))
+                )
+            )
+            await session.execute(delete(ArchiveWishReport).where(ArchiveWishReport.wish_id == wish.id))
+            await session.execute(delete(ArchiveWish).where(ArchiveWish.id == wish.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
+            await session.commit()
 
 
 @pytest.mark.asyncio
@@ -73,6 +190,115 @@ async def test_wish_new_course_category_keeps_review_snapshot_and_requires_bilin
             await session.execute(
                 delete(ArchiveWish).where(ArchiveWish.creator_id == user.id)
             )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_wish_create_rejects_targets_already_satisfied_by_public_archive(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    wisher = await make_user(name="available-target-wisher")
+    async with session_maker() as session:
+        course = Course(name="Already Available Course", category="required")
+        session.add(course)
+        await session.flush()
+        session.add(
+            Archive(
+                course_id=course.id,
+                name="midterm1",
+                professor="Professor Available",
+                archive_type="midterm",
+                academic_year=1141,
+                object_name="already-available.pdf",
+            )
+        )
+        await session.commit()
+
+    payload = {
+        "title": "Need midterm one",
+        "course_id": course.id,
+        "subject": course.name,
+        "category": course.category,
+        "professor": "Professor Available",
+        "academic_year": 1141,
+        "archive_type": "midterm",
+        "name": "midterm1",
+    }
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(wisher.id)
+        specified = await client.post("/wishes", json=payload)
+        any_term = await client.post(
+            "/wishes",
+            json={**payload, "title": "Any term", "academic_year": None},
+        )
+        different_term = await client.post(
+            "/wishes",
+            json={**payload, "title": "Different term", "academic_year": 1142},
+        )
+        async with session_maker() as session:
+            pending_archive = Archive(
+                course_id=course.id,
+                name="quiz1",
+                professor="Professor Pending",
+                archive_type="quiz",
+                academic_year=1141,
+                object_name="pending-only.pdf",
+                uploader_id=wisher.id,
+            )
+            session.add(pending_archive)
+            await session.flush()
+            pending_submission = ArchiveSubmission(
+                subject=course.name,
+                category=course.category,
+                name="quiz1",
+                academic_year=1141,
+                archive_type="quiz",
+                professor="Professor Pending",
+                object_name="pending-only.pdf",
+                requester_id=wisher.id,
+                created_archive_id=pending_archive.id,
+                status=SubmissionStatus.PENDING,
+            )
+            session.add(pending_submission)
+            await session.commit()
+        pending_only = await client.post(
+            "/wishes",
+            json={
+                **payload,
+                "title": "Pending is not public",
+                "professor": "Professor Pending",
+                "archive_type": "quiz",
+                "name": "quiz1",
+            },
+        )
+
+        assert specified.status_code == 409
+        assert specified.json()["detail"] == {"code": "wish_target_already_available"}
+        assert any_term.status_code == 409
+        assert any_term.json()["detail"] == {"code": "wish_target_already_available"}
+        assert different_term.status_code == 201
+        assert pending_only.status_code == 201
+        async with session_maker() as session:
+            assert await session.scalar(
+                select(func.count(ArchiveWish.id)).where(
+                    ArchiveWish.creator_id == wisher.id
+                )
+            ) == 2
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(ArchiveWish).where(ArchiveWish.creator_id == wisher.id)
+            )
+            await session.execute(
+                delete(ArchiveSubmission).where(
+                    ArchiveSubmission.requester_id == wisher.id
+                )
+            )
+            await session.execute(delete(Archive).where(Archive.course_id == course.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
             await session.commit()
 
 
