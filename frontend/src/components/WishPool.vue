@@ -5,7 +5,13 @@
         <h2 id="wish-pool-title">{{ $t('考古許願池') }}</h2>
         <p>{{ $t('點選許願可按愛心、回報問題或協助上傳。') }}</p>
       </div>
-      <Button :label="$t('新增許願')" icon="pi pi-plus" @click="emit('add-wish')" />
+      <Button
+        :label="$t('新增許願')"
+        icon="pi pi-plus"
+        severity="success"
+        size="small"
+        @click="emit('add-wish')"
+      />
     </header>
     <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
     <ProgressSpinner v-if="loading" class="wish-spinner" />
@@ -47,9 +53,42 @@
       @update:visible="!$event && closeWishDetail()"
       modal
       :draggable="false"
-      :header="selected?.title"
       :style="{ width: '520px', maxWidth: '94vw' }"
     >
+      <template #header>
+        <div class="wish-dialog-header">
+          <strong>{{ selected?.title }}</strong>
+          <div v-if="selected" class="wish-dialog-header__actions">
+            <Button
+              :label="String(selected.heart_count)"
+              :icon="selected.hearted_by_me ? 'pi pi-heart-fill' : 'pi pi-heart'"
+              :severity="selected.hearted_by_me ? 'danger' : 'secondary'"
+              text
+              rounded
+              size="small"
+              :loading="heartLoading"
+              :disabled="heartLoading"
+              :aria-label="$t('愛心 {count}', { count: selected.heart_count })"
+              :title="$t('愛心 {count}', { count: selected.heart_count })"
+              :aria-pressed="selected.hearted_by_me"
+              class="discussion-action-button discussion-action-like-button"
+              :class="{ 'is-active': selected.hearted_by_me }"
+              @click="toggleHeart"
+            />
+            <Button
+              icon="pi pi-flag"
+              severity="secondary"
+              text
+              rounded
+              size="small"
+              :aria-label="$t('回報')"
+              :title="$t('回報')"
+              class="discussion-action-button"
+              @click="toggleReport"
+            />
+          </div>
+        </div>
+      </template>
       <div v-if="selected" class="wish-detail">
         <p>
           {{ selected.subject }} · {{ selected.professor }} · {{ semesterLabel(selected) }} ·
@@ -57,18 +96,6 @@
         </p>
         <Tag v-if="selected.fulfilled" severity="success">{{ $t('已實現') }}</Tag>
         <div class="dialog-actions wrap">
-          <Button
-            :label="$t('愛心 {count}', { count: selected.heart_count })"
-            :icon="selected.hearted_by_me ? 'pi pi-heart-fill' : 'pi pi-heart'"
-            @click="toggleHeart"
-          />
-          <Button
-            :label="$t('回報')"
-            icon="pi pi-flag"
-            severity="secondary"
-            outlined
-            @click="toggleReport"
-          />
           <Button
             :label="$t('協助上傳')"
             icon="pi pi-cloud-upload"
@@ -124,7 +151,8 @@ const wishes = ref([]),
 const selected = ref(null)
 const reportVisible = ref(false)
 const reportSubmitting = ref(false),
-  deleting = ref(false)
+  deleting = ref(false),
+  heartLoading = ref(false)
 const report = reactive({ reason: null, customMessage: '' })
 const poolRef = ref(null)
 const cloudRef = ref(null)
@@ -193,6 +221,9 @@ async function layoutCloud() {
   const placed = []
   const nextPositions = {}
   const goldenAngle = Math.PI * (3 - Math.sqrt(5))
+  const horizontalLayout = maxWidth >= 560
+  const horizontalScale = horizontalLayout ? 1.32 : 0.96
+  const verticalScale = horizontalLayout ? 0.62 : 0.82
   const ordered = [...wishes.value].sort((left, right) => Number(left.id) - Number(right.id))
   fittedFontSizes.value = Object.fromEntries(
     ordered.map((wish) => [wish.id, baseFontSize(wish.heart_count)])
@@ -219,8 +250,8 @@ async function layoutCloud() {
       const radius = 8 * Math.sqrt(attempt)
       const angle = startAngle + attempt * goldenAngle
       const trial = {
-        x: Math.cos(angle) * radius - width / 2,
-        y: Math.sin(angle) * radius * 0.78 - height / 2,
+        x: Math.cos(angle) * radius * horizontalScale - width / 2,
+        y: Math.sin(angle) * radius * verticalScale - height / 2,
         width,
         height,
       }
@@ -291,10 +322,16 @@ async function load(reset = true) {
 }
 const loadMore = () => load(false)
 async function toggleHeart() {
-  const { data } = await wishService.toggleHeart(selected.value.id)
-  Object.assign(selected.value, { hearted_by_me: data.hearted, heart_count: data.heart_count })
-  const item = wishes.value.find((wish) => wish.id === selected.value.id)
-  if (item) Object.assign(item, selected.value)
+  if (!selected.value || heartLoading.value) return
+  heartLoading.value = true
+  try {
+    const { data } = await wishService.toggleHeart(selected.value.id)
+    Object.assign(selected.value, { hearted_by_me: data.hearted, heart_count: data.heart_count })
+    const item = wishes.value.find((wish) => wish.id === selected.value.id)
+    if (item) Object.assign(item, selected.value)
+  } finally {
+    heartLoading.value = false
+  }
 }
 function toggleReport() {
   if (reportVisible.value) return closeReport()
@@ -388,6 +425,8 @@ onMounted(() => {
     if (poolRef.value) resizeObserver.observe(poolRef.value)
   }
   load()
+  const fontLoad = document.fonts?.load?.('1rem Huninn')
+  if (fontLoad) void fontLoad.then(scheduleLayout).catch(scheduleLayout)
 })
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
@@ -462,6 +501,7 @@ onBeforeUnmount(() => {
   overflow-wrap: normal;
   white-space: nowrap;
   transform-origin: center;
+  font-family: 'Huninn', 'Noto Sans TC', system-ui, sans-serif;
 }
 .wish-word__title,
 .wish-word small,
@@ -501,6 +541,24 @@ onBeforeUnmount(() => {
 .wish-detail {
   display: grid;
   gap: 0.8rem;
+}
+.wish-dialog-header {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.wish-dialog-header > strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.wish-dialog-header__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.35rem;
 }
 .dialog-actions {
   justify-content: flex-end;

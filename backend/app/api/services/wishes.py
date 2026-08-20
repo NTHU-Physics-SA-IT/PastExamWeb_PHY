@@ -12,7 +12,6 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db.session import get_session
 from app.models.models import (
-    Archive,
     ArchiveWish,
     ArchiveWishCreate,
     ArchiveWishHeart,
@@ -28,27 +27,36 @@ from app.models.models import (
     CommentReportStatus,
     Course,
     CourseCategory,
+    PersonalNotificationType,
     User,
     UserRoles,
 )
-from app.services.archive_visibility import public_archive_conditions
+from app.services.personal_notifications import enqueue_personal_notification
+from app.services.wish_fulfillment import (
+    matching_archive_id_subquery,
+    target_has_public_archive,
+)
 from app.utils.auth import get_current_user
 from app.utils.course_text import (
     format_course_display_name,
     normalize_course_search_text,
-    normalized_course_text_expr,
 )
 
 router = APIRouter()
 admin_router = APIRouter()
 
+WISH_REPORT_REASON_LABELS = {
+    CommentReportReason.SPAM_OR_DUPLICATE: "垃圾訊息或重複洗版",
+    CommentReportReason.HARASSMENT_OR_HOSTILITY: "攻擊、騷擾或不友善內容",
+    CommentReportReason.INAPPROPRIATE_OR_ILLEGAL: "不當或違法內容",
+    CommentReportReason.PRIVACY_VIOLATION: "洩漏個人資料或隱私",
+    CommentReportReason.MISINFORMATION: "錯誤或誤導資訊",
+    CommentReportReason.OTHER: "其他",
+}
+
 
 def _normalized_text(value: str | None) -> str:
     return (value or "").strip().lower()
-
-
-def _normalized_text_expr(value):
-    return func.lower(func.trim(func.coalesce(value, "")))
 
 
 def _target_key(data: ArchiveWishCreate, *, course: Course | None) -> str:
@@ -84,48 +92,6 @@ async def _validated_course(db: AsyncSession, data: ArchiveWishCreate) -> Course
     return course
 
 
-def _matching_archive_id_subquery():
-    course_match = or_(
-        (ArchiveWish.course_id.is_not(None))
-        & (Archive.course_id == ArchiveWish.course_id),
-        (ArchiveWish.course_id.is_(None))
-        & (
-            normalized_course_text_expr(Course.name)
-            == normalized_course_text_expr(
-                ArchiveWish.requested_course_name, ArchiveWish.subject
-            )
-        )
-        & (
-            _normalized_text_expr(Course.category)
-            == _normalized_text_expr(
-                func.coalesce(ArchiveWish.requested_category_key, ArchiveWish.category)
-            )
-        ),
-    )
-    return (
-        select(Archive.id)
-        .join(Course, Course.id == Archive.course_id)
-        .where(
-            *public_archive_conditions(),
-            Course.deleted_at.is_(None),
-            course_match,
-            _normalized_text_expr(Archive.name)
-            == _normalized_text_expr(ArchiveWish.name),
-            _normalized_text_expr(Archive.professor)
-            == _normalized_text_expr(ArchiveWish.professor),
-            or_(
-                ArchiveWish.academic_year.is_(None),
-                Archive.academic_year == ArchiveWish.academic_year,
-            ),
-            Archive.archive_type == ArchiveWish.archive_type,
-        )
-        .order_by(Archive.id.asc())
-        .limit(1)
-        .correlate(ArchiveWish)
-        .scalar_subquery()
-    )
-
-
 def _wish_select(user_id: int):
     creator = aliased(User)
     heart_count = (
@@ -150,7 +116,7 @@ def _wish_select(user_id: int):
         creator.name,
         heart_count.label("heart_count"),
         hearted_by_me.label("my_heart_id"),
-        _matching_archive_id_subquery().label("matching_archive_id"),
+        matching_archive_id_subquery().label("matching_archive_id"),
     ).join(creator, creator.id == ArchiveWish.creator_id)
 
 
@@ -185,7 +151,7 @@ async def list_wishes(
     db: AsyncSession = Depends(get_session),
     current_user: UserRoles = Depends(get_current_user),
 ):
-    unfulfilled = _matching_archive_id_subquery().is_(None)
+    unfulfilled = matching_archive_id_subquery().is_(None)
     total = int(
         await db.scalar(select(func.count(ArchiveWish.id)).where(unfulfilled)) or 0
     )
@@ -213,6 +179,11 @@ async def create_wish(
     current_user: UserRoles = Depends(get_current_user),
 ):
     course = await _validated_course(db, data)
+    if await target_has_public_archive(db, data, course=course):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "wish_target_already_available"},
+        )
     key = _target_key(data, course=course)
     existing_id = await db.scalar(
         select(ArchiveWish.id).where(ArchiveWish.target_key == key)
@@ -343,6 +314,28 @@ async def create_wish_report(
     )
     db.add(report)
     try:
+        await db.flush()
+        await enqueue_personal_notification(
+            db,
+            user_id=current_user.user_id,
+            notification_type=PersonalNotificationType.WISH_REPORT_SUBMITTED,
+            title="許願回報已成功送出",
+            message=(
+                f"原因：{WISH_REPORT_REASON_LABELS[payload.report_reason]}。"
+                "請等待管理員審核。"
+            ),
+            source_type="wish_report",
+            source_id=report.id,
+            metadata={
+                "report_id": report.id,
+                "wish_id": wish.id,
+                "wish_title": wish.title,
+                "target_summary": report.target_summary_snapshot,
+                "reason": payload.report_reason.value,
+                "status": report.status,
+            },
+            dedupe_key=f"wish_report_submitted:{report.id}",
+        )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -520,6 +513,33 @@ async def review_wish_report(
     report.reviewed_at = datetime.now(UTC)
     report.updated_at = report.reviewed_at
     db.add(report)
+    result_label = (
+        "回報成立"
+        if report.status == CommentReportStatus.UPHELD.value
+        else "回報不成立"
+    )
+    response_label = report.admin_response or "未提供答覆"
+    if report.reporter_user_id is not None:
+        await enqueue_personal_notification(
+            db,
+            user_id=report.reporter_user_id,
+            notification_type=PersonalNotificationType.WISH_REPORT_RESULT,
+            title="許願回報審核完成",
+            message=f"審核結果：{result_label}。管理員答覆：{response_label}。",
+            source_type="wish_report",
+            source_id=report.id,
+            metadata={
+                "report_id": report.id,
+                "wish_id": report.wish_id,
+                "wish_title": report.wish_title_snapshot,
+                "target_summary": report.target_summary_snapshot,
+                "reason": report.reason,
+                "status": report.status,
+                "admin_response": report.admin_response,
+                "reviewed_at": report.reviewed_at.isoformat(),
+            },
+            dedupe_key=f"wish_report_result:{report.id}",
+        )
     await db.commit()
     return await _read_wish_report(db, report.id)
 

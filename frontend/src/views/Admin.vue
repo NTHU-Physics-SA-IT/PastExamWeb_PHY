@@ -2279,6 +2279,7 @@
                               {
                                 'review-action-button--reject': action.key === 'reject',
                                 'review-action-button--delete': action.key === 'delete',
+                                'review-takedown-action': action.key === 'takedown',
                                 'review-action-reject': action.key === 'reject',
                                 'admin-danger-solid-button': action.key === 'reject',
                                 'admin-danger-outline-button': action.key === 'delete',
@@ -2633,6 +2634,7 @@
                               {
                                 'review-action-button--reject': action.key === 'reject',
                                 'review-action-button--delete': action.key === 'delete',
+                                'review-takedown-action': action.key === 'takedown',
                                 'review-action-reject': action.key === 'reject',
                                 'admin-danger-solid-button': action.key === 'reject',
                                 'admin-danger-outline-button': action.key === 'delete',
@@ -3567,7 +3569,7 @@
                       icon="pi pi-eye-slash"
                       size="small"
                       severity="secondary"
-                      outlined
+                      class="review-takedown-action"
                       @click="confirmTakedownComparisonItem(data)"
                     />
                   </div>
@@ -3625,7 +3627,7 @@
                     icon="pi pi-eye-slash"
                     size="small"
                     severity="secondary"
-                    outlined
+                    class="review-takedown-action"
                     @click="confirmTakedownComparisonItem(comparison)"
                   />
                 </div>
@@ -3749,6 +3751,7 @@
               {
                 'review-action-button--reject': action.key === 'reject',
                 'review-action-button--delete': action.key === 'delete',
+                'review-takedown-action': action.key === 'takedown',
                 'review-action-reject': action.key === 'reject',
                 'admin-danger-solid-button': action.key === 'reject',
                 'admin-danger-outline-button': action.key === 'delete',
@@ -6495,7 +6498,6 @@ const reviewActionDefinitions = computed(() => ({
     label: t('下架'),
     icon: 'pi pi-eye-slash',
     severity: 'secondary',
-    outlined: true,
   },
   republish: {
     key: 'republish',
@@ -8267,6 +8269,7 @@ const confirmTakedownComparisonItem = (item) => {
     icon: 'pi pi-exclamation-triangle',
     acceptLabel: t('下架'),
     rejectLabel: t('取消'),
+    acceptClass: 'p-button-secondary review-takedown-action',
     accept: () => takedownComparisonItem(item),
   })
 }
@@ -10756,6 +10759,27 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+}
+
+:global(.review-takedown-action.p-button) {
+  border-color: var(--p-surface-700, #374151) !important;
+  background: var(--p-surface-700, #374151) !important;
+  color: var(--p-surface-0, #ffffff) !important;
+}
+
+:global(.review-takedown-action.p-button:not(:disabled):hover) {
+  border-color: var(--p-surface-800, #1f2937) !important;
+  background: var(--p-surface-800, #1f2937) !important;
+}
+
+:global(.review-takedown-action.p-button:not(:disabled):active) {
+  border-color: var(--p-surface-900, #111827) !important;
+  background: var(--p-surface-900, #111827) !important;
+}
+
+:global(.review-takedown-action.p-button .p-button-icon),
+:global(.review-takedown-action.p-button .p-button-label) {
+  color: inherit !important;
 }
 
 .submission-detail-comparison-mobile {
@@ -15568,5 +15592,28 @@ onBeforeUnmount(() => {
     line-height: 1.25;
     align-items: center;
   }
+}
+</style>
+
+<style>
+html.dark .review-action-reject.p-button.p-button-danger {
+  border-color: var(--p-red-600, #dc2626) !important;
+  background: var(--p-red-600, #dc2626) !important;
+  color: var(--p-surface-950, #020617) !important;
+}
+
+html.dark .review-action-reject.p-button.p-button-danger:not(:disabled):hover {
+  border-color: var(--p-red-500, #ef4444) !important;
+  background: var(--p-red-500, #ef4444) !important;
+}
+
+html.dark .review-action-reject.p-button.p-button-danger:not(:disabled):active {
+  border-color: var(--p-red-700, #b91c1c) !important;
+  background: var(--p-red-700, #b91c1c) !important;
+}
+
+html.dark .review-action-reject.p-button.p-button-danger .p-button-icon,
+html.dark .review-action-reject.p-button.p-button-danger .p-button-label {
+  color: inherit !important;
 }
 </style>

@@ -27,12 +27,13 @@ guarantee.
 Announcement and About Us locale selection is a read-time presentation effect:
 English uses the optional English field when nonblank and otherwise falls back
 to the required Chinese field. Both bodies pass through the same sanitized
-Markdown renderer. Creating, hearting, reporting, fulfilling, or permanently
-deleting an Archive Wish currently produces API/UI feedback only; it does not
-enqueue a `PersonalNotification`, publish a WebSocket event, touch Redis, or
-mutate MinIO. Help Upload deliberately reuses the ordinary Archive upload and
-review pipeline, so its storage and later review side effects remain those of
-an ordinary upload.
+Markdown renderer. Creating, hearting, or permanently deleting an Archive Wish
+produces API/UI feedback only. Wish-report create/final review and newly
+fulfilled Wishes enqueue the durable notifications described below; none of
+these Wish operations publishes a WebSocket event, touches Redis, or mutates
+MinIO. Help Upload deliberately reuses the ordinary Archive upload and review
+pipeline, so its storage and later review side effects remain those of an
+ordinary upload.
 
 ## Current notification inventory
 
@@ -45,6 +46,9 @@ an ordinary upload.
 | Comment report result | `comment_report_result` | Reporter; report/source metadata | Enqueued with final review |
 | Archive report submitted | `archive_report_submitted` | Reporter; archive report source | Enqueued in the report transaction |
 | Archive report result | `archive_report_result` | Reporter; report/source/takedown result | Enqueued with final review |
+| Wish report submitted | `wish_report_submitted` | Reporter; Wish report metadata | Enqueued in the report transaction |
+| Wish report result | `wish_report_result` | Reporter; Wish report metadata | Enqueued with final review |
+| Wish fulfilled | `wish_fulfilled` | Wish owner other than the publisher; Wish/Archive metadata | Enqueued in the first matching publication transaction |
 | Submission approved/rejected/takedown | Matching submission type | Submission requester; submission source | Helper enqueues before caller commit |
 | Submission republished | `archive_submission_republished` | Submission requester; submission source | Enqueued with republish transition |
 
@@ -195,11 +199,22 @@ takedown-transition identity and has separate repeated-cycle characterization.
 
 ### Current implementation
 
-Creating comment/archive reports records a submitted acknowledgement for the
-reporter. Final review records a result notification; archive-report result
+Creating comment/archive/Wish reports records a submitted acknowledgement for
+the reporter. Final review records a result notification; archive-report result
 metadata also describes whether takedown occurred. The notification row is
 written in the same database transaction as the corresponding report create or
-review operation.
+review operation. Wish report retries are deduplicated by the persisted report
+identity and final-state guard plus `wish_report_submitted:{report_id}` and
+`wish_report_result:{report_id}` keys.
+
+When a newly uploaded or newly approved effective-public Archive first matches
+an unfulfilled Wish, the Archive publication transaction enqueues
+`wish_fulfilled:{wish_id}` for the Wish owner. The publisher does not receive a
+self-fulfillment notification. Existing public matches, republish operations,
+and repeated evaluation are silent; the dedupe key is the final retry boundary.
+The helper does not commit: enqueue failure rolls back the caller-owned Archive
+publication transaction. The notification is source-less and detail-only, so
+it never exposes another user's private Submission destination.
 
 If notification enqueue raises, the transaction is expected to fail rather
 than commit the report alone. The unique dedupe key protects retry of the same

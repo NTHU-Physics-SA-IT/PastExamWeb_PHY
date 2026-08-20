@@ -39,7 +39,7 @@
           size="small"
           :aria-label="$t('回覆留言')"
           :title="$t('回覆')"
-          class="discussion-card__icon-button"
+          class="discussion-card__icon-button discussion-action-button"
           @click="$emit('reply', message)"
         />
         <Button
@@ -54,7 +54,7 @@
           :aria-label="message.liked_by_current_user ? $t('取消愛心') : $t('按愛心')"
           :aria-pressed="Boolean(message.liked_by_current_user)"
           :title="message.liked_by_current_user ? $t('取消愛心') : $t('按愛心')"
-          class="discussion-card__icon-button discussion-card__like-button"
+          class="discussion-card__icon-button discussion-card__like-button discussion-action-button discussion-action-like-button"
           :class="{ 'is-active': message.liked_by_current_user }"
           @click="$emit('like', message)"
         />
@@ -66,7 +66,7 @@
           size="small"
           :aria-label="$t('回報留言')"
           :title="$t('回報')"
-          class="discussion-card__icon-button"
+          class="discussion-card__icon-button discussion-action-button"
           @click="$emit('report', message)"
         />
       </div>
@@ -81,7 +81,7 @@
           size="small"
           :aria-label="message.is_pinned ? $t('取消置頂') : $t('置頂留言')"
           :title="message.is_pinned ? $t('取消置頂') : $t('置頂')"
-          class="discussion-card__icon-button"
+          class="discussion-card__icon-button discussion-action-button"
           @click="$emit('pin', message)"
         />
         <Button
@@ -93,7 +93,7 @@
           size="small"
           :aria-label="$t('刪除留言')"
           :title="$t('刪除')"
-          class="discussion-card__icon-button"
+          class="discussion-card__icon-button discussion-action-button"
           @click="$emit('delete', message)"
         />
       </div>
@@ -317,7 +317,7 @@ const formattedLikeCount = computed(() =>
   margin-top: 0.55rem;
 }
 
-:deep(.discussion-card__icon-button.p-button) {
+:global(.discussion-action-button.p-button) {
   min-width: 2rem;
   width: auto;
   height: 2rem;
@@ -325,17 +325,17 @@ const formattedLikeCount = computed(() =>
   flex: 0 0 auto;
 }
 
-:deep(.discussion-card__icon-button.p-button .p-button-icon) {
+:global(.discussion-action-button.p-button .p-button-icon) {
   font-size: 0.82rem;
 }
 
-:deep(.discussion-card__like-button.p-button .p-button-label) {
+:global(.discussion-action-like-button.p-button .p-button-label) {
   min-width: 1ch;
   font-size: var(--app-font-size-xs);
   font-variant-numeric: tabular-nums;
 }
 
-:deep(.discussion-card__like-button.is-active.p-button) {
+:global(.discussion-action-like-button.is-active.p-button) {
   color: var(--p-red-500, var(--text-primary));
 }
 
@@ -372,7 +372,7 @@ const formattedLikeCount = computed(() =>
 }
 
 @media (pointer: coarse) {
-  :deep(.discussion-card__icon-button.p-button) {
+  :global(.discussion-action-button.p-button) {
     min-width: 2.5rem;
     height: 2.5rem;
   }

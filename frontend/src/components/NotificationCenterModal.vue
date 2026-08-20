@@ -341,6 +341,9 @@ function notificationIcon(type) {
     comment_report_result: 'pi pi-verified',
     archive_report_submitted: 'pi pi-flag-fill',
     archive_report_result: 'pi pi-verified',
+    wish_report_submitted: 'pi pi-flag',
+    wish_report_result: 'pi pi-verified',
+    wish_fulfilled: 'pi pi-sparkles',
   }
   return `${icons[type] || 'pi pi-bell'} notification-card__icon`
 }

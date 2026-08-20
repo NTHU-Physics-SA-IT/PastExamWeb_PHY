@@ -1022,7 +1022,7 @@
                   </div>
                   <div class="report-mobile-info-item report-mobile-info-item--wide">
                     <dt>{{ $t('許願目標') }}</dt>
-                    <dd>{{ data.target_summary }}</dd>
+                    <dd>{{ formatWishTargetSummary(data.target_summary) }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
                     <dt>{{ $t('審核') }}</dt>
@@ -1080,9 +1080,15 @@
         </Column>
         <Column sortField="wish_target" :header="$t('許願目標')" sortable>
           <template #body="{ data }"
-            ><div v-if="!isCardLayout" class="comment-report-content" :title="data.target_summary">
+            ><div
+              v-if="!isCardLayout"
+              class="comment-report-content"
+              :title="formatWishTargetSummary(data.target_summary)"
+            >
               <strong class="comment-report-content__reason">{{ data.wish_title }}</strong
-              ><span class="comment-report-content__summary">{{ data.target_summary }}</span>
+              ><span class="comment-report-content__summary">{{
+                formatWishTargetSummary(data.target_summary)
+              }}</span>
             </div></template
           >
         </Column>
@@ -1157,30 +1163,49 @@
           </div>
           <div>
             <dt>{{ $t('許願目標') }}</dt>
-            <dd>{{ selectedWishReport.wish_title }} · {{ selectedWishReport.target_summary }}</dd>
+            <dd>{{ formatWishTargetSummary(selectedWishReport.target_summary) }}</dd>
           </div>
         </dl>
-        <div v-if="selectedWishReport.custom_message" class="report-review__message">
-          <strong>{{ $t('補充說明') }}</strong>
-          <p>{{ selectedWishReport.custom_message }}</p>
-        </div>
-        <div class="report-review__form">
-          <label>{{ $t('審核結果') }}</label
-          ><Select
+        <section v-if="selectedWishReport.custom_message" class="report-review__content-field">
+          <strong class="report-review__content-label">{{ $t('補充說明') }}</strong>
+          <div class="report-review__content-block">
+            <p>{{ selectedWishReport.custom_message }}</p>
+          </div>
+        </section>
+        <p v-if="isFinal(selectedWishReport.status)" class="report-review__response">
+          <strong>{{ $t('管理員答覆：') }}</strong
+          >{{ selectedWishReport.admin_response || $t('未提供答覆') }}
+        </p>
+        <Message
+          v-if="isFinal(selectedWishReport.status)"
+          class="report-review__message"
+          severity="info"
+          :closable="false"
+        >
+          {{ $t('審核結果已送出，無法修改。') }}
+        </Message>
+        <div v-if="!isFinal(selectedWishReport.status)" class="report-review__field">
+          <label for="wish-review-status">{{ $t('審核結果') }}</label>
+          <Select
+            inputId="wish-review-status"
             v-model="wishReviewForm.status"
             :options="statusOptions.filter((item) => item.value !== 'pending')"
             optionLabel="label"
             optionValue="value"
-            class="w-full"
-            :disabled="isFinal(selectedWishReport.status)"
-          /><label>{{ $t('管理員答覆（選填）') }}</label
-          ><Textarea
+            :disabled="wishReviewSaving"
+          />
+        </div>
+        <div v-if="!isFinal(selectedWishReport.status)" class="report-review__field">
+          <label for="wish-admin-response">{{ $t('給回報者的答覆') }}</label>
+          <Textarea
+            id="wish-admin-response"
             v-model="wishReviewForm.admin_response"
             rows="4"
             maxlength="1000"
-            class="w-full"
-            :disabled="isFinal(selectedWishReport.status)"
+            :placeholder="$t('可留空；若未提供答覆，通知中將顯示「未提供答覆」。')"
+            :disabled="wishReviewSaving"
           />
+          <small>{{ wishReviewForm.admin_response.length }}/1000</small>
         </div>
         <div class="report-review__actions">
           <Button
@@ -1248,9 +1273,11 @@
               <span class="report-review__thread-id">{{
                 selectedReport.thread_id ? `#${selectedReport.thread_id}` : '—'
               }}</span>
-              <div class="report-review__thread-hint">
-                {{ $t('此識別碼代表該回覆串的第一則留言，用於定位討論串。') }}
-              </div>
+              <Tag
+                class="soft-badge soft-badge--info report-review__thread-hint"
+                severity="info"
+                :value="$t('此識別碼代表該回覆串的第一則留言，用於定位討論串。')"
+              />
             </dd>
           </div>
         </dl>
@@ -2311,6 +2338,23 @@ function isFinal(value) {
 const formatDateTime = (value) => formatRelativeOrAbsoluteDateTime(value)
 const formatReviewTime = (value) => (value ? formatDateTime(value, true) : '--')
 
+const formatWishTargetSummary = (value) =>
+  String(value || '')
+    .split(' · ')
+    .map((part) => {
+      const term = part.match(/^term:(any|\d+)$/i)?.[1]
+      if (!term) return part
+      if (term.toLowerCase() === 'any') return t('不限學期')
+      const numericValue = Number(term)
+      const year = Math.floor(numericValue / 10)
+      const semester = numericValue % 10
+      if (numericValue >= 1000 && numericValue < 2000 && (semester === 1 || semester === 2)) {
+        return t(semester === 1 ? '{year}上學期' : '{year}下學期', { year })
+      }
+      return t('{value} 年', { value: numericValue })
+    })
+    .join(' · ')
+
 function syncCardLayout(event) {
   isCardLayout.value = event.matches
 }
@@ -2799,10 +2843,6 @@ onBeforeUnmount(teardownCardLayout)
 }
 .report-review__meta div {
   min-width: 0;
-  padding: 0.5rem;
-  border-radius: var(--content-border-radius);
-  border: 1px solid var(--border-color);
-  background: var(--bg-secondary);
 }
 .report-review__meta dt {
   color: var(--text-color-secondary);
@@ -2827,13 +2867,19 @@ onBeforeUnmount(teardownCardLayout)
   font-size: var(--app-font-size-base);
   line-height: 1.4;
 }
-.report-review__thread-content > .report-review__thread-hint {
-  display: block;
+.report-review__thread-content :deep(.report-review__thread-hint.p-tag) {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  justify-self: start;
   margin-top: 0.1rem;
-  color: var(--text-secondary);
-  font-size: 0.75em;
-  font-weight: 400;
-  line-height: 1.3;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.report-review__thread-content :deep(.report-review__thread-hint .p-tag-label) {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .report-review__content-field {
   display: grid;
@@ -2853,8 +2899,7 @@ onBeforeUnmount(teardownCardLayout)
   overflow: hidden;
   border: 1px solid var(--border-color);
   border-radius: var(--content-border-radius);
-  background: var(--bg-secondary);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border-color) 24%, transparent);
+  background: transparent;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -2899,10 +2944,7 @@ onBeforeUnmount(teardownCardLayout)
   white-space: pre-wrap;
 }
 .system-report-detail__note {
-  padding: 0.75rem;
-  border: 1px solid var(--border-color);
-  border-radius: var(--content-border-radius);
-  background: var(--bg-secondary);
+  color: var(--text-color-secondary);
 }
 .system-report-detail__read-state {
   display: grid;
@@ -2910,7 +2952,7 @@ onBeforeUnmount(teardownCardLayout)
   padding: 0.75rem;
   border: 1px solid var(--border-color);
   border-radius: var(--content-border-radius);
-  background: var(--bg-secondary);
+  background: transparent;
 }
 .system-report-detail__read-heading,
 .system-report-detail__read-option {
@@ -2943,6 +2985,16 @@ onBeforeUnmount(teardownCardLayout)
 :global(.report-management-dialog .p-select),
 :global(.report-management-dialog .p-select-label) {
   font-size: var(--app-control-font-size) !important;
+}
+:global(.report-management-dialog .report-review__field .p-select),
+:global(.report-management-dialog .report-review__field .p-select-label),
+:global(.report-management-dialog .report-review__field textarea),
+:global(.report-management-dialog .report-review__field .p-textarea) {
+  background: color-mix(
+    in srgb,
+    var(--p-form-field-background, var(--bg-primary)) 92%,
+    var(--p-surface-300, #cbd5e1) 8%
+  ) !important;
 }
 :global(.report-management-dialog .p-button) {
   min-height: 2rem;
@@ -3247,7 +3299,13 @@ onBeforeUnmount(teardownCardLayout)
 }
 @media (max-width: 760px) {
   .report-review__meta {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem 0.6rem;
+  }
+  .report-review__meta dd {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
   .report-review__actions {
     flex-wrap: wrap;

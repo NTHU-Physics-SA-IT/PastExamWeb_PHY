@@ -82,6 +82,7 @@ from app.services.archive_submission_status import (
     resolve_archive_submission_delete_source_status,
     take_down_archive_submission,
 )
+from app.services.wish_fulfillment import enqueue_new_wish_fulfillment_notifications
 from app.utils.auth import get_current_user
 from app.utils.course_text import (
     format_course_display_name,
@@ -939,7 +940,7 @@ async def upload_archive(
             uploader_id=current_user.user_id,
         )
         db.add(archive)
-        await db.commit()
+        await db.flush()
         await db.refresh(archive)
 
         submission = ArchiveSubmission(
@@ -978,6 +979,11 @@ async def upload_archive(
         db.add(submission)
         await db.flush()
         await record_submission_event(db, submission)
+        await enqueue_new_wish_fulfillment_notifications(
+            db,
+            archive=archive,
+            publisher_user_id=current_user.user_id,
+        )
         await db.commit()
         await db.refresh(submission)
 
@@ -1710,6 +1716,11 @@ async def approve_archive_submission(
             )
         await db.flush()
         await db.refresh(submission)
+        await enqueue_new_wish_fulfillment_notifications(
+            db,
+            archive=archive,
+            publisher_user_id=submission.requester_id,
+        )
         await db.commit()
         await db.refresh(submission)
         return _serialize_archive_submission_action(submission, changed=True)

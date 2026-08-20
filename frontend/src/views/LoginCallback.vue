@@ -1,7 +1,5 @@
 <template>
-  <div
-    class="login-callback physics-background h-full flex align-items-center justify-content-center"
-  >
+  <div class="login-callback h-full flex align-items-center justify-content-center">
     <div class="text-center px-4 w-full max-w-md" :style="{ color: 'var(--text-secondary)' }">
       <div v-if="errorMessage">
         <Card class="border-round shadow-2" :style="{ backgroundColor: 'var(--bg-secondary)' }">
@@ -30,8 +28,6 @@
 </template>
 
 <script>
-import { useTheme } from '../utils/useTheme'
-import { getFieldBgSvg } from '../utils/svgBg'
 import { authService } from '../api'
 import { setToken } from '../utils/auth'
 import { STORAGE_KEYS, removeSessionItem } from '../utils/storage'
@@ -52,25 +48,12 @@ export default {
       errorMessage: '',
     }
   },
-  setup() {
-    const { isDarkTheme } = useTheme()
-    return {
-      isDarkTheme,
-    }
-  },
   methods: {
     goToHome() {
       this.$router.push('/')
     },
-    setBg() {
-      const el = document.querySelector('.physics-background')
-      if (el) {
-        el.style.setProperty('background-image', getFieldBgSvg())
-      }
-    },
   },
   async mounted() {
-    this.setBg()
     const urlParams = new URLSearchParams(window.location.search)
     const code = urlParams.get('code')
     const providerError = urlParams.get('error')
@@ -102,44 +85,14 @@ export default {
       this.errorMessage = this.$t('驗證失敗，請重試或聯絡管理員。')
     }
   },
-  watch: {
-    isDarkTheme() {
-      this.setBg()
-    },
-  },
 }
 </script>
 
 <style scoped>
-.physics-background {
-  position: relative;
-}
-
-.physics-background::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-
-  animation: scrollBackground 120s linear infinite;
-  pointer-events: none;
-  z-index: 0;
-}
-
-@keyframes scrollBackground {
-  from {
-    background-position: 0 0;
-  }
-  to {
-    background-position: 300% 300%;
-  }
-}
-
-.physics-background > div {
-  position: relative;
-  z-index: 1;
+.login-callback {
+  min-width: 0;
+  overflow-x: hidden;
+  background: var(--bg-primary);
 }
 
 :deep(.p-card) {

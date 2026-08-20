@@ -483,6 +483,17 @@ const en = {
   '點選許願可按愛心、回報問題或協助上傳。':
     'Select a wish to heart it, report a problem, or help upload the exam.',
   新增許願: 'Add Wish',
+  考古已存在: 'Past Exam Already Available',
+  '這份考古已經存在，不需要再許願。':
+    'This past exam is already available, so there is no need to create a wish.',
+  相同許願已存在: 'Matching Wish Already Exists',
+  許願回報已成功送出: 'Wish report submitted',
+  許願回報審核完成: 'Wish report review complete',
+  考古許願已實現: 'Wish Fulfilled',
+  '審核結果：{result}。管理員答覆：{response}。':
+    'Review result: {result}. Administrator response: {response}.',
+  '另一位使用者已上傳符合「{wishTitle}」的考古題，現在可以使用了。':
+    'Another user uploaded a matching past exam for “{wishTitle}”, and it is now available.',
   新增考古許願: 'Add Past Exam Wish',
   許願標題: 'Wish title',
   '例如: 王道維普物一 midterm1': 'For example: Prof. Wang General Physics I midterm1',
