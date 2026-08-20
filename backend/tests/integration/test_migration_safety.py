@@ -661,8 +661,9 @@ def test_unknown_and_multiple_ledger_revisions_fail(
 
 def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
     script, _ = revision_graph()
-    parent_revisions = script.get_revision(head_revision()).down_revision
-    assert parent_revisions == (COORDINATION_SIBLING, MAIN_SIBLING)
+    assert script.get_revision(head_revision()).down_revision == MERGED_HEAD
+    merge_parents = script.get_revision(MERGED_HEAD).down_revision
+    assert merge_parents == (COORDINATION_SIBLING, MAIN_SIBLING)
     previous_revision = MAIN_SIBLING
     upgrade(previous_revision)
 
