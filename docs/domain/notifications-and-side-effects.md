@@ -210,7 +210,9 @@ identity and final-state guard plus `wish_report_submitted:{report_id}` and
 When a newly uploaded or newly approved effective-public Archive first matches
 an unfulfilled Wish, the Archive publication transaction enqueues
 `wish_fulfilled:{wish_id}` for the Wish owner. The publisher does not receive a
-self-fulfillment notification. Existing public matches, republish operations,
+self-fulfillment notification. Recipient eligibility is role-independent, so
+an administrator who created the Wish is notified on the same cross-user terms
+as any other Wish owner. Existing public matches, republish operations,
 and repeated evaluation are silent; the dedupe key is the final retry boundary.
 The helper does not commit: enqueue failure rolls back the caller-owned Archive
 publication transaction. The notification is source-less and detail-only, so

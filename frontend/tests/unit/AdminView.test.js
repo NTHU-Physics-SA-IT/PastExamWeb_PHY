@@ -941,6 +941,20 @@ describe('AdminView', () => {
     )
   })
 
+  it('keeps takedown filled, republish outlined, and scopes the dark reject colors', () => {
+    expect(adminViewSource).toContain("'review-takedown-action': action.key === 'takedown'")
+    expect(adminViewSource).toMatch(
+      /takedown:\s*\{[\s\S]*?severity:\s*'secondary',[\s\S]*?\},\s*republish:/
+    )
+    expect(adminViewSource).toMatch(/republish:\s*\{[\s\S]*?outlined:\s*true,[\s\S]*?\}/)
+    expect(adminViewSource).toMatch(
+      /html\.dark \.review-action-reject\.p-button\.p-button-danger\s*\{[^}]*background:\s*var\(--p-red-600,[^;]+;[^}]*color:\s*var\(--p-surface-950, #020617\)/
+    )
+    expect(adminViewSource).toMatch(
+      /\.review-takedown-action\.p-button\)\s*\{[^}]*background:\s*var\(--p-surface-700, #374151\)[^}]*color:\s*var\(--p-surface-0, #ffffff\)/
+    )
+  })
+
   it('keeps desktop actor-time columns while restoring compact mobile metadata', async () => {
     const wrapper = createWrapper()
     await flushPromises()

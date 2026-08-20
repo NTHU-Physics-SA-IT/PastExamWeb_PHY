@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import LoginCallback from '@/views/LoginCallback.vue'
+import loginCallbackSource from '@/views/LoginCallback.vue?raw'
 
 const routerMock = {
   push: vi.fn(),
@@ -172,5 +173,12 @@ describe('LoginCallback view', () => {
     expect(sessionStorage.getItem('auth-token')).toBeNull()
     expect(routerMock.replace).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('驗證失敗')
+  })
+
+  it('uses the theme surface without changing callback behavior', () => {
+    expect(loginCallbackSource).toContain('background: var(--bg-primary)')
+    expect(loginCallbackSource).not.toContain('physics-background')
+    expect(loginCallbackSource).not.toContain('getFieldBgSvg')
+    expect(loginCallbackSource).toContain('authService.exchangeNthuCode(code)')
   })
 })

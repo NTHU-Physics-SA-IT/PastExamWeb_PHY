@@ -354,6 +354,69 @@ describe('UploadArchiveDialog', () => {
     wrapper.unmount()
   })
 
+  it.each([
+    ['midterm', 'midterm1', 1],
+    ['midterm', 'midterm2', 2],
+    ['quiz', 'quiz3', 3],
+  ])(
+    'keeps the %s %s exam number while applying Help Upload prefill',
+    async (type, name, number) => {
+      const wrapper = mountDialog({
+        modelValue: false,
+        sourceWishId: 52,
+        prefill: {
+          id: 52,
+          course_id: 'c1',
+          subject: 'Calculus I',
+          category: 'freshman',
+          professor: 'Prof. Lin',
+          academic_year: 1141,
+          archive_type: type,
+          name,
+        },
+      })
+
+      await wrapper.setProps({ modelValue: true })
+      await flushPromises()
+
+      expect(wrapper.vm.form.type).toBe(type)
+      expect(wrapper.vm.form.examNumber).toBe(number)
+      expect(wrapper.vm.generatedFilename).toBe(name)
+      expect(wrapper.vm.canGoToStep3).toBe(true)
+
+      wrapper.unmount()
+    }
+  )
+
+  it('distinguishes an existing Archive from a duplicate Wish', async () => {
+    const wrapper = mountDialog({ mode: 'wish' })
+    const vm = wrapper.vm
+    Object.assign(vm.form, {
+      category: 'freshman',
+      subject: { name: 'Calculus I', code: 'c1' },
+      subjectId: 'c1',
+      professor: 'Prof. Lin',
+      academicYear: null,
+      type: 'final',
+      wishTitle: 'Need final',
+    })
+    await flushPromises()
+    wishServiceMock.create.mockRejectedValueOnce({
+      response: { data: { detail: { code: 'wish_target_already_available' } } },
+    })
+
+    await vm.handleUpload()
+
+    expect(toastAddMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'warn',
+        summary: '考古已存在',
+        detail: '這份考古已經存在，不需要再許願。',
+      })
+    )
+    wrapper.unmount()
+  })
+
   it('covers helper utilities, watchers, and error branches', async () => {
     const wrapper = mountDialog()
     const vm = wrapper.vm

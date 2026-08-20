@@ -205,7 +205,7 @@ describe('ReportManagementPanel', () => {
       created_at: '2026-08-18T01:00:00Z',
       reason: 'misinformation',
       wish_title: '普通物理期中考',
-      target_summary: '普通物理 · 王老師 · midterm1',
+      target_summary: '普通物理 · 王老師 · term:1141 · midterm1',
       status: 'pending',
       admin_response: null,
     }
@@ -222,6 +222,12 @@ describe('ReportManagementPanel', () => {
     await wrapper.vm.openWishReport(report.id)
     expect(mocks.getWishReport).toHaveBeenCalledWith(report.id)
     expect(wrapper.vm.wishReviewVisible).toBe(true)
+    const target = wrapper
+      .findAll('.report-review__meta > div')
+      .find((item) => item.get('dt').text() === '許願目標')
+    expect(target.get('dd').text()).toBe('普通物理 · 王老師 · 114上學期 · midterm1')
+    expect(target.get('dd').text()).not.toContain(report.wish_title)
+    expect(target.get('dd').text()).not.toContain('term:')
 
     wrapper.vm.wishReviewForm = { status: 'upheld', admin_response: '已確認' }
     wrapper.vm.confirmSaveWishReview()
@@ -248,7 +254,7 @@ describe('ReportManagementPanel', () => {
             created_at: '2026-08-18T01:00:00Z',
             reason: 'misinformation',
             wish_title: '普通物理期中考',
-            target_summary: '普通物理 · 王老師 · midterm1',
+            target_summary: '普通物理 · 王老師 · term:any · midterm1',
             status: 'pending',
             reviewer_name: null,
             reviewed_at: null,
@@ -274,7 +280,7 @@ describe('ReportManagementPanel', () => {
     const wishTarget = card
       .findAll('.report-mobile-info-item')
       .find((item) => item.get('dt').text() === '許願目標')
-    expect(wishTarget.get('dd').text()).toBe('普通物理 · 王老師 · midterm1')
+    expect(wishTarget.get('dd').text()).toBe('普通物理 · 王老師 · 不限學期 · midterm1')
     expect(row.findAll('.report-person-time')).toHaveLength(0)
     expect(row.findAll('.comment-report-content')).toHaveLength(0)
     expect(card.findAll('button').map((button) => button.text())).toEqual(['檢視／審核', '刪除'])
@@ -462,10 +468,27 @@ describe('ReportManagementPanel', () => {
     expect(fields[0].get('.report-review__content-label').text()).toBe('補充說明')
     expect(blocks[0].text()).toContain('未提供補充說明')
     expect(reportManagementSource).toContain('border: 1px solid var(--border-color)')
-    expect(reportManagementSource).toContain('background: var(--bg-secondary)')
+    expect(reportManagementSource).toMatch(
+      /\.report-review__content-block\s*\{[^}]*background:\s*transparent;/
+    )
     expect(reportManagementSource).not.toContain('var(--surface-border)')
     expect(reportManagementSource).not.toContain('var(--surface-50)')
     expect(reportManagementSource).toContain('var(--app-font-size-base)')
+  })
+
+  it('keeps metadata two-column on narrow dialogs and uses the shared Thread info pill', () => {
+    expect(reportManagementSource).toMatch(
+      /@media \(max-width: 760px\)[\s\S]*?\.report-review__meta\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/
+    )
+    expect(reportManagementSource).toMatch(
+      /@media \(max-width: 760px\)[\s\S]*?\.report-review__meta dd\s*\{[^}]*overflow-wrap:\s*anywhere;[^}]*word-break:\s*break-word;/
+    )
+    expect(reportManagementSource).toContain(
+      'class="soft-badge soft-badge--info report-review__thread-hint"'
+    )
+    expect(reportManagementSource).toMatch(
+      /report-review__thread-hint\.p-tag\)\s*\{[^}]*display:\s*inline-flex;[^}]*max-width:\s*100%;[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;/
+    )
   })
 
   it('submits archive review without an admin response and renders the fallback', async () => {
