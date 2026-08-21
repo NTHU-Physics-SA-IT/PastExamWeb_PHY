@@ -20,7 +20,7 @@
   - [ADR-0005](0005-main-pr-docs-only-exception.md)
   - [ADR-0006](0006-coordination-postmerge-full-evidence-reuse.md)
   - [ADR-0007](0007-retain-full-fallback-for-post-case-b-reconciliation-tails.md)
-- Related PR / issue: PR #128 motivated the research; no closeout PR yet
+- Related PR / issue: PR #128 motivated the research; PR #154 records the formal closeout
 - Supersedes: None
 - Superseded by: None
 
