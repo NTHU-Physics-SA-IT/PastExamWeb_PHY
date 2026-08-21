@@ -180,9 +180,9 @@ services:
       VITE_SITE_HOSTNAME: http://localhost:${DEV_HTTP_PORT:-8080}
       VITE_NTHU_DEV_MOCK_ENABLED: ${NTHU_DEV_MOCK_ENABLED:-false}
     command: >-
-      sh -c "pnpm install --frozen-lockfile
+      sh -c "CI=true pnpm install --frozen-lockfile
       --store-dir /app/node_modules/.pnpm-store
-      && pnpm run dev --host 0.0.0.0 --port 80"
+      && exec pnpm run dev --host 0.0.0.0 --port 80"
     ports:
       - "127.0.0.1:${DEV_HMR_PORT:-24678}:24678"
     volumes:
