@@ -87,7 +87,10 @@ from app.services.archive_mutation import (
 from app.services.archive_submission_links import (
     validate_archive_source_submission_rows,
 )
-from app.services.archive_visibility import public_archive_conditions
+from app.services.archive_visibility import (
+    public_archive_conditions,
+    public_course_conditions,
+)
 from app.services.course_lifecycle_locks import CourseLifecycleOperation
 from app.services.discussions import soft_delete_discussion_message
 from app.services.personal_notifications import enqueue_personal_notification
@@ -201,18 +204,6 @@ def _normalize_category_badge_color(color: str | None) -> str:
             detail="Invalid category badge color",
         )
     return normalized
-
-
-def _public_catalog_course_conditions() -> list:
-    active_category_exists = exists().where(
-        CourseCategoryConfig.key == Course.category,
-        CourseCategoryConfig.is_active.is_(True),
-        CourseCategoryConfig.deleted_at.is_(None),
-    )
-    return [
-        Course.deleted_at.is_(None),
-        active_category_exists,
-    ]
 
 
 async def _category_order_map(db: AsyncSession) -> dict[str, int]:
@@ -450,7 +441,7 @@ async def _get_categorized_courses_data(
 ) -> CategorizedCourses:
     query = select(Course)
     if public_only:
-        query = query.where(*_public_catalog_course_conditions())
+        query = query.where(*public_course_conditions())
     else:
         query = query.where(Course.deleted_at.is_(None))
     normalized_search = normalize_course_search_text(search)
@@ -515,7 +506,7 @@ async def get_public_course_archives(
         await db.execute(
             select(Course).where(
                 Course.id == course_id,
-                *_public_catalog_course_conditions(),
+                *public_course_conditions(),
             )
         )
     ).scalar_one_or_none()

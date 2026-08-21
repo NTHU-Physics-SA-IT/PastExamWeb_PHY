@@ -42,6 +42,7 @@
     "b": [
       "tests/unit/test_archive_submission_status.py",
       "tests/api/test_about_us.py",
+      "tests/api/test_archive_backups.py",
       "tests/api/test_archive_discussion.py",
       "tests/api/test_archive_lifecycle_lock_order.py",
       "tests/api/test_archive_reports.py",

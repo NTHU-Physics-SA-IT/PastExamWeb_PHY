@@ -93,6 +93,12 @@ describe('API service wrappers', () => {
     archiveService.getArchiveDownloadUrl('course-1', 'arch-1')
     expect(getMock).toHaveBeenCalledWith('/courses/course-1/archives/arch-1/download')
 
+    archiveService.downloadArchiveBackup()
+    expect(getMock).toHaveBeenCalledWith('/backups/admin/archive', {
+      responseType: 'blob',
+      timeout: 0,
+    })
+
     archiveService.deleteArchive('course-1', 'arch-1')
     expect(deleteMock).toHaveBeenCalledWith('/courses/course-1/archives/arch-1')
 

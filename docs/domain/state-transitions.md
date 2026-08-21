@@ -463,6 +463,12 @@ For a NTHU OAuth User, provider-synchronized `name` and `email` remain provider-
 - Pending, rejected, takedown, or deleted siblings do not hide an approved PDF.
 - An item may be hidden when that public item, its Course, or a required parent
   is explicitly trashed or blocked.
+- The administrator archive-backup export uses the same effective-public
+  Archive and active Course/Category predicates. It exports only PDF bytes and
+  identifying Archive/Course/Category metadata; it excludes submissions,
+  users, reports, discussions, notifications, trash, and all other database
+  contents. Frontend placement does not replace the backend administrator
+  authorization check.
 
 Focused safety-net coverage confirms that the anonymous catalog keeps
 same-metadata Archive identities independent across approved, pending,

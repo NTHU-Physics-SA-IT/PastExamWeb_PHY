@@ -9,6 +9,7 @@
           <Tab value="1">{{ $t('使用者管理') }}</Tab>
           <Tab value="5">{{ $t('回報管理') }}</Tab>
           <Tab value="4">{{ $t('垃圾桶') }}</Tab>
+          <Tab value="6">{{ $t('資料備份') }}</Tab>
         </TabList>
         <TabPanels>
           <TabPanel value="0">
@@ -3109,6 +3110,82 @@
               />
             </div>
           </TabPanel>
+          <TabPanel value="6">
+            <div class="p-2 md:p-4 backup-panel">
+              <section class="backup-card" aria-labelledby="archive-backup-title">
+                <header class="backup-card__header">
+                  <div class="backup-card__heading">
+                    <span class="backup-card__icon" aria-hidden="true">
+                      <i class="pi pi-cloud-download"></i>
+                    </span>
+                    <div>
+                      <h3 id="archive-backup-title" class="m-0">
+                        {{ $t('公開考古題備份') }}
+                      </h3>
+                      <p class="backup-card__description">
+                        {{ $t('將目前網站上有效公開的考古題整理成可離線保存與管理的 ZIP 備份。') }}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    class="backup-card__action"
+                    :label="$t('建立並下載 ZIP')"
+                    icon="pi pi-download"
+                    :loading="backupDownloading"
+                    :disabled="backupDownloading"
+                    @click="downloadArchiveBackup"
+                  />
+                </header>
+
+                <div class="backup-content-grid">
+                  <article class="backup-information-block">
+                    <h4>
+                      <i class="pi pi-check-circle" aria-hidden="true"></i>{{ $t('備份包含') }}
+                    </h4>
+                    <ul>
+                      <li>{{ $t('有效公開中的考古題 PDF') }}</li>
+                      <li>{{ $t('依課程分類與課程整理的資料夾結構') }}</li>
+                      <li>{{ $t('考古題與課程相關清單及 metadata') }}</li>
+                      <li><code>manifest.json</code></li>
+                      <li>{{ $t('每個課程的') }} <code>_archives.csv</code></li>
+                      <li>{{ $t('SHA-256 校驗碼') }}</li>
+                    </ul>
+                  </article>
+
+                  <article class="backup-information-block">
+                    <h4><i class="pi pi-ban" aria-hidden="true"></i>{{ $t('備份不包含') }}</h4>
+                    <ul>
+                      <li>{{ $t('垃圾桶內容') }}</li>
+                      <li>{{ $t('待審核投稿') }}</li>
+                      <li>{{ $t('未通過投稿') }}</li>
+                      <li>{{ $t('已下架或非公開內容') }}</li>
+                      <li>{{ $t('使用者私人資料') }}</li>
+                    </ul>
+                  </article>
+
+                  <div class="backup-file-guidance backup-content-grid__full-width">
+                    <h4>{{ $t('PDF 檔名與儲存') }}</h4>
+                    <p>
+                      {{
+                        $t(
+                          'ZIP 內的 PDF 會使用較易管理的人類可讀檔名；正式 MinIO 中的 UUID / object name 不會被重新命名或修改。'
+                        )
+                      }}
+                    </p>
+                  </div>
+
+                  <p class="backup-scope-note backup-content-grid__full-width">
+                    <i class="pi pi-info-circle" aria-hidden="true"></i>
+                    {{
+                      $t(
+                        '此功能是考古題資料的可攜式匯出備份，不取代 VPS Snapshot 或 PostgreSQL 資料庫備份。'
+                      )
+                    }}
+                  </p>
+                </div>
+              </section>
+            </div>
+          </TabPanel>
         </TabPanels>
       </Tabs>
 
@@ -5856,7 +5933,7 @@ const TAB_STORAGE_KEY = STORAGE_KEYS.local.ADMIN_CURRENT_TAB
 const getInitialTab = () => {
   try {
     const savedTab = getLocalItem(TAB_STORAGE_KEY)
-    if (savedTab && ['0', '1', '2', '3', '4', '5'].includes(savedTab)) {
+    if (savedTab && ['0', '1', '2', '3', '4', '5', '6'].includes(savedTab)) {
       return savedTab
     }
   } catch (e) {
@@ -5866,6 +5943,46 @@ const getInitialTab = () => {
 }
 
 const currentTab = ref(getInitialTab())
+const backupDownloading = ref(false)
+
+const downloadArchiveBackup = async () => {
+  if (backupDownloading.value) return
+  backupDownloading.value = true
+  try {
+    const response = await archiveService.downloadArchiveBackup()
+    const contentDisposition = response.headers?.['content-disposition'] || ''
+    const filenameMatch = contentDisposition.match(/filename="?([^";]+)"?/i)
+    const filename = filenameMatch?.[1] || 'PhysArchive_Backup.zip'
+    const url = window.URL.createObjectURL(response.data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    link.style.display = 'none'
+    document.body.appendChild(link)
+    link.click()
+    setTimeout(() => {
+      window.URL.revokeObjectURL(url)
+      link.remove()
+    }, 100)
+    toast.add({
+      severity: 'success',
+      summary: t('備份已建立'),
+      detail: t('ZIP 備份已開始下載。'),
+      life: 3000,
+    })
+  } catch (error) {
+    console.error(t('建立備份失敗:'), error)
+    if (isUnauthorizedError(error)) return
+    toast.add({
+      severity: 'error',
+      summary: t('備份失敗'),
+      detail: t('無法建立完整備份，請確認公開 PDF 儲存狀態後再試一次。'),
+      life: 5000,
+    })
+  } finally {
+    backupDownloading.value = false
+  }
+}
 
 const categoryOptions = computed(() =>
   courseCategories.value
@@ -9253,6 +9370,8 @@ const loadTabData = async (value) => {
   }
 
   if (tab === '5') return
+
+  if (tab === '6') return
 }
 
 const handleTabChange = (value) => {
@@ -9267,6 +9386,7 @@ const handleTabChange = (value) => {
     3: 'reviews',
     4: 'trash',
     5: 'reports',
+    6: 'backup',
   }
 
   trackEvent(EVENTS.SWITCH_TAB, {
@@ -10722,6 +10842,138 @@ onBeforeUnmount(() => {
 
 .admin-toolbar--trash-shell {
   align-items: flex-start;
+}
+
+.backup-panel {
+  width: 100%;
+}
+
+.backup-card {
+  padding: 1.5rem;
+  border: 1px solid var(--surface-border);
+  border-radius: 0.75rem;
+  background: var(--surface-card);
+}
+
+.backup-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--surface-border);
+}
+
+.backup-card__heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.backup-card__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 2.75rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  color: var(--primary-color);
+  background: color-mix(in srgb, var(--primary-color) 12%, transparent);
+  font-size: 1.25rem;
+}
+
+.backup-card__description {
+  margin: 0.6rem 0 0;
+  color: var(--text-color-secondary);
+  line-height: 1.65;
+}
+
+.backup-card__action {
+  flex: 0 0 auto;
+}
+
+.backup-content-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.backup-content-grid__full-width {
+  grid-column: 1 / -1;
+}
+
+.backup-information-block,
+.backup-file-guidance {
+  padding: 1.1rem 1.2rem;
+  border: 1px solid var(--surface-border);
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, var(--surface-ground) 62%, var(--surface-card));
+}
+
+.backup-information-block h4,
+.backup-file-guidance h4 {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0 0 0.75rem;
+  color: var(--text-color);
+}
+
+.backup-information-block h4 i {
+  color: var(--primary-color);
+}
+
+.backup-information-block ul {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding-left: 1.25rem;
+  color: var(--text-color-secondary);
+  line-height: 1.55;
+}
+
+.backup-information-block code {
+  color: var(--text-color);
+}
+
+.backup-file-guidance p {
+  margin: 0;
+  color: var(--text-color-secondary);
+  line-height: 1.65;
+}
+
+.backup-scope-note {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0 1.2rem;
+  color: var(--text-color-secondary);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+@media (max-width: 768px) {
+  .backup-card__header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .backup-card__action {
+    width: 100%;
+  }
+
+  .backup-content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .backup-content-grid__full-width {
+    grid-column: auto;
+  }
 }
 
 .admin-toolbar--trash {

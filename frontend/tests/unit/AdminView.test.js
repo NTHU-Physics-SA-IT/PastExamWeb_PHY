@@ -189,6 +189,7 @@ const rejectSubmissionMock = vi.hoisted(() => vi.fn())
 const takedownSubmissionMock = vi.hoisted(() => vi.fn())
 const republishSubmissionMock = vi.hoisted(() => vi.fn())
 const deleteSubmissionMock = vi.hoisted(() => vi.fn())
+const downloadArchiveBackupMock = vi.hoisted(() => vi.fn())
 
 const trackEventMock = vi.hoisted(() => vi.fn())
 const isUnauthorizedErrorMock = vi.hoisted(() => vi.fn(() => false))
@@ -265,11 +266,30 @@ vi.mock('@/api', () => ({
     takedownSubmission: takedownSubmissionMock,
     republishSubmission: republishSubmissionMock,
     deleteSubmission: deleteSubmissionMock,
+    downloadArchiveBackup: downloadArchiveBackupMock,
   },
 }))
 
 function createWrapper() {
   return shallowMount(AdminView)
+}
+
+function createBackupWrapper() {
+  const passthrough = { template: '<div><slot /></div>' }
+  return shallowMount(AdminView, {
+    global: {
+      stubs: {
+        Tabs: passthrough,
+        TabList: { template: '<div class="tab-list-test"><slot /></div>' },
+        Tab: { props: ['value'], template: '<button :data-value="value"><slot /></button>' },
+        TabPanels: passthrough,
+        TabPanel: {
+          props: ['value'],
+          template: '<div v-if="value === \'6\'" :data-value="value"><slot /></div>',
+        },
+      },
+    },
+  })
 }
 
 let consoleErrorSpy
@@ -317,11 +337,16 @@ describe('AdminView', () => {
     takedownSubmissionMock.mockReset()
     republishSubmissionMock.mockReset()
     deleteSubmissionMock.mockReset()
+    downloadArchiveBackupMock.mockReset()
     approveSubmissionMock.mockResolvedValue({ data: {} })
     rejectSubmissionMock.mockResolvedValue({ data: {} })
     takedownSubmissionMock.mockResolvedValue({ data: {} })
     republishSubmissionMock.mockResolvedValue({ data: {} })
     deleteSubmissionMock.mockResolvedValue({ data: { changed: true } })
+    downloadArchiveBackupMock.mockResolvedValue({
+      data: new Blob(['backup']),
+      headers: { 'content-disposition': 'attachment; filename="PhysArchive_Backup_test.zip"' },
+    })
     getSubmissionStatisticsMock.mockImplementation((range) =>
       Promise.resolve({ data: makeSubmissionStatistics(range, { 0: 2, 1: 1 }) })
     )
@@ -448,6 +473,126 @@ describe('AdminView', () => {
     expect(wrapper.vm.isNotificationEffective(sampleNotifications[1])).toBe(false)
     expect(wrapper.vm.formatAdminActorTime('invalid')).toBe('—')
     expect(wrapper.vm.formatAdminActorTime(now.toISOString())).not.toBe('—')
+
+    wrapper.unmount()
+  })
+
+  it('renders the approved backup tab, copy, and aligned content structure', () => {
+    const wrapper = createBackupWrapper()
+    const tabLabels = Array.from(wrapper.find('.tab-list-test').element.children).map(
+      (tab) => tab.textContent
+    )
+
+    expect(tabLabels.at(-2)).toBe('垃圾桶')
+    expect(tabLabels.at(-1)).toBe('資料備份')
+    expect(wrapper.text()).toContain('公開考古題備份')
+    expect(wrapper.text()).toContain(
+      '將目前網站上有效公開的考古題整理成可離線保存與管理的 ZIP 備份。'
+    )
+    expect(wrapper.text()).toContain('備份包含')
+    expect(wrapper.text()).toContain('備份不包含')
+    for (const copy of [
+      '有效公開中的考古題 PDF',
+      '依課程分類與課程整理的資料夾結構',
+      '考古題與課程相關清單及 metadata',
+      'manifest.json',
+      '_archives.csv',
+      'SHA-256 校驗碼',
+      '垃圾桶內容',
+      '待審核投稿',
+      '未通過投稿',
+      '已下架或非公開內容',
+      '使用者私人資料',
+    ]) {
+      expect(wrapper.text()).toContain(copy)
+    }
+    expect(wrapper.text()).toContain('PDF 檔名與儲存')
+    expect(wrapper.text()).toContain(
+      '此功能是考古題資料的可攜式匯出備份，不取代 VPS Snapshot 或 PostgreSQL 資料庫備份。'
+    )
+    expect(wrapper.text()).not.toContain(
+      '系統會在下載前完成所有檔案檢查；若任何公開 PDF 缺失或無法讀取，將不會產生不完整的成功備份。'
+    )
+
+    const contentGrid = wrapper.find('.backup-content-grid')
+    expect(contentGrid.exists()).toBe(true)
+    expect(contentGrid.findAll('.backup-information-block')).toHaveLength(2)
+    expect(contentGrid.find('.backup-file-guidance.backup-content-grid__full-width').exists()).toBe(
+      true
+    )
+    expect(contentGrid.find('.backup-scope-note.backup-content-grid__full-width').exists()).toBe(
+      true
+    )
+    expect(contentGrid.find('.backup-scope-note > .pi-info-circle').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('downloads one backup at a time and reports success', async () => {
+    let resolveDownload
+    downloadArchiveBackupMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveDownload = resolve
+      })
+    )
+    const createObjectURLMock = vi.fn(() => 'blob:archive-backup')
+    const revokeObjectURLMock = vi.fn()
+    const clickMock = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    Object.defineProperty(window.URL, 'createObjectURL', {
+      configurable: true,
+      value: createObjectURLMock,
+    })
+    Object.defineProperty(window.URL, 'revokeObjectURL', {
+      configurable: true,
+      value: revokeObjectURLMock,
+    })
+    const wrapper = createWrapper()
+
+    const firstDownload = wrapper.vm.downloadArchiveBackup()
+    const duplicateDownload = wrapper.vm.downloadArchiveBackup()
+    expect(wrapper.vm.backupDownloading).toBe(true)
+    expect(downloadArchiveBackupMock).toHaveBeenCalledTimes(1)
+
+    resolveDownload({
+      data: new Blob(['backup']),
+      headers: { 'content-disposition': 'attachment; filename="PhysArchive_Backup_test.zip"' },
+    })
+    await firstDownload
+    await duplicateDownload
+    expect(wrapper.vm.backupDownloading).toBe(false)
+    expect(createObjectURLMock).toHaveBeenCalledOnce()
+    expect(clickMock).toHaveBeenCalledOnce()
+    expect(toastAddMock).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'success', detail: 'ZIP 備份已開始下載。' })
+    )
+
+    vi.advanceTimersByTime(100)
+    expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:archive-backup')
+    clickMock.mockRestore()
+    delete window.URL.createObjectURL
+    delete window.URL.revokeObjectURL
+    wrapper.unmount()
+  })
+
+  it('recovers from backup errors and follows unauthorized handling', async () => {
+    const wrapper = createWrapper()
+    downloadArchiveBackupMock.mockRejectedValueOnce(new Error('storage unavailable'))
+
+    await wrapper.vm.downloadArchiveBackup()
+    expect(wrapper.vm.backupDownloading).toBe(false)
+    expect(toastAddMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'error',
+        detail: '無法建立完整備份，請確認公開 PDF 儲存狀態後再試一次。',
+      })
+    )
+
+    toastAddMock.mockClear()
+    isUnauthorizedErrorMock.mockReturnValueOnce(true)
+    downloadArchiveBackupMock.mockRejectedValueOnce(new Error('unauthorized'))
+    await wrapper.vm.downloadArchiveBackup()
+    expect(wrapper.vm.backupDownloading).toBe(false)
+    expect(toastAddMock).not.toHaveBeenCalled()
 
     wrapper.unmount()
   })

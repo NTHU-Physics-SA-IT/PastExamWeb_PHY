@@ -317,6 +317,17 @@ snapshot without retroactively changing statistical meaning.
 
 ## PostgreSQL and MinIO permanent deletion
 
+### Administrator archive backup export
+
+The administrator archive-backup export is read-only. It streams each
+effective-public PDF from its existing MinIO object into a spooled ZIP copy;
+it does not rename, move, write, or delete the source object and does not
+increment download counts or create database, notification, audit, Redis, or
+WebSocket effects. The ZIP contains a versioned manifest, per-Course CSV
+indexes, and SHA-256 checksums for exported PDFs. If any selected object is
+missing or unreadable, the operation fails before returning a successful ZIP
+response rather than presenting a partial backup as complete.
+
 ### Product contract
 
 - A single item that succeeds in only PostgreSQL or only MinIO is not reported
@@ -387,6 +398,7 @@ integration.
 | WebSocket discussion update | Database commit precedes broadcast | Durable write succeeds even if live delivery fails |
 | Redis | Used primarily for authentication token blacklist/state | Not part of archive lifecycle atomicity |
 | About Us create/update | Route-authorized single PostgreSQL commit | No notification, receipt, storage, Redis, or WebSocket side effect |
+| Administrator archive backup export | Read-only effective-public query plus MinIO reads into one spooled response | No persistent mutation; any selected object-read failure aborts the response |
 
 ## NTHU OAuth and login handoff
 
