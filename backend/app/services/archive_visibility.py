@@ -2,7 +2,30 @@
 
 from sqlalchemy import exists, or_
 
-from app.models.models import Archive, ArchiveSubmission, SubmissionStatus
+from app.models.models import (
+    Archive,
+    ArchiveSubmission,
+    Course,
+    CourseCategoryConfig,
+    SubmissionStatus,
+)
+
+
+def public_course_conditions() -> list:
+    """Canonical active course/category predicates for public catalog consumers."""
+    active_category_exists = (
+        exists()
+        .where(
+            CourseCategoryConfig.key == Course.category,
+            CourseCategoryConfig.is_active.is_(True),
+            CourseCategoryConfig.deleted_at.is_(None),
+        )
+        .correlate(Course)
+    )
+    return [
+        Course.deleted_at.is_(None),
+        active_category_exists,
+    ]
 
 
 def public_archive_conditions(

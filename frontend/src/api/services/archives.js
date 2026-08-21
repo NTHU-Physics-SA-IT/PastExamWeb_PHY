@@ -48,6 +48,13 @@ export const archiveService = {
     return api.get(`/courses/${courseId}/archives/${archiveId}/download`)
   },
 
+  downloadArchiveBackup() {
+    return api.get('/backups/admin/archive', {
+      responseType: 'blob',
+      timeout: 0,
+    })
+  },
+
   deleteArchive(courseId, archiveId) {
     return api.delete(`/courses/${courseId}/archives/${archiveId}`)
   },
