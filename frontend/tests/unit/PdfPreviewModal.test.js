@@ -69,7 +69,6 @@ describe('PdfPreviewModal', () => {
           Dialog: stubComponent,
           ProgressSpinner: stubComponent,
           Button: stubComponent,
-          VuePdfEmbed: stubComponent,
         },
       },
     })
