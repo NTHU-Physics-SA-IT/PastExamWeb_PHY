@@ -28,7 +28,9 @@
           <path d="M220 680 C390 498 526 408 704 392 C872 376 1010 270 1130 78" />
           <path d="M445 52 C584 202 642 332 622 456 C604 576 668 670 806 730" />
         </g>
-        <circle class="mass-core" cx="760" cy="380" r="92" />
+        <g ref="massCoreEntry" class="mass-core-entry">
+          <circle ref="massCore" class="mass-core" cx="760" cy="380" r="92" />
+        </g>
       </svg>
 
       <div ref="formulaCloud" class="formula-cloud">
@@ -45,56 +47,67 @@
       </div>
     </div>
 
-    <section class="hero-shell">
-      <div class="hero-copy">
-        <p class="eyebrow">PHY ARCHIVE</p>
-        <div class="hero-title-lockup">
-          <h1><span class="title-line">清大物理</span><span class="title-line">考古系統</span></h1>
-          <p class="title-campus"><span></span>NTHU PHYSICS<span></span></p>
+    <div class="hero-layout">
+      <section class="hero-shell">
+        <div class="hero-copy">
+          <p class="eyebrow">PHYS ARCHIVE</p>
+          <div class="hero-title-lockup">
+            <h1>
+              <span ref="titleLineLeading" class="title-line title-line-leading">清大物理</span
+              ><span ref="titleLineTrailing" class="title-line title-line-trailing">考古系統</span>
+            </h1>
+            <p class="title-campus"><span></span>NTHU PHYSICS<span></span></p>
+          </div>
+          <p class="subtitle">書卷沒有，考古這有</p>
+          <div class="hero-actions">
+            <Button
+              icon="pi pi-building-columns"
+              :label="$t('清華校務系統登入')"
+              size="large"
+              @click="startNthuLogin"
+            />
+            <Button
+              icon="pi pi-sign-in"
+              :label="$t('本地帳號登入')"
+              size="large"
+              @click="openLogin"
+            />
+            <span class="hero-action-divider" aria-hidden="true"></span>
+            <Teleport defer to="#desktop-catalog-action" :disabled="!isDesktopHeroLayout">
+              <Button
+                class="catalog-action"
+                icon="pi pi-book"
+                :label="catalogActionLabel"
+                :pt="{ label: { 'data-catalog-label': catalogActionLabel } }"
+                size="large"
+                severity="secondary"
+                outlined
+                @click="openCatalog"
+              />
+            </Teleport>
+          </div>
         </div>
-        <p class="subtitle">書卷沒有，考古這有</p>
-        <div class="hero-actions">
-          <Button
-            icon="pi pi-building-columns"
-            :label="$t('清華校務系統登入')"
-            size="large"
-            @click="startNthuLogin"
-          />
-          <Button
-            icon="pi pi-sign-in"
-            :label="$t('本地帳號登入')"
-            size="large"
-            @click="openLogin"
-          />
-          <Button
-            icon="pi pi-book"
-            :label="$t('瀏覽公開課程目錄')"
-            size="large"
-            severity="secondary"
-            outlined
-            @click="openCatalog"
-          />
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <section class="dashboard-strip">
-      <article
-        v-for="(stat, index) in statistics"
-        :key="stat.key"
-        class="stat-card"
-        :class="{ 'animate-fade-in': statsLoaded }"
-        :style="{ animationDelay: `${index * 0.08}s` }"
-      >
-        <div class="stat-icon">
-          <i :class="stat.icon"></i>
-        </div>
-        <div>
-          <p>{{ stat.label }}</p>
-          <strong>{{ animatedValues[stat.key] }}</strong>
-        </div>
-      </article>
-    </section>
+      <section class="dashboard-strip">
+        <article
+          v-for="(stat, index) in statistics"
+          :key="stat.key"
+          class="stat-card"
+          :class="{ 'animate-fade-in': statsLoaded }"
+          :style="{ animationDelay: `${index * 0.08}s` }"
+        >
+          <div class="stat-icon">
+            <i :class="stat.icon"></i>
+          </div>
+          <div>
+            <p>{{ stat.label }}</p>
+            <strong>{{ animatedValues[stat.key] }}</strong>
+          </div>
+        </article>
+        <div id="desktop-catalog-action" class="desktop-catalog-target"></div>
+      </section>
+    </div>
   </main>
 </template>
 
@@ -103,7 +116,7 @@ defineOptions({
   name: 'HomeView',
 })
 
-import { ref, onBeforeUnmount, onMounted, computed } from 'vue'
+import { ref, onBeforeUnmount, onMounted, computed, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useTheme } from '../utils/useTheme'
@@ -117,6 +130,14 @@ const { isDarkTheme } = useTheme()
 const { t, locale } = useI18n()
 const router = useRouter()
 const formulaCloud = ref(null)
+const titleLineLeading = ref(null)
+const titleLineTrailing = ref(null)
+const massCoreEntry = ref(null)
+const massCore = ref(null)
+const isDesktopHeroLayout = ref(false)
+let desktopLayoutMediaQuery = null
+let massCoreEntryAnimationHandler = null
+let homeMounted = false
 
 useFormulaPhysics(formulaCloud)
 
@@ -149,6 +170,8 @@ const STATISTIC_KEYS = Object.freeze([
   'activeToday',
 ])
 let counterAnimationFrameId = 0
+
+const catalogActionLabel = computed(() => t('瀏覽公開課程目錄'))
 
 const statistics = computed(() => [
   {
@@ -294,9 +317,116 @@ const renderedFormulaCards = computed(() =>
 )
 
 onMounted(async () => {
+  homeMounted = true
+  desktopLayoutMediaQuery = window.matchMedia('(min-width: 1181px)')
+  syncDesktopHeroLayout(desktopLayoutMediaQuery)
+  desktopLayoutMediaQuery.addEventListener('change', syncDesktopHeroLayout)
+  initializeMassCoreEntry(desktopLayoutMediaQuery)
   applyHomeSeo()
   await fetchStatistics()
 })
+
+function syncDesktopHeroLayout(event) {
+  isDesktopHeroLayout.value = event.matches
+  if (!event.matches) completeMassCoreEntry()
+}
+
+async function initializeMassCoreEntry(desktopMediaQuery) {
+  const entry = massCoreEntry.value
+  if (!entry) return
+
+  if (!desktopMediaQuery.matches || prefersReducedMotion()) {
+    completeMassCoreEntry()
+    return
+  }
+
+  try {
+    if (document.fonts?.ready) await document.fonts.ready
+    await nextTick()
+
+    if (!homeMounted || massCoreEntry.value !== entry || !desktopMediaQuery.matches) {
+      completeMassCoreEntry()
+      return
+    }
+
+    const offset = getMassCoreEntryOffset()
+    if (!offset) {
+      completeMassCoreEntry()
+      return
+    }
+
+    entry.style.setProperty('--mass-core-entry-x', `${offset.x}px`)
+    entry.style.setProperty('--mass-core-entry-y', `${offset.y}px`)
+    massCoreEntryAnimationHandler = (event) => {
+      if (event.target === entry) completeMassCoreEntry()
+    }
+    entry.addEventListener('animationend', massCoreEntryAnimationHandler)
+    entry.addEventListener('animationcancel', massCoreEntryAnimationHandler)
+    entry.classList.add('mass-core-entry-ready', 'mass-core-entry-animate')
+  } catch {
+    completeMassCoreEntry()
+  }
+}
+
+function getMassCoreEntryOffset() {
+  const leadingTitleLine = titleLineLeading.value
+  const trailingTitleLine = titleLineTrailing.value
+  const entry = massCoreEntry.value
+  const circle = massCore.value
+  if (
+    !leadingTitleLine ||
+    !trailingTitleLine ||
+    !entry ||
+    !circle ||
+    typeof entry.getScreenCTM !== 'function'
+  ) {
+    return null
+  }
+
+  const leadingRect = leadingTitleLine.getBoundingClientRect()
+  const trailingRect = trailingTitleLine.getBoundingClientRect()
+  const screenMatrix = entry.getScreenCTM()
+  if (!screenMatrix) return null
+
+  const titleJunctionX = (leadingRect.right + trailingRect.left) / 2
+  const titleJunctionY =
+    (leadingRect.top + leadingRect.bottom + trailingRect.top + trailingRect.bottom) / 4
+  const circleCenterX = Number(circle.getAttribute('cx'))
+  const circleCenterY = Number(circle.getAttribute('cy'))
+  const circleCenterOnScreen = {
+    x: screenMatrix.a * circleCenterX + screenMatrix.c * circleCenterY + screenMatrix.e,
+    y: screenMatrix.b * circleCenterX + screenMatrix.d * circleCenterY + screenMatrix.f,
+  }
+  const screenDelta = {
+    x: titleJunctionX - circleCenterOnScreen.x,
+    y: titleJunctionY - circleCenterOnScreen.y,
+  }
+  const determinant = screenMatrix.a * screenMatrix.d - screenMatrix.b * screenMatrix.c
+  if (!Number.isFinite(determinant) || Math.abs(determinant) < Number.EPSILON) return null
+
+  const offset = {
+    x: (screenMatrix.d * screenDelta.x - screenMatrix.c * screenDelta.y) / determinant,
+    y: (-screenMatrix.b * screenDelta.x + screenMatrix.a * screenDelta.y) / determinant,
+  }
+
+  return Number.isFinite(offset.x) && Number.isFinite(offset.y) ? offset : null
+}
+
+function completeMassCoreEntry() {
+  const entry = massCoreEntry.value
+  if (!entry) return
+
+  if (massCoreEntryAnimationHandler) {
+    entry.removeEventListener('animationend', massCoreEntryAnimationHandler)
+    entry.removeEventListener('animationcancel', massCoreEntryAnimationHandler)
+    massCoreEntryAnimationHandler = null
+  }
+
+  entry.classList.remove('mass-core-entry-animate')
+  entry.classList.add('mass-core-entry-ready')
+  entry.style.removeProperty('--mass-core-entry-x')
+  entry.style.removeProperty('--mass-core-entry-y')
+}
 
 function openLogin() {
   window.__pastexam?.openLoginModal?.()
@@ -412,7 +542,8 @@ function updateAnimatedValues(progress) {
     nextValues[key] = formatNumber(displayValue)
   })
 
-  animatedValues.value = nextValues
+  const valuesChanged = STATISTIC_KEYS.some((key) => animatedValues.value[key] !== nextValues[key])
+  if (valuesChanged) animatedValues.value = nextValues
 }
 
 function prefersReducedMotion() {
@@ -436,7 +567,12 @@ function formatNumber(num) {
   return Number(num).toLocaleString(locale.value)
 }
 
-onBeforeUnmount(cancelCounterAnimation)
+onBeforeUnmount(() => {
+  homeMounted = false
+  cancelCounterAnimation()
+  completeMassCoreEntry()
+  desktopLayoutMediaQuery?.removeEventListener('change', syncDesktopHeroLayout)
+})
 </script>
 
 <style scoped>
@@ -461,6 +597,10 @@ onBeforeUnmount(cancelCounterAnimation)
     radial-gradient(circle at 74% 38%, rgba(188, 205, 178, 0.42), transparent 30rem),
     radial-gradient(circle at 20% 14%, rgba(112, 158, 133, 0.2), transparent 24rem),
     linear-gradient(135deg, #f7f3e8 0%, #edf4ec 48%, #dfeade 100%);
+}
+
+.hero-layout {
+  display: contents;
 }
 
 .hero-shell {
@@ -571,32 +711,37 @@ h1 {
   color: rgba(33, 58, 50, 0.78);
 }
 
-.hero-actions :deep(.p-button.p-button-secondary.p-button-outlined) {
-  color: rgba(232, 240, 226, 0.86);
-  border-color: rgba(214, 230, 223, 0.62);
-  background: rgba(10, 20, 18, 0.18);
+:deep(.catalog-action) {
+  --catalog-action-color: rgba(232, 240, 226, 0.86);
+  --catalog-action-highlight-color: #f5fbf6;
+  color: var(--catalog-action-color);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.physics-home:not(.physics-home-dark) :deep(.catalog-action) {
+  --catalog-action-color: #1c4c42;
+  --catalog-action-highlight-color: #0f6a57;
+  color: var(--catalog-action-color);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+:deep(.catalog-action.p-button.p-button-secondary.p-button-outlined:not(:disabled):hover) {
+  color: var(--catalog-action-color);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 
 .physics-home:not(.physics-home-dark)
-  .hero-actions
-  :deep(.p-button.p-button-secondary.p-button-outlined) {
-  color: #1c4c42;
-  border-color: rgba(58, 111, 93, 0.36);
-  background: rgba(249, 247, 238, 0.52);
-}
-
-.hero-actions :deep(.p-button.p-button-secondary.p-button-outlined:hover) {
-  color: #f5fbf6;
-  border-color: rgba(238, 246, 239, 0.82);
-  background: rgba(214, 230, 223, 0.1);
-}
-
-.physics-home:not(.physics-home-dark)
-  .hero-actions
-  :deep(.p-button.p-button-secondary.p-button-outlined:hover) {
-  color: #123a31;
-  border-color: rgba(58, 111, 93, 0.5);
-  background: rgba(232, 240, 224, 0.75);
+  :deep(.catalog-action.p-button.p-button-secondary.p-button-outlined:not(:disabled):hover) {
+  color: var(--catalog-action-color);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 
 .hero-actions {
@@ -604,6 +749,103 @@ h1 {
   flex-wrap: wrap;
   gap: 0.75rem;
   margin-top: 2rem;
+}
+
+.hero-action-divider {
+  display: none;
+}
+
+/* Light sweep inspired by Uiverse.io by satyamchaudharydev. */
+.hero-actions :deep(.p-button) {
+  isolation: isolate;
+  overflow: hidden;
+  position: relative;
+}
+
+.hero-actions :deep(.p-button)::before {
+  position: absolute;
+  z-index: 2;
+  top: -35%;
+  left: -42%;
+  width: 30%;
+  height: 170%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.12) 28%,
+    rgba(255, 255, 255, 0.42) 50%,
+    rgba(255, 255, 255, 0.12) 72%,
+    transparent 100%
+  );
+  content: '';
+  pointer-events: none;
+  transform: translateX(0) skewX(-18deg);
+  transition: none;
+  will-change: transform;
+}
+
+.hero-actions :deep(.p-button:not(:disabled):hover)::before {
+  transform: translateX(510%) skewX(-18deg);
+  transition: transform 1s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+:deep(.catalog-action)::before {
+  display: none;
+}
+
+:deep(.catalog-action) {
+  transition: none;
+}
+
+.hero-actions :deep(.p-button .p-button-icon),
+.hero-actions :deep(.p-button .p-button-label) {
+  position: relative;
+  z-index: 1;
+}
+
+:deep(.catalog-action .p-button-label) {
+  position: relative;
+  color: var(--catalog-action-color);
+  white-space: nowrap;
+  transition: none;
+}
+
+/* Adapted from Uiverse.io by satyamchaudharydev: the reveal is label-width only. */
+:deep(.catalog-action .p-button-label)::before {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  color: var(--catalog-action-highlight-color);
+  overflow: hidden;
+  white-space: nowrap;
+  content: attr(data-catalog-label);
+  pointer-events: none;
+  transition: width 300ms ease-out;
+}
+
+:deep(.catalog-action .p-button-label)::after {
+  position: absolute;
+  left: 0;
+  bottom: -0.35rem;
+  width: 0;
+  height: 2px;
+  background: var(--catalog-action-highlight-color);
+  content: '';
+  pointer-events: none;
+  transition: width 300ms ease-out;
+}
+
+:deep(.catalog-action:not(:disabled):hover .p-button-label)::before,
+:deep(.catalog-action:focus-visible .p-button-label)::before,
+:deep(.catalog-action:not(:disabled):hover .p-button-label)::after,
+:deep(.catalog-action:focus-visible .p-button-label)::after {
+  width: 100%;
+}
+
+:deep(.catalog-action .p-button-icon) {
+  color: var(--catalog-action-color);
+  transition: none;
 }
 
 .physics-board {
@@ -753,6 +995,25 @@ h1 {
 
 .physics-home:not(.physics-home-dark) .geodesics path {
   stroke: rgba(174, 139, 54, 0.5);
+}
+
+.mass-core-entry {
+  transform: translate(0, 0);
+}
+
+@media (min-width: 1181px) {
+  .mass-core-entry {
+    opacity: 0;
+  }
+
+  .mass-core-entry.mass-core-entry-ready {
+    opacity: 1;
+  }
+
+  .mass-core-entry.mass-core-entry-animate {
+    animation: massCoreEntryDrift 5s cubic-bezier(0.22, 0.72, 0.24, 1) forwards;
+    will-change: transform;
+  }
 }
 
 .mass-core {
@@ -1204,15 +1465,72 @@ h1 {
 }
 
 @media (min-width: 1181px) {
-  .hero-shell {
+  .hero-layout {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(17.5rem, 18.25rem);
+    align-items: center;
+    column-gap: clamp(3rem, 7vw, 8rem);
     width: min(1280px, calc(100% - clamp(3rem, 8vw, 10rem)));
+    min-height: calc(100vh - var(--navbar-height));
+    margin: 0 auto;
+    padding: clamp(2rem, 7vh, 5rem) 0;
+  }
+
+  .hero-shell {
+    align-items: center;
+    width: auto;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+  }
+
+  .hero-actions :deep(.p-button:nth-child(2)),
+  .hero-actions :deep(.p-button:nth-child(2):hover) {
+    color: rgba(232, 240, 226, 0.86);
+    border-color: rgba(214, 230, 223, 0.62);
+    border-width: 1px;
+    border-style: solid;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .physics-home:not(.physics-home-dark) .hero-actions :deep(.p-button:nth-child(2)),
+  .physics-home:not(.physics-home-dark) .hero-actions :deep(.p-button:nth-child(2):hover) {
+    color: #1c4c42;
+    border-color: rgba(58, 111, 93, 0.42);
+    background: transparent;
   }
 
   .dashboard-strip {
-    width: min(18.25rem, calc(100% - 2rem));
-    top: 50%;
-    right: max(clamp(2rem, 7vw, 7rem), calc((100% - 1280px) / 2));
-    transform: translateY(-45%);
+    position: relative;
+    top: auto;
+    right: auto;
+    width: 100%;
+    transform: none;
+    justify-self: end;
+  }
+
+  .desktop-catalog-target {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-self: start;
+    width: 100%;
+  }
+
+  .desktop-catalog-target::before {
+    display: block;
+    width: 100%;
+    height: 1px;
+    margin-bottom: 0.55rem;
+    background: rgba(214, 230, 223, 0.3);
+    content: '';
+  }
+
+  .physics-home:not(.physics-home-dark) .desktop-catalog-target::before {
+    background: rgba(58, 111, 93, 0.24);
   }
 }
 
@@ -1431,9 +1749,9 @@ h1 {
   background:
     linear-gradient(90deg, rgba(202, 179, 111, 0.08), transparent 44%), rgba(7, 18, 17, 0.62);
   box-shadow: none;
-  backdrop-filter: blur(16px);
+  contain: layout style;
   opacity: 0;
-  transform: translateY(12px);
+  transform: translate3d(0, 12px, 0);
 }
 
 .physics-home:not(.physics-home-dark) .stat-card {
@@ -1494,7 +1812,7 @@ h1 {
 @keyframes fadeInUp {
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0);
   }
 }
 
@@ -1525,6 +1843,16 @@ h1 {
 
   to {
     stroke-dashoffset: -720;
+  }
+}
+
+@keyframes massCoreEntryDrift {
+  from {
+    transform: translate(var(--mass-core-entry-x, 0px), var(--mass-core-entry-y, 0px));
+  }
+
+  to {
+    transform: translate(0, 0);
   }
 }
 
@@ -1638,6 +1966,25 @@ h1 {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .mass-core-entry,
+  .mass-core-entry.mass-core-entry-ready {
+    opacity: 1;
+    transform: translate(0, 0);
+  }
+
+  .mass-core-entry.mass-core-entry-animate {
+    animation: none;
+  }
+
+  .hero-actions :deep(.p-button)::before {
+    display: none;
+  }
+
+  :deep(.catalog-action .p-button-label)::before,
+  :deep(.catalog-action .p-button-label)::after {
+    transition: none;
+  }
+
   .formula-cloud {
     animation-duration: 18s !important;
   }
@@ -1681,15 +2028,85 @@ h1 {
   }
 
   .hero-actions {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: center;
     width: min(100%, 24rem);
     justify-content: center;
     margin-left: auto;
     margin-right: auto;
-    gap: 0.8rem;
+    gap: 0;
   }
 
   .hero-actions :deep(.p-button) {
+    justify-content: center;
     width: 100%;
+    max-width: 100%;
+    min-height: 3.15rem;
+  }
+
+  .hero-actions :deep(.p-button:nth-child(2)) {
+    margin-top: 1rem;
+  }
+
+  .hero-actions :deep(.p-button:nth-child(2)),
+  .hero-actions :deep(.p-button.p-button-secondary.p-button-outlined:last-child),
+  .hero-actions :deep(.p-button:nth-child(2):hover),
+  .hero-actions :deep(.p-button.p-button-secondary.p-button-outlined:last-child:hover) {
+    color: rgba(232, 240, 226, 0.86);
+    border-color: rgba(214, 230, 223, 0.62);
+    border-width: 1px;
+    border-style: solid;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .physics-home:not(.physics-home-dark) .hero-actions :deep(.p-button:nth-child(2)),
+  .physics-home:not(.physics-home-dark)
+    .hero-actions
+    :deep(.p-button.p-button-secondary.p-button-outlined:last-child),
+  .physics-home:not(.physics-home-dark) .hero-actions :deep(.p-button:nth-child(2):hover),
+  .physics-home:not(.physics-home-dark)
+    .hero-actions
+    :deep(.p-button.p-button-secondary.p-button-outlined:last-child:hover) {
+    color: #1c4c42;
+    border-color: rgba(58, 111, 93, 0.42);
+    background: transparent;
+  }
+
+  .hero-actions :deep(.p-button.p-button-secondary.p-button-outlined:last-child) {
+    border-color: transparent;
+  }
+
+  .hero-actions :deep(.p-button.p-button-secondary.p-button-outlined:last-child:hover) {
+    color: rgba(232, 240, 226, 0.86);
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .physics-home:not(.physics-home-dark)
+    .hero-actions
+    :deep(.p-button.p-button-secondary.p-button-outlined:last-child) {
+    border-color: transparent;
+  }
+
+  .physics-home:not(.physics-home-dark)
+    .hero-actions
+    :deep(.p-button.p-button-secondary.p-button-outlined:last-child:hover) {
+    color: #1c4c42;
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .hero-action-divider {
+    display: block;
+    width: 100%;
+    height: 1px;
+    margin: 1rem 0;
+    background: currentColor;
+    opacity: 0.18;
   }
 
   .dashboard-strip {
@@ -1782,14 +2199,14 @@ h1 {
   }
 
   .eyebrow {
-    margin-bottom: 0.9rem;
-    font-size: 0.78rem;
+    margin-bottom: 1.05rem;
+    font-size: 0.84rem;
   }
 
   h1 {
     max-width: min(100%, 7.2em);
-    font-size: clamp(1.7rem, 7.8vw, 2.15rem);
-    line-height: 1.1;
+    font-size: clamp(2rem, 8.8vw, 2.4rem);
+    line-height: 1.08;
     letter-spacing: 0.03em;
     margin-inline: auto;
   }
@@ -1807,36 +2224,37 @@ h1 {
   }
 
   .title-campus {
-    width: min(100%, 18rem);
+    width: min(100%, 20rem);
     gap: 0.55rem;
-    font-size: 0.666rem;
+    font-size: 0.74rem;
     letter-spacing: 0.34em;
     text-indent: 0.34em;
     margin-inline: auto;
-    margin-top: 0.25rem;
+    margin-top: 0.45rem;
   }
 
   .subtitle {
-    margin-top: 1.45rem;
-    margin-inline: auto;
-    width: 100%;
-    text-align: center;
-    font-size: 0.95rem;
-    line-height: 1.6;
+    display: none;
   }
 
   .hero-actions {
-    gap: 0.85rem;
-    margin-top: 1.8rem;
-    width: min(100%, 23rem);
+    margin-top: clamp(4.75rem, 10vh, 5.75rem);
+    width: min(80vw, 23rem);
     margin-inline: auto;
   }
 
   .hero-actions :deep(.p-button) {
-    width: 100%;
     justify-content: center;
-    min-height: 2.85rem;
-    font-size: 0.95rem;
+    min-height: 3.15rem;
+    font-size: 1.05rem;
+  }
+
+  .hero-actions :deep(.p-button:nth-child(2)) {
+    margin-top: 1.35rem;
+  }
+
+  .hero-action-divider {
+    margin: 1.15rem 0;
   }
 
   .physics-board {

@@ -318,6 +318,7 @@ watch(locale, () => {
 .course-header h1 {
   margin: 0.35rem 0 1rem;
   font-size: clamp(1.7rem, 3vw, 2.25rem);
+  font-weight: 700;
 }
 
 .course-header > p,

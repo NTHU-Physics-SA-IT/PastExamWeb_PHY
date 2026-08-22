@@ -99,13 +99,17 @@ class CommandExecutor:
 
 
 def dev_compose_command(
-    action: str, *, expected_ledger: str | None = None
+    action: str,
+    *,
+    canonical_authority_root: Path = REPOSITORY_ROOT,
+    expected_ledger: str | None = None,
 ) -> tuple[str, ...]:
+    dev_compose = canonical_authority_root / "scripts" / "dev-compose.sh"
     arguments = (action,)
     if expected_ledger is not None:
         arguments += ("--expected-ledger", expected_ledger)
     if os.name != "nt":
-        return (str(DEV_COMPOSE), *arguments)
+        return (str(dev_compose), *arguments)
 
     git_bash = (
         Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
@@ -115,7 +119,7 @@ def dev_compose_command(
     )
     if not git_bash.is_file():
         raise RunnerFailure("Git Bash is required on Windows", 20)
-    return (str(git_bash), str(DEV_COMPOSE), *arguments)
+    return (str(git_bash), str(dev_compose), *arguments)
 
 
 @dataclass(frozen=True)
@@ -161,6 +165,7 @@ class Evidence:
     migration_status: str = "not_started"
     migration_head: str | None = None
     canonical_expected_ledger: str | None = None
+    canonical_authority_root: str | None = None
     ephemeral_target_head: str = EPHEMERAL_TARGET_HEAD
     pytest_arguments: list[str] = field(default_factory=list)
     pytest_exit_status: int | None = None
@@ -186,6 +191,13 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--postgres-container-id", required=True)
     parser.add_argument("--backend-container-id", required=True)
+    parser.add_argument(
+        "--canonical-authority-root",
+        help=(
+            "Absolute registered main worktree that owns the canonical "
+            "pastexam-dev Compose project. Defaults to the subject checkout."
+        ),
+    )
     parser.add_argument(
         "--canonical-expected-ledger",
         default=EPHEMERAL_TARGET_HEAD,
@@ -235,6 +247,109 @@ def require(result: CommandResult, message: str, exit_code: int) -> str:
     if result.returncode != 0:
         raise RunnerFailure(message, exit_code)
     return result.stdout.strip()
+
+
+def _git_output(
+    executor: CommandExecutor,
+    arguments: Sequence[str],
+    *,
+    cwd: Path,
+    message: str,
+) -> str:
+    return require(
+        executor.run(("git", *arguments), cwd=cwd, timeout=15),
+        message,
+        20,
+    )
+
+
+def validate_canonical_authority_root(
+    executor: CommandExecutor,
+    value: str | None,
+) -> Path:
+    """Resolve one clean registered main worktree from the subject repository."""
+
+    if value is None:
+        return REPOSITORY_ROOT
+
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        raise RunnerFailure("canonical authority root must be absolute", 20)
+    try:
+        resolved = candidate.resolve(strict=True)
+    except OSError as exc:
+        raise RunnerFailure("canonical authority root does not exist", 20) from exc
+    if candidate != resolved or not resolved.is_dir():
+        raise RunnerFailure("canonical authority root path is ambiguous", 20)
+
+    dev_compose = resolved / "scripts" / "dev-compose.sh"
+    if not dev_compose.is_file() or not os.access(dev_compose, os.X_OK):
+        raise RunnerFailure("canonical authority dev-compose.sh is unavailable", 20)
+
+    subject_common = Path(
+        _git_output(
+            executor,
+            ("rev-parse", "--path-format=absolute", "--git-common-dir"),
+            cwd=REPOSITORY_ROOT,
+            message="subject repository identity is unavailable",
+        )
+    ).resolve()
+    authority_common = Path(
+        _git_output(
+            executor,
+            ("rev-parse", "--path-format=absolute", "--git-common-dir"),
+            cwd=resolved,
+            message="canonical authority is not a Git worktree",
+        )
+    ).resolve()
+    if authority_common != subject_common:
+        raise RunnerFailure("canonical authority belongs to another repository", 20)
+
+    worktree_output = _git_output(
+        executor,
+        ("worktree", "list", "--porcelain"),
+        cwd=REPOSITORY_ROOT,
+        message="registered worktree inventory is unavailable",
+    )
+    registered = {
+        Path(line.removeprefix("worktree ")).resolve()
+        for line in worktree_output.splitlines()
+        if line.startswith("worktree ")
+    }
+    if resolved not in registered:
+        raise RunnerFailure("canonical authority is not a registered worktree", 20)
+
+    status = executor.run(
+        ("git", "status", "--porcelain=v1", "--untracked-files=all"),
+        cwd=resolved,
+        timeout=15,
+    )
+    if status.returncode != 0 or status.stdout.strip():
+        raise RunnerFailure("canonical authority worktree must be clean", 20)
+
+    branch = _git_output(
+        executor,
+        ("symbolic-ref", "-q", "HEAD"),
+        cwd=resolved,
+        message="canonical authority must be on main",
+    )
+    if branch != "refs/heads/main":
+        raise RunnerFailure("canonical authority must be the registered main worktree", 20)
+    authority_head = _git_output(
+        executor,
+        ("rev-parse", "HEAD"),
+        cwd=resolved,
+        message="canonical authority HEAD is unavailable",
+    )
+    main_head = _git_output(
+        executor,
+        ("rev-parse", "refs/heads/main"),
+        cwd=REPOSITORY_ROOT,
+        message="subject main authority is unavailable",
+    )
+    if authority_head != main_head:
+        raise RunnerFailure("canonical authority main HEAD is inconsistent", 20)
+    return resolved
 
 
 def container_state(executor: CommandExecutor, container_id: str) -> dict[str, Any]:
@@ -299,6 +414,7 @@ def canonical_snapshot(
     postgres_id: str,
     backend_id: str,
     canonical_expected_ledger: str,
+    canonical_authority_root: Path = REPOSITORY_ROOT,
 ) -> CanonicalSnapshot:
     postgres = container_state(executor, postgres_id)
     backend = container_state(executor, backend_id)
@@ -313,7 +429,9 @@ def canonical_snapshot(
         require(
             executor.run(
                 dev_compose_command(
-                    "schema-status", expected_ledger=canonical_expected_ledger
+                    "schema-status",
+                    canonical_authority_root=canonical_authority_root,
+                    expected_ledger=canonical_expected_ledger,
                 ),
                 timeout=60,
             ),
@@ -621,6 +739,7 @@ class IsolatedPostgresRunner:
         self.container_name: str | None = None
         self.temp_dir: Path | None = None
         self.pre_snapshot: CanonicalSnapshot | None = None
+        self.canonical_authority_root = REPOSITORY_ROOT
         self.secrets_to_mask: list[str] = []
 
     def install_signal_handlers(self) -> dict[int, Any]:
@@ -679,6 +798,7 @@ class IsolatedPostgresRunner:
                     self.args.postgres_container_id,
                     self.args.backend_container_id,
                     self.args.canonical_expected_ledger,
+                    self.canonical_authority_root,
                 )
                 self.evidence.canonical_post = public_snapshot(post)
                 matches = post == self.pre_snapshot
@@ -696,6 +816,13 @@ class IsolatedPostgresRunner:
         try:
             self.evidence.lifecycle_stage = "preflight"
             git_clean(self.executor)
+            self.canonical_authority_root = validate_canonical_authority_root(
+                self.executor,
+                self.args.canonical_authority_root,
+            )
+            self.evidence.canonical_authority_root = str(
+                self.canonical_authority_root
+            )
             self.args.canonical_expected_ledger = validate_canonical_expected_ledger(
                 self.args.canonical_expected_ledger
             )
@@ -707,6 +834,7 @@ class IsolatedPostgresRunner:
                 self.args.postgres_container_id,
                 self.args.backend_container_id,
                 self.args.canonical_expected_ledger,
+                self.canonical_authority_root,
             )
             self.evidence.canonical_pre = public_snapshot(self.pre_snapshot)
             self.evidence.sealed_baseline_digest = self.pre_snapshot.baseline_digest

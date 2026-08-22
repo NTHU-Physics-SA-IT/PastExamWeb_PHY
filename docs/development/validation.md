@@ -79,6 +79,16 @@ prove canonical identity, restart counts, and the sealed baseline before and
 after the run. Do not substitute Compose, a permanent test service, or a
 canonical database.
 
+When the subject source is a clean external Git worktree, pass
+`--canonical-authority-root` with the absolute path of the clean registered
+`main` worktree that owns `pastexam-dev`. The runner continues to derive its
+migration graph, Python environment path, migrations, and pytest targets from
+the subject checkout. Only canonical pre/post `schema-status` uses the
+authority checkout's unchanged `scripts/dev-compose.sh`, so its Compose
+working-directory guard and ignored environment remain authoritative. An
+unrelated repository, copied or unregistered checkout, non-`main` worktree,
+dirty authority checkout, ambiguous path, or missing wrapper fails closed.
+
 On a schema-changing branch, the canonical persistent ledger may remain at a
 reviewed ancestor while the ephemeral database migrates to the repository
 head. Pass that baseline explicitly with

@@ -66,6 +66,7 @@ repository root:
 python3 scripts/run-isolated-backend-tests.py \
   --postgres-container-id <exact-canonical-postgres-id> \
   --backend-container-id <exact-canonical-backend-id> \
+  --canonical-authority-root <absolute-clean-registered-main-worktree> \
   -- backend/tests/api/test_archives.py -q
 ```
 
@@ -74,6 +75,9 @@ port exposure and tmpfs data, applies current migrations, passes the supplied
 arguments directly to `python -m pytest`, and removes only its exact generated
 resource. It refuses to run unless the canonical container identities and
 sealed baseline are Green. It does not use Compose or a persistent volume.
+Omit `--canonical-authority-root` for same-checkout execution. External
+subject worktrees use it only to select the canonical checkout's guarded
+pre/post `schema-status`; source, migration, and pytest execution stay local.
 
 Use the [validation policy](../docs/development/validation.md) for targeted
 commands, database isolation requirements, retry limits, and CI completion.

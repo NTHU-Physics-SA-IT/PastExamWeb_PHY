@@ -67,6 +67,14 @@ runner requires exact canonical container IDs, creates one uniquely named
 direct-`docker run` PostgreSQL 15 container with loopback-only port and tmpfs
 data, and removes only that generated resource.
 
+For a clean external subject worktree, the runner accepts an explicit
+`--canonical-authority-root` that must resolve to the same repository's clean,
+registered `main` worktree. Subject migrations and tests remain subject-owned;
+canonical pre/post inspection calls only the authority checkout's existing
+`scripts/dev-compose.sh`. This preserves the canonical Compose ownership guard
+without copying ignored environment files or treating a sibling checkout as
+the owner of `pastexam-dev`.
+
 ## Environment responsibility matrix
 
 | Environment | Identity guards | Allowed purpose and operations | Forbidden use | Credentials and cleanup | Startup/shutdown owner and evidence |
