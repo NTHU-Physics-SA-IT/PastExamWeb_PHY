@@ -432,13 +432,22 @@ closed through the generic internal-error boundary and does not borrow the
 Archive or Course lifecycle conflict contracts.
 
 This lock adoption does not change the pending-to-final matrix, finalized
-conflict, invalid action combination, result notification, soft-delete
-metadata, or pending-report restore uniqueness gap. An upheld source-less
-legacy report with takedown requested now applies the established Archive
-soft-trash transition to the exact locked active Archive, without creating a
-Submission or deleting its stored object. The Archive transition, Report
-decision, and result notification commit atomically; a finalized retry remains
-a conflict.
+conflict, invalid action combination, result notification, or soft-delete
+metadata. ArchiveReport create, soft trash, and restore additionally serialize
+the exact non-null reporter/Archive uniqueness scope with one transaction
+advisory mutex before row locking or mutation. Active pending uniqueness
+excludes soft-deleted rows. Restore rejects with
+`409 archive_report_restore_pending_conflict` when another active pending
+ArchiveReport occupies that scope; both the older trashed row and the newer
+active row remain unchanged. Only the named PostgreSQL partial-index violation
+maps to the duplicate-report conflict; unrelated integrity errors retain their
+original error path.
+
+An upheld source-less legacy report with takedown requested applies the
+established Archive soft-trash transition to the exact locked active Archive,
+without creating a Submission or deleting its stored object. The Archive
+transition, Report decision, and result notification commit atomically; a
+finalized retry remains a conflict.
 
 ## NTHU login authorization
 
@@ -696,11 +705,18 @@ fail-closed behavior, reversible backfill, and anomaly rejection.
 
 ### Current implementation and gap
 
-`CommentReport` and `ArchiveReport` use partial unique PostgreSQL indexes whose
-predicate is only `status = 'pending'`. The predicate does not exclude
-`deleted_at`, even though endpoint queries filter soft-deleted rows. This can
-block a new report after trash and does not provide the required restore
-conflict semantics.
+`ArchiveReport` uses the named partial unique index
+`uq_archive_reports_pending_reporter_archive` over
+`(reporter_user_id, archive_id)` with predicate
+`status = 'pending' AND deleted_at IS NULL`. Create, trash, and restore share
+the same reporter/Archive transaction mutex, and PostgreSQL remains the final
+arbiter. A trashed pending row therefore remains historical data without
+blocking a new active pending row. Restoring it while a newer active row exists
+is rejected with a stable `409`; neither row is rewritten, merged, deleted, or
+implicitly superseded.
+
+`CommentReport` still uses its older `status = 'pending'` predicate and is
+outside this ArchiveReport corrective contract.
 
 ## ArchiveSubmission parent resolution on approval
 

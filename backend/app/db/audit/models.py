@@ -126,6 +126,26 @@ class OneToOneAggregateCounts(PreviousStatusAggregateCounts):
     submission_state_checksum: str = Field(pattern=r"^[0-9a-f]{32}$")
 
 
+class ArchiveReportUniquenessAggregateCounts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    total: int = Field(ge=0)
+    active_pending: int = Field(ge=0)
+    trashed_pending: int = Field(ge=0)
+    active_pending_duplicate_groups: int = Field(ge=0)
+    active_pending_duplicate_rows: int = Field(ge=0)
+    active_and_trashed_scopes: int = Field(ge=0)
+    candidate_restore_conflict_scopes: int = Field(ge=0)
+    detached_reporter_identity: int = Field(ge=0)
+    detached_archive_identity: int = Field(ge=0)
+    index_contract_mismatch: int = Field(ge=0)
+    unsupported: int = Field(ge=0)
+    unclassified: int = Field(ge=0)
+    overlap: int = Field(ge=0)
+    bucket_sum: int = Field(ge=0)
+    difference: int
+
+
 class FlagCombination(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -145,7 +165,11 @@ class AuditResult(BaseModel):
     error_code: str | None
     continuity: ContinuityResult | None
     aggregates: (
-        AggregateCounts | PreviousStatusAggregateCounts | OneToOneAggregateCounts | None
+        AggregateCounts
+        | PreviousStatusAggregateCounts
+        | OneToOneAggregateCounts
+        | ArchiveReportUniquenessAggregateCounts
+        | None
     )
     combinations: list[FlagCombination] = Field(default_factory=list, max_length=20)
     mutual_exclusivity: bool | None

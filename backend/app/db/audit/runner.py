@@ -25,6 +25,7 @@ from app.db.audit.models import (
 from app.db.audit.registry import (
     ABOUT_US_ORDERING_REVISION,
     ABOUT_US_REVISION,
+    ARCHIVE_REPORT_UNIQUENESS_REVISION,
     BILINGUAL_COURSE_CATALOG_REVISION,
     BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
     CATEGORY_STATE_PRESERVATION_REVISION,
@@ -135,6 +136,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         SIBLING_MERGE_REVISION,
         WISH_OPTIONAL_SEMESTER_REVISION,
         ABOUT_US_ORDERING_REVISION,
+        ARCHIVE_REPORT_UNIQUENESS_REVISION,
     }
     owner_delete_column_condition = (
         """
@@ -175,6 +177,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         SIBLING_MERGE_REVISION,
         WISH_OPTIONAL_SEMESTER_REVISION,
         ABOUT_US_ORDERING_REVISION,
+        ARCHIVE_REPORT_UNIQUENESS_REVISION,
     }
     previous_status_column_condition = (
         """
@@ -209,6 +212,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         SIBLING_MERGE_REVISION,
         WISH_OPTIONAL_SEMESTER_REVISION,
         ABOUT_US_ORDERING_REVISION,
+        ARCHIVE_REPORT_UNIQUENESS_REVISION,
     }
     bilingual_catalog_condition = (
         """
@@ -252,6 +256,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         SIBLING_MERGE_REVISION,
         WISH_OPTIONAL_SEMESTER_REVISION,
         ABOUT_US_ORDERING_REVISION,
+        ARCHIVE_REPORT_UNIQUENESS_REVISION,
     }
     bilingual_snapshot_condition = (
         """
@@ -290,6 +295,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         SIBLING_MERGE_REVISION,
         WISH_OPTIONAL_SEMESTER_REVISION,
         ABOUT_US_ORDERING_REVISION,
+        ARCHIVE_REPORT_UNIQUENESS_REVISION,
     }
     category_state_snapshot_condition = (
         """
@@ -319,6 +325,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         SIBLING_MERGE_REVISION,
         WISH_OPTIONAL_SEMESTER_REVISION,
         ABOUT_US_ORDERING_REVISION,
+        ARCHIVE_REPORT_UNIQUENESS_REVISION,
     }
     course_submission_lifecycle_condition = (
         """
@@ -359,11 +366,16 @@ def _continuity_cte(request: AuditRequest) -> str:
         SIBLING_MERGE_REVISION,
         WISH_OPTIONAL_SEMESTER_REVISION,
         ABOUT_US_ORDERING_REVISION,
+        ARCHIVE_REPORT_UNIQUENESS_REVISION,
     }
     wish_year_nullability = (
         "YES"
         if request.expected_ledger
-        in {WISH_OPTIONAL_SEMESTER_REVISION, ABOUT_US_ORDERING_REVISION}
+        in {
+            WISH_OPTIONAL_SEMESTER_REVISION,
+            ABOUT_US_ORDERING_REVISION,
+            ARCHIVE_REPORT_UNIQUENESS_REVISION,
+        }
         else "NO"
     )
     wish_pool_condition = (
@@ -416,7 +428,8 @@ def _continuity_cte(request: AuditRequest) -> str:
               AND is_nullable = 'NO'
         )
         """
-        if request.expected_ledger == ABOUT_US_ORDERING_REVISION
+        if request.expected_ledger
+        in {ABOUT_US_ORDERING_REVISION, ARCHIVE_REPORT_UNIQUENESS_REVISION}
         else """
         NOT EXISTS (
             SELECT 1

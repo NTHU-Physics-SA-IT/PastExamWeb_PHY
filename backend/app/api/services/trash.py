@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from minio.error import S3Error
 from pydantic import BaseModel
 from sqlalchemy import String, and_, cast, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
 from app.api.services.archive_submission_lifecycle import (
@@ -51,6 +52,11 @@ from app.services.archive_lifecycle_locks import (
 )
 from app.services.archive_report_lifecycle_locks import (
     acquire_stable_archive_report_locks,
+)
+from app.services.archive_report_uniqueness import (
+    acquire_archive_report_uniqueness_mutex_for_report,
+    archive_report_restore_pending_conflict_error,
+    is_archive_report_pending_unique_violation,
 )
 from app.services.archive_submission_links import (
     ensure_archive_submission_link_available,
@@ -2174,6 +2180,10 @@ async def restore_trash_item(
         return {"message": "留言回報已還原"}
 
     if payload.item_type == TrashEntityType.ARCHIVE_REPORT:
+        await acquire_archive_report_uniqueness_mutex_for_report(
+            db,
+            report_id=payload.item_id,
+        )
         locked = await acquire_stable_archive_report_locks(
             db,
             report_id=payload.item_id,
@@ -2185,9 +2195,32 @@ async def restore_trash_item(
                 detail="Archive report not found",
             )
         report = locked.report
+        if (
+            report.status == "pending"
+            and report.reporter_user_id is not None
+            and report.archive_id is not None
+        ):
+            conflict = await db.scalar(
+                select(ArchiveReport.id).where(
+                    ArchiveReport.id != report.id,
+                    ArchiveReport.reporter_user_id == report.reporter_user_id,
+                    ArchiveReport.archive_id == report.archive_id,
+                    ArchiveReport.status == "pending",
+                    ArchiveReport.deleted_at.is_(None),
+                )
+            )
+            if conflict is not None:
+                await db.rollback()
+                raise archive_report_restore_pending_conflict_error()
         report.deleted_at = None
         report.deleted_by_id = None
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError as error:
+            await db.rollback()
+            if is_archive_report_pending_unique_violation(error):
+                raise archive_report_restore_pending_conflict_error() from error
+            raise
         return {"message": "考古題回報已還原"}
 
     if payload.item_type == TrashEntityType.COURSE_CATEGORY:

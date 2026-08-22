@@ -231,8 +231,16 @@ object storage. That Archive mutation shares the Report and result-notification
 transaction.
 Soft trash and restore use the same ordering and remain notification-free. The
 route/session continues to own commit and rollback; the planner performs no
-mutation, notification insert, or commit. Revalidation failure therefore
-leaves Report, Archive or Submission, and notification state unchanged.
+mutation, notification insert, or commit.
+ArchiveReport create, soft trash, and restore first serialize the non-null
+reporter/Archive uniqueness scope with a transaction advisory mutex. A restore
+blocked by another active pending report rolls back and returns the stable
+conflict without changing either report or enqueuing a notification. A
+successful trash releases active uniqueness only with its commit; a successful
+restore or create occupies it in that same caller-owned transaction. The named
+partial unique index remains the integrity-race fallback.
+Revalidation failure therefore leaves Report, Archive or Submission, and
+notification state unchanged.
 
 ### Test evidence
 
@@ -391,8 +399,8 @@ integration.
 | Submission direct administrator edit | The route owns authorization, canonical parent-first locks, locked state/membership validation, snapshot mutation, and one commit | Pending/rejected/takedown edits are silent and Submission-only; approved/deleted rejection or any failure leaves the linked Archive and side effects untouched |
 | Archive metadata mutation/reparent | The route owns administrator authorization, canonical source/target Course, Archive, and exact Submission locks, post-lock validation, mutation, and one commit | Silent and database-only; it creates/restores no Course, changes no Submission, performs no MinIO operation, and rolls back the complete mutation on failure |
 | Course soft trash/restore | The route owns discovery, canonical Category/Course/Archive/Submission locks, one bounded membership rebuild, lifecycle mutation, and commit | Existing Course results and counts remain unchanged; both operations remain silent |
-| Report create/review | Report mutation and durable personal notification share a commit; ArchiveReport review uses canonical Course/Archive/optional Submission/Report locks and includes optional linked-Submission takedown or exact legacy-Archive soft trash | Database-atomic; legacy takedown fabricates no Submission and performs no storage operation |
-| ArchiveReport soft trash/restore | Route-owned canonical parent-first lock plan, Report metadata mutation, then commit | Silent; existing status and pending-uniqueness behavior are unchanged |
+| Report create/review | Report mutation and durable personal notification share a commit; ArchiveReport create also holds its reporter/Archive uniqueness mutex, while review uses canonical Course/Archive/optional Submission/Report locks and includes optional linked-Submission takedown or exact legacy-Archive soft trash | Database-atomic; one active pending ArchiveReport per non-null reporter/Archive scope; legacy takedown fabricates no Submission and performs no storage operation |
+| ArchiveReport soft trash/restore | Route-owned uniqueness mutex, canonical parent-first lock plan, Report metadata mutation, then commit | Silent; trash releases active uniqueness on commit, and conflicting restore returns stable 409 while preserving both rows |
 | Republish | Transition and notification share the caller transaction | Comparatively complete |
 | Permanent delete | MinIO call and DB delete cannot be atomic; helper may downgrade storage failure to warning | Retry and truthful result gap |
 | WebSocket discussion update | Database commit precedes broadcast | Durable write succeeds even if live delivery fails |

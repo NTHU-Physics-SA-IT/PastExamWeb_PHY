@@ -8,11 +8,13 @@ from pydantic import BaseModel
 
 from app.db.audit.models import (
     AggregateCounts,
+    ArchiveReportUniquenessAggregateCounts,
     OneToOneAggregateCounts,
     PreviousStatusAggregateCounts,
 )
 
 ELIGIBILITY_AUDIT_ID = "archive-submission-self-delete-eligibility"
+ARCHIVE_REPORT_UNIQUENESS_AUDIT_ID = "archive-report-active-pending-uniqueness"
 PREVIOUS_STATUS_REVISION = "d8f2a6c1b4e7"
 ONE_TO_ONE_REVISION = "6f3a9c2d8e41"
 OAUTH_IDENTITY_REVISION = "9f1c2a7e4b63"
@@ -25,6 +27,7 @@ COURSE_SUBMISSION_LIFECYCLE_REVISION = "a9c2e5f7b1d4"
 WISH_POOL_REVISION = "a9c4e7b2d6f1"
 SIBLING_MERGE_REVISION = "b4d6f8a2c1e3"
 WISH_OPTIONAL_SEMESTER_REVISION = "f3a7c1e9d5b2"
+ARCHIVE_REPORT_UNIQUENESS_REVISION = "c8e4a1f7b2d9"
 ABOUT_US_ORDERING_REVISION = "c7e4a9b2d6f1"
 
 
@@ -814,6 +817,7 @@ _ELIGIBILITY_V4 = AuditAdapter(
             SIBLING_MERGE_REVISION,
             WISH_OPTIONAL_SEMESTER_REVISION,
             ABOUT_US_ORDERING_REVISION,
+            ARCHIVE_REPORT_UNIQUENESS_REVISION,
         }
     ),
     approved_aggregate_labels=tuple(OneToOneAggregateCounts.model_fields),
@@ -824,11 +828,187 @@ _ELIGIBILITY_V4 = AuditAdapter(
 )
 
 
+_ARCHIVE_REPORT_UNIQUENESS_SUMMARY_SQL = r"""
+WITH report_counts AS (
+    SELECT
+        count(*)::bigint AS total,
+        count(*) FILTER (
+            WHERE status = 'pending' AND deleted_at IS NULL
+        )::bigint AS active_pending,
+        count(*) FILTER (
+            WHERE status = 'pending' AND deleted_at IS NOT NULL
+        )::bigint AS trashed_pending,
+        count(*) FILTER (
+            WHERE reporter_user_id IS NULL
+               OR (
+                    reporter_user_id IS NOT NULL
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM users
+                        WHERE users.id = archive_reports.reporter_user_id
+                    )
+               )
+        )::bigint AS detached_reporter_identity,
+        count(*) FILTER (
+            WHERE archive_id IS NULL
+               OR (
+                    archive_id IS NOT NULL
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM archives
+                        WHERE archives.id = archive_reports.archive_id
+                    )
+               )
+        )::bigint AS detached_archive_identity
+    FROM archive_reports
+),
+active_scope AS (
+    SELECT reporter_user_id, archive_id, count(*)::bigint AS report_count
+    FROM archive_reports
+    WHERE status = 'pending'
+      AND deleted_at IS NULL
+      AND reporter_user_id IS NOT NULL
+      AND archive_id IS NOT NULL
+    GROUP BY reporter_user_id, archive_id
+),
+trashed_scope AS (
+    SELECT reporter_user_id, archive_id
+    FROM archive_reports
+    WHERE status = 'pending'
+      AND deleted_at IS NOT NULL
+      AND reporter_user_id IS NOT NULL
+      AND archive_id IS NOT NULL
+    GROUP BY reporter_user_id, archive_id
+),
+duplicate_counts AS (
+    SELECT
+        count(*) FILTER (WHERE report_count > 1)::bigint
+            AS active_pending_duplicate_groups,
+        coalesce(sum(report_count) FILTER (WHERE report_count > 1), 0)::bigint
+            AS active_pending_duplicate_rows
+    FROM active_scope
+),
+restore_counts AS (
+    SELECT count(*)::bigint AS conflict_scopes
+    FROM active_scope
+    JOIN trashed_scope USING (reporter_user_id, archive_id)
+),
+index_contract AS (
+    SELECT (
+        SELECT count(*) = 1
+        FROM pg_class AS table_relation
+        JOIN pg_namespace AS namespace
+          ON namespace.oid = table_relation.relnamespace
+        JOIN pg_index AS index_state
+          ON index_state.indrelid = table_relation.oid
+        JOIN pg_class AS index_relation
+          ON index_relation.oid = index_state.indexrelid
+        WHERE namespace.nspname = 'public'
+          AND table_relation.relname = 'archive_reports'
+          AND index_relation.relname =
+              'uq_archive_reports_pending_reporter_archive'
+          AND index_state.indisunique
+          AND (
+              SELECT array_agg(attribute.attname::text ORDER BY key.ordinality)
+              FROM unnest(index_state.indkey)
+                  WITH ORDINALITY AS key(attnum, ordinality)
+              JOIN pg_attribute AS attribute
+                ON attribute.attrelid = table_relation.oid
+               AND attribute.attnum = key.attnum
+          ) = ARRAY['reporter_user_id', 'archive_id']::text[]
+          AND lower(
+              regexp_replace(
+                  replace(
+                      pg_get_expr(index_state.indpred, index_state.indrelid),
+                      '::text',
+                      ''
+                  ),
+                  '[()"[:space:]]',
+                  '',
+                  'g'
+              )
+          ) = CASE (SELECT min(version_num) FROM alembic_version)
+              WHEN 'f3a7c1e9d5b2' THEN 'status=''pending'''
+              WHEN 'c7e4a9b2d6f1' THEN 'status=''pending'''
+              WHEN 'c8e4a1f7b2d9' THEN 'status=''pending''anddeleted_atisnull'
+              ELSE ''
+          END
+    ) AS matches
+),
+summary AS (
+    SELECT
+        report_counts.total,
+        report_counts.active_pending,
+        report_counts.trashed_pending,
+        duplicate_counts.active_pending_duplicate_groups,
+        duplicate_counts.active_pending_duplicate_rows,
+        restore_counts.conflict_scopes AS active_and_trashed_scopes,
+        restore_counts.conflict_scopes AS candidate_restore_conflict_scopes,
+        report_counts.detached_reporter_identity,
+        report_counts.detached_archive_identity,
+        CASE WHEN index_contract.matches THEN 0 ELSE 1 END::bigint
+            AS index_contract_mismatch
+    FROM report_counts, duplicate_counts, restore_counts, index_contract
+)
+SELECT
+    summary.*,
+    (
+        active_pending_duplicate_rows
+        + index_contract_mismatch
+    )::bigint AS unsupported,
+    0::bigint AS unclassified,
+    0::bigint AS overlap,
+    total::bigint AS bucket_sum,
+    0::bigint AS difference
+FROM summary
+"""
+
+_ARCHIVE_REPORT_UNIQUENESS_COMBINATIONS_SQL = f"""
+WITH summary AS (
+{_ARCHIVE_REPORT_UNIQUENESS_SUMMARY_SQL}
+)
+SELECT ARRAY['active_pending_duplicate']::text[] AS flags,
+       active_pending_duplicate_rows AS count
+FROM summary
+WHERE active_pending_duplicate_rows > 0
+UNION ALL
+SELECT ARRAY['index_contract_mismatch']::text[] AS flags,
+       index_contract_mismatch AS count
+FROM summary
+WHERE index_contract_mismatch > 0
+"""
+
+_ARCHIVE_REPORT_UNIQUENESS_V1 = AuditAdapter(
+    audit_id=ARCHIVE_REPORT_UNIQUENESS_AUDIT_ID,
+    version=1,
+    accepted_source_revisions=frozenset(
+        {
+            WISH_OPTIONAL_SEMESTER_REVISION,
+            ABOUT_US_ORDERING_REVISION,
+            ARCHIVE_REPORT_UNIQUENESS_REVISION,
+        }
+    ),
+    approved_aggregate_labels=tuple(
+        ArchiveReportUniquenessAggregateCounts.model_fields
+    ),
+    approved_combination_flags=frozenset(
+        {"active_pending_duplicate", "index_contract_mismatch"}
+    ),
+    summary_sql=_ARCHIVE_REPORT_UNIQUENESS_SUMMARY_SQL,
+    combinations_sql=_ARCHIVE_REPORT_UNIQUENESS_COMBINATIONS_SQL,
+    aggregate_model=ArchiveReportUniquenessAggregateCounts,
+)
+
+
 _REGISTRY = {
     (_ELIGIBILITY_V1.audit_id, _ELIGIBILITY_V1.version): _ELIGIBILITY_V1,
     (_ELIGIBILITY_V2.audit_id, _ELIGIBILITY_V2.version): _ELIGIBILITY_V2,
     (_ELIGIBILITY_V3.audit_id, _ELIGIBILITY_V3.version): _ELIGIBILITY_V3,
     (_ELIGIBILITY_V4.audit_id, _ELIGIBILITY_V4.version): _ELIGIBILITY_V4,
+    (
+        _ARCHIVE_REPORT_UNIQUENESS_V1.audit_id,
+        _ARCHIVE_REPORT_UNIQUENESS_V1.version,
+    ): _ARCHIVE_REPORT_UNIQUENESS_V1,
 }
 
 

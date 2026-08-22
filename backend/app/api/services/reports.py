@@ -44,6 +44,12 @@ from app.models.models import (
 from app.services.archive_report_lifecycle_locks import (
     acquire_stable_archive_report_locks,
 )
+from app.services.archive_report_uniqueness import (
+    acquire_archive_report_uniqueness_mutex,
+    acquire_archive_report_uniqueness_mutex_for_report,
+    archive_report_pending_conflict_error,
+    is_archive_report_pending_unique_violation,
+)
 from app.services.archive_submission_status import (
     normalize_submission_status,
     take_down_archive_submission,
@@ -166,7 +172,9 @@ def _serialize_report(row) -> CommentReportRead:
 
 async def _read_report(db: AsyncSession, report_id: int) -> CommentReportRead:
     statement, _, _, _ = _report_select()
-    row = (await db.execute(statement.where(CommentReport.id == report_id))).one_or_none()
+    row = (
+        await db.execute(statement.where(CommentReport.id == report_id))
+    ).one_or_none()
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Comment report not found"
@@ -273,9 +281,7 @@ def _serialize_archive_report(row) -> ArchiveReportRead:
     )
 
 
-async def _read_archive_report(
-    db: AsyncSession, report_id: int
-) -> ArchiveReportRead:
+async def _read_archive_report(db: AsyncSession, report_id: int) -> ArchiveReportRead:
     statement, _, _ = _archive_report_select()
     row = (
         await db.execute(statement.where(ArchiveReport.id == report_id))
@@ -625,9 +631,13 @@ async def create_comment_report(
         thread_id=message.parent_id or message.id,
         reply_to_message_id=message.reply_to_message_id,
         reason=reason,
-        custom_message=custom_message if payload.report_reason == CommentReportReason.OTHER else None,
+        custom_message=custom_message
+        if payload.report_reason == CommentReportReason.OTHER
+        else None,
         comment_content_snapshot=message.content,
-        comment_author_name_snapshot=_display_name(author.id, author.nickname, author.name),
+        comment_author_name_snapshot=_display_name(
+            author.id, author.nickname, author.name
+        ),
         comment_created_at_snapshot=message.created_at,
         archive_name_snapshot=archive.name,
         course_name_snapshot=course.name,
@@ -845,9 +855,7 @@ async def review_comment_report(
 
     db.add(report)
     result_label = (
-        "回報成立"
-        if new_status == CommentReportStatus.UPHELD.value
-        else "回報不成立"
+        "回報成立" if new_status == CommentReportStatus.UPHELD.value else "回報不成立"
     )
     response_label = response or "未提供答覆"
     await enqueue_personal_notification(
@@ -887,10 +895,7 @@ async def create_archive_report(
     db: AsyncSession = Depends(get_session),
 ):
     supplementary_detail = (payload.supplementary_detail or "").strip()
-    if (
-        payload.report_reason == ArchiveReportReason.OTHER
-        and not supplementary_detail
-    ):
+    if payload.report_reason == ArchiveReportReason.OTHER and not supplementary_detail:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Supplementary detail is required for the other reason",
@@ -940,6 +945,11 @@ async def create_archive_report(
         )
     source_submission = linked_submissions[0] if linked_submissions else None
 
+    await acquire_archive_report_uniqueness_mutex(
+        db,
+        reporter_user_id=current_user.user_id,
+        archive_id=archive_id,
+    )
     duplicate = await db.scalar(
         select(ArchiveReport.id).where(
             ArchiveReport.reporter_user_id == current_user.user_id,
@@ -949,10 +959,7 @@ async def create_archive_report(
         )
     )
     if duplicate is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="You already have a pending report for this archive",
-        )
+        raise archive_report_pending_conflict_error()
 
     archive_type = getattr(archive.archive_type, "value", archive.archive_type)
     report = ArchiveReport(
@@ -979,10 +986,9 @@ async def create_archive_report(
         await db.flush()
     except IntegrityError as error:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="You already have a pending report for this archive",
-        ) from error
+        if is_archive_report_pending_unique_violation(error):
+            raise archive_report_pending_conflict_error() from error
+        raise
 
     reason_label = ARCHIVE_REPORT_REASON_LABELS[report.reason]
     await enqueue_personal_notification(
@@ -1078,8 +1084,7 @@ async def list_archive_reports(
         if normalized_search.isdigit():
             search_conditions.extend(
                 [
-                    ArchiveReport.archive_id_snapshot
-                    == int(normalized_search),
+                    ArchiveReport.archive_id_snapshot == int(normalized_search),
                     ArchiveReport.id == int(normalized_search),
                 ]
             )
@@ -1105,9 +1110,7 @@ async def list_archive_reports(
             reporter.name,
             ArchiveReport.reporter_name_snapshot,
         ),
-        "course_archive": func.coalesce(
-            ArchiveReport.course_name_snapshot, ""
-        ),
+        "course_archive": func.coalesce(ArchiveReport.course_name_snapshot, ""),
         "archive_id": ArchiveReport.archive_id_snapshot,
         "reviewer": func.coalesce(reviewer.nickname, reviewer.name, ""),
         "reviewed_at": ArchiveReport.reviewed_at,
@@ -1156,6 +1159,10 @@ async def delete_archive_report(
     db: AsyncSession = Depends(get_session),
 ):
     _require_admin(current_user)
+    await acquire_archive_report_uniqueness_mutex_for_report(
+        db,
+        report_id=report_id,
+    )
     locked = await acquire_stable_archive_report_locks(
         db,
         report_id=report_id,
@@ -1205,10 +1212,7 @@ async def review_archive_report(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="A pending report must be finalized as upheld or dismissed",
         )
-    if (
-        payload.take_down_archive
-        and new_status != CommentReportStatus.UPHELD.value
-    ):
+    if payload.take_down_archive and new_status != CommentReportStatus.UPHELD.value:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Only an upheld report can take down the source archive",
@@ -1274,9 +1278,7 @@ async def review_archive_report(
     db.add(report)
 
     result_label = (
-        "回報成立"
-        if new_status == CommentReportStatus.UPHELD.value
-        else "回報不成立"
+        "回報成立" if new_status == CommentReportStatus.UPHELD.value else "回報不成立"
     )
     disposition = (
         "該考古題已下架。"
@@ -1284,7 +1286,11 @@ async def review_archive_report(
         else "管理員已完成處理；該考古題未因本次審核下架。"
     )
     if report.reporter_user_id is not None:
-        course = locked.rows.course(report.course_id) if report.course_id is not None else None
+        course = (
+            locked.rows.course(report.course_id)
+            if report.course_id is not None
+            else None
+        )
         course_name_en = (
             course.name_en
             if course is not None and course.name == report.course_name_snapshot

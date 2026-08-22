@@ -14,7 +14,11 @@ from app.db.audit.models import (
     AuditStatus,
 )
 from app.db.audit.registry import (
+    ABOUT_US_ORDERING_REVISION,
+    ARCHIVE_REPORT_UNIQUENESS_AUDIT_ID,
+    ARCHIVE_REPORT_UNIQUENESS_REVISION,
     ELIGIBILITY_AUDIT_ID,
+    WISH_OPTIONAL_SEMESTER_REVISION,
     get_audit_adapter,
 )
 from app.db.audit.runner import (
@@ -174,14 +178,64 @@ def test_bilingual_head_audit_is_new_version_and_preserves_lifecycle_classifier(
             "e8a4c1d7b2f6",
             "a9c2e5f7b1d4",
             "b4d6f8a2c1e3",
-            "f3a7c1e9d5b2",
-            "c7e4a9b2d6f1",
+            WISH_OPTIONAL_SEMESTER_REVISION,
+            ABOUT_US_ORDERING_REVISION,
+            ARCHIVE_REPORT_UNIQUENESS_REVISION,
         }
     )
     previous = get_audit_adapter(ELIGIBILITY_AUDIT_ID, 3)
     assert adapter.summary_sql == previous.summary_sql
     assert adapter.combinations_sql == previous.combinations_sql
     assert "UPDATE ARCHIVE_SUBMISSIONS" not in adapter.summary_sql.upper()
+
+
+def test_archive_report_audit_is_revision_bounded_aggregate_only_and_read_only() -> (
+    None
+):
+    adapter = get_audit_adapter(ARCHIVE_REPORT_UNIQUENESS_AUDIT_ID, 1)
+
+    assert adapter.accepted_source_revisions == frozenset(
+        {
+            WISH_OPTIONAL_SEMESTER_REVISION,
+            ABOUT_US_ORDERING_REVISION,
+            ARCHIVE_REPORT_UNIQUENESS_REVISION,
+        }
+    )
+    assert set(adapter.approved_aggregate_labels) == {
+        "total",
+        "active_pending",
+        "trashed_pending",
+        "active_pending_duplicate_groups",
+        "active_pending_duplicate_rows",
+        "active_and_trashed_scopes",
+        "candidate_restore_conflict_scopes",
+        "detached_reporter_identity",
+        "detached_archive_identity",
+        "index_contract_mismatch",
+        "unsupported",
+        "unclassified",
+        "overlap",
+        "bucket_sum",
+        "difference",
+    }
+    assert "report_reason" not in adapter.summary_sql
+    assert "supplementary_detail" not in adapter.summary_sql
+    assert "reporter_name_snapshot" not in adapter.summary_sql
+    validate_adapter_sql(adapter.summary_sql)
+    validate_adapter_sql(adapter.combinations_sql)
+
+    sql = build_transaction_sql(
+        AuditRequest(
+            audit_id=ARCHIVE_REPORT_UNIQUENESS_AUDIT_ID,
+            audit_version=1,
+            mode=AuditMode.PERSISTENT_LOCAL,
+            expected_ledger=WISH_OPTIONAL_SEMESTER_REVISION,
+            repository_revision="a" * 40,
+        ),
+        adapter,
+    )
+    assert "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY" in sql
+    assert "ROLLBACK;" in sql
 
 
 def _column_condition_context(sql: str, column_name: str) -> str:
@@ -281,7 +335,7 @@ def test_cli_defaults_to_current_bilingual_audit_version() -> None:
         ]
     )
 
-    assert arguments.version == 4
+    assert arguments.version is None
 
 
 def test_transaction_is_noninteractive_read_only_and_explicitly_rolled_back() -> None:

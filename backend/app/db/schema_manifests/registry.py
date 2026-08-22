@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-HEAD_SCHEMA_REVISION = "c7e4a9b2d6f1"
+PREVIOUS_HEAD_SCHEMA_REVISION = "c7e4a9b2d6f1"
+HEAD_SCHEMA_REVISION = "c8e4a1f7b2d9"
 
 
 @dataclass(frozen=True)
@@ -131,6 +132,11 @@ MANIFESTS = {
         revision="f3a7c1e9d5b2",
         description="schema before persisted About Us ordering",
         metadata_variant="pre_about_us_ordering",
+    ),
+    PREVIOUS_HEAD_SCHEMA_REVISION: ManifestSpec(
+        revision=PREVIOUS_HEAD_SCHEMA_REVISION,
+        description="schema before active-pending ArchiveReport uniqueness",
+        metadata_variant="pre_archive_report_active_pending_uniqueness",
     ),
     HEAD_SCHEMA_REVISION: ManifestSpec(
         revision=HEAD_SCHEMA_REVISION,

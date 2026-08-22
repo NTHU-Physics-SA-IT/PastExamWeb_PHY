@@ -20,6 +20,9 @@ uv run python migrate.py reconcile --check --json
 uv run python audit.py run \
   --audit archive-submission-self-delete-eligibility \
   --mode isolated-test
+uv run python audit.py run \
+  --audit archive-report-active-pending-uniqueness \
+  --mode persistent-local --expected-ledger f3a7c1e9d5b2
 ```
 
 All preflight and reconciliation checks are read-only. Production-style
@@ -71,7 +74,9 @@ Reviewed manifests currently cover:
   head; and
 - `b4d6f8a2c1e3`: the merged schema before optional Wish academic year; and
 - `f3a7c1e9d5b2`: the reviewed schema before persisted About Us ordering; and
-- `c7e4a9b2d6f1`: the current repository head and SQLModel metadata contract.
+- `c7e4a9b2d6f1`: the schema before active-pending ArchiveReport uniqueness
+  excludes trashed rows; and
+- `c8e4a1f7b2d9`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,
@@ -230,6 +235,17 @@ deleted Category inactive. Upgrade and downgrade reject malformed lifecycle
 rows rather than guessing. Downgrade returns only to the About Us revision:
 it restores deleted rows' representable pre-D1 active state, removes only the
 snapshot column, and preserves the About Us table and its contents.
+The ArchiveReport active-pending uniqueness migration replaces only the named
+partial index predicate, from `status = 'pending'` to
+`status = 'pending' AND deleted_at IS NULL`. It locks the table for the
+bounded index transition, fails closed on source-schema drift or active
+duplicate scopes, and never deletes or rewrites report history. Downgrade
+restores the older predicate only when every active and trashed pending row can
+satisfy it; otherwise the PostgreSQL transaction aborts unchanged. The sealed
+`archive-report-active-pending-uniqueness` audit reports aggregate duplicate,
+trashed, mixed-scope, restore-conflict, detached-identity, and index-contract
+counts without returning identifiers or report content.
+
 
 On the first bootstrap, one missing canonical key or any extra custom category
 is evidence that the database is not the expected clean initialized target,
