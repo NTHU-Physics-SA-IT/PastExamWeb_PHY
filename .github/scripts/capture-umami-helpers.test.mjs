@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   classifyDateFilterLabel,
   evaluatePageviewsRange,
+  pageviewsEndpointFingerprint,
   safeDateEnum,
 } from "./capture-umami-helpers.mjs";
 
@@ -23,12 +24,26 @@ test("sanitizes redirected date state before logging", () => {
 });
 
 function pageviewsUrl({ startAt, endAt, unit }) {
-  const url = new URL("https://analytics.example/api/pageviews");
+  const url = new URL("https://api.example/api/website-pageviews");
   url.searchParams.set("startAt", String(startAt));
   url.searchParams.set("endAt", String(endAt));
   url.searchParams.set("unit", unit);
   return url;
 }
+
+test("fingerprints a pageviews endpoint without retaining query identifiers", () => {
+  const url = pageviewsUrl({ startAt: 1, endAt: 2, unit: "day" });
+  url.searchParams.set("website", "private-id");
+
+  assert.equal(
+    pageviewsEndpointFingerprint(url),
+    "https://api.example/api/website-pageviews",
+  );
+  assert.equal(
+    pageviewsEndpointFingerprint("https://api.example/api/stats"),
+    null,
+  );
+});
 
 test("accepts a successful 91-day calendar-boundary pageviews range", () => {
   const startAt = Date.UTC(2026, 4, 23, 16);

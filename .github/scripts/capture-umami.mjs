@@ -5,6 +5,7 @@ import { mkdir, readFile, stat } from "node:fs/promises";
 import {
   classifyDateFilterLabel,
   evaluatePageviewsRange,
+  pageviewsEndpointFingerprint,
   safeDateEnum,
   UMAMI_SCREENSHOT_DATE,
 } from "./capture-umami-helpers.mjs";
@@ -200,14 +201,22 @@ async function select90DayRange(page) {
 function observeExpectedPageviewsRange(page) {
   let matchingEvidence = null;
   let lastEvidence = null;
+  let endpointFingerprint = null;
 
   const onResponse = (response) => {
     const evidence = evaluatePageviewsRange(
       response.url(),
       response.status(),
-      targetUrl.origin,
     );
     if (!evidence.relevant) return;
+    const fingerprint = pageviewsEndpointFingerprint(response.url());
+    if (
+      !fingerprint ||
+      (endpointFingerprint && fingerprint !== endpointFingerprint)
+    ) {
+      return;
+    }
+    endpointFingerprint ??= fingerprint;
     lastEvidence = evidence;
     if (evidence.valid) matchingEvidence = evidence;
   };
