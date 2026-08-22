@@ -109,6 +109,8 @@ describe('About Us view', () => {
     expect(wrapper.find('.about-us-entry-title').exists()).toBe(false)
     expect(wrapper.html()).toContain('<h1>English body</h1>')
     expect(wrapper.findAll('.about-us-pagination-page')).toHaveLength(2)
+    expect(wrapper.get('.about-us-header').find('.about-us-pagination').exists()).toBe(true)
+    expect(wrapper.find('.about-us-list .about-us-pagination').exists()).toBe(false)
     expect(wrapper.findAll('.about-us-pagination-page')[0].attributes('aria-current')).toBe('page')
     expect(wrapper.find('.about-us-order-actions').text()).toContain('Reorder')
 
@@ -132,6 +134,8 @@ describe('About Us view', () => {
     expect(i18n.global.t('aboutUsImageHelp')).toContain(
       '![alt text](image URL){width=33% align=right wrap=true}'
     )
+    expect(i18n.global.t('aboutUsImageHelp')).toContain('at all viewport sizes')
+    expect(i18n.global.t('aboutUsImageHelp')).not.toContain('automatically uses a non-wrapping')
     setLocale('zh-TW')
     expect(i18n.global.t('aboutUsImageHelp')).toContain(
       '![替代文字](圖片網址){width=50% align=center}'
@@ -185,6 +189,8 @@ describe('About Us view', () => {
     await flushPromises()
 
     expect(wrapper.find('.about-us-pagination').exists()).toBe(true)
+    expect(wrapper.get('.about-us-header-actions').find('.about-us-pagination').exists()).toBe(true)
+    expect(wrapper.find('.about-us-header-actions button').text()).toBe('1')
     expect(wrapper.find('.about-us-order-actions').exists()).toBe(false)
     wrapper.vm.selectEntry(1)
     await wrapper.vm.$nextTick()

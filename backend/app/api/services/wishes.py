@@ -446,6 +446,7 @@ async def list_wish_reports(
         "wisher": func.coalesce(wisher.nickname, wisher.name, ""),
         "wish_target": func.coalesce(ArchiveWishReport.wish_title_snapshot, ""),
         "status": status_rank,
+        "reviewed_at": ArchiveWishReport.reviewed_at,
     }
     sort_column = sort_fields.get(sort_by)
     if sort_column is None:

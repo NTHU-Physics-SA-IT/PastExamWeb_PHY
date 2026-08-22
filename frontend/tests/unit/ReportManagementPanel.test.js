@@ -189,7 +189,7 @@ describe('ReportManagementPanel', () => {
       .findAll('.report-section')[3]
       .findAll('.column-header')
       .map((header) => header.text())
-    expect(wishHeaders).toEqual(['回報者', '回報原因', '許願者', '許願目標', '狀態', '操作'])
+    expect(wishHeaders).toEqual(['回報', '回報原因', '許願者', '許願目標', '狀態', '審核', '操作'])
     for (const removedHeader of ['回報時間', '回報者', '留言作者', '審核人', '審核時間']) {
       expect(commentHeaders).not.toContain(removedHeader)
     }
@@ -311,6 +311,13 @@ describe('ReportManagementPanel', () => {
       .findAll('.report-mobile-info-item')
       .find((item) => item.get('dt').text() === '許願目標')
     expect(wishTarget.get('dd').text()).toBe('普通物理 · 王老師 · 不限學期 · midterm1')
+    expect(
+      card
+        .findAll('.report-mobile-info-item')
+        .find((item) => item.get('dt').text() === '審核人')
+        ?.get('dd')
+        .text()
+    ).toBe('尚未審核')
     expect(row.findAll('.report-person-time')).toHaveLength(0)
     expect(row.findAll('.comment-report-content')).toHaveLength(0)
     expect(card.findAll('button').map((button) => button.text())).toEqual(['檢視／審核', '刪除'])
@@ -353,6 +360,13 @@ describe('ReportManagementPanel', () => {
     expect(archiveCard.text()).toContain('待審核')
     expect(archiveCard.text()).toContain('期中考')
     expect(archiveCard.text()).toContain('#88')
+    const archiveMetadata = archiveCard.findAll('.report-mobile-info-item')
+    const archiveIdMetadata = archiveMetadata.find((item) => item.get('dt').text() === '考古題編號')
+    expect(archiveIdMetadata.classes()).toContain('report-mobile-info-item--wide')
+    expect(archiveMetadata.slice(-2).map((item) => item.get('dt').text())).toEqual([
+      '審核人',
+      '審核時間',
+    ])
     expect(
       archiveCard
         .findAll('.report-mobile-info-item')
@@ -757,35 +771,52 @@ describe('ReportManagementPanel', () => {
     )
   })
 
-  it('marks meaningful wish report headers sortable but keeps actions static', async () => {
+  it('adds the shared wish review presentation while keeping non-data actions static', async () => {
     const wrapper = mountPanel()
     await flushPromises()
 
     const wishHeaders = wrapper.find('.report-management__wish-table').findAll('.column-header')
     expect(wishHeaders.map((header) => header.text())).toEqual([
-      '回報者',
+      '回報',
       '回報原因',
       '許願者',
       '許願目標',
       '狀態',
+      '審核',
       '操作',
     ])
-    expect(wishHeaders.slice(0, 5).map((header) => header.attributes('data-sortable'))).toEqual([
+    expect(wishHeaders.slice(0, 6).map((header) => header.attributes('data-sortable'))).toEqual([
+      'true',
       'true',
       'true',
       'true',
       'true',
       'true',
     ])
-    expect(wishHeaders[5].attributes('data-sortable')).toBe('false')
+    expect(wishHeaders.slice(6).map((header) => header.attributes('data-sortable'))).toEqual([
+      'false',
+    ])
     expect(wishHeaders.map((header) => header.attributes('data-sort-field'))).toEqual([
       'created_at',
       'reason',
       'wisher',
       'wish_target',
       'status',
+      'reviewed_at',
       '',
     ])
+    mocks.listWishReports.mockClear()
+    await wrapper.vm.onWishSort({ sortField: 'reviewed_at', sortOrder: 1 })
+    expect(mocks.listWishReports).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 0, sort_by: 'reviewed_at', sort_order: 'asc' })
+    )
+    await wrapper.vm.onWishSort({ sortField: 'reviewed_at', sortOrder: -1 })
+    expect(mocks.listWishReports).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 0, sort_by: 'reviewed_at', sort_order: 'desc' })
+    )
+    expect(reportManagementSource).toMatch(
+      /report-management__wish-table[\s\S]*?field="reviewed_at"[\s\S]*?report-person-time__name--empty[\s\S]*?formatDateTime\(data\.reviewed_at, true\)[\s\S]*?report-person-time__time">--/
+    )
   })
 
   it('shares admin page-size options while keeping report pagination state independent', async () => {
@@ -1211,6 +1242,7 @@ describe('ReportManagementPanel', () => {
     expect(reportManagementSource).toContain('@container report-section (max-width: 25rem)')
     expect(reportManagementSource).toContain("<dt>{{ $t('回報者') }}</dt>")
     expect(reportManagementSource).toContain("<dt>{{ $t('留言者') }}</dt>")
+    expect(reportManagementSource.match(/<dt>\{\{ \$t\('審核人'\) \}\}<\/dt>/g)).toHaveLength(4)
     expect(reportManagementSource).toContain("<dt>{{ $t('審核時間') }}</dt>")
     expect(reportManagementSource).not.toMatch(/\.report-mobile-card__footer\s*\{[^}]*background:/)
     expect(reportManagementSource).toMatch(
@@ -1346,7 +1378,7 @@ describe('ReportManagementPanel', () => {
     expect(commentRow.text().match(/留言作者丙/g)).toHaveLength(1)
     expect(commentRow.text().match(/普通物理甲/g)).toHaveLength(1)
     expect(commentRow.text().match(/期末考乙/g)).toHaveLength(1)
-    expect(commentRow.findAll('dt').filter((item) => item.text() === '審核')).toHaveLength(1)
+    expect(commentRow.findAll('dt').filter((item) => item.text() === '審核人')).toHaveLength(1)
     expect(commentRow.findAll('button').map((item) => item.text())).toEqual(['檢視／審核', '刪除'])
 
     expect(reportManagementSource).toMatch(

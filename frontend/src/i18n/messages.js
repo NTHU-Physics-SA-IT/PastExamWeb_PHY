@@ -603,6 +603,8 @@ const en = {
   '審核時間：{time}': 'Reviewed: {time}',
   審核留言: 'Review Note',
   尚無審核留言: 'No review note',
+  '可留空；若未填寫，投稿者將看到「尚無審核留言」。此留言會隨投稿紀錄保留。':
+    'Optional. If left blank, the submitter will see “No review note.” This note remains with the submission record.',
   編輯考古題: 'Edit Exam',
   考試名稱: 'Exam Title',
   輸入考試名稱: 'Enter an exam title',
@@ -1587,7 +1589,7 @@ const en = {
   中文預覽: 'Chinese Preview',
   英文預覽: 'English Preview',
   aboutUsImageHelp:
-    "Images:\n![alt text](image URL)\n\nSize and position:\n![alt text](image URL){'{'}width=50% align=center{'}'}\n\nText wrapping:\n![alt text](image URL){'{'}width=33% align=right wrap=true{'}'}\n\nWidth:\n1%–100%, e.g. 20%, 42%, 58.5%, 90%\n\nPosition:\nleft / center / right\n\nwrap=true applies only to left / right; mobile automatically uses a non-wrapping stacked layout.",
+    "Images:\n![alt text](image URL)\n\nSize and position:\n![alt text](image URL){'{'}width=50% align=center{'}'}\n\nText wrapping:\n![alt text](image URL){'{'}width=33% align=right wrap=true{'}'}\n\nWidth:\n1%–100%, e.g. 20%, 42%, 58.5%, 90%\n\nPosition:\nleft / center / right\n\nwrap=true applies to left / right at all viewport sizes; the selected percentage controls the remaining text width.",
   關於我們內容順序: 'About Us content order',
   移到前面: 'Move earlier',
   移到後面: 'Move later',
@@ -1608,7 +1610,7 @@ const en = {
 const zhTW = {
   ...Object.fromEntries(Object.keys(en).map((key) => [key, key])),
   aboutUsImageHelp:
-    "圖片：\n![替代文字](圖片網址)\n\n調整大小與位置：\n![替代文字](圖片網址){'{'}width=50% align=center{'}'}\n\n文字環繞：\n![替代文字](圖片網址){'{'}width=33% align=right wrap=true{'}'}\n\n可用寬度：\n1%–100%，例如 20%、42%、58.5%、90%\n\n位置：\nleft / center / right\n\nwrap=true 僅適用於 left / right；手機版會自動改為不環繞的直向排版。",
+    "圖片：\n![替代文字](圖片網址)\n\n調整大小與位置：\n![替代文字](圖片網址){'{'}width=50% align=center{'}'}\n\n文字環繞：\n![替代文字](圖片網址){'{'}width=33% align=right wrap=true{'}'}\n\n可用寬度：\n1%–100%，例如 20%、42%、58.5%、90%\n\n位置：\nleft / center / right\n\nwrap=true 在所有螢幕寬度皆適用於 left / right；所選百分比會決定文字的剩餘寬度。",
   '投稿等級（使用者管理欄位）': '投稿等級',
   '管理員權限（使用者管理欄位）': '管理員權限',
   '管理員投稿（審核中心）': '管理員投稿',
