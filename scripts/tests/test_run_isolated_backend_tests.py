@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -21,6 +22,53 @@ SPEC.loader.exec_module(runner_module)
 
 POSTGRES_ID = "a" * 64
 BACKEND_ID = "b" * 64
+
+
+def initialize_authority_pair(parent: Path) -> tuple[Path, Path]:
+    parent.mkdir()
+    canonical_root = parent / "canonical"
+    subject_root = parent / "subject"
+    canonical_root.mkdir()
+    script = canonical_root / "scripts" / "dev-compose.sh"
+    script.parent.mkdir()
+    script.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    script.chmod(0o755)
+    subprocess.run(
+        ["git", "init", "-b", "main"],
+        cwd=canonical_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "add", "scripts/dev-compose.sh"],
+        cwd=canonical_root,
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Runner Contract",
+            "-c",
+            "user.email=runner@example.invalid",
+            "commit",
+            "-m",
+            "test fixture",
+        ],
+        cwd=canonical_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "worktree", "add", "-b", "fix/subject", str(subject_root)],
+        cwd=canonical_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return canonical_root, subject_root
 
 
 def schema_status(
@@ -90,6 +138,7 @@ class FakeExecutor:
         volume_mount: bool = False,
         schema_expected_ledger: str | None = None,
         isolated_head: str | None = None,
+        subject_dirty: bool = False,
     ) -> None:
         self.pytest_exit = pytest_exit
         self.migration_exit = migration_exit
@@ -101,6 +150,7 @@ class FakeExecutor:
         self.volume_mount = volume_mount
         self.schema_expected_ledger = schema_expected_ledger
         self.isolated_head = isolated_head
+        self.subject_dirty = subject_dirty
         self.commands: list[tuple[str, ...]] = []
         self.inputs: list[str] = []
         self.schema_calls = 0
@@ -121,7 +171,10 @@ class FakeExecutor:
         if input_text:
             self.inputs.append(input_text)
         if command[:2] == ("git", "status"):
-            return runner_module.CommandResult(0, "")
+            return runner_module.CommandResult(
+                0,
+                " M subject-change\n" if self.subject_dirty else "",
+            )
         if command[:2] == ("docker", "inspect") and command[-1] in {
             POSTGRES_ID,
             BACKEND_ID,
@@ -210,11 +263,13 @@ class FakeExecutor:
 def args(
     *pytest_args: str,
     canonical_expected_ledger: str = "d4b7e2a9c6f1",
+    canonical_authority_root: str | None = None,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         postgres_container_id=POSTGRES_ID,
         backend_container_id=BACKEND_ID,
         canonical_expected_ledger=canonical_expected_ledger,
+        canonical_authority_root=canonical_authority_root,
         output="json",
         pytest_args=list(
             pytest_args or ("backend/tests/unit/test_submission_decision.py", "-q")
@@ -226,11 +281,13 @@ def run(
     fake: FakeExecutor,
     *pytest_args: str,
     canonical_expected_ledger: str = "d4b7e2a9c6f1",
+    canonical_authority_root: str | None = None,
 ):
     runner = runner_module.IsolatedPostgresRunner(
         args(
             *pytest_args,
             canonical_expected_ledger=canonical_expected_ledger,
+            canonical_authority_root=canonical_authority_root,
         ),
         executor=fake,
     )
@@ -262,13 +319,13 @@ def test_success_has_stable_json_and_complete_cleanup() -> None:
     assert runner.evidence.exit_code == 0
     assert payload["schema_version"] == 2
     assert payload["canonical_expected_ledger"] == "d4b7e2a9c6f1"
-    assert payload["ephemeral_target_head"] == "b4d6f8a2c1e3"
-    assert payload["migration_head"] == "b4d6f8a2c1e3"
+    assert payload["ephemeral_target_head"] == runner_module.HEAD_SCHEMA_REVISION
+    assert payload["migration_head"] == runner_module.HEAD_SCHEMA_REVISION
     assert all(payload["cleanup"].values())
 
 
 def test_runner_uses_canonical_schema_manifest_head() -> None:
-    assert runner_module.EPHEMERAL_TARGET_HEAD == "b4d6f8a2c1e3"
+    assert runner_module.EPHEMERAL_TARGET_HEAD == runner_module.HEAD_SCHEMA_REVISION
 
 
 def test_explicit_canonical_baseline_is_distinct_from_ephemeral_target() -> None:
@@ -278,6 +335,8 @@ def test_explicit_canonical_baseline_is_distinct_from_ephemeral_target() -> None
             POSTGRES_ID,
             "--backend-container-id",
             BACKEND_ID,
+            "--canonical-authority-root",
+            "/canonical/main",
             "--canonical-expected-ledger",
             "c2a8e4f6b9d1",
             "--",
@@ -286,6 +345,7 @@ def test_explicit_canonical_baseline_is_distinct_from_ephemeral_target() -> None
     )
 
     assert parsed.canonical_expected_ledger == "c2a8e4f6b9d1"
+    assert parsed.canonical_authority_root == "/canonical/main"
     assert runner_module.EPHEMERAL_TARGET_HEAD == runner_module.HEAD_SCHEMA_REVISION
 
 
@@ -433,6 +493,135 @@ def test_dev_compose_command_passes_exact_canonical_baseline() -> None:
         "--expected-ledger",
         "c2a8e4f6b9d1",
     )
+
+
+def test_registered_clean_main_authority_is_accepted_and_selects_its_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    canonical_root, subject_root = initialize_authority_pair(tmp_path / "valid")
+    monkeypatch.setattr(runner_module, "REPOSITORY_ROOT", subject_root)
+
+    resolved = runner_module.validate_canonical_authority_root(
+        runner_module.CommandExecutor(),
+        str(canonical_root),
+    )
+    command = runner_module.dev_compose_command(
+        "schema-status",
+        canonical_authority_root=resolved,
+        expected_ledger="f3a7c1e9d5b2",
+    )
+
+    assert resolved == canonical_root
+    assert str(canonical_root / "scripts" / "dev-compose.sh") in command
+    assert command[-3:] == (
+        "schema-status",
+        "--expected-ledger",
+        "f3a7c1e9d5b2",
+    )
+
+
+def test_external_authority_rejects_relative_nonworktree_and_other_repository(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _canonical_root, subject_root = initialize_authority_pair(tmp_path / "subject")
+    other_root, _other_subject = initialize_authority_pair(tmp_path / "other")
+    nonworktree = tmp_path / "nonworktree"
+    script = nonworktree / "scripts" / "dev-compose.sh"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    script.chmod(0o755)
+    monkeypatch.setattr(runner_module, "REPOSITORY_ROOT", subject_root)
+    executor = runner_module.CommandExecutor()
+
+    with pytest.raises(runner_module.RunnerFailure, match="must be absolute"):
+        runner_module.validate_canonical_authority_root(executor, "relative/path")
+    with pytest.raises(runner_module.RunnerFailure, match="not a Git worktree"):
+        runner_module.validate_canonical_authority_root(executor, str(nonworktree))
+    with pytest.raises(runner_module.RunnerFailure, match="another repository"):
+        runner_module.validate_canonical_authority_root(executor, str(other_root))
+
+
+def test_external_authority_rejects_unregistered_copy_and_non_main_worktree(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    canonical_root, subject_root = initialize_authority_pair(tmp_path / "registered")
+    copied_root = tmp_path / "copied"
+    shutil.copytree(subject_root, copied_root)
+    monkeypatch.setattr(runner_module, "REPOSITORY_ROOT", subject_root)
+    executor = runner_module.CommandExecutor()
+
+    with pytest.raises(runner_module.RunnerFailure, match="not a registered worktree"):
+        runner_module.validate_canonical_authority_root(executor, str(copied_root))
+    with pytest.raises(runner_module.RunnerFailure, match="registered main worktree"):
+        runner_module.validate_canonical_authority_root(executor, str(subject_root))
+
+    assert canonical_root.exists()
+
+
+def test_external_authority_rejects_dirty_ambiguous_and_missing_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    canonical_root, subject_root = initialize_authority_pair(tmp_path / "safety")
+    monkeypatch.setattr(runner_module, "REPOSITORY_ROOT", subject_root)
+    executor = runner_module.CommandExecutor()
+
+    ambiguous_root = tmp_path / "canonical-link"
+    ambiguous_root.symlink_to(canonical_root, target_is_directory=True)
+    with pytest.raises(runner_module.RunnerFailure, match="path is ambiguous"):
+        runner_module.validate_canonical_authority_root(executor, str(ambiguous_root))
+
+    dirty_path = canonical_root / "dirty.txt"
+    dirty_path.write_text("dirty\n", encoding="utf-8")
+    with pytest.raises(runner_module.RunnerFailure, match="must be clean"):
+        runner_module.validate_canonical_authority_root(executor, str(canonical_root))
+    dirty_path.unlink()
+
+    wrapper = canonical_root / "scripts" / "dev-compose.sh"
+    wrapper.unlink()
+    with pytest.raises(runner_module.RunnerFailure, match="unavailable"):
+        runner_module.validate_canonical_authority_root(executor, str(canonical_root))
+
+
+def test_external_authority_selects_canonical_dev_compose_for_pre_and_post(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    canonical_root = tmp_path / "canonical"
+    canonical_root.mkdir()
+    monkeypatch.setattr(
+        runner_module,
+        "validate_canonical_authority_root",
+        lambda _executor, value: Path(value).resolve(),
+    )
+    fake = FakeExecutor()
+
+    runner = run(
+        fake,
+        canonical_authority_root=str(canonical_root),
+    )
+
+    schema_commands = [
+        command for command in fake.commands if "schema-status" in command
+    ]
+    expected_script = canonical_root / "scripts" / "dev-compose.sh"
+    assert runner.evidence.exit_code == 0
+    assert len(schema_commands) == 2
+    assert all(str(expected_script) in command for command in schema_commands)
+    assert runner.evidence.cleanup["postflight_matches"] is True
+
+
+def test_dirty_subject_still_fails_before_ephemeral_resource() -> None:
+    fake = FakeExecutor(subject_dirty=True)
+
+    runner = run(fake)
+
+    assert runner.evidence.exit_code == 20
+    assert runner.evidence.generated_resource_name is None
+    assert not any(command[:2] == ("docker", "run") for command in fake.commands)
 
 
 def test_cleanup_targets_only_exact_generated_resource() -> None:
