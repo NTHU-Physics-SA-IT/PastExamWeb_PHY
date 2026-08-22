@@ -3,6 +3,7 @@
   "shards": {
     "a": [
       "tests/unit/test_archive_submission_links.py",
+      "tests/api/test_admin_attention_summary.py",
       "tests/api/test_archive_approval_atomicity.py",
       "tests/api/test_archive_submission_lifecycle_concurrency.py",
       "tests/api/test_archive_submission_review_contract.py",
