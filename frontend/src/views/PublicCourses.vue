@@ -249,6 +249,7 @@ onMounted(loadCatalog)
 .catalog-header h1 {
   margin: 0.35rem 0 0.85rem;
   font-size: clamp(1.6rem, 2.6vw, 2rem);
+  font-weight: 700;
 }
 
 .catalog-header > p,

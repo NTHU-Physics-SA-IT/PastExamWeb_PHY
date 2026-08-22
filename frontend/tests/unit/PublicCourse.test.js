@@ -45,6 +45,10 @@ describe('PublicCourse', () => {
     setSeoMock.mockReset()
   })
 
+  it('uses the shared course header selector for every bold dynamic course title', () => {
+    expect(publicCourseSource).toMatch(/\.course-header h1\s*\{[^}]*font-weight:\s*700;/s)
+  })
+
   it('vertically centers breadcrumb links, separators, and current-page text', () => {
     expect(publicCourseSource).toMatch(/\.breadcrumbs\s*\{[^}]*align-items:\s*center/s)
     expect(publicCourseSource).toMatch(
