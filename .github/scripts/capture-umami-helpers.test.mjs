@@ -2,54 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  classifyDateFilterLabel,
   evaluatePageviewsRange,
-  normalizeRedirectedDateUrl,
+  safeDateEnum,
 } from "./capture-umami-helpers.mjs";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-test("normalizes the redirected pathname without returning to the entry path", () => {
-  const requestedUrl = new URL(
-    "https://analytics.example/share/entry?date=90day",
-  );
-  const redirectedUrl = new URL(
-    "https://analytics.example/share/dashboard?view=overview",
-  );
-
-  const result = normalizeRedirectedDateUrl(requestedUrl, redirectedUrl);
-
-  assert.equal(result.needsNavigation, true);
-  assert.equal(result.previousDate, "missing");
-  assert.equal(result.url.origin, redirectedUrl.origin);
-  assert.equal(result.url.pathname, "/share/dashboard");
-  assert.equal(result.url.searchParams.get("view"), "overview");
-  assert.equal(result.url.searchParams.get("date"), "90day");
+test("recognizes only allowlisted semantic Umami date labels", () => {
+  assert.equal(classifyDateFilterLabel("Last 24 hours"), "24hour");
+  assert.equal(classifyDateFilterLabel("  Last   90 days  "), "90day");
+  assert.equal(classifyDateFilterLabel("Website: private.example"), null);
+  assert.equal(classifyDateFilterLabel(null), null);
 });
 
-test("does not navigate again when the redirected URL already has 90day", () => {
-  const requestedUrl = new URL(
-    "https://analytics.example/share/entry?date=90day",
-  );
-  const redirectedUrl = new URL(
-    "https://analytics.example/share/dashboard?date=90day",
-  );
-
-  const result = normalizeRedirectedDateUrl(requestedUrl, redirectedUrl);
-
-  assert.equal(result.needsNavigation, false);
-  assert.equal(result.previousDate, "90day");
-  assert.equal(result.url.toString(), redirectedUrl.toString());
-});
-
-test("rejects a redirected URL on another origin", () => {
-  assert.throws(
-    () =>
-      normalizeRedirectedDateUrl(
-        new URL("https://analytics.example/share/entry?date=90day"),
-        new URL("https://other.example/share/dashboard"),
-      ),
-    /origin/i,
-  );
+test("sanitizes redirected date state before logging", () => {
+  assert.equal(safeDateEnum(null), "missing");
+  assert.equal(safeDateEnum("90day"), "90day");
+  assert.equal(safeDateEnum("secret-looking-value"), "other-redacted");
 });
 
 function pageviewsUrl({ startAt, endAt, unit }) {

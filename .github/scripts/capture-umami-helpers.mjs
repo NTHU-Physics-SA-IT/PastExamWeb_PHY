@@ -23,9 +23,26 @@ function round(value, places = 3) {
   return Math.round(value * factor) / factor;
 }
 
-function safeDateEnum(value) {
+export function safeDateEnum(value) {
   if (value == null || value === "") return "missing";
   return SAFE_DATE_ENUM.test(value) ? value : "other-redacted";
+}
+
+const DATE_FILTER_LABELS = new Map([
+  ["last 24 hours", "24hour"],
+  ["last 7 days", "7day"],
+  ["last 30 days", "30day"],
+  ["last 90 days", UMAMI_SCREENSHOT_DATE],
+  ["today", "0day"],
+  ["this week", "0week"],
+  ["this month", "0month"],
+  ["this year", "0year"],
+]);
+
+export function classifyDateFilterLabel(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().replace(/\s+/g, " ").toLowerCase();
+  return DATE_FILTER_LABELS.get(normalized) ?? null;
 }
 
 function safeUnit(value) {
@@ -40,23 +57,6 @@ function parseTimestamp(value) {
   if (numeric > 1e9 && numeric < 1e11) numeric *= 1000;
   const date = new Date(numeric);
   return Number.isFinite(+date) ? date : null;
-}
-
-export function normalizeRedirectedDateUrl(requestedUrl, redirectedUrl) {
-  const requested = new URL(requestedUrl);
-  const redirected = new URL(redirectedUrl);
-
-  if (redirected.origin !== requested.origin) {
-    throw new Error("Umami share redirect changed origin.");
-  }
-
-  const previousDate = safeDateEnum(redirected.searchParams.get("date"));
-  if (previousDate === UMAMI_SCREENSHOT_DATE) {
-    return { needsNavigation: false, previousDate, url: redirected };
-  }
-
-  redirected.searchParams.set("date", UMAMI_SCREENSHOT_DATE);
-  return { needsNavigation: true, previousDate, url: redirected };
 }
 
 export function evaluatePageviewsRange(
