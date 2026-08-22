@@ -36,6 +36,9 @@
 - 手動執行：支援 `workflow_dispatch`。
 - 不會因一般 push 自動執行。
 - 擷取區間：最近 90 天。
+- 公開分享頁 redirect 完成後，automation 會透過頁面的日期篩選器套用
+  `Last 90 days`；不會依賴 redirect 保留原始 query string。
+- 截圖前會確認 Overview pageviews 回應使用日粒度且涵蓋約 90 天；驗證失敗時 workflow 會停止，不會更新正式圖片。
 - 固定 viewport：`1600 × 1400`，device scale factor 為 2。
 - 截圖只保留 Overview 統計卡片與主要圖表，並隱藏導覽列及帳號相關控制項；不會把完整頁面或診斷 HTML 上傳為 artifact。
 - 圖片採用無損 PNG 壓縮，不降低文字解析度。

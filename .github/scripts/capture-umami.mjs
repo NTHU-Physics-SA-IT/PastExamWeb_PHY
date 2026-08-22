@@ -2,11 +2,24 @@ import { chromium } from "@playwright/test";
 import sharp from "sharp";
 import { mkdir, readFile, stat } from "node:fs/promises";
 
+import {
+  classifyDateFilterLabel,
+  evaluatePageviewsRange,
+  pageviewsEndpointFingerprint,
+  safeDateEnum,
+  UMAMI_SCREENSHOT_DATE,
+} from "./capture-umami-helpers.mjs";
+
 const shareUrl = process.env.UMAMI_SHARE_URL?.trim();
 if (!shareUrl)
   throw new Error("UMAMI_SHARE_URL was not provided after preflight.");
 
-const targetUrl = new URL(shareUrl);
+let targetUrl;
+try {
+  targetUrl = new URL(shareUrl);
+} catch {
+  throw new Error("UMAMI_SHARE_URL is not a valid URL.");
+}
 if (
   targetUrl.protocol !== "https:" ||
   !targetUrl.hostname ||
@@ -18,7 +31,7 @@ if (
     "UMAMI_SHARE_URL must be an HTTPS public share-page URL without embedded credentials.",
   );
 }
-targetUrl.searchParams.set("date", "90day");
+targetUrl.searchParams.set("date", UMAMI_SCREENSHOT_DATE);
 
 const outputDirectory = "dist/umami-assets";
 const deviceScaleFactor = 2;
@@ -90,6 +103,152 @@ async function findKpiBox(page, chartBox) {
   }, chartBox);
 }
 
+async function navigateSafely(page, url, phase) {
+  let response;
+  try {
+    response = await page.goto(url.toString(), {
+      waitUntil: "domcontentloaded",
+      timeout: 30000,
+    });
+  } catch {
+    throw new Error(`Umami ${phase} navigation failed.`);
+  }
+
+  if (!response) {
+    throw new Error(`Umami ${phase} navigation returned no response.`);
+  }
+  if (response.status() >= 400) {
+    throw new Error(
+      `Umami ${phase} navigation returned HTTP ${response.status()}.`,
+    );
+  }
+  return response;
+}
+
+async function assertPublicSharePage(page) {
+  let finalUrl;
+  try {
+    finalUrl = new URL(page.url());
+  } catch {
+    throw new Error("Umami share page returned an invalid final URL.");
+  }
+
+  const loginForm = page.locator('input[type="password"]:visible');
+  if (
+    finalUrl.origin !== targetUrl.origin ||
+    finalUrl.pathname.toLowerCase().includes("login") ||
+    (await loginForm.count()) > 0
+  ) {
+    throw new Error(
+      "Umami share page redirected away from the configured public dashboard.",
+    );
+  }
+  return finalUrl;
+}
+
+async function findDateFilterControl(page, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const candidates = page.locator(
+      'button:visible,[role="combobox"]:visible',
+    );
+    const count = Math.min(await candidates.count(), 120);
+    for (let index = 0; index < count; index += 1) {
+      const candidate = candidates.nth(index);
+      const date = classifyDateFilterLabel(
+        await candidate.innerText().catch(() => ""),
+      );
+      if (date) return { date, locator: candidate };
+    }
+    await page.waitForTimeout(100);
+  }
+  throw new Error("Unable to locate the Umami date filter safely.");
+}
+
+async function find90DayOption(page, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const candidates = page.locator(
+      '[role="option"]:visible,[role="menuitem"]:visible,' +
+        '[role="menuitemradio"]:visible,button:visible',
+    );
+    const count = Math.min(await candidates.count(), 160);
+    for (let index = 0; index < count; index += 1) {
+      const candidate = candidates.nth(index);
+      const date = classifyDateFilterLabel(
+        await candidate.innerText().catch(() => ""),
+      );
+      if (date === UMAMI_SCREENSHOT_DATE) return candidate;
+    }
+    await page.waitForTimeout(100);
+  }
+  throw new Error("Unable to locate the Umami 90-day date option safely.");
+}
+
+async function select90DayRange(page) {
+  try {
+    const control = await findDateFilterControl(page);
+    if (control.date === UMAMI_SCREENSHOT_DATE) return;
+
+    await control.locator.click();
+    const option = await find90DayOption(page);
+    await option.click();
+  } catch {
+    throw new Error("Unable to select the Umami 90-day date range safely.");
+  }
+}
+
+function observeExpectedPageviewsRange(page) {
+  let matchingEvidence = null;
+  let lastEvidence = null;
+  let endpointFingerprint = null;
+
+  const onResponse = (response) => {
+    const evidence = evaluatePageviewsRange(
+      response.url(),
+      response.status(),
+    );
+    if (!evidence.relevant) return;
+    const fingerprint = pageviewsEndpointFingerprint(response.url());
+    if (
+      !fingerprint ||
+      (endpointFingerprint && fingerprint !== endpointFingerprint)
+    ) {
+      return;
+    }
+    endpointFingerprint ??= fingerprint;
+    lastEvidence = evidence;
+    if (evidence.valid) matchingEvidence = evidence;
+  };
+  page.on("response", onResponse);
+
+  return {
+    async waitForMatch(timeoutMs = 30000) {
+      const deadline = Date.now() + timeoutMs;
+      while (!matchingEvidence && Date.now() < deadline) {
+        await page.waitForTimeout(100);
+      }
+      if (matchingEvidence) return matchingEvidence;
+
+      if (!lastEvidence) {
+        throw new Error(
+          "Umami 90-day validation failed: no pageviews response observed.",
+        );
+      }
+      throw new Error(
+        `Umami 90-day validation failed: ${lastEvidence.reason}; HTTP ${lastEvidence.status}; unit ${lastEvidence.unit}; span ${lastEvidence.spanDays} days.`,
+      );
+    },
+    reset() {
+      matchingEvidence = null;
+      lastEvidence = null;
+    },
+    stop() {
+      page.off("response", onResponse);
+    },
+  };
+}
+
 async function capture(theme, output) {
   const context = await browser.newContext({
     viewport: { width: 1600, height: 1400 },
@@ -105,34 +264,40 @@ async function capture(theme, output) {
   );
 
   const page = await context.newPage();
+  const rangeObserver = observeExpectedPageviewsRange(page);
   let pageErrorCount = 0;
   page.on("pageerror", () => {
     pageErrorCount += 1;
   });
 
   try {
-    const response = await page.goto(targetUrl.toString(), {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
-    });
-
-    if (!response)
-      throw new Error("Umami page returned no navigation response.");
-    if (response.status() >= 400) {
-      throw new Error(`Umami page returned HTTP ${response.status()}.`);
+    const initialResponse = await navigateSafely(
+      page,
+      targetUrl,
+      "initial",
+    );
+    const redirectedUrl = await assertPublicSharePage(page);
+    const redirectedDate = redirectedUrl.searchParams.get("date");
+    if (redirectedDate !== UMAMI_SCREENSHOT_DATE) {
+      console.log(
+        `Selecting Umami date after redirect; previous date ${safeDateEnum(redirectedDate)}.`,
+      );
+      rangeObserver.reset();
+      await select90DayRange(page);
     }
 
-    const finalUrl = new URL(page.url());
-    const loginForm = page.locator('input[type="password"]:visible');
-    if (
-      finalUrl.origin !== targetUrl.origin ||
-      finalUrl.pathname.toLowerCase().includes("login") ||
-      (await loginForm.count()) > 0
-    ) {
+    const rangeEvidence = await rangeObserver.waitForMatch();
+    const finalUrl = await assertPublicSharePage(page);
+    const finalDate = finalUrl.searchParams.get("date");
+    if (finalDate !== UMAMI_SCREENSHOT_DATE) {
       throw new Error(
-        "Umami share page redirected away from the configured public dashboard.",
+        `Umami final date validation failed: expected ${UMAMI_SCREENSHOT_DATE}; received ${finalDate ? "other-redacted" : "missing"}.`,
       );
     }
+
+    console.log(
+      `Confirmed Umami pageviews range; HTTP ${rangeEvidence.status}; unit ${rangeEvidence.unit}; span ${rangeEvidence.spanDays} days.`,
+    );
 
     await page.addStyleTag({
       content: `
@@ -245,10 +410,11 @@ async function capture(theme, output) {
 
     const bytes = await verifyPng(output);
     console.log(
-      `Saved ${theme} screenshot (${bytes} bytes); HTTP ${response.status()}; page errors ${pageErrorCount}.`,
+      `Saved ${theme} screenshot (${bytes} bytes); HTTP ${initialResponse.status()}; page errors ${pageErrorCount}.`,
     );
     return await readFile(output);
   } finally {
+    rangeObserver.stop();
     await context.close();
   }
 }
