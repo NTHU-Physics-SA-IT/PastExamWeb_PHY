@@ -241,7 +241,7 @@ def test_model_and_manifest_define_named_nullable_unique_constraint() -> None:
 
     assert column.nullable is True
     assert constraints[CONSTRAINT_NAME] == ("created_archive_id",)
-    assert HEAD_SCHEMA_REVISION == "f3a7c1e9d5b2"
+    assert HEAD_SCHEMA_REVISION == "c8e4a1f7b2d9"
 
     source_metadata = metadata_for_revision(PREVIOUS_REVISION)
     head_metadata = metadata_for_revision(NEW_REVISION)

@@ -24,13 +24,17 @@ from app.db.migration_safety import (
     revision_graph,
     safe_error,
 )
+from app.db.schema_manifests.registry import (
+    HEAD_SCHEMA_REVISION,
+    PREVIOUS_HEAD_SCHEMA_REVISION,
+)
 from app.db.test_database_guard import (
     validate_connected_test_database,
     validate_test_database_target,
 )
 
 MERGED_HEAD = "b4d6f8a2c1e3"
-CURRENT_HEAD = "f3a7c1e9d5b2"
+CURRENT_HEAD = PREVIOUS_HEAD_SCHEMA_REVISION
 E6_REVISION = "e6a1b3c5d7f9"
 E8_REVISION = "e8a4c1d7b2f6"
 COORDINATION_SIBLING = "a9c2e5f7b1d4"
@@ -661,7 +665,15 @@ def test_unknown_and_multiple_ledger_revisions_fail(
 
 def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
     script, _ = revision_graph()
-    assert script.get_revision(head_revision()).down_revision == MERGED_HEAD
+    assert head_revision() == HEAD_SCHEMA_REVISION
+    assert (
+        script.get_revision(HEAD_SCHEMA_REVISION).down_revision
+        == PREVIOUS_HEAD_SCHEMA_REVISION
+    )
+    assert (
+        script.get_revision(PREVIOUS_HEAD_SCHEMA_REVISION).down_revision
+        == MERGED_HEAD
+    )
     merge_parents = script.get_revision(MERGED_HEAD).down_revision
     assert merge_parents == (COORDINATION_SIBLING, MAIN_SIBLING)
     previous_revision = MAIN_SIBLING

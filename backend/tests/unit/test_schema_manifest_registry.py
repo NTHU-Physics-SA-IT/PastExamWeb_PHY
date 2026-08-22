@@ -6,7 +6,7 @@ from sqlalchemy import UniqueConstraint
 from sqlalchemy.dialects.sqlite import dialect as sqlite_dialect
 from sqlalchemy.schema import CreateTable
 
-from app.db.migration_safety import metadata_for_revision
+from app.db.migration_safety import _normalize_predicate, metadata_for_revision
 from app.db.schema_manifests import (
     HEAD_SCHEMA_REVISION,
     get_manifest_spec,
@@ -16,7 +16,7 @@ from app.models.models import ArchiveSubmission, User
 
 
 def test_reviewed_manifest_registry_has_required_revisions() -> None:
-    assert HEAD_SCHEMA_REVISION == "f3a7c1e9d5b2"
+    assert HEAD_SCHEMA_REVISION == "c8e4a1f7b2d9"
     assert reviewed_manifest_revisions() == (
         "c4d8e2f1a6b9",
         "a4c7e9d2f6b1",
@@ -36,6 +36,7 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
         "a9c4e7b2d6f1",
         "b4d6f8a2c1e3",
         "f3a7c1e9d5b2",
+        "c8e4a1f7b2d9",
     )
     assert get_manifest_spec("d4b7e2a9c6f1").metadata_variant == (
         "pre_about_us_entries"
@@ -49,13 +50,21 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
     assert get_manifest_spec("a9c2e5f7b1d4").metadata_variant == (
         "coordination_sibling_head"
     )
-    assert get_manifest_spec("a9c4e7b2d6f1").metadata_variant == (
-        "main_sibling_head"
-    )
+    assert get_manifest_spec("a9c4e7b2d6f1").metadata_variant == ("main_sibling_head")
     assert get_manifest_spec("b4d6f8a2c1e3").metadata_variant == (
         "pre_wish_optional_semester"
     )
-    assert get_manifest_spec("f3a7c1e9d5b2").metadata_variant == "head"
+    assert get_manifest_spec("f3a7c1e9d5b2").metadata_variant == (
+        "pre_archive_report_active_pending_uniqueness"
+    )
+    assert get_manifest_spec("c8e4a1f7b2d9").metadata_variant == "head"
+
+
+def test_compound_partial_index_predicate_normalizes_postgresql_parentheses() -> None:
+    expected = "status = 'pending' AND deleted_at IS NULL"
+    reflected = "((status)::text = 'pending'::text) AND (deleted_at IS NULL)"
+
+    assert _normalize_predicate(reflected) == _normalize_predicate(expected)
 
 
 def test_recovery_manifest_is_versioned_and_revision_bound() -> None:
@@ -73,7 +82,8 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     column_name = "owner_self_delete_consumed"
     previous_status_column = "previous_status"
     constraint_name = "uq_archive_submissions_created_archive_id"
-    head = metadata_for_revision("f3a7c1e9d5b2")
+    head = metadata_for_revision("c8e4a1f7b2d9")
+    previous_archive_report_head = metadata_for_revision("f3a7c1e9d5b2")
     previous_wish_head = metadata_for_revision("b4d6f8a2c1e3")
     coordination_head = metadata_for_revision("a9c2e5f7b1d4")
     main_head = metadata_for_revision("a9c4e7b2d6f1")
@@ -92,6 +102,7 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     a4 = metadata_for_revision("a4c7e9d2f6b1")
 
     assert head is not None
+    assert previous_archive_report_head is not None
     assert previous_wish_head is not None
     assert head.tables["archive_wishes"].c.academic_year.nullable is True
     assert previous_wish_head.tables["archive_wishes"].c.academic_year.nullable is False
@@ -106,10 +117,7 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     assert "source_wish_id" in head.tables["archive_submissions"].c
     assert "source_wish_id" in main_head.tables["archive_submissions"].c
     assert "source_wish_id" not in coordination_head.tables["archive_submissions"].c
-    assert (
-        "source_wish_id"
-        not in pre_sibling_branches.tables["archive_submissions"].c
-    )
+    assert "source_wish_id" not in pre_sibling_branches.tables["archive_submissions"].c
     assert pre_about_us is not None
     assert "about_us_entries" in head.tables
     assert "about_us_entries" in pre_sibling_branches.tables
@@ -149,15 +157,13 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
         not in pre_sibling_branches.tables["course_category_configs"].c
     )
     assert (
-        "pre_delete_is_active"
-        in coordination_head.tables["course_category_configs"].c
+        "pre_delete_is_active" in coordination_head.tables["course_category_configs"].c
     )
-    assert "pre_delete_is_active" in pre_course_submission_lifecycle.tables[
-        "course_category_configs"
-    ].c
-    assert "pre_delete_is_active" not in main_head.tables[
-        "course_category_configs"
-    ].c
+    assert (
+        "pre_delete_is_active"
+        in pre_course_submission_lifecycle.tables["course_category_configs"].c
+    )
+    assert "pre_delete_is_active" not in main_head.tables["course_category_configs"].c
     assert (
         "pre_delete_is_active" not in pre_about_us.tables["course_category_configs"].c
     )
@@ -191,6 +197,36 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
         and tuple(constraint.columns.keys()) == ("created_archive_id",)
         for constraint in head.tables["archive_submissions"].constraints
     )
+    current_pending_index = next(
+        index
+        for index in head.tables["archive_reports"].indexes
+        if index.name == "uq_archive_reports_pending_reporter_archive"
+    )
+    previous_pending_index = next(
+        index
+        for index in previous_archive_report_head.tables["archive_reports"].indexes
+        if index.name == "uq_archive_reports_pending_reporter_archive"
+    )
+    older_pending_index = next(
+        index
+        for index in a7.tables["archive_reports"].indexes
+        if index.name == "uq_archive_reports_pending_reporter_archive"
+    )
+    current_predicate = str(
+        current_pending_index.dialect_options["postgresql"]["where"]
+    ).lower()
+    previous_predicate = str(
+        previous_pending_index.dialect_options["postgresql"]["where"]
+    ).lower()
+    older_predicate = str(
+        older_pending_index.dialect_options["postgresql"]["where"]
+    ).lower()
+    assert "status = 'pending'" in current_predicate
+    assert "deleted_at is null" in current_predicate
+    assert "status = 'pending'" in previous_predicate
+    assert "deleted_at" not in previous_predicate
+    assert "status = 'pending'" in older_predicate
+    assert "deleted_at" not in older_predicate
     assert any(
         isinstance(constraint, UniqueConstraint)
         and constraint.name == "uq_users_oauth_provider_sub"
@@ -253,7 +289,7 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     )
 
     # Building older variants must never mutate current SQLModel metadata.
-    rebuilt_head = metadata_for_revision("f3a7c1e9d5b2")
+    rebuilt_head = metadata_for_revision("c8e4a1f7b2d9")
     assert rebuilt_head is not None
     assert column_name in rebuilt_head.tables["archive_submissions"].c
     assert previous_status_column in rebuilt_head.tables["archive_submissions"].c

@@ -1175,7 +1175,7 @@ class ArchiveReport(SQLModel, table=True):
             "reporter_user_id",
             "archive_id",
             unique=True,
-            postgresql_where=text("status = 'pending'"),
+            postgresql_where=text("status = 'pending' AND deleted_at IS NULL"),
         ),
         Index("ix_archive_reports_status_created", "status", "created_at"),
     )

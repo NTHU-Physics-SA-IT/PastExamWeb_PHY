@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy import delete, func, text
 from sqlmodel import select
 
+from app.api.services import reports as reports_service
 from app.main import app
 from app.models.models import (
     Archive,
@@ -17,7 +18,7 @@ from app.models.models import (
     SubmissionStatus,
     UserRoles,
 )
-from app.services import archive_lifecycle_locks
+from app.services import archive_lifecycle_locks, archive_report_uniqueness
 from app.services.archive_lifecycle_locks import LifecycleResourceClass
 from app.utils.auth import get_current_user
 
@@ -103,9 +104,7 @@ async def _cleanup_context(session_maker, *, course_id: int, archive_id: int):
             )
         )
         await session.execute(
-            delete(ArchiveReport).where(
-                ArchiveReport.archive_id_snapshot == archive_id
-            )
+            delete(ArchiveReport).where(ArchiveReport.archive_id_snapshot == archive_id)
         )
         await session.execute(
             delete(ArchiveSubmission).where(
@@ -165,6 +164,72 @@ async def _run_two_request_lock_race(
     )
 
 
+async def _run_two_request_uniqueness_race(
+    *,
+    monkeypatch,
+    first_request,
+    second_request,
+):
+    first_locked = asyncio.Event()
+    release_first = asyncio.Event()
+    second_attempted = asyncio.Event()
+    call_count = 0
+    scopes: list[str | None] = []
+    original_acquire = archive_report_uniqueness.acquire_archive_report_uniqueness_mutex
+
+    async def observed_acquire(
+        db,
+        *,
+        reporter_user_id: int | None,
+        archive_id: int | None,
+    ):
+        nonlocal call_count
+        call_count += 1
+        call_number = call_count
+        if call_number == 1:
+            scope = await original_acquire(
+                db,
+                reporter_user_id=reporter_user_id,
+                archive_id=archive_id,
+            )
+            scopes.append(scope)
+            first_locked.set()
+            await asyncio.wait_for(release_first.wait(), timeout=5)
+            return scope
+        if call_number == 2:
+            second_attempted.set()
+        scope = await original_acquire(
+            db,
+            reporter_user_id=reporter_user_id,
+            archive_id=archive_id,
+        )
+        scopes.append(scope)
+        return scope
+
+    monkeypatch.setattr(
+        archive_report_uniqueness,
+        "acquire_archive_report_uniqueness_mutex",
+        observed_acquire,
+    )
+    monkeypatch.setattr(
+        reports_service,
+        "acquire_archive_report_uniqueness_mutex",
+        observed_acquire,
+    )
+    first_task = asyncio.create_task(first_request())
+    await asyncio.wait_for(first_locked.wait(), timeout=5)
+    second_task = asyncio.create_task(second_request())
+    await asyncio.wait_for(second_attempted.wait(), timeout=5)
+    release_first.set()
+    responses = await asyncio.wait_for(
+        asyncio.gather(first_task, second_task),
+        timeout=10,
+    )
+    assert len(scopes) == 2
+    assert scopes[0] == scopes[1]
+    return responses
+
+
 @pytest.mark.asyncio
 async def test_archive_report_creation_auth_validation_duplicate_and_notification(
     client, session_maker, make_user
@@ -215,9 +280,7 @@ async def test_archive_report_creation_auth_validation_duplicate_and_notificatio
                 json={"report_reason": "file_unavailable_or_corrupt"},
             )
         ).status_code == 409
-        assert (
-            await client.get(f"{path}/pending")
-        ).json()["id"] == body["id"]
+        assert (await client.get(f"{path}/pending")).json()["id"] == body["id"]
 
         async with session_maker() as session:
             notifications = list(
@@ -380,9 +443,7 @@ async def test_archive_report_review_optional_takedown_is_atomic_and_non_destruc
     path = f"/reports/courses/{course.id}/archives/{archive.id}"
     try:
         app.dependency_overrides[get_current_user] = _override_user(reporter.id)
-        created = await client.post(
-            path, json={"report_reason": "metadata_mismatch"}
-        )
+        created = await client.post(path, json={"report_reason": "metadata_mismatch"})
         report_id = created.json()["id"]
         assert (await client.get("/reports/admin/archives")).status_code == 403
 
@@ -418,9 +479,7 @@ async def test_archive_report_review_optional_takedown_is_atomic_and_non_destruc
         )
         async with session_maker() as session:
             rolled_back_report = await session.get(ArchiveReport, report_id)
-            rolled_back_submission = await session.get(
-                ArchiveSubmission, submission.id
-            )
+            rolled_back_submission = await session.get(ArchiveSubmission, submission.id)
             assert rolled_back_report.status == "pending"
             assert rolled_back_submission.status == SubmissionStatus.APPROVED
 
@@ -465,8 +524,7 @@ async def test_archive_report_review_optional_takedown_is_atomic_and_non_destruc
             result = await session.scalar(
                 select(PersonalNotification).where(
                     PersonalNotification.user_id == reporter.id,
-                    PersonalNotification.notification_type
-                    == "archive_report_result",
+                    PersonalNotification.notification_type == "archive_report_result",
                     PersonalNotification.source_id == report_id,
                 )
             )
@@ -497,7 +555,9 @@ async def test_archive_report_concurrent_create_and_review_have_single_winner(
         )
         assert sorted(response.status_code for response in responses) == [201, 409]
         report_id = next(
-            response.json()["id"] for response in responses if response.status_code == 201
+            response.json()["id"]
+            for response in responses
+            if response.status_code == 201
         )
 
         app.dependency_overrides[get_current_user] = _override_user(
@@ -515,23 +575,23 @@ async def test_archive_report_concurrent_create_and_review_have_single_winner(
         )
         assert sorted(response.status_code for response in reviews) == [200, 409]
         async with session_maker() as session:
-            assert int(
-                await session.scalar(
-                    select(func.count(ArchiveReport.id)).where(
-                        ArchiveReport.archive_id_snapshot == archive.id
+            assert (
+                int(
+                    await session.scalar(
+                        select(func.count(ArchiveReport.id)).where(
+                            ArchiveReport.archive_id_snapshot == archive.id
+                        )
                     )
+                    or 0
                 )
-                or 0
-            ) == 1
-            unchanged_submission = await session.get(
-                ArchiveSubmission, submission.id
+                == 1
             )
+            unchanged_submission = await session.get(ArchiveSubmission, submission.id)
             assert unchanged_submission.status == SubmissionStatus.APPROVED
             result = await session.scalar(
                 select(PersonalNotification).where(
                     PersonalNotification.user_id == reporter.id,
-                    PersonalNotification.notification_type
-                    == "archive_report_result",
+                    PersonalNotification.notification_type == "archive_report_result",
                     PersonalNotification.source_id == report_id,
                 )
             )
@@ -606,8 +666,7 @@ async def test_archive_report_review_accepts_missing_or_blank_admin_response(
             )
             assert len(notifications) == 2
             assert all(
-                "管理員答覆：未提供答覆" in item.message
-                for item in notifications
+                "管理員答覆：未提供答覆" in item.message for item in notifications
             )
     finally:
         app.dependency_overrides.pop(get_current_user, None)
@@ -1388,6 +1447,307 @@ async def test_two_archive_reports_reverse_input_lock_in_numeric_order(
             asyncio.gather(first_task, second_task),
             timeout=10,
         )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_context(
+            session_maker,
+            course_id=course.id,
+            archive_id=archive.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_trashed_pending_report_allows_replacement_and_blocks_old_restore(
+    client, session_maker, make_user
+):
+    reporter = await make_user(name=f"replacement-reporter-{uuid.uuid4().hex[:8]}")
+    requester = await make_user(name=f"replacement-requester-{uuid.uuid4().hex[:8]}")
+    admin = await make_user(
+        name=f"replacement-admin-{uuid.uuid4().hex[:8]}",
+        is_admin=True,
+    )
+    course, archive, _ = await _create_archive_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    path = f"/reports/courses/{course.id}/archives/{archive.id}"
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(reporter.id)
+        first = await client.post(path, json={"report_reason": "metadata_mismatch"})
+        assert first.status_code == 201
+
+        app.dependency_overrides[get_current_user] = _override_user(
+            admin.id,
+            is_admin=True,
+        )
+        assert (
+            await client.delete(f"/reports/admin/archives/{first.json()['id']}")
+        ).status_code == 200
+
+        app.dependency_overrides[get_current_user] = _override_user(reporter.id)
+        replacement = await client.post(
+            path,
+            json={"report_reason": "file_unavailable_or_corrupt"},
+        )
+        assert replacement.status_code == 201
+
+        app.dependency_overrides[get_current_user] = _override_user(
+            admin.id,
+            is_admin=True,
+        )
+        restore = await client.post(
+            "/trash/restore",
+            json={"item_type": "archive_report", "item_id": first.json()["id"]},
+        )
+        assert restore.status_code == 409
+        assert restore.json()["detail"] == {
+            "code": "archive_report_restore_pending_conflict",
+            "message": "Another active pending report prevents restoration.",
+            "reload_required": False,
+        }
+
+        async with session_maker() as session:
+            first_stored = await session.get(ArchiveReport, first.json()["id"])
+            replacement_stored = await session.get(
+                ArchiveReport,
+                replacement.json()["id"],
+            )
+            assert first_stored is not None
+            assert first_stored.deleted_at is not None
+            assert replacement_stored is not None
+            assert replacement_stored.deleted_at is None
+            assert replacement_stored.status == "pending"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_context(
+            session_maker,
+            course_id=course.id,
+            archive_id=archive.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_archive_report_creates_have_one_active_winner(
+    client, session_maker, make_user, monkeypatch
+):
+    actor = await make_user(
+        name=f"create-race-admin-{uuid.uuid4().hex[:8]}",
+        is_admin=True,
+    )
+    course, archive, _ = await _create_archive_context(
+        session_maker,
+        requester_id=actor.id,
+    )
+    path = f"/reports/courses/{course.id}/archives/{archive.id}"
+    app.dependency_overrides[get_current_user] = _override_user(
+        actor.id,
+        is_admin=True,
+    )
+    try:
+
+        async def first_create():
+            return await client.post(
+                path,
+                json={"report_reason": "metadata_mismatch"},
+            )
+
+        async def second_create():
+            return await client.post(
+                path,
+                json={"report_reason": "duplicate_archive"},
+            )
+
+        responses = await _run_two_request_uniqueness_race(
+            monkeypatch=monkeypatch,
+            first_request=first_create,
+            second_request=second_create,
+        )
+
+        assert [response.status_code for response in responses] == [201, 409]
+        assert responses[1].json()["detail"]["code"] == (
+            "archive_report_pending_conflict"
+        )
+        async with session_maker() as session:
+            active_count = await session.scalar(
+                select(func.count(ArchiveReport.id)).where(
+                    ArchiveReport.reporter_user_id == actor.id,
+                    ArchiveReport.archive_id == archive.id,
+                    ArchiveReport.status == "pending",
+                    ArchiveReport.deleted_at.is_(None),
+                )
+            )
+            assert active_count == 1
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_context(
+            session_maker,
+            course_id=course.id,
+            archive_id=archive.id,
+        )
+
+
+@pytest.mark.parametrize("create_first", [True, False])
+@pytest.mark.asyncio
+async def test_archive_report_create_and_restore_serialize_on_active_scope(
+    client, session_maker, make_user, monkeypatch, create_first
+):
+    actor = await make_user(
+        name=f"create-restore-admin-{uuid.uuid4().hex[:8]}",
+        is_admin=True,
+    )
+    course, archive, _ = await _create_archive_context(
+        session_maker,
+        requester_id=actor.id,
+    )
+    path = f"/reports/courses/{course.id}/archives/{archive.id}"
+    app.dependency_overrides[get_current_user] = _override_user(
+        actor.id,
+        is_admin=True,
+    )
+    try:
+        original = await client.post(
+            path,
+            json={"report_reason": "metadata_mismatch"},
+        )
+        assert original.status_code == 201
+        original_id = original.json()["id"]
+        assert (
+            await client.delete(f"/reports/admin/archives/{original_id}")
+        ).status_code == 200
+
+        async def create_replacement():
+            return await client.post(
+                path,
+                json={"report_reason": "duplicate_archive"},
+            )
+
+        async def restore_original():
+            return await client.post(
+                "/trash/restore",
+                json={"item_type": "archive_report", "item_id": original_id},
+            )
+
+        requests = (
+            (create_replacement, restore_original)
+            if create_first
+            else (restore_original, create_replacement)
+        )
+        responses = await _run_two_request_uniqueness_race(
+            monkeypatch=monkeypatch,
+            first_request=requests[0],
+            second_request=requests[1],
+        )
+
+        expected_statuses = [201, 409] if create_first else [200, 409]
+        assert [response.status_code for response in responses] == (expected_statuses)
+        assert responses[1].json()["detail"]["code"] == (
+            "archive_report_restore_pending_conflict"
+            if create_first
+            else "archive_report_pending_conflict"
+        )
+        async with session_maker() as session:
+            reports = (
+                (
+                    await session.execute(
+                        select(ArchiveReport)
+                        .where(
+                            ArchiveReport.reporter_user_id == actor.id,
+                            ArchiveReport.archive_id_snapshot == archive.id,
+                        )
+                        .order_by(ArchiveReport.id.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(reports) == (2 if create_first else 1)
+            assert sum(report.deleted_at is None for report in reports) == 1
+            original_stored = next(
+                report for report in reports if report.id == original_id
+            )
+            if create_first:
+                assert original_stored.deleted_at is not None
+            else:
+                assert original_stored.deleted_at is None
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_context(
+            session_maker,
+            course_id=course.id,
+            archive_id=archive.id,
+        )
+
+
+@pytest.mark.parametrize("trash_first", [True, False])
+@pytest.mark.asyncio
+async def test_archive_report_trash_and_create_serialize_on_active_scope(
+    client, session_maker, make_user, monkeypatch, trash_first
+):
+    actor = await make_user(
+        name=f"trash-create-admin-{uuid.uuid4().hex[:8]}",
+        is_admin=True,
+    )
+    course, archive, _ = await _create_archive_context(
+        session_maker,
+        requester_id=actor.id,
+    )
+    path = f"/reports/courses/{course.id}/archives/{archive.id}"
+    app.dependency_overrides[get_current_user] = _override_user(
+        actor.id,
+        is_admin=True,
+    )
+    try:
+        original = await client.post(
+            path,
+            json={"report_reason": "metadata_mismatch"},
+        )
+        assert original.status_code == 201
+        original_id = original.json()["id"]
+
+        async def trash_original():
+            return await client.delete(f"/reports/admin/archives/{original_id}")
+
+        async def create_replacement():
+            return await client.post(
+                path,
+                json={"report_reason": "duplicate_archive"},
+            )
+
+        requests = (
+            (trash_original, create_replacement)
+            if trash_first
+            else (create_replacement, trash_original)
+        )
+        responses = await _run_two_request_uniqueness_race(
+            monkeypatch=monkeypatch,
+            first_request=requests[0],
+            second_request=requests[1],
+        )
+
+        assert [response.status_code for response in responses] == (
+            [200, 201] if trash_first else [409, 200]
+        )
+        if not trash_first:
+            assert responses[0].json()["detail"]["code"] == (
+                "archive_report_pending_conflict"
+            )
+        async with session_maker() as session:
+            reports = (
+                (
+                    await session.execute(
+                        select(ArchiveReport).where(
+                            ArchiveReport.reporter_user_id == actor.id,
+                            ArchiveReport.archive_id_snapshot == archive.id,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert len(reports) == (2 if trash_first else 1)
+            assert sum(report.deleted_at is None for report in reports) == (
+                1 if trash_first else 0
+            )
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         await _cleanup_context(

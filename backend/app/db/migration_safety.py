@@ -53,6 +53,7 @@ COURSE_SUBMISSION_LIFECYCLE_CHECKS = {
     "ck_course_submissions_active_previous_status_null",
 }
 USER_OAUTH_IDENTITY_UNIQUE = "uq_users_oauth_provider_sub"
+ARCHIVE_REPORT_PENDING_UNIQUE = "uq_archive_reports_pending_reporter_archive"
 IDENTIFIER_TEXT_CAST = re.compile(
     r"\bcast\(\s*(?P<identifier>[a-z_]\w*(?:\.[a-z_]\w*)?)"
     r"\s+as\s+text\s*\)"
@@ -287,11 +288,30 @@ def _remove_wish_pool_and_bilingual_content(metadata: MetaData) -> None:
         table._columns.remove(table.c.body_en)
 
 
+def _restore_pre_archive_report_active_pending_uniqueness(
+    metadata: MetaData,
+) -> None:
+    report_table = metadata.tables["archive_reports"]
+    pending_indexes = [
+        index
+        for index in report_table.indexes
+        if index.name == ARCHIVE_REPORT_PENDING_UNIQUE
+    ]
+    if len(pending_indexes) != 1:
+        raise ValueError(
+            "Expected exactly one ArchiveReport active-pending unique index"
+        )
+    pending_indexes[0].dialect_options["postgresql"]["where"] = text(
+        "status = 'pending'"
+    )
+
+
 def _metadata_for_variant(variant: str) -> MetaData:
     metadata = head_metadata()
     if variant == "head":
         return metadata
     if variant not in {
+        "pre_archive_report_active_pending_uniqueness",
         "pre_wish_optional_semester",
         "main_sibling_head",
         "coordination_sibling_head",
@@ -310,6 +330,10 @@ def _metadata_for_variant(variant: str) -> MetaData:
         "pre_category_canonicalization",
     }:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
+
+    _restore_pre_archive_report_active_pending_uniqueness(metadata)
+    if variant == "pre_archive_report_active_pending_uniqueness":
+        return metadata
 
     if variant == "pre_wish_optional_semester":
         metadata.tables["archive_wishes"].c.academic_year.nullable = False
@@ -473,9 +497,28 @@ def _normalize_predicate(value: Any) -> str | None:
     # operators, literals, functions, and boolean structure remain visible.
     normalized = IDENTIFIER_TEXT_CAST.sub(r"\g<identifier>", normalized)
     normalized = re.sub(r"\(\(([^()]*)\)\)", r"(\1)", normalized)
-    normalized = re.sub(r"^\((.*)\)$", r"\1", normalized)
+    while normalized.startswith("(") and normalized.endswith(")"):
+        depth = 0
+        encloses_expression = True
+        for position, character in enumerate(normalized):
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+                if depth == 0 and position != len(normalized) - 1:
+                    encloses_expression = False
+                    break
+        if not encloses_expression or depth != 0:
+            break
+        normalized = normalized[1:-1].strip()
+    normalized = re.sub(r"\(([\w.]+)\)", r"\1", normalized)
     normalized = re.sub(
-        r"^\(([\w.]+)\)(?=\s*(?:=|<>|in|not))",
+        r"\(([\w.]+\s*(?:=|<>)\s*'[^']*')\)",
+        r"\1",
+        normalized,
+    )
+    normalized = re.sub(
+        r"\(([\w.]+\s+is\s+(?:not\s+)?null)\)",
         r"\1",
         normalized,
     )

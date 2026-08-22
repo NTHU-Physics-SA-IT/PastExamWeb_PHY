@@ -9,7 +9,11 @@ import sys
 from collections.abc import Sequence
 
 from app.db.audit.models import AuditMode, AuditRequest, AuditResult
-from app.db.audit.registry import ELIGIBILITY_AUDIT_ID, get_audit_adapter
+from app.db.audit.registry import (
+    ARCHIVE_REPORT_UNIQUENESS_AUDIT_ID,
+    ELIGIBILITY_AUDIT_ID,
+    get_audit_adapter,
+)
 from app.db.audit.runner import (
     AuditExecutionError,
     execute_audit,
@@ -24,8 +28,15 @@ def parser() -> argparse.ArgumentParser:
     )
     commands = root.add_subparsers(dest="command", required=True)
     run = commands.add_parser("run")
-    run.add_argument("--audit", required=True, choices=[ELIGIBILITY_AUDIT_ID])
-    run.add_argument("--version", type=int, default=4, choices=[1, 2, 3, 4])
+    run.add_argument(
+        "--audit",
+        required=True,
+        choices=[
+            ELIGIBILITY_AUDIT_ID,
+            ARCHIVE_REPORT_UNIQUENESS_AUDIT_ID,
+        ],
+    )
+    run.add_argument("--version", type=int, choices=[1, 2, 3, 4])
     run.add_argument(
         "--mode",
         required=True,
@@ -78,9 +89,14 @@ def _emit(result: AuditResult, output: str) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = parser().parse_args(argv)
     try:
+        audit_version = arguments.version
+        if audit_version is None:
+            audit_version = (
+                1 if arguments.audit == ARCHIVE_REPORT_UNIQUENESS_AUDIT_ID else 4
+            )
         request = AuditRequest(
             audit_id=arguments.audit,
-            audit_version=arguments.version,
+            audit_version=audit_version,
             mode=AuditMode(arguments.mode),
             expected_ledger=arguments.expected_ledger,
             repository_revision=_repository_revision(arguments.repository_revision),

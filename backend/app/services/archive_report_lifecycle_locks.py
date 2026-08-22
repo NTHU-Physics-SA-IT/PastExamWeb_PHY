@@ -43,6 +43,7 @@ class ArchiveReportMembershipFingerprint:
     report_id: int
     status: str
     deleted: bool
+    reporter_user_id: int | None
     archive_id: int | None
     report_course_id: int | None
     archive_submission_id: int | None
@@ -163,6 +164,7 @@ async def discover_archive_report_lifecycle_plan(
         report_id=report.id,
         status=_status_value(report),
         deleted=report.deleted_at is not None,
+        reporter_user_id=report.reporter_user_id,
         archive_id=report.archive_id,
         report_course_id=report.course_id,
         archive_submission_id=report.archive_submission_id,
@@ -226,6 +228,7 @@ async def _locked_fingerprint(
         report_id=report.id,
         status=_status_value(report),
         deleted=report.deleted_at is not None,
+        reporter_user_id=report.reporter_user_id,
         archive_id=report.archive_id,
         report_course_id=report.course_id,
         archive_submission_id=report.archive_submission_id,
