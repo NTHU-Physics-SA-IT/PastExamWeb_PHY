@@ -59,6 +59,17 @@ function parseTimestamp(value) {
   return Number.isFinite(+date) ? date : null;
 }
 
+export function pageviewsEndpointFingerprint(requestUrl) {
+  let parsed;
+  try {
+    parsed = new URL(requestUrl);
+  } catch {
+    return null;
+  }
+  if (!parsed.pathname.toLowerCase().includes("pageview")) return null;
+  return `${parsed.origin}${parsed.pathname}`;
+}
+
 export function evaluatePageviewsRange(
   requestUrl,
   responseStatus,
@@ -80,7 +91,7 @@ export function evaluatePageviewsRange(
 
   if (
     (expectedOrigin && parsed.origin !== expectedOrigin) ||
-    !/(?:^|\/)pageviews?(?:\/|$)/i.test(parsed.pathname)
+    !parsed.pathname.toLowerCase().includes("pageview")
   ) {
     return {
       relevant: false,
