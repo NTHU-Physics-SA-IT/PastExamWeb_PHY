@@ -10,6 +10,14 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout current protected main authority
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          path: trusted-main
+          persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+
       - name: Checkout immutable pull request base
         uses: actions/checkout@v7
         with:
@@ -25,13 +33,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           TRUSTED_ROOT: trusted-base
+          TRUSTED_MAIN_ROOT: trusted-main
+          TRUSTED_VERIFIER_APP_ID: ${{ vars.TRUSTED_GOVERNANCE_APP_ID || 0 }}
+          TRUSTED_RULESET_ID: ${{ vars.TRUSTED_INTEGRATION_RULESET_ID || 0 }}
+          TRUSTED_RULESET_DIGEST: ${{ vars.TRUSTED_INTEGRATION_RULESET_DIGEST }}
         run: |
           set -euo pipefail
 
           config="$TRUSTED_ROOT/.github/project-governance.json"
           resolver="$TRUSTED_ROOT/scripts/ci/project_governance.py"
 
-          if [[ -f "$config" && -f "$resolver" ]]; then
+          if [[ "$BASE_BRANCH" == "main" && -f "$config" && -f "$resolver" ]]; then
             python3 "$resolver" \
               --repository-root "$TRUSTED_ROOT" \
               validate-pr-base \
@@ -39,7 +51,7 @@ jobs:
             exit 0
           fi
 
-          if [[ -e "$config" || -e "$resolver" ]]; then
+          if [[ "$BASE_BRANCH" == "main" && ( -e "$config" || -e "$resolver" ) ]]; then
             echo "Trusted project governance is incomplete." >&2
             exit 2
           fi
@@ -54,17 +66,21 @@ jobs:
             exit 1
           fi
 
-          mapfile -t protected_coordination_branches < <(
-            gh api --paginate "repos/$REPOSITORY/branches" \
-              --jq '.[] | select(.protected == true) | .name | select(startswith("integration/"))'
-          )
-
-          if [[ "${#protected_coordination_branches[@]}" -ne 1 || \
-                "$BASE_BRANCH" != "${protected_coordination_branches[0]:-}" ]]; then
-            echo \
-              "Bootstrap requires the unique protected integration branch; received: $BASE_BRANCH" \
-              >&2
-            exit 1
+          trusted_validator="$TRUSTED_MAIN_ROOT/scripts/ci/trusted_governance_gate.py"
+          if [[ ! -f "$trusted_validator" || \
+                "$TRUSTED_VERIFIER_APP_ID" == "0" || \
+                "$TRUSTED_RULESET_ID" == "0" || \
+                -z "$TRUSTED_RULESET_DIGEST" ]]; then
+            echo "Trusted Activation authority is unavailable." >&2
+            exit 2
           fi
 
-          echo "Pull request base branch is allowed during governance bootstrap."
+          GITHUB_TOKEN="$GH_TOKEN" python3 "$trusted_validator" \
+            --api-url '${{ github.api_url }}' \
+            --repository "$REPOSITORY" \
+            --repository-root "$TRUSTED_MAIN_ROOT" \
+            validate-pr-base \
+            --base "$BASE_BRANCH" \
+            --expected-app-id "$TRUSTED_VERIFIER_APP_ID" \
+            --ruleset-id "$TRUSTED_RULESET_ID" \
+            --ruleset-digest "$TRUSTED_RULESET_DIGEST"

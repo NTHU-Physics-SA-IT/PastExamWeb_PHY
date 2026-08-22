@@ -1,0 +1,77 @@
+name: Trusted Coordination Ref Lifecycle
+
+run-name: >-
+  trusted-coordination ${{ inputs.operation }}
+  ${{ inputs.activation_id }} at ${{ inputs.expected_main_sha }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Exact trusted ref lifecycle operation
+        required: true
+        type: choice
+        options:
+          - issue
+          - retire
+          - replay-preflight
+      activation_id:
+        description: Exact UUIDv4 protected-main ledger identity
+        required: true
+        type: string
+      expected_main_sha:
+        description: Exact current protected-main SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  trusted_ref_lifecycle:
+    name: Operate ref through independent App
+    if: ${{ vars.TRUSTED_GOVERNANCE_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    environment: trusted-coordination-issuance
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout current protected main only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Create downscoped issuance App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ vars.TRUSTED_GOVERNANCE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TRUSTED_GOVERNANCE_APP_PRIVATE_KEY }}
+          permission-administration: read
+          permission-contents: write
+
+      - name: Validate immutable authority and operate exact ref
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          OPERATION: ${{ inputs.operation }}
+          ACTIVATION_ID: ${{ inputs.activation_id }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          EXPECTED_APP_ID: ${{ vars.TRUSTED_GOVERNANCE_APP_ID }}
+          EXPECTED_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          RULESET_ID: ${{ vars.TRUSTED_INTEGRATION_RULESET_ID }}
+          RULESET_DIGEST: ${{ vars.TRUSTED_INTEGRATION_RULESET_DIGEST }}
+        run: >-
+          python3 scripts/ci/trusted_governance_gate.py
+          --api-url '${{ github.api_url }}'
+          --repository '${{ github.repository }}'
+          --repository-root .
+          operate-ref
+          --operation "$OPERATION"
+          --activation-id "$ACTIVATION_ID"
+          --expected-main-sha "$EXPECTED_MAIN_SHA"
+          --expected-app-slug "$EXPECTED_APP_SLUG"
+          --expected-app-id "$EXPECTED_APP_ID"
+          --ruleset-id "$RULESET_ID"
+          --ruleset-digest "$RULESET_DIGEST"
