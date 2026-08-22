@@ -53,6 +53,7 @@ COURSE_SUBMISSION_LIFECYCLE_CHECKS = {
     "ck_course_submissions_active_previous_status_null",
 }
 USER_OAUTH_IDENTITY_UNIQUE = "uq_users_oauth_provider_sub"
+ARCHIVE_REPORT_PENDING_UNIQUE = "uq_archive_reports_pending_reporter_archive"
 IDENTIFIER_TEXT_CAST = re.compile(
     r"\bcast\(\s*(?P<identifier>[a-z_]\w*(?:\.[a-z_]\w*)?)"
     r"\s+as\s+text\s*\)"
@@ -292,6 +293,7 @@ def _metadata_for_variant(variant: str) -> MetaData:
     if variant == "head":
         return metadata
     if variant not in {
+        "pre_archive_report_active_pending_uniqueness",
         "pre_wish_optional_semester",
         "main_sibling_head",
         "coordination_sibling_head",
@@ -310,6 +312,18 @@ def _metadata_for_variant(variant: str) -> MetaData:
         "pre_category_canonicalization",
     }:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
+
+    if variant == "pre_archive_report_active_pending_uniqueness":
+        report_table = metadata.tables["archive_reports"]
+        pending_index = next(
+            index
+            for index in report_table.indexes
+            if index.name == ARCHIVE_REPORT_PENDING_UNIQUE
+        )
+        pending_index.dialect_options["postgresql"]["where"] = text(
+            "status = 'pending'"
+        )
+        return metadata
 
     if variant == "pre_wish_optional_semester":
         metadata.tables["archive_wishes"].c.academic_year.nullable = False

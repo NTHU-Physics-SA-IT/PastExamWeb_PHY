@@ -24,6 +24,7 @@ from app.db.audit.models import (
 )
 from app.db.audit.registry import (
     ABOUT_US_REVISION,
+    ARCHIVE_REPORT_UNIQUENESS_REVISION,
     BILINGUAL_COURSE_CATALOG_REVISION,
     BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
     CATEGORY_STATE_PRESERVATION_REVISION,
@@ -133,6 +134,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_POOL_REVISION,
         SIBLING_MERGE_REVISION,
         WISH_OPTIONAL_SEMESTER_REVISION,
+        ARCHIVE_REPORT_UNIQUENESS_REVISION,
     }
     owner_delete_column_condition = (
         """
@@ -172,6 +174,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_POOL_REVISION,
         SIBLING_MERGE_REVISION,
         WISH_OPTIONAL_SEMESTER_REVISION,
+        ARCHIVE_REPORT_UNIQUENESS_REVISION,
     }
     previous_status_column_condition = (
         """
@@ -205,6 +208,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_POOL_REVISION,
         SIBLING_MERGE_REVISION,
         WISH_OPTIONAL_SEMESTER_REVISION,
+        ARCHIVE_REPORT_UNIQUENESS_REVISION,
     }
     bilingual_catalog_condition = (
         """
@@ -247,6 +251,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_POOL_REVISION,
         SIBLING_MERGE_REVISION,
         WISH_OPTIONAL_SEMESTER_REVISION,
+        ARCHIVE_REPORT_UNIQUENESS_REVISION,
     }
     bilingual_snapshot_condition = (
         """
@@ -284,6 +289,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         COURSE_SUBMISSION_LIFECYCLE_REVISION,
         SIBLING_MERGE_REVISION,
         WISH_OPTIONAL_SEMESTER_REVISION,
+        ARCHIVE_REPORT_UNIQUENESS_REVISION,
     }
     category_state_snapshot_condition = (
         """
@@ -312,6 +318,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         COURSE_SUBMISSION_LIFECYCLE_REVISION,
         SIBLING_MERGE_REVISION,
         WISH_OPTIONAL_SEMESTER_REVISION,
+        ARCHIVE_REPORT_UNIQUENESS_REVISION,
     }
     course_submission_lifecycle_condition = (
         """
@@ -351,10 +358,15 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_POOL_REVISION,
         SIBLING_MERGE_REVISION,
         WISH_OPTIONAL_SEMESTER_REVISION,
+        ARCHIVE_REPORT_UNIQUENESS_REVISION,
     }
     wish_year_nullability = (
         "YES"
-        if request.expected_ledger == WISH_OPTIONAL_SEMESTER_REVISION
+        if request.expected_ledger
+        in {
+            WISH_OPTIONAL_SEMESTER_REVISION,
+            ARCHIVE_REPORT_UNIQUENESS_REVISION,
+        }
         else "NO"
     )
     wish_pool_condition = (
