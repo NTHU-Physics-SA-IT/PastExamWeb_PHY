@@ -30,6 +30,7 @@ from app.db.test_database_guard import (
 )
 
 MERGED_HEAD = "b4d6f8a2c1e3"
+PRE_ABOUT_US_ORDERING_HEAD = "f3a7c1e9d5b2"
 CURRENT_HEAD = "c7e4a9b2d6f1"
 E6_REVISION = "e6a1b3c5d7f9"
 E8_REVISION = "e8a4c1d7b2f6"
@@ -704,7 +705,11 @@ def test_unknown_and_multiple_ledger_revisions_fail(
 
 def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
     script, _ = revision_graph()
-    assert script.get_revision(head_revision()).down_revision == MERGED_HEAD
+    assert (
+        script.get_revision(head_revision()).down_revision
+        == PRE_ABOUT_US_ORDERING_HEAD
+    )
+    assert script.get_revision(PRE_ABOUT_US_ORDERING_HEAD).down_revision == MERGED_HEAD
     merge_parents = script.get_revision(MERGED_HEAD).down_revision
     assert merge_parents == (COORDINATION_SIBLING, MAIN_SIBLING)
     previous_revision = MAIN_SIBLING
