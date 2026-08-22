@@ -571,6 +571,17 @@ describe('Navbar methods', () => {
     expect(navbarSource).toContain('<span class="brand-title-sub">PHYSICS ARCHIVE · NTHU</span>')
   })
 
+  it('renders locale and theme indicators as the current state', () => {
+    expect(navbarSource).toContain(":label=\"isEnglish ? 'EN' : '中'\"")
+    expect(navbarSource).toContain(":icon=\"isDarkTheme ? 'pi pi-moon' : 'pi pi-sun'\"")
+    expect(navbarSource).toContain(
+      ":aria-label=\"isEnglish ? $t('切換為中文') : $t('切換為英文')\""
+    )
+    expect(navbarSource).toContain(
+      ":aria-label=\"isDarkTheme ? $t('切換至淺色模式') : $t('切換至深色模式')\""
+    )
+  })
+
   it('formats issue body with system information', () => {
     const ctx = {
       getBrowserInfo: vi.fn(() => 'Chrome 120'),

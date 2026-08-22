@@ -12,6 +12,9 @@ export const aboutUsService = {
   update(id, payload) {
     return api.put(`${BASE_PATH}/admin/entries/${id}`, payload)
   },
+  reorder(entryIds) {
+    return api.put(`${BASE_PATH}/admin/entries/reorder`, { entry_ids: entryIds })
+  },
   remove(id) {
     return api.delete(`${BASE_PATH}/admin/entries/${id}`)
   },

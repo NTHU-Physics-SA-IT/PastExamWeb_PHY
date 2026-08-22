@@ -1,16 +1,109 @@
 import logging
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends
-from sqlmodel import func, select
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlmodel import func, or_, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.services.presence import distinct_online_user_ids, load_presence_sessions
 from app.db.session import get_session
-from app.models.models import Archive, Course, User
+from app.models.models import (
+    AdminAttentionSummaryRead,
+    AdminReportAttentionRead,
+    AdminReviewAttentionRead,
+    Archive,
+    ArchiveReport,
+    ArchiveSubmission,
+    ArchiveWishReport,
+    CommentReport,
+    CommentReportStatus,
+    Course,
+    SubmissionStatus,
+    SystemIssueReport,
+    User,
+)
+from app.utils.auth import get_current_user
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+async def _count(db: AsyncSession, model, *predicates) -> int:
+    return int(
+        await db.scalar(select(func.count()).select_from(model).where(*predicates)) or 0
+    )
+
+
+@router.get("/admin/attention-summary", response_model=AdminAttentionSummaryRead)
+async def get_admin_attention_summary(
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
+
+    pending_submission = (
+        ArchiveSubmission.status == SubmissionStatus.PENDING,
+        ArchiveSubmission.deleted_at.is_(None),
+    )
+    requests_new_parent = or_(
+        func.nullif(func.trim(ArchiveSubmission.requested_course_name), "").is_not(
+            None
+        ),
+        func.nullif(func.trim(ArchiveSubmission.requested_category_key), "").is_not(
+            None
+        ),
+    )
+    new_parent_count = await _count(
+        db, ArchiveSubmission, *pending_submission, requests_new_parent
+    )
+    existing_course_count = await _count(
+        db, ArchiveSubmission, *pending_submission, ~requests_new_parent
+    )
+    pending_report = CommentReportStatus.PENDING.value
+    archive_report_count = await _count(
+        db,
+        ArchiveReport,
+        ArchiveReport.status == pending_report,
+        ArchiveReport.deleted_at.is_(None),
+    )
+    comment_report_count = await _count(
+        db,
+        CommentReport,
+        CommentReport.status == pending_report,
+        CommentReport.deleted_at.is_(None),
+    )
+    wish_report_count = await _count(
+        db, ArchiveWishReport, ArchiveWishReport.status == pending_report
+    )
+    system_issue_count = await _count(
+        db,
+        SystemIssueReport,
+        SystemIssueReport.read_at.is_(None),
+        SystemIssueReport.deleted_at.is_(None),
+    )
+
+    return AdminAttentionSummaryRead(
+        review_center=AdminReviewAttentionRead(
+            new_course_or_category=new_parent_count,
+            existing_course=existing_course_count,
+            total=new_parent_count + existing_course_count,
+        ),
+        report_management=AdminReportAttentionRead(
+            archive_reports=archive_report_count,
+            comment_reports=comment_report_count,
+            wish_reports=wish_report_count,
+            system_issues=system_issue_count,
+            total=(
+                archive_report_count
+                + comment_report_count
+                + wish_report_count
+                + system_issue_count
+            ),
+        ),
+    )
 
 
 @router.get("/statistics")

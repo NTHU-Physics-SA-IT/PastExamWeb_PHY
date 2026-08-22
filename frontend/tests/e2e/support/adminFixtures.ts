@@ -173,6 +173,22 @@ export const mockAdminCourseEndpoints = async (
       body: JSON.stringify({ items: [], total: 0 }),
     })
   )
+  await page.route('**/api/admin/attention-summary', (route) =>
+    route.fulfill({
+      status: 200,
+      headers: JSON_HEADERS,
+      body: JSON.stringify({
+        review_center: { new_course_or_category: 0, existing_course: 0, total: 0 },
+        report_management: {
+          archive_reports: 0,
+          comment_reports: 0,
+          wish_reports: 0,
+          system_issues: 0,
+          total: 0,
+        },
+      }),
+    })
+  )
 
   await page.route('**/api/courses', async (route) => {
     await route.fulfill({

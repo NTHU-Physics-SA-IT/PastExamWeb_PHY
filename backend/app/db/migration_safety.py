@@ -306,6 +306,14 @@ def _restore_pre_archive_report_active_pending_uniqueness(
     )
 
 
+def _remove_about_us_ordering(metadata: MetaData) -> None:
+    table = metadata.tables["about_us_entries"]
+    for index in list(table.indexes):
+        if "order_index" in index.columns:
+            table.indexes.remove(index)
+    table._columns.remove(table.c.order_index)
+
+
 def _metadata_for_variant(variant: str) -> MetaData:
     metadata = head_metadata()
     if variant == "head":
@@ -313,6 +321,7 @@ def _metadata_for_variant(variant: str) -> MetaData:
     if variant not in {
         "pre_archive_report_active_pending_uniqueness",
         "pre_wish_optional_semester",
+        "pre_about_us_ordering",
         "main_sibling_head",
         "coordination_sibling_head",
         "pre_course_submission_lifecycle",
@@ -333,6 +342,10 @@ def _metadata_for_variant(variant: str) -> MetaData:
 
     _restore_pre_archive_report_active_pending_uniqueness(metadata)
     if variant == "pre_archive_report_active_pending_uniqueness":
+        return metadata
+
+    _remove_about_us_ordering(metadata)
+    if variant == "pre_about_us_ordering":
         return metadata
 
     if variant == "pre_wish_optional_semester":

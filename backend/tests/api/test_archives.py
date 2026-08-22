@@ -56,6 +56,13 @@ def _override_admin(user_id: int):
     return _get_current_user
 
 
+def _override_user(user_id: int, *, is_admin: bool = False):
+    async def _get_current_user():
+        return UserRoles(user_id=user_id, is_admin=is_admin)
+
+    return _get_current_user
+
+
 async def _create_upload_course(session_maker, *, name: str) -> Course:
     async with session_maker() as session:
         course = Course(
@@ -192,12 +199,15 @@ async def test_approval_notifies_cross_user_wish_creator_once(
     app.dependency_overrides[get_current_user] = _override_admin(reviewer.id)
     try:
         async with session_maker() as session:
-            assert await session.scalar(
-                select(func.count(PersonalNotification.id)).where(
-                    PersonalNotification.notification_type == "wish_fulfilled",
-                    PersonalNotification.user_id == creator.id,
+            assert (
+                await session.scalar(
+                    select(func.count(PersonalNotification.id)).where(
+                        PersonalNotification.notification_type == "wish_fulfilled",
+                        PersonalNotification.user_id == creator.id,
+                    )
                 )
-            ) == 0
+                == 0
+            )
 
         approved = await client.post(
             f"/archives/admin/submissions/{submission.id}/approve",
@@ -295,14 +305,20 @@ async def test_wish_notification_failure_rolls_back_archive_approval(
             stored = await session.get(ArchiveSubmission, submission.id)
             assert stored.status == SubmissionStatus.PENDING
             assert stored.created_archive_id is None
-            assert await session.scalar(
-                select(func.count(Archive.id)).where(Archive.course_id == course.id)
-            ) == 0
-            assert await session.scalar(
-                select(func.count(PersonalNotification.id)).where(
-                    PersonalNotification.dedupe_key == f"wish_fulfilled:{wish.id}"
+            assert (
+                await session.scalar(
+                    select(func.count(Archive.id)).where(Archive.course_id == course.id)
                 )
-            ) == 0
+                == 0
+            )
+            assert (
+                await session.scalar(
+                    select(func.count(PersonalNotification.id)).where(
+                        PersonalNotification.dedupe_key == f"wish_fulfilled:{wish.id}"
+                    )
+                )
+                == 0
+            )
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
@@ -383,8 +399,12 @@ async def test_approved_submission_can_be_rejected_or_taken_down(
             assert stored.reviewer_id == admin.id
             assert stored.reviewed_at is not None
             assert stored.reviewed_at > approved_reviewed_at
-            assert stored.review_note == f"move to {target_status.value}"
-            assert stored.lifecycle_reason is None
+            assert stored.review_note is None
+            assert stored.lifecycle_reason == (
+                "move to takedown"
+                if target_status == SubmissionStatus.TAKEDOWN
+                else None
+            )
             assert stored.created_archive_id == archive_id
             assert paired_archive is not None
             assert paired_archive.deleted_at is None
@@ -484,7 +504,7 @@ async def test_rejected_submission_can_be_approved(
             assert stored.reviewer_id == admin.id
             assert stored.reviewed_at is not None
             assert stored.reviewed_at > rejected_reviewed_at
-            assert stored.review_note == "approved after rejection"
+            assert stored.review_note is None
             assert stored.created_archive_id is not None
             assert stored.lifecycle_reason is None
 
@@ -878,6 +898,7 @@ async def test_help_upload_preserves_source_wish_and_rejects_target_mismatch(
         "app.api.services.archives.get_minio_client",
         lambda: FakeMinio(),
     )
+
     async def fake_get_current_user():
         return UserRoles(user_id=user.id, is_admin=False)
 
@@ -896,7 +917,9 @@ async def test_help_upload_preserves_source_wish_and_rejects_target_mismatch(
     try:
         response = await client.post(
             "/archives/upload",
-            files={"file": ("wish.pdf", io.BytesIO(b"%PDF-1.4 wish"), "application/pdf")},
+            files={
+                "file": ("wish.pdf", io.BytesIO(b"%PDF-1.4 wish"), "application/pdf")
+            },
             data=common_data,
         )
         assert response.status_code == 200
@@ -1520,14 +1543,10 @@ async def test_admin_edit_enforces_submission_state_contract(
     requester = await make_user()
     admin = await make_user(is_admin=True)
     deleted_at = (
-        datetime.now(UTC)
-        if submission_status == SubmissionStatus.DELETED
-        else None
+        datetime.now(UTC) if submission_status == SubmissionStatus.DELETED else None
     )
     archive_deleted_at = (
-        datetime.now(UTC)
-        if submission_status == SubmissionStatus.TAKEDOWN
-        else None
+        datetime.now(UTC) if submission_status == SubmissionStatus.TAKEDOWN else None
     )
     async with session_maker() as session:
         course = Course(
@@ -1579,13 +1598,17 @@ async def test_admin_edit_enforces_submission_state_contract(
     try:
         response = await client.put(
             f"/archives/admin/submissions/{submission_id}",
-            json={"professor": "Edited submission professor"},
+            json={
+                "professor": "Edited submission professor",
+                "review_note": "  State-specific annotation  ",
+            },
         )
 
         assert response.status_code == expected_http_status
         if expected_editable:
             assert response.json()["status"] == submission_status.value
             assert response.json()["professor"] == "Edited submission professor"
+            assert response.json()["review_note"] == "State-specific annotation"
         else:
             assert response.json() == {
                 "detail": {
@@ -1607,6 +1630,9 @@ async def test_admin_edit_enforces_submission_state_contract(
                 if expected_editable
                 else "Original submission professor"
             )
+            assert stored_submission.review_note == (
+                "State-specific annotation" if expected_editable else None
+            )
             assert stored_archive.professor == "Original archive professor"
             assert stored_archive.deleted_at == archive_deleted_at
     finally:
@@ -1618,6 +1644,236 @@ async def test_admin_edit_enforces_submission_state_contract(
             await session.execute(delete(Archive).where(Archive.id == archive_id))
             await session.execute(delete(Course).where(Course.id == course_id))
             await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_review_note_survives_takedown_republish_and_explicit_changes(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    course, submission = await _create_pending_review_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        approved = await client.post(
+            f"/archives/admin/submissions/{submission.id}/approve",
+            json={"note": "approval action reason", "expected_status": "pending"},
+        )
+        assert approved.status_code == 200
+        annotated = await client.put(
+            f"/archives/admin/submissions/{submission.id}",
+            json={"review_note": "  stage-a-persistent-review-note  "},
+        )
+        assert annotated.status_code == 200
+        assert annotated.json()["review_note"] == "stage-a-persistent-review-note"
+
+        taken_down = await client.post(
+            f"/archives/admin/submissions/{submission.id}/takedown",
+            json={"note": "takedown action reason", "expected_status": "approved"},
+        )
+        assert taken_down.status_code == 200
+        assert taken_down.json()["review_note"] == "stage-a-persistent-review-note"
+        assert taken_down.json()["lifecycle_reason"] == "takedown action reason"
+
+        republished = await client.post(
+            f"/archives/admin/submissions/{submission.id}/republish",
+            json={"note": "republish action reason", "expected_status": "takedown"},
+        )
+        assert republished.status_code == 200
+        assert republished.json()["review_note"] == "stage-a-persistent-review-note"
+        assert republished.json()["lifecycle_reason"] is None
+
+        changed = await client.put(
+            f"/archives/admin/submissions/{submission.id}",
+            json={"review_note": "explicitly changed annotation"},
+        )
+        assert changed.status_code == 200
+        assert changed.json()["review_note"] == "explicitly changed annotation"
+
+        app.dependency_overrides[get_current_user] = _override_user(
+            requester.id, is_admin=False
+        )
+        mine = await client.get("/archives/submissions/me")
+        assert mine.status_code == 200
+        requester_record = next(
+            item for item in mine.json() if item["id"] == submission.id
+        )
+        assert requester_record["review_note"] == "explicitly changed annotation"
+
+        app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+        cleared = await client.put(
+            f"/archives/admin/submissions/{submission.id}",
+            json={"review_note": "   "},
+        )
+        assert cleared.status_code == 200
+        assert cleared.json()["review_note"] is None
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, submission.id)
+            assert stored.review_note is None
+            assert stored.status == SubmissionStatus.APPROVED
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_review_context(
+            session_maker,
+            course_id=course.id,
+            submission_id=submission.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_approved_admin_edit_allows_review_note_only_and_preserves_review_lifecycle(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    unique = uuid.uuid4().hex
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    reviewed_at = datetime.now(UTC)
+    async with session_maker() as session:
+        course = Course(
+            name=f"Approved note course {unique}",
+            category=CourseCategory.FRESHMAN.value,
+        )
+        session.add(course)
+        await session.flush()
+        archive = Archive(
+            course_id=course.id,
+            name=f"Approved note exam {unique}",
+            academic_year=2026,
+            archive_type=ArchiveType.FINAL,
+            professor="Approved archive professor",
+            object_name=f"archives/approved-note-{unique}.pdf",
+            uploader_id=requester.id,
+        )
+        session.add(archive)
+        await session.flush()
+        submission = ArchiveSubmission(
+            subject=course.name,
+            category=CourseCategory.FRESHMAN.value,
+            name=archive.name,
+            academic_year=archive.academic_year,
+            archive_type=archive.archive_type,
+            professor="Approved submission professor",
+            object_name=archive.object_name,
+            requester_id=requester.id,
+            reviewer_id=admin.id,
+            reviewed_at=reviewed_at,
+            status=SubmissionStatus.APPROVED,
+            created_archive_id=archive.id,
+        )
+        session.add(submission)
+        await session.commit()
+        await session.refresh(course)
+        await session.refresh(archive)
+        await session.refresh(submission)
+
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        saved = await client.put(
+            f"/archives/admin/submissions/{submission.id}",
+            json={
+                "subject": submission.subject,
+                "category": submission.category,
+                "name": submission.name,
+                "academic_year": submission.academic_year,
+                "archive_type": submission.archive_type.value,
+                "professor": submission.professor,
+                "has_answers": submission.has_answers,
+                "review_note": "  stage-a-review-note-check  ",
+            },
+        )
+        assert saved.status_code == 200
+        assert saved.json()["review_note"] == "stage-a-review-note-check"
+
+        forbidden = await client.put(
+            f"/archives/admin/submissions/{submission.id}",
+            json={
+                "review_note": "must not persist",
+                "professor": "Forbidden approved metadata edit",
+            },
+        )
+        assert forbidden.status_code == 409
+        assert forbidden.json()["detail"]["code"] == "archive_submission_edit_forbidden"
+
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, submission.id)
+            assert stored.review_note == "stage-a-review-note-check"
+            assert stored.professor == "Approved submission professor"
+
+        cleared = await client.put(
+            f"/archives/admin/submissions/{submission.id}",
+            json={"review_note": "   "},
+        )
+        assert cleared.status_code == 200
+        assert cleared.json()["review_note"] is None
+
+        async with session_maker() as session:
+            stored = await session.get(ArchiveSubmission, submission.id)
+            assert stored.review_note is None
+            assert stored.status == SubmissionStatus.APPROVED
+            assert stored.reviewer_id == admin.id
+            assert stored.reviewed_at == reviewed_at
+            assert stored.created_archive_id == archive.id
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_review_context(
+            session_maker,
+            course_id=course.id,
+            submission_id=submission.id,
+        )
+
+
+@pytest.mark.parametrize("legacy_marker", ("管理員上傳", "admin upload"))
+@pytest.mark.asyncio
+async def test_admin_edit_normalizes_review_note_and_preserves_legacy_admin_upload(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    legacy_marker,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    course, submission = await _create_pending_review_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    async with session_maker() as session:
+        stored = await session.get(ArchiveSubmission, submission.id)
+        stored.review_note = legacy_marker
+        stored.is_admin_upload = False
+        await session.commit()
+
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        response = await client.put(
+            f"/archives/admin/submissions/{submission.id}",
+            json={"review_note": "  Updated review note  "},
+        )
+        assert response.status_code == 200
+        assert response.json()["review_note"] == "Updated review note"
+        assert response.json()["is_admin_upload"] is True
+
+        cleared = await client.put(
+            f"/archives/admin/submissions/{submission.id}",
+            json={"review_note": "   "},
+        )
+        assert cleared.status_code == 200
+        assert cleared.json()["review_note"] is None
+        assert cleared.json()["is_admin_upload"] is True
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_review_context(
+            session_maker,
+            course_id=course.id,
+            submission_id=submission.id,
+        )
 
 
 @pytest.mark.asyncio

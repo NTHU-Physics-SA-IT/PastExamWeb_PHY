@@ -14,6 +14,7 @@ from app.db.audit.models import (
     AuditStatus,
 )
 from app.db.audit.registry import (
+    ABOUT_US_ORDERING_REVISION,
     ARCHIVE_REPORT_UNIQUENESS_AUDIT_ID,
     ARCHIVE_REPORT_UNIQUENESS_REVISION,
     ELIGIBILITY_AUDIT_ID,
@@ -178,6 +179,7 @@ def test_bilingual_head_audit_is_new_version_and_preserves_lifecycle_classifier(
             "a9c2e5f7b1d4",
             "b4d6f8a2c1e3",
             WISH_OPTIONAL_SEMESTER_REVISION,
+            ABOUT_US_ORDERING_REVISION,
             ARCHIVE_REPORT_UNIQUENESS_REVISION,
         }
     )
@@ -195,6 +197,7 @@ def test_archive_report_audit_is_revision_bounded_aggregate_only_and_read_only()
     assert adapter.accepted_source_revisions == frozenset(
         {
             WISH_OPTIONAL_SEMESTER_REVISION,
+            ABOUT_US_ORDERING_REVISION,
             ARCHIVE_REPORT_UNIQUENESS_REVISION,
         }
     )

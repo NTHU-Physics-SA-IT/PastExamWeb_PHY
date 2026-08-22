@@ -18,7 +18,8 @@ from app.db.test_database_guard import (
     validate_test_database_target,
 )
 
-PREVIOUS_REVISION = "f3a7c1e9d5b2"
+PREVIOUS_PREVIOUS_REVISION = "f3a7c1e9d5b2"
+PREVIOUS_REVISION = "c7e4a9b2d6f1"
 NEW_REVISION = "c8e4a1f7b2d9"
 INDEX_NAME = "uq_archive_reports_pending_reporter_archive"
 NOW = datetime(2026, 8, 22, 12, 0, tzinfo=UTC)
@@ -243,6 +244,10 @@ def test_revision_is_the_sole_forward_head() -> None:
     assert HEAD_SCHEMA_REVISION == NEW_REVISION
     assert heads == [NEW_REVISION]
     assert script.get_revision(NEW_REVISION).down_revision == PREVIOUS_REVISION
+    assert (
+        script.get_revision(PREVIOUS_REVISION).down_revision
+        == PREVIOUS_PREVIOUS_REVISION
+    )
 
 
 def test_upgrade_preserves_trashed_history_and_allows_one_active_pending(

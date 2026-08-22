@@ -393,6 +393,61 @@ body {
   line-height: 1.4;
 }
 
+body .p-badge.admin-attention-badge.p-component {
+  box-sizing: border-box;
+  display: inline-flex;
+  min-width: 1rem !important;
+  min-height: 1rem !important;
+  height: 1rem !important;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.14rem !important;
+  font-size: 0.625rem !important;
+  font-weight: 500 !important;
+  line-height: 1 !important;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+body .p-badge.admin-attention-badge.admin-attention-badge--child.p-component {
+  font-size: 0.5rem !important;
+}
+
+@media (max-width: 1399.98px) {
+  .admin-responsive-card-table.p-datatable,
+  .admin-responsive-card-table .p-datatable-table-container,
+  .admin-responsive-card-table .p-datatable-table,
+  .admin-responsive-card-table .p-datatable-tbody {
+    background: transparent !important;
+  }
+
+  .admin-responsive-card-table .p-datatable-tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+  }
+
+  .admin-responsive-card-table .p-datatable-tbody > tr {
+    box-sizing: border-box;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--primary-color) 38%, var(--border-color));
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--bg-secondary) 86%, transparent) !important;
+  }
+
+  .admin-responsive-card-table .p-datatable-tbody > tr > td,
+  .admin-responsive-card-table .review-row-action-area,
+  .admin-responsive-card-table .review-card-actions,
+  .admin-responsive-card-table .report-mobile-card,
+  .admin-responsive-card-table .report-mobile-card-content,
+  .admin-responsive-card-table .report-mobile-card__header,
+  .admin-responsive-card-table .report-mobile-card__body,
+  .admin-responsive-card-table .report-mobile-card__footer,
+  .admin-responsive-card-table .report-row-actions {
+    background: transparent !important;
+  }
+}
+
 .p-dialog .p-button,
 .p-dialog .p-inputtext,
 .p-dialog textarea,

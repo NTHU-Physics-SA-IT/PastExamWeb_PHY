@@ -1,7 +1,7 @@
 """exclude trashed ArchiveReports from active-pending uniqueness
 
 Revision ID: c8e4a1f7b2d9
-Revises: f3a7c1e9d5b2
+Revises: c7e4a9b2d6f1
 Create Date: 2026-08-22 18:00:00.000000
 """
 
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c8e4a1f7b2d9"
-down_revision: str | Sequence[str] | None = "f3a7c1e9d5b2"
+down_revision: str | Sequence[str] | None = "c7e4a9b2d6f1"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

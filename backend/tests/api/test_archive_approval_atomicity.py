@@ -639,7 +639,7 @@ async def test_approve_commits_complete_result_visible_to_new_session(
             assert archive.object_name == object_name
             assert stored_submission.status == SubmissionStatus.APPROVED
             assert stored_submission.reviewer_id == admin.id
-            assert stored_submission.review_note == "complete approval"
+            assert stored_submission.review_note is None
             assert stored_submission.reviewed_at is not None
             assert stored_submission.created_archive_id == archive.id
             assert len(notifications) == 1

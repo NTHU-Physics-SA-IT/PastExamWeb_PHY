@@ -34,7 +34,8 @@ from app.db.test_database_guard import (
 )
 
 MERGED_HEAD = "b4d6f8a2c1e3"
-CURRENT_HEAD = PREVIOUS_HEAD_SCHEMA_REVISION
+PRE_ABOUT_US_ORDERING_HEAD = "f3a7c1e9d5b2"
+CURRENT_HEAD = HEAD_SCHEMA_REVISION
 E6_REVISION = "e6a1b3c5d7f9"
 E8_REVISION = "e8a4c1d7b2f6"
 COORDINATION_SIBLING = "a9c2e5f7b1d4"
@@ -200,12 +201,52 @@ def test_known_sibling_baselines_converge_to_current_head(
     assert inspect_database().schema_matches_head is True
     if source_revision is not None:
         with clean_public_schema.connect() as connection:
-            assert connection.scalar(
-                text(
-                    "SELECT body FROM about_us_entries "
-                    "WHERE title = 'sibling convergence sentinel'"
+            assert (
+                connection.scalar(
+                    text(
+                        "SELECT body FROM about_us_entries "
+                        "WHERE title = 'sibling convergence sentinel'"
+                    )
                 )
-            ) == source_revision
+                == source_revision
+            )
+
+
+def test_about_us_ordering_migration_preserves_previous_display_sequence(
+    clean_public_schema: Engine,
+) -> None:
+    previous_revision = "f3a7c1e9d5b2"
+    upgrade(previous_revision)
+    with clean_public_schema.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO about_us_entries "
+                "(title, body, title_en, body_en, created_at, updated_at, updated_by_id) "
+                "VALUES "
+                "('Oldest', '# Oldest', 'Oldest', '# Oldest', "
+                "'2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', NULL), "
+                "('Newest', '# Newest', 'Newest', '# Newest', "
+                "'2026-01-02T00:00:00+00:00', '2026-01-03T00:00:00+00:00', NULL), "
+                "('Middle', '# Middle', 'Middle', '# Middle', "
+                "'2026-01-03T00:00:00+00:00', '2026-01-02T00:00:00+00:00', NULL)"
+            )
+        )
+
+    command.upgrade(alembic_config(), CURRENT_HEAD)
+    with clean_public_schema.connect() as connection:
+        ordered = connection.execute(
+            text("SELECT title, order_index FROM about_us_entries ORDER BY order_index")
+        ).all()
+    assert ordered == [("Newest", 0), ("Middle", 1), ("Oldest", 2)]
+
+    command.downgrade(alembic_config(), previous_revision)
+    with clean_public_schema.connect() as connection:
+        columns = {
+            column["name"]
+            for column in sa_inspect(connection).get_columns("about_us_entries")
+        }
+        assert "order_index" not in columns
+        assert connection.scalar(text("SELECT count(*) FROM about_us_entries")) == 3
 
 
 def test_merge_revision_upgrade_and_downgrade_are_schema_no_ops(
@@ -258,10 +299,13 @@ def test_optional_wish_semester_upgrade_preserves_values_and_allows_null(
     }
     assert columns["academic_year"]["nullable"] is True
     with clean_public_schema.begin() as connection:
-        assert connection.scalar(
-            text("SELECT academic_year FROM archive_wishes WHERE id = :id"),
-            {"id": wish_id},
-        ) == 1141
+        assert (
+            connection.scalar(
+                text("SELECT academic_year FROM archive_wishes WHERE id = :id"),
+                {"id": wish_id},
+            )
+            == 1141
+        )
         connection.execute(
             text(
                 "INSERT INTO archive_wishes "
@@ -672,7 +716,10 @@ def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
     )
     assert (
         script.get_revision(PREVIOUS_HEAD_SCHEMA_REVISION).down_revision
-        == MERGED_HEAD
+        == PRE_ABOUT_US_ORDERING_HEAD
+    )
+    assert (
+        script.get_revision(PRE_ABOUT_US_ORDERING_HEAD).down_revision == MERGED_HEAD
     )
     merge_parents = script.get_revision(MERGED_HEAD).down_revision
     assert merge_parents == (COORDINATION_SIBLING, MAIN_SIBLING)

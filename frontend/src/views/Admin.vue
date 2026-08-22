@@ -3,11 +3,31 @@
     <div class="card h-full flex flex-col">
       <Tabs :value="currentTab" class="flex-1" @update:value="handleTabChange">
         <TabList>
-          <Tab value="3">{{ $t('審核中心') }}</Tab>
+          <Tab value="3">
+            <span class="admin-tab-label">
+              <span>{{ $t('審核中心') }}</span>
+              <Badge
+                class="admin-attention-badge"
+                v-if="formatAttentionBadge(attentionSummary.review_center.total)"
+                :value="formatAttentionBadge(attentionSummary.review_center.total)"
+                severity="danger"
+              />
+            </span>
+          </Tab>
           <Tab value="0">{{ $t('課程管理') }}</Tab>
           <Tab value="2">{{ $t('公告管理') }}</Tab>
           <Tab value="1">{{ $t('使用者管理') }}</Tab>
-          <Tab value="5">{{ $t('回報管理') }}</Tab>
+          <Tab value="5">
+            <span class="admin-tab-label">
+              <span>{{ $t('回報管理') }}</span>
+              <Badge
+                class="admin-attention-badge"
+                v-if="formatAttentionBadge(attentionSummary.report_management.total)"
+                :value="formatAttentionBadge(attentionSummary.report_management.total)"
+                severity="danger"
+              />
+            </span>
+          </Tab>
           <Tab value="4">{{ $t('垃圾桶') }}</Tab>
           <Tab value="6">{{ $t('資料備份') }}</Tab>
         </TabList>
@@ -1895,8 +1915,38 @@
               </div>
               <Tabs v-model:value="activeReviewGroup" class="mb-4">
                 <TabList>
-                  <Tab value="new">{{ $t('新課程 / 新分類考古申請') }}</Tab>
-                  <Tab value="existing">{{ $t('既有課程考古申請') }}</Tab>
+                  <Tab value="new">
+                    <span class="admin-tab-label">
+                      <span>{{ $t('新課程 / 新分類考古申請') }}</span>
+                      <Badge
+                        class="admin-attention-badge admin-attention-badge--child"
+                        v-if="
+                          formatAttentionBadge(
+                            attentionSummary.review_center.new_course_or_category
+                          )
+                        "
+                        :value="
+                          formatAttentionBadge(
+                            attentionSummary.review_center.new_course_or_category
+                          )
+                        "
+                        severity="danger"
+                      />
+                    </span>
+                  </Tab>
+                  <Tab value="existing">
+                    <span class="admin-tab-label">
+                      <span>{{ $t('既有課程考古申請') }}</span>
+                      <Badge
+                        class="admin-attention-badge admin-attention-badge--child"
+                        v-if="formatAttentionBadge(attentionSummary.review_center.existing_course)"
+                        :value="
+                          formatAttentionBadge(attentionSummary.review_center.existing_course)
+                        "
+                        severity="danger"
+                      />
+                    </span>
+                  </Tab>
                 </TabList>
               </Tabs>
               <div v-show="activeReviewGroup === 'new'" class="review-section">
@@ -1906,7 +1956,7 @@
                 <DataTable
                   :value="newCourseArchiveRequests"
                   :loading="reviewLoading"
-                  class="admin-data-table review-request-table review-request-table--new"
+                  class="admin-data-table admin-responsive-card-table review-request-table review-request-table--new"
                   paginator
                   :rows="newSubmissionRows"
                   :rowsPerPageOptions="[5, 10, 15, 25, 50]"
@@ -2317,7 +2367,7 @@
                 <DataTable
                   :value="existingCourseArchiveRequests"
                   :loading="reviewLoading"
-                  class="admin-data-table review-request-table"
+                  class="admin-data-table admin-responsive-card-table review-request-table"
                   paginator
                   :rows="existingSubmissionRows"
                   :rowsPerPageOptions="[5, 10, 15, 25, 50]"
@@ -2669,7 +2719,10 @@
 
           <TabPanel value="5">
             <div class="p-2 md:p-4">
-              <ReportManagementPanel />
+              <ReportManagementPanel
+                :attention-counts="attentionSummary.report_management"
+                @attention-change="loadAdminAttentionSummary"
+              />
             </div>
           </TabPanel>
 
@@ -3438,7 +3491,7 @@
                 id="admin-review-requested-category-key"
                 name="admin-review-requested-category-key"
                 v-model="archiveRequestEditForm.requested_category_key"
-                :disabled="!canEditSelectedArchiveRequest"
+                :disabled="!canEditSelectedArchiveMetadata"
               />
             </div>
             <div class="col-12 md:col-6 flex flex-column gap-2">
@@ -3447,7 +3500,7 @@
                 id="admin-review-requested-category-name"
                 name="admin-review-requested-category-name"
                 v-model="archiveRequestEditForm.requested_category_name"
-                :disabled="!canEditSelectedArchiveRequest"
+                :disabled="!canEditSelectedArchiveMetadata"
               />
             </div>
             <div class="col-12 md:col-6 flex flex-column gap-2">
@@ -3456,7 +3509,7 @@
                 id="admin-review-requested-category-name-en"
                 name="admin-review-requested-category-name-en"
                 v-model="archiveRequestEditForm.requested_category_name_en"
-                :disabled="!canEditSelectedArchiveRequest"
+                :disabled="!canEditSelectedArchiveMetadata"
               />
             </div>
             <div class="col-12 md:col-6 flex flex-column gap-2">
@@ -3465,7 +3518,7 @@
                 id="admin-review-requested-category-label"
                 name="admin-review-requested-category-label"
                 v-model="archiveRequestEditForm.requested_category_label"
-                :disabled="!canEditSelectedArchiveRequest"
+                :disabled="!canEditSelectedArchiveMetadata"
               />
             </div>
             <div class="col-12 md:col-6 flex flex-column gap-2">
@@ -3474,7 +3527,7 @@
                 id="admin-review-requested-category-label-en"
                 name="admin-review-requested-category-label-en"
                 v-model="archiveRequestEditForm.requested_category_label_en"
-                :disabled="!canEditSelectedArchiveRequest"
+                :disabled="!canEditSelectedArchiveMetadata"
               />
             </div>
           </template>
@@ -3487,7 +3540,7 @@
               id="admin-review-requested-course-name"
               name="admin-review-requested-course-name"
               v-model="archiveRequestEditForm.requested_course_name"
-              :disabled="!canEditSelectedArchiveRequest"
+              :disabled="!canEditSelectedArchiveMetadata"
             />
           </div>
           <div
@@ -3499,7 +3552,7 @@
               id="admin-review-requested-course-name-en"
               name="admin-review-requested-course-name-en"
               v-model="archiveRequestEditForm.requested_course_name_en"
-              :disabled="!canEditSelectedArchiveRequest"
+              :disabled="!canEditSelectedArchiveMetadata"
             />
           </div>
           <div class="col-12 md:col-6 flex flex-column gap-2">
@@ -3508,7 +3561,7 @@
               id="admin-review-subject"
               name="admin-review-subject"
               v-model="archiveRequestEditForm.subject"
-              :disabled="!canEditSelectedArchiveRequest"
+              :disabled="!canEditSelectedArchiveMetadata"
             />
           </div>
           <div
@@ -3520,7 +3573,7 @@
               id="admin-review-category-key"
               name="admin-review-category-key"
               v-model="archiveRequestEditForm.category"
-              :disabled="!canEditSelectedArchiveRequest"
+              :disabled="!canEditSelectedArchiveMetadata"
             />
           </div>
           <div v-else class="col-12 md:col-6 flex flex-column gap-2">
@@ -3533,7 +3586,7 @@
               optionLabel="name"
               optionValue="value"
               overlayClass="submission-typography-overlay"
-              :disabled="!canEditSelectedArchiveRequest"
+              :disabled="!canEditSelectedArchiveMetadata"
             />
           </div>
           <div class="col-12 md:col-6 flex flex-column gap-2">
@@ -3542,7 +3595,7 @@
               id="admin-review-exam-name"
               name="admin-review-exam-name"
               v-model="archiveRequestEditForm.name"
-              :disabled="!canEditSelectedArchiveRequest"
+              :disabled="!canEditSelectedArchiveMetadata"
             />
           </div>
           <div class="col-12 md:col-6 flex flex-column gap-2">
@@ -3551,7 +3604,7 @@
               id="admin-review-professor"
               name="admin-review-professor"
               v-model="archiveRequestEditForm.professor"
-              :disabled="!canEditSelectedArchiveRequest"
+              :disabled="!canEditSelectedArchiveMetadata"
             />
           </div>
           <div class="col-12 md:col-6 flex flex-column gap-2">
@@ -3560,7 +3613,7 @@
               inputId="admin-review-academic-year"
               name="admin-review-academic-year"
               v-model="archiveRequestEditForm.academic_year"
-              :disabled="!canEditSelectedArchiveRequest"
+              :disabled="!canEditSelectedArchiveMetadata"
               :useGrouping="false"
             />
           </div>
@@ -3574,7 +3627,7 @@
               optionLabel="name"
               optionValue="value"
               overlayClass="submission-typography-overlay"
-              :disabled="!canEditSelectedArchiveRequest"
+              :disabled="!canEditSelectedArchiveMetadata"
             />
           </div>
           <div class="col-12 flex align-items-center gap-2">
@@ -3583,9 +3636,20 @@
               name="admin-review-has-answers"
               v-model="archiveRequestEditForm.has_answers"
               :binary="true"
-              :disabled="!canEditSelectedArchiveRequest"
+              :disabled="!canEditSelectedArchiveMetadata"
             />
             <label for="admin-review-has-answers">{{ $t('附解答') }}</label>
+          </div>
+          <div class="col-12 flex flex-column gap-2">
+            <label for="admin-review-note">{{ $t('審核留言') }}</label>
+            <Textarea
+              id="admin-review-note"
+              name="admin-review-note"
+              v-model="archiveRequestEditForm.review_note"
+              rows="4"
+              autoResize
+              :disabled="!canEditSelectedArchiveReviewNote"
+            />
           </div>
         </div>
 
@@ -4811,6 +4875,7 @@ import {
 import { buildTemporalTicks, resolveTemporalTickLayout } from '../utils/temporalChart'
 import {
   getCourses,
+  getAdminAttentionSummary,
   createCourse,
   updateCourse,
   reorderCourses,
@@ -5152,6 +5217,16 @@ const notificationForm = ref({
 const notificationFormErrors = ref({})
 const reviewLoading = ref(false)
 const reviewLoadError = ref('')
+const attentionSummary = ref({
+  review_center: { new_course_or_category: 0, existing_course: 0, total: 0 },
+  report_management: {
+    archive_reports: 0,
+    comment_reports: 0,
+    wish_reports: 0,
+    system_issues: 0,
+    total: 0,
+  },
+})
 const reviewSubmissionView = ref('time')
 const isReviewSubmissionChartExpanded = ref(false)
 const reviewSubmissionRangeHours = ref(24)
@@ -5207,7 +5282,26 @@ const archiveRequestEditForm = ref({
   requested_category_label: '',
   requested_category_label_en: '',
   requested_category_icon: '',
+  review_note: '',
 })
+const archiveRequestInitialEditForm = ref({})
+const archiveRequestMetadataFields = [
+  'subject',
+  'category',
+  'name',
+  'academic_year',
+  'archive_type',
+  'professor',
+  'has_answers',
+  'requested_course_name',
+  'requested_course_name_en',
+  'requested_category_key',
+  'requested_category_name',
+  'requested_category_name_en',
+  'requested_category_label',
+  'requested_category_label_en',
+  'requested_category_icon',
+]
 const archiveTypeOptions = computed(() => [
   { name: t('期中考'), value: 'midterm' },
   { name: t('期末考'), value: 'final' },
@@ -5316,19 +5410,25 @@ const getReviewStatusFilterValue = (status) => {
   return reviewStatusFilterValues.has(normalized) ? normalized : ''
 }
 const isReadonlyReviewSubmission = (item) => {
-  return ['takedown', 'deleted'].includes(getReviewItemStatus(item))
+  return getReviewItemStatus(item) === 'deleted'
 }
 const getReadonlyReviewSubmissionMessage = (item) => {
   const status = getReviewItemStatus(item)
-  if (status === 'takedown') return t('此投稿已下架，僅能查看，不能再編輯內容。')
   if (status === 'deleted') return t('此投稿已刪除，僅能查看，請至垃圾桶處理復原或永久刪除。')
   return ''
 }
-const canEditSelectedArchiveRequest = computed(() => {
-  return (
-    Boolean(selectedArchiveRequest.value) &&
-    !isReadonlyReviewSubmission(selectedArchiveRequest.value)
+const canEditSelectedArchiveMetadata = computed(() => {
+  return ['pending', 'rejected', 'takedown'].includes(
+    getReviewItemStatus(selectedArchiveRequest.value)
   )
+})
+const canEditSelectedArchiveReviewNote = computed(() => {
+  return ['pending', 'approved', 'rejected', 'takedown'].includes(
+    getReviewItemStatus(selectedArchiveRequest.value)
+  )
+})
+const canEditSelectedArchiveRequest = computed(() => {
+  return canEditSelectedArchiveMetadata.value || canEditSelectedArchiveReviewNote.value
 })
 const archiveRequestReadonlyMessage = computed(() => {
   return getReadonlyReviewSubmissionMessage(selectedArchiveRequest.value)
@@ -7360,6 +7460,7 @@ const loadReviewItems = async () => {
     courseCategories.value = Array.isArray(categoryResponse.data) ? categoryResponse.data : []
     courses.value = Array.isArray(allCoursesResponse.data) ? allCoursesResponse.data : []
     archiveRequests.value = Array.isArray(archiveResponse.data) ? archiveResponse.data : []
+    await loadAdminAttentionSummary()
   } catch (error) {
     console.error(t('載入審核資料失敗:'), error)
     reviewLoadError.value = t('審核資料載入失敗，請稍後再試或查看伺服器日誌。')
@@ -7374,6 +7475,25 @@ const loadReviewItems = async () => {
     })
   } finally {
     reviewLoading.value = false
+  }
+}
+
+const formatAttentionBadge = (value) => {
+  const count = Number(value) || 0
+  if (count <= 0) return null
+  return count > 99 ? '99+' : count
+}
+
+const loadAdminAttentionSummary = async () => {
+  try {
+    const { data } = await getAdminAttentionSummary()
+    if (data?.review_center && data?.report_management) {
+      attentionSummary.value = data
+    }
+  } catch (error) {
+    if (!isUnauthorizedError(error)) {
+      console.error('Load admin attention summary error:', error)
+    }
   }
 }
 
@@ -8139,9 +8259,8 @@ const bulkDeleteTrashScope = async () => {
   }
 }
 
-const openArchiveRequestDialog = async (request) => {
-  selectedArchiveRequest.value = request
-  archiveRequestEditForm.value = {
+const buildArchiveRequestEditForm = (request) => {
+  return {
     subject: request.subject,
     category: request.category,
     name: request.name,
@@ -8157,7 +8276,34 @@ const openArchiveRequestDialog = async (request) => {
     requested_category_label: request.requested_category_label || '',
     requested_category_label_en: request.requested_category_label_en || '',
     requested_category_icon: request.requested_category_icon || 'pi pi-fw pi-book',
+    review_note: request.review_note || '',
   }
+}
+
+const normalizeArchiveRequestReviewNote = (value) => String(value || '').trim() || null
+
+const buildArchiveRequestUpdatePayload = () => {
+  const status = getReviewItemStatus(selectedArchiveRequest.value)
+  const fields =
+    status === 'approved' ? ['review_note'] : [...archiveRequestMetadataFields, 'review_note']
+  return fields.reduce((payload, field) => {
+    const initialValue = archiveRequestInitialEditForm.value[field]
+    const nextValue = archiveRequestEditForm.value[field]
+    if (field === 'review_note') {
+      const normalizedInitial = normalizeArchiveRequestReviewNote(initialValue)
+      const normalizedNext = normalizeArchiveRequestReviewNote(nextValue)
+      if (normalizedNext !== normalizedInitial) payload.review_note = normalizedNext
+    } else if (nextValue !== initialValue) {
+      payload[field] = nextValue
+    }
+    return payload
+  }, {})
+}
+
+const openArchiveRequestDialog = async (request) => {
+  selectedArchiveRequest.value = request
+  archiveRequestEditForm.value = buildArchiveRequestEditForm(request)
+  archiveRequestInitialEditForm.value = { ...archiveRequestEditForm.value }
   showArchiveRequestDialog.value = true
   await Promise.all([loadArchiveComparison(request), loadArchiveRequesterStats(request)])
 }
@@ -8173,13 +8319,22 @@ const saveArchiveRequestEdit = async () => {
     })
     return
   }
+  const payload = buildArchiveRequestUpdatePayload()
+  if (!Object.keys(payload).length) {
+    toast.add({
+      severity: 'info',
+      summary: t('未變更'),
+      detail: t('考古題與投稿未變更'),
+      life: 3000,
+    })
+    return
+  }
   reviewEditLoading.value = true
   try {
-    const { data } = await archiveService.updateSubmission(
-      selectedArchiveRequest.value.id,
-      archiveRequestEditForm.value
-    )
+    const { data } = await archiveService.updateSubmission(selectedArchiveRequest.value.id, payload)
     selectedArchiveRequest.value = data
+    archiveRequestEditForm.value = buildArchiveRequestEditForm(data)
+    archiveRequestInitialEditForm.value = { ...archiveRequestEditForm.value }
     toast.add({
       severity: 'success',
       summary: t('成功'),
@@ -9442,6 +9597,7 @@ watch(userStatisticsChartElement, observeStatisticsChartElement)
 watch(reviewSubmissionChartElement, observeStatisticsChartElement)
 
 onMounted(() => {
+  void loadAdminAttentionSummary()
   if (typeof window === 'undefined') return
   updateStatisticsFontScale()
   if (typeof ResizeObserver !== 'undefined') {
@@ -9494,6 +9650,12 @@ onBeforeUnmount(() => {
   min-width: 0;
   max-width: 100%;
   overflow-x: hidden;
+}
+
+.admin-tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
 }
 
 .card {
@@ -12291,9 +12453,7 @@ onBeforeUnmount(() => {
     gap: 0.85rem;
     box-sizing: border-box;
     padding: 1rem;
-    border: 1px solid color-mix(in srgb, var(--primary-color) 38%, var(--border-color));
     border-radius: 8px;
-    background: color-mix(in srgb, var(--bg-secondary) 86%, transparent);
   }
 
   .admin-mobile-list .admin-card-primary {
@@ -13506,7 +13666,9 @@ onBeforeUnmount(() => {
   }
 
   :deep(.review-request-table .p-datatable-tbody) {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
     width: 100%;
   }
 
@@ -13515,12 +13677,13 @@ onBeforeUnmount(() => {
     flex-direction: column;
     width: 100%;
     min-width: 0;
+    margin: 0;
     box-sizing: border-box;
     gap: 0.75rem;
     padding: 0.95rem;
-    border: 1px solid var(--border-color);
+    border: 1px solid color-mix(in srgb, var(--primary-color) 38%, var(--border-color));
     border-radius: 8px;
-    background: color-mix(in srgb, var(--bg-primary) 94%, var(--bg-secondary) 6%);
+    background: color-mix(in srgb, var(--bg-secondary) 86%, transparent);
   }
 
   :deep(.review-request-table .p-datatable-tbody > tr > td) {
@@ -13556,7 +13719,6 @@ onBeforeUnmount(() => {
   :deep(.review-request-table .p-datatable-tbody > tr > td:last-child) {
     order: 2;
     padding-top: 0.75rem !important;
-    border-top: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent) !important;
   }
 
   :deep(.review-mobile-card-header) {

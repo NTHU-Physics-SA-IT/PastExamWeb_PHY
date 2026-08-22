@@ -46,6 +46,15 @@ Leaving a state through a legal transition and later returning to it, for
 example `approved` to `takedown` to `approved`, is a new lifecycle event rather
 than a retry.
 
+`review_note` is a persistent administrator annotation on the Submission, not
+the reason for a lifecycle action. Approval, rejection, takedown, republish,
+trash, and restore transitions preserve it unchanged. Lifecycle-action reasons
+remain under the existing `lifecycle_reason` or event/notification
+responsibility and never replace the annotation. Only an explicit
+administrator Submission edit may change or clear `review_note`; blank explicit
+input normalizes to null, and an annotation-only edit is not a lifecycle
+transition.
+
 `pending` to `takedown` lets an administrator stop processing a pending
 duplicate or otherwise ineligible file after comparing its detail.
 
@@ -111,16 +120,24 @@ classifying the locked status:
 | Status | Direct Submission edit |
 | --- | --- |
 | `pending` | allowed |
-| `approved` | forbidden |
+| `approved` | protected metadata is forbidden; admin `review_note` annotation only is allowed |
 | `rejected` | allowed |
 | `takedown` | allowed without republishing |
 | `deleted` | forbidden |
 
-The editable states update only the Submission snapshot. They do not create or
+The editable states update only the Submission snapshot. An administrator may
+also maintain `review_note` after approval as a post-review annotation exception;
+the server compares normalized values and rejects an approved request if any
+protected metadata actually changes. Review-note text is trimmed and blank text
+is stored as null. Editing the annotation does not change status, reviewer,
+review time, linked Archive identity, or notification behavior and is not a
+lifecycle transition. A legacy admin-upload marker stored only as `管理員上傳` or
+`admin upload` is promoted to the explicit `is_admin_upload` flag before that
+note can change. These edits do not create or
 move a Course, mutate a linked Archive, publish a linked Archive, or invoke a
 review transition. Public approved content is edited through the Archive
 management API; a deleted Submission must be restored before it can be edited.
-The forbidden states return `409 Conflict` with
+Forbidden metadata changes and deleted-state edits return `409 Conflict` with
 `archive_submission_edit_forbidden`, the message
 `此狀態的投稿不可直接編輯。`, and `reload_required=false`. This stable
 business restriction is distinct from stale expected-state, lifecycle drift,
@@ -324,6 +341,23 @@ paired Archive and one approval notification after the rejection baseline.
 These tests do not cover same-target retries, repeated transition cycles, or
 sibling visibility.
 
+### Administrator attention summary
+
+The administrator-only attention projection counts active work directly from
+the canonical persisted states, independently of frontend pagination:
+
+- Review Center includes only active `ArchiveSubmission.status=pending` rows.
+  A nonblank requested Course name or requested Category key places a row in
+  the new-Course/new-Category group; all other pending rows are existing-Course
+  submissions. The top-level count is their sum.
+- Report Management includes active `pending` Archive reports, active
+  `pending` Comment reports, `pending` Wish reports, and active System Issue
+  reports whose `read_at` is null. System Issue status is not rewritten into a
+  moderation state. The top-level count is those four values' sum.
+
+Soft-deleted records and every approved, rejected, taken-down, upheld,
+dismissed, read, or otherwise final record are excluded from attention counts.
+
 ## Report states
 
 Archive Wish reports use the same one-way moderation vocabulary as comment and
@@ -438,6 +472,12 @@ For a NTHU OAuth User, provider-synchronized `name` and `email` remain provider-
 - Authenticated users may list and read every About Us entry.
 - Only administrators may create or update entries; the backend enforces this
   independently of hidden frontend controls.
+- Visible headings come from the bilingual Markdown bodies. Legacy title
+  columns remain compatibility metadata and are derived from the first
+  Markdown heading or meaningful line rather than exposed as editor fields.
+- Entries render by persisted `order_index`. New entries start at the beginning
+  of the sequence, and administrators may atomically replace the complete
+  order; stale or incomplete reorder input is rejected.
 - About Us content is separate from announcements and creates no notification
   or read-receipt state. Deletion is outside the current contract.
 - Invalid content is rejected without persisting a partial mutation.

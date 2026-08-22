@@ -1264,7 +1264,7 @@ async def review_archive_report(
                 db,
                 submission,
                 reviewer_id=current_user.user_id,
-                note=f"考古題回報 #{report.id} 成立",
+                lifecycle_reason=f"考古題回報 #{report.id} 成立",
             )
         report.archive_taken_down = True
 

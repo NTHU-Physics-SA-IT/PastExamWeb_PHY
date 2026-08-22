@@ -2,10 +2,50 @@
   <section class="report-management" :aria-label="$t('回報管理')">
     <Tabs v-model:value="activeReportTab" class="mb-4">
       <TabList>
-        <Tab value="archive">{{ $t('考古題回報') }}</Tab>
-        <Tab value="comment">{{ $t('留言回報') }}</Tab>
-        <Tab value="wish">{{ $t('許願回報') }}</Tab>
-        <Tab value="system">{{ $t('系統問題回報') }}</Tab>
+        <Tab value="archive">
+          <span class="report-tab-label">
+            <span>{{ $t('考古題回報') }}</span>
+            <Badge
+              class="admin-attention-badge admin-attention-badge--child"
+              v-if="formatAttentionBadge(attentionCounts.archive_reports)"
+              :value="formatAttentionBadge(attentionCounts.archive_reports)"
+              severity="danger"
+            />
+          </span>
+        </Tab>
+        <Tab value="comment">
+          <span class="report-tab-label">
+            <span>{{ $t('留言回報') }}</span>
+            <Badge
+              class="admin-attention-badge admin-attention-badge--child"
+              v-if="formatAttentionBadge(attentionCounts.comment_reports)"
+              :value="formatAttentionBadge(attentionCounts.comment_reports)"
+              severity="danger"
+            />
+          </span>
+        </Tab>
+        <Tab value="wish">
+          <span class="report-tab-label">
+            <span>{{ $t('許願回報') }}</span>
+            <Badge
+              class="admin-attention-badge admin-attention-badge--child"
+              v-if="formatAttentionBadge(attentionCounts.wish_reports)"
+              :value="formatAttentionBadge(attentionCounts.wish_reports)"
+              severity="danger"
+            />
+          </span>
+        </Tab>
+        <Tab value="system">
+          <span class="report-tab-label">
+            <span>{{ $t('系統問題回報') }}</span>
+            <Badge
+              class="admin-attention-badge admin-attention-badge--child"
+              v-if="formatAttentionBadge(attentionCounts.system_issues)"
+              :value="formatAttentionBadge(attentionCounts.system_issues)"
+              severity="danger"
+            />
+          </span>
+        </Tab>
       </TabList>
     </Tabs>
     <section
@@ -89,7 +129,7 @@
         :sortOrder="systemPage.sortOrder"
         responsiveLayout="stack"
         breakpoint="1399.98px"
-        class="report-management__table report-management__system-table admin-data-table"
+        class="report-management__table report-management__system-table admin-data-table admin-responsive-card-table"
         tableStyle="table-layout: fixed; min-width: 60rem"
         @page="onSystemPage"
         @sort="onSystemSort"
@@ -405,7 +445,7 @@
         :sortOrder="commentPage.sortOrder"
         responsiveLayout="stack"
         breakpoint="1399.98px"
-        class="report-management__table report-management__comment-table admin-data-table"
+        class="report-management__table report-management__comment-table admin-data-table admin-responsive-card-table"
         tableStyle="table-layout: fixed; min-width: 75rem"
         @page="onCommentPage"
         @sort="onCommentSort"
@@ -698,7 +738,7 @@
         :sortOrder="archiveListState.sortOrder"
         responsiveLayout="stack"
         breakpoint="1399.98px"
-        class="report-management__table report-management__archive-table admin-data-table"
+        class="report-management__table report-management__archive-table admin-data-table admin-responsive-card-table"
         tableStyle="table-layout: fixed; min-width: 72rem"
         @page="onArchivePage"
         @sort="onArchiveSort"
@@ -942,7 +982,7 @@
         :sortOrder="wishPage.sortOrder"
         responsiveLayout="stack"
         breakpoint="1399.98px"
-        class="report-management__table report-management__wish-table admin-data-table"
+        class="report-management__table report-management__wish-table admin-data-table admin-responsive-card-table"
         tableStyle="table-layout: fixed; min-width: 68rem"
         @page="onWishPage"
         @sort="onWishSort"
@@ -1532,6 +1572,20 @@ import { getCurrentUser } from '@/utils/auth'
 import { localizedCourseSnapshotName } from '@/utils/localizedCatalog'
 import { formatRelativeOrAbsoluteDateTime } from '@/utils/time'
 
+const props = defineProps({
+  attentionCounts: {
+    type: Object,
+    default: () => ({
+      archive_reports: 0,
+      comment_reports: 0,
+      wish_reports: 0,
+      system_issues: 0,
+    }),
+  },
+})
+const emit = defineEmits(['attention-change'])
+const attentionCounts = computed(() => props.attentionCounts)
+
 const confirm = useConfirm()
 const toast = useToast()
 const router = useRouter()
@@ -1600,6 +1654,11 @@ const archiveReviewForm = ref({
 const loading = computed(
   () => loadingSystem.value || loadingComments.value || archiveListState.value.loading
 )
+const formatAttentionBadge = (value) => {
+  const count = Number(value) || 0
+  if (count <= 0) return null
+  return count > 99 ? '99+' : count
+}
 
 const reasonOptions = computed(() => [
   { label: t('垃圾訊息或重複洗版'), value: 'spam_or_duplicate' },
@@ -1787,7 +1846,7 @@ function onArchiveSort(event) {
   archiveListState.value.sortOrder = event.sortOrder || 1
   return loadArchiveReports()
 }
-function refreshAll() {
+async function refreshAll() {
   Object.assign(systemPage.value, { first: 0, sortField: 'read_state', sortOrder: 1 })
   Object.assign(commentPage.value, { first: 0, sortField: 'status', sortOrder: 1 })
   Object.assign(wishPage.value, { first: 0, sortField: 'created_at', sortOrder: -1 })
@@ -1796,12 +1855,14 @@ function refreshAll() {
     sortField: 'status',
     sortOrder: 1,
   })
-  return Promise.allSettled([
+  const result = await Promise.allSettled([
     loadSystemIssues(),
     loadCommentReports(),
     loadArchiveReports(),
     loadWishReports(),
   ])
+  emit('attention-change')
+  return result
 }
 async function loadWishReports() {
   wishLoading.value = true
@@ -1886,6 +1947,7 @@ async function saveWishReview() {
       life: 3000,
     })
     await loadWishReports()
+    emit('attention-change')
   } catch {
     toast.add({
       severity: 'error',
@@ -1924,6 +1986,7 @@ async function removeWishReport(report) {
       life: 3000,
     })
     await loadWishReports()
+    emit('attention-change')
   } catch {
     toast.add({
       severity: 'error',
@@ -1992,6 +2055,7 @@ async function saveSystemReadState() {
       detail: data.is_read ? t('已標記為已讀') : t('已標記為未讀'),
       life: 3000,
     })
+    emit('attention-change')
   } catch (error) {
     console.error('Update system issue report read state error:', error)
     systemReadForm.value = Boolean(selectedSystemReport.value.is_read)
@@ -2019,6 +2083,7 @@ async function deleteSystemIssue(item) {
       life: 3000,
     })
     await loadSystemIssues()
+    emit('attention-change')
   } catch (error) {
     console.error('Delete system issue report error:', error)
     toast.add({
@@ -2058,6 +2123,7 @@ async function deleteCommentReport(item) {
       life: 3000,
     })
     await loadCommentReports()
+    emit('attention-change')
   } catch (error) {
     console.error('Delete comment report error:', error)
     toast.add({
@@ -2137,6 +2203,7 @@ async function saveReview() {
       life: 3000,
     })
     await loadCommentReports()
+    emit('attention-change')
   } catch (error) {
     console.error('Review comment report error:', error)
     toast.add({
@@ -2194,6 +2261,7 @@ async function deleteArchiveReport(item) {
       life: 3000,
     })
     await loadArchiveReports()
+    emit('attention-change')
   } catch (error) {
     console.error('Delete archive report error:', error)
     toast.add({ severity: 'error', summary: t('刪除失敗'), detail: t('回報未變更'), life: 3000 })
@@ -2262,6 +2330,7 @@ async function saveArchiveReview() {
       life: 3500,
     })
     await loadArchiveReports()
+    emit('attention-change')
   } catch (error) {
     console.error('Review archive report error:', error)
     const conflict = error?.response?.status === 409
@@ -2390,6 +2459,12 @@ onBeforeUnmount(teardownCardLayout)
 .report-management {
   min-width: 0;
   font-size: var(--app-font-size-base);
+}
+
+.report-tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
 }
 .report-management :deep(.p-component) {
   font-size: var(--app-font-size-base) !important;
@@ -3045,7 +3120,9 @@ onBeforeUnmount(teardownCardLayout)
     display: none !important;
   }
   :deep(.report-management__table .p-datatable-tbody) {
-    display: block;
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
     width: 100%;
   }
   :deep(.report-management__table .p-datatable-tbody > tr) {
@@ -3053,12 +3130,11 @@ onBeforeUnmount(teardownCardLayout)
     flex-direction: column;
     width: 100%;
     min-width: 0;
+    margin: 0;
     box-sizing: border-box;
     gap: 0.75rem;
     padding: 0.95rem;
-    border: 1px solid var(--border-color);
     border-radius: 8px;
-    background: color-mix(in srgb, var(--bg-primary) 94%, var(--bg-secondary) 6%);
   }
   :deep(.report-management__table .p-datatable-tbody > tr > td) {
     display: none !important;
@@ -3097,9 +3173,6 @@ onBeforeUnmount(teardownCardLayout)
     border-top: 0 !important;
     color: var(--text-color-secondary);
     text-align: center;
-  }
-  :deep(.report-management__table .p-datatable-tbody > tr + tr) {
-    margin-top: 0.75rem;
   }
   .report-mobile-card-content {
     display: grid;
@@ -3197,7 +3270,7 @@ onBeforeUnmount(teardownCardLayout)
     padding: 0.55rem 0.65rem;
     border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
     border-radius: var(--content-border-radius);
-    background: color-mix(in srgb, var(--bg-secondary) 78%, transparent);
+    background: transparent;
   }
   .report-mobile-summary-preview__label {
     display: block;
@@ -3258,7 +3331,6 @@ onBeforeUnmount(teardownCardLayout)
   .report-mobile-card__footer {
     margin-top: 0.75rem;
     padding-top: 0.75rem;
-    border-top: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
   }
   .report-row-actions {
     justify-content: flex-end;

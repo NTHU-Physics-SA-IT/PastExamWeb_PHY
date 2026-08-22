@@ -28,6 +28,7 @@ WISH_POOL_REVISION = "a9c4e7b2d6f1"
 SIBLING_MERGE_REVISION = "b4d6f8a2c1e3"
 WISH_OPTIONAL_SEMESTER_REVISION = "f3a7c1e9d5b2"
 ARCHIVE_REPORT_UNIQUENESS_REVISION = "c8e4a1f7b2d9"
+ABOUT_US_ORDERING_REVISION = "c7e4a9b2d6f1"
 
 
 _CLASSIFICATION_CTE = r"""
@@ -815,6 +816,7 @@ _ELIGIBILITY_V4 = AuditAdapter(
             WISH_POOL_REVISION,
             SIBLING_MERGE_REVISION,
             WISH_OPTIONAL_SEMESTER_REVISION,
+            ABOUT_US_ORDERING_REVISION,
             ARCHIVE_REPORT_UNIQUENESS_REVISION,
         }
     ),
@@ -927,6 +929,7 @@ index_contract AS (
               )
           ) = CASE (SELECT min(version_num) FROM alembic_version)
               WHEN 'f3a7c1e9d5b2' THEN 'status=''pending'''
+              WHEN 'c7e4a9b2d6f1' THEN 'status=''pending'''
               WHEN 'c8e4a1f7b2d9' THEN 'status=''pending''anddeleted_atisnull'
               ELSE ''
           END
@@ -981,6 +984,7 @@ _ARCHIVE_REPORT_UNIQUENESS_V1 = AuditAdapter(
     accepted_source_revisions=frozenset(
         {
             WISH_OPTIONAL_SEMESTER_REVISION,
+            ABOUT_US_ORDERING_REVISION,
             ARCHIVE_REPORT_UNIQUENESS_REVISION,
         }
     ),
