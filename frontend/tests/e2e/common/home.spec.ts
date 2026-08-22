@@ -236,61 +236,72 @@ test.describe('Home page', () => {
   }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' })
     await page.setViewportSize({ width: 1440, height: 900 })
+    await page.addInitScript(() => {
+      const testWindow = window as typeof window & {
+        __massCoreEntryInitialGeometry?: {
+          circle: { cx: string | null; cy: string | null; r: string | null }
+          renderedStart: { x: number; y: number }
+          titleJunction: { x: number; y: number }
+        }
+      }
+
+      const observer = new MutationObserver(() => {
+        const titleLeading = document.querySelector('.title-line-leading')
+        const titleTrailing = document.querySelector('.title-line-trailing')
+        const entryGroup = document.querySelector('.mass-core-entry')
+        const circle = document.querySelector('.mass-core')
+        if (
+          !titleLeading ||
+          !titleTrailing ||
+          !entryGroup?.classList.contains('mass-core-entry-animate') ||
+          !circle
+        ) {
+          return
+        }
+
+        // Capture the first visible geometry before the independently animated SVG parent advances.
+        const leadingRect = titleLeading.getBoundingClientRect()
+        const trailingRect = titleTrailing.getBoundingClientRect()
+        const circleRect = circle.getBoundingClientRect()
+        testWindow.__massCoreEntryInitialGeometry = {
+          circle: {
+            cx: circle.getAttribute('cx'),
+            cy: circle.getAttribute('cy'),
+            r: circle.getAttribute('r'),
+          },
+          renderedStart: {
+            x: circleRect.left + circleRect.width / 2,
+            y: circleRect.top + circleRect.height / 2,
+          },
+          titleJunction: {
+            x: (leadingRect.right + trailingRect.left) / 2,
+            y: (leadingRect.top + leadingRect.bottom + trailingRect.top + trailingRect.bottom) / 4,
+          },
+        }
+        observer.disconnect()
+      })
+
+      observer.observe(document, {
+        attributes: true,
+        attributeFilter: ['class'],
+        childList: true,
+        subtree: true,
+      })
+    })
     await page.goto('/')
 
     const entry = page.locator('.mass-core-entry')
     await expect(entry).toHaveClass(/mass-core-entry-animate/)
 
     const initialGeometry = await page.evaluate(() => {
-      const titleLeading = document.querySelector('.title-line-leading')
-      const titleTrailing = document.querySelector('.title-line-trailing')
-      const entryGroup = document.querySelector('.mass-core-entry')
-      const circle = document.querySelector('.mass-core')
-      const svg = entryGroup?.ownerSVGElement
-      const parentMatrix = entryGroup?.parentElement?.getScreenCTM()
-      if (!titleLeading || !titleTrailing || !entryGroup || !circle || !svg || !parentMatrix) {
-        return null
+      const testWindow = window as typeof window & {
+        __massCoreEntryInitialGeometry?: {
+          circle: { cx: string | null; cy: string | null; r: string | null }
+          renderedStart: { x: number; y: number }
+          titleJunction: { x: number; y: number }
+        }
       }
-
-      const leadingRect = titleLeading.getBoundingClientRect()
-      const trailingRect = titleTrailing.getBoundingClientRect()
-      const style = getComputedStyle(entryGroup)
-      const point = svg.createSVGPoint()
-      point.x = Number(circle.getAttribute('cx'))
-      point.y = Number(circle.getAttribute('cy'))
-      const neutralCenter = point.matrixTransform(parentMatrix)
-      const entryAnimation = entryGroup
-        .getAnimations()
-        .find((animation) => Number(animation.effect?.getTiming().duration) === 5000)
-      if (!entryAnimation) return null
-
-      entryAnimation.pause()
-      entryAnimation.currentTime = 0
-      const circleRect = circle.getBoundingClientRect()
-      const renderedStart = {
-        x: circleRect.left + circleRect.width / 2,
-        y: circleRect.top + circleRect.height / 2,
-      }
-      entryAnimation.play()
-
-      return {
-        circle: {
-          cx: circle.getAttribute('cx'),
-          cy: circle.getAttribute('cy'),
-          r: circle.getAttribute('r'),
-        },
-        renderedStart,
-        configuredOffset: {
-          x: Number.parseFloat(style.getPropertyValue('--mass-core-entry-x')),
-          y: Number.parseFloat(style.getPropertyValue('--mass-core-entry-y')),
-        },
-        neutralCenter: { x: neutralCenter.x, y: neutralCenter.y },
-        titleJunction: {
-          x: (leadingRect.right + trailingRect.left) / 2,
-          y:
-            (leadingRect.top + leadingRect.bottom + trailingRect.top + trailingRect.bottom) / 4,
-        },
-      }
+      return testWindow.__massCoreEntryInitialGeometry ?? null
     })
 
     expect(initialGeometry).not.toBeNull()
