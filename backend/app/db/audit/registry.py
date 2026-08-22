@@ -25,6 +25,7 @@ COURSE_SUBMISSION_LIFECYCLE_REVISION = "a9c2e5f7b1d4"
 WISH_POOL_REVISION = "a9c4e7b2d6f1"
 SIBLING_MERGE_REVISION = "b4d6f8a2c1e3"
 WISH_OPTIONAL_SEMESTER_REVISION = "f3a7c1e9d5b2"
+ABOUT_US_ORDERING_REVISION = "c7e4a9b2d6f1"
 
 
 _CLASSIFICATION_CTE = r"""
@@ -812,6 +813,7 @@ _ELIGIBILITY_V4 = AuditAdapter(
             WISH_POOL_REVISION,
             SIBLING_MERGE_REVISION,
             WISH_OPTIONAL_SEMESTER_REVISION,
+            ABOUT_US_ORDERING_REVISION,
         }
     ),
     approved_aggregate_labels=tuple(OneToOneAggregateCounts.model_fields),

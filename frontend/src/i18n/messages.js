@@ -1583,12 +1583,32 @@ const en = {
   '關於我們內容儲存失敗，請稍後再試。': 'Unable to save About Us content. Please try again later.',
   'Markdown 內容': 'Markdown Content',
   'Markdown 預覽': 'Markdown Preview',
+  '英文 Markdown 預覽': 'English Markdown Preview',
+  中文預覽: 'Chinese Preview',
+  英文預覽: 'English Preview',
+  aboutUsImageHelp:
+    "Images:\n![alt text](image URL)\n\nSize and position:\n![alt text](image URL){'{'}width=50% align=center{'}'}\n\nText wrapping:\n![alt text](image URL){'{'}width=33% align=right wrap=true{'}'}\n\nWidth:\n1%–100%, e.g. 20%, 42%, 58.5%, 90%\n\nPosition:\nleft / center / right\n\nwrap=true applies only to left / right; mobile automatically uses a non-wrapping stacked layout.",
+  關於我們內容順序: 'About Us content order',
+  移到前面: 'Move earlier',
+  移到後面: 'Move later',
+  瀏覽關於我們內容: 'Browse About Us content',
+  瀏覽: 'Browse',
+  排序: 'Reorder',
+  上一則: 'Previous',
+  下一則: 'Next',
+  '第 {current} / {total} 則': 'Entry {current} of {total}',
+  '關於我們內容順序儲存失敗，請稍後再試。':
+    'Unable to save the About Us order. Please try again later.',
+  '確定要永久刪除這筆關於我們內容嗎？此動作無法復原。':
+    'Permanently delete this About Us entry? This cannot be undone.',
   標題是必填欄位: 'Title is required',
   內容是必填欄位: 'Content is required',
 }
 
 const zhTW = {
   ...Object.fromEntries(Object.keys(en).map((key) => [key, key])),
+  aboutUsImageHelp:
+    "圖片：\n![替代文字](圖片網址)\n\n調整大小與位置：\n![替代文字](圖片網址){'{'}width=50% align=center{'}'}\n\n文字環繞：\n![替代文字](圖片網址){'{'}width=33% align=right wrap=true{'}'}\n\n可用寬度：\n1%–100%，例如 20%、42%、58.5%、90%\n\n位置：\nleft / center / right\n\nwrap=true 僅適用於 left / right；手機版會自動改為不環繞的直向排版。",
   '投稿等級（使用者管理欄位）': '投稿等級',
   '管理員權限（使用者管理欄位）': '管理員權限',
   '管理員投稿（審核中心）': '管理員投稿',

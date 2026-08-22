@@ -4,6 +4,10 @@ export const getCourses = () => {
   return api.get('/courses/admin/courses')
 }
 
+export const getAdminAttentionSummary = () => {
+  return api.get('/admin/attention-summary')
+}
+
 export const createCourse = (courseData) => {
   return api.post('/courses/admin/courses', courseData)
 }

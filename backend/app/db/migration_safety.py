@@ -287,12 +287,21 @@ def _remove_wish_pool_and_bilingual_content(metadata: MetaData) -> None:
         table._columns.remove(table.c.body_en)
 
 
+def _remove_about_us_ordering(metadata: MetaData) -> None:
+    table = metadata.tables["about_us_entries"]
+    for index in list(table.indexes):
+        if "order_index" in index.columns:
+            table.indexes.remove(index)
+    table._columns.remove(table.c.order_index)
+
+
 def _metadata_for_variant(variant: str) -> MetaData:
     metadata = head_metadata()
     if variant == "head":
         return metadata
     if variant not in {
         "pre_wish_optional_semester",
+        "pre_about_us_ordering",
         "main_sibling_head",
         "coordination_sibling_head",
         "pre_course_submission_lifecycle",
@@ -310,6 +319,10 @@ def _metadata_for_variant(variant: str) -> MetaData:
         "pre_category_canonicalization",
     }:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
+
+    _remove_about_us_ordering(metadata)
+    if variant == "pre_about_us_ordering":
+        return metadata
 
     if variant == "pre_wish_optional_semester":
         metadata.tables["archive_wishes"].c.academic_year.nullable = False

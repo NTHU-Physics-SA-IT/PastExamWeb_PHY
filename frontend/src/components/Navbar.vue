@@ -107,7 +107,7 @@
           </div>
 
           <Button
-            :label="isEnglish ? '中' : 'EN'"
+            :label="isEnglish ? 'EN' : '中'"
             :aria-label="isEnglish ? $t('切換為中文') : $t('切換為英文')"
             severity="secondary"
             size="small"
@@ -116,7 +116,7 @@
             @click="toggleLocale"
           />
           <Button
-            :icon="isDarkTheme ? 'pi pi-sun' : 'pi pi-moon'"
+            :icon="isDarkTheme ? 'pi pi-moon' : 'pi pi-sun'"
             :aria-label="isDarkTheme ? $t('切換至淺色模式') : $t('切換至深色模式')"
             severity="secondary"
             size="small"

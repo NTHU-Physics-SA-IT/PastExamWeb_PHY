@@ -171,12 +171,13 @@ def test_bilingual_head_audit_is_new_version_and_preserves_lifecycle_classifier(
             "c2a8e4f6b9d1",
             "d4b7e2a9c6f1",
             "e6a1b3c5d7f9",
-                "e8a4c1d7b2f6",
-                "a9c2e5f7b1d4",
-                "b4d6f8a2c1e3",
-                "f3a7c1e9d5b2",
-            }
-        )
+            "e8a4c1d7b2f6",
+            "a9c2e5f7b1d4",
+            "b4d6f8a2c1e3",
+            "f3a7c1e9d5b2",
+            "c7e4a9b2d6f1",
+        }
+    )
     previous = get_audit_adapter(ELIGIBILITY_AUDIT_ID, 3)
     assert adapter.summary_sql == previous.summary_sql
     assert adapter.combinations_sql == previous.combinations_sql

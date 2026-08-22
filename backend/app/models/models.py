@@ -725,6 +725,7 @@ class AboutUsEntry(SQLModel, table=True):
         default=None, sa_column=Column(String(150), nullable=True)
     )
     body_en: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    order_index: int = Field(default=0, index=True)
     created_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False)
     )
@@ -1631,47 +1632,70 @@ def normalize_optional_bilingual_text(value: str | None) -> str | None:
     return value.strip() or None
 
 
-class AboutUsEntryBase(BaseModel):
-    title: str = Field(min_length=1, max_length=150)
+class AboutUsEntryBodyBase(BaseModel):
     body: str = Field(min_length=1)
-    title_en: str | None = Field(default=None, max_length=150)
     body_en: str | None = None
-    _normalize_text = field_validator("title", "body")(validate_about_us_text)
-    _normalize_optional_text = field_validator("title_en", "body_en")(
+    _normalize_text = field_validator("body")(validate_about_us_text)
+    _normalize_optional_text = field_validator("body_en")(
         normalize_optional_bilingual_text
     )
 
 
-class AboutUsEntryCreate(AboutUsEntryBase):
-    title_en: str = Field(min_length=1, max_length=150)
+class AboutUsEntryCreate(AboutUsEntryBodyBase):
     body_en: str = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_required_english_text(self):
-        if self.title_en is None or self.body_en is None:
+        if self.body_en is None:
             raise ValueError("About Us English fields must not be blank")
         return self
 
 
 class AboutUsEntryUpdate(BaseModel):
-    title: str | None = Field(default=None, min_length=1, max_length=150)
     body: str | None = Field(default=None, min_length=1)
-    title_en: str | None = Field(default=None, max_length=150)
     body_en: str | None = None
-    _normalize_text = field_validator("title", "body")(validate_about_us_text)
-    _normalize_optional_text = field_validator("title_en", "body_en")(
+    _normalize_text = field_validator("body")(validate_about_us_text)
+    _normalize_optional_text = field_validator("body_en")(
         normalize_optional_bilingual_text
     )
 
 
-class AboutUsEntryRead(AboutUsEntryBase):
+class AboutUsEntryRead(BaseModel):
     id: int
+    title: str
+    body: str
+    title_en: str | None = None
+    body_en: str | None = None
+    order_index: int
     created_at: datetime
     updated_at: datetime
     updated_by_username: str | None = None
 
     class Config:
         from_attributes = True
+
+
+class AboutUsEntryReorder(BaseModel):
+    entry_ids: list[int] = Field(min_length=1)
+
+
+class AdminReviewAttentionRead(BaseModel):
+    new_course_or_category: int
+    existing_course: int
+    total: int
+
+
+class AdminReportAttentionRead(BaseModel):
+    archive_reports: int
+    comment_reports: int
+    wish_reports: int
+    system_issues: int
+    total: int
+
+
+class AdminAttentionSummaryRead(BaseModel):
+    review_center: AdminReviewAttentionRead
+    report_management: AdminReportAttentionRead
 
 
 class ArchiveWishCreate(BaseModel):
@@ -2225,6 +2249,7 @@ class ArchiveSubmissionUpdate(BaseModel):
     requested_category_label: str | None = None
     requested_category_label_en: str | None = None
     requested_category_icon: str | None = None
+    review_note: str | None = None
 
 
 class TrashItem(BaseModel):

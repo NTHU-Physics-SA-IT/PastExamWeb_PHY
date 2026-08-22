@@ -377,6 +377,10 @@ async def test_archive_report_review_optional_takedown_is_atomic_and_non_destruc
     course, archive, submission = await _create_archive_context(
         session_maker, requester_id=requester.id
     )
+    async with session_maker() as session:
+        stored_submission = await session.get(ArchiveSubmission, submission.id)
+        stored_submission.review_note = "persistent report-source annotation"
+        await session.commit()
     path = f"/reports/courses/{course.id}/archives/{archive.id}"
     try:
         app.dependency_overrides[get_current_user] = _override_user(reporter.id)
@@ -423,6 +427,10 @@ async def test_archive_report_review_optional_takedown_is_atomic_and_non_destruc
             )
             assert rolled_back_report.status == "pending"
             assert rolled_back_submission.status == SubmissionStatus.APPROVED
+            assert (
+                rolled_back_submission.review_note
+                == "persistent report-source annotation"
+            )
 
         reviewed = await client.patch(
             f"/reports/admin/archives/{report_id}",
@@ -450,6 +458,8 @@ async def test_archive_report_review_optional_takedown_is_atomic_and_non_destruc
             assert live_submission is not None
             assert live_submission.deleted_at is None
             assert live_submission.status == SubmissionStatus.TAKEDOWN
+            assert live_submission.review_note == "persistent report-source annotation"
+            assert live_submission.lifecycle_reason == f"考古題回報 #{report_id} 成立"
             result_notifications = int(
                 await session.scalar(
                     select(func.count(PersonalNotification.id)).where(

@@ -70,7 +70,8 @@ Reviewed manifests currently cover:
 - `a9c4e7b2d6f1`: the reviewed bilingual managed-content and Wish Pool sibling
   head; and
 - `b4d6f8a2c1e3`: the merged schema before optional Wish academic year; and
-- `f3a7c1e9d5b2`: the current repository head and SQLModel metadata contract.
+- `f3a7c1e9d5b2`: the reviewed schema before persisted About Us ordering; and
+- `c7e4a9b2d6f1`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,
@@ -207,6 +208,14 @@ The About Us migration adds only the dedicated `about_us_entries` table and
 its update-order/editor indexes. It backfills or rewrites no existing rows,
 keeps its editor reference nullable with `ON DELETE SET NULL`, and downgrade
 removes only that new table and its indexes.
+
+The About Us ordering migration adds one non-null integer `order_index` and its
+non-unique lookup index. It preserves the previously configured presentation
+order by backfilling `updated_at DESC, id DESC` to contiguous zero-based
+indexes while the table is locked. Newer entries subsequently start at index
+zero and administrator reorder operations persist the complete sequence.
+Downgrade removes only the ordering index and column; legacy title/body data is
+unchanged.
 
 The optional Wish-semester migration changes only
 `archive_wishes.academic_year` from non-null to nullable. It adds no sentinel,
