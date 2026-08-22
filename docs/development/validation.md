@@ -115,6 +115,15 @@ use Equivalent only with the existing exact Full-source provenance and topology
 evidence. Governance-path pull requests and merges retain their existing
 fail-closed Full fallback.
 
+Trusted Activation adds no CI mode. Activation, reconciliation, deactivation,
+return, stale authority, invalid authority, and ambiguity remain Full-only or
+blocked. Equivalent eligibility additionally requires the protected-main
+grant, exact claim, live independent App/ruleset binding, current-main
+ancestry, and no revocation or retirement. A Green Trusted Governance Gate may
+validate a transition while explicitly reporting inactive authority. See
+[ADR-0011](../decisions/0011-trusted-activation-for-protected-coordination.md)
+and the [operator runbook](../runbooks/trusted-activation.md).
+
 The stable `integration/**` workflow family only starts workflow evaluation. It
 does not approve a base or grant Equivalent eligibility; the classifier and PR
 base policy resolve the exact configured coordination branch at runtime.
