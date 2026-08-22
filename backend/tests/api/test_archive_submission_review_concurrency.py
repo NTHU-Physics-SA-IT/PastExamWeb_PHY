@@ -408,7 +408,7 @@ async def test_direct_review_races_are_deterministic_first_writer_wins(
         assert after["submission"][0] == final_status
         assert after["submission"][1] == admin.id
         assert after["submission"][2] is not None
-        assert after["submission"][3] == f"winner:{winner_action}"
+        assert after["submission"][3] == before["submission"][3]
         assert after["submission"][4] is None
         assert after["submission"][6:] == (None, None)
         assert len(after["notifications"]) == 1

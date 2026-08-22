@@ -631,7 +631,7 @@ async def test_direct_review_true_transitions_return_flat_changed_response(
         assert after["submission"][0] == resulting_status
         assert after["submission"][1] == admin.id
         assert after["submission"][2] is not None
-        assert after["submission"][3] == f"true {action}"
+        assert after["submission"][3] == before["submission"][3]
         assert after["notifications"] == before["notifications"] + 1
         assert after["events"] == before["events"]
     finally:
