@@ -3,8 +3,9 @@ import sharp from "sharp";
 import { mkdir, readFile, stat } from "node:fs/promises";
 
 import {
+  classifyDateFilterLabel,
   evaluatePageviewsRange,
-  normalizeRedirectedDateUrl,
+  safeDateEnum,
   UMAMI_SCREENSHOT_DATE,
 } from "./capture-umami-helpers.mjs";
 
@@ -144,6 +145,58 @@ async function assertPublicSharePage(page) {
   return finalUrl;
 }
 
+async function findDateFilterControl(page, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const candidates = page.locator(
+      'button:visible,[role="combobox"]:visible',
+    );
+    const count = Math.min(await candidates.count(), 120);
+    for (let index = 0; index < count; index += 1) {
+      const candidate = candidates.nth(index);
+      const date = classifyDateFilterLabel(
+        await candidate.innerText().catch(() => ""),
+      );
+      if (date) return { date, locator: candidate };
+    }
+    await page.waitForTimeout(100);
+  }
+  throw new Error("Unable to locate the Umami date filter safely.");
+}
+
+async function find90DayOption(page, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const candidates = page.locator(
+      '[role="option"]:visible,[role="menuitem"]:visible,' +
+        '[role="menuitemradio"]:visible,button:visible',
+    );
+    const count = Math.min(await candidates.count(), 160);
+    for (let index = 0; index < count; index += 1) {
+      const candidate = candidates.nth(index);
+      const date = classifyDateFilterLabel(
+        await candidate.innerText().catch(() => ""),
+      );
+      if (date === UMAMI_SCREENSHOT_DATE) return candidate;
+    }
+    await page.waitForTimeout(100);
+  }
+  throw new Error("Unable to locate the Umami 90-day date option safely.");
+}
+
+async function select90DayRange(page) {
+  try {
+    const control = await findDateFilterControl(page);
+    if (control.date === UMAMI_SCREENSHOT_DATE) return;
+
+    await control.locator.click();
+    const option = await find90DayOption(page);
+    await option.click();
+  } catch {
+    throw new Error("Unable to select the Umami 90-day date range safely.");
+  }
+}
+
 function observeExpectedPageviewsRange(page) {
   let matchingEvidence = null;
   let lastEvidence = null;
@@ -215,24 +268,16 @@ async function capture(theme, output) {
       "initial",
     );
     const redirectedUrl = await assertPublicSharePage(page);
-    const normalized = normalizeRedirectedDateUrl(
-      targetUrl,
-      redirectedUrl,
-    );
-
-    let finalResponse = initialResponse;
-    if (normalized.needsNavigation) {
+    const redirectedDate = redirectedUrl.searchParams.get("date");
+    if (redirectedDate !== UMAMI_SCREENSHOT_DATE) {
       console.log(
-        `Normalizing Umami date after redirect; previous date ${normalized.previousDate}.`,
+        `Selecting Umami date after redirect; previous date ${safeDateEnum(redirectedDate)}.`,
       );
       rangeObserver.reset();
-      finalResponse = await navigateSafely(
-        page,
-        normalized.url,
-        "normalized",
-      );
+      await select90DayRange(page);
     }
 
+    const rangeEvidence = await rangeObserver.waitForMatch();
     const finalUrl = await assertPublicSharePage(page);
     const finalDate = finalUrl.searchParams.get("date");
     if (finalDate !== UMAMI_SCREENSHOT_DATE) {
@@ -241,7 +286,6 @@ async function capture(theme, output) {
       );
     }
 
-    const rangeEvidence = await rangeObserver.waitForMatch();
     console.log(
       `Confirmed Umami pageviews range; HTTP ${rangeEvidence.status}; unit ${rangeEvidence.unit}; span ${rangeEvidence.spanDays} days.`,
     );
@@ -357,7 +401,7 @@ async function capture(theme, output) {
 
     const bytes = await verifyPng(output);
     console.log(
-      `Saved ${theme} screenshot (${bytes} bytes); HTTP ${finalResponse.status()}; page errors ${pageErrorCount}.`,
+      `Saved ${theme} screenshot (${bytes} bytes); HTTP ${initialResponse.status()}; page errors ${pageErrorCount}.`,
     );
     return await readFile(output);
   } finally {
