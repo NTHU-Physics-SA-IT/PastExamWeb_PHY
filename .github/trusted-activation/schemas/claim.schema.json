@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/NTHU-Physics-SA-IT/PastExamWeb_PHY/.github/trusted-activation/schemas/claim.schema.json",
+  "title": "Trusted Activation Branch Claim",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "record_type", "repository_id", "repository", "branch", "activation_id", "grant_path", "grant_commit_sha", "grant_blob_sha", "policy_version", "policy_digest", "ruleset_id", "ruleset_digest", "verifier_app_id"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "record_type": {"const": "claim"},
+    "repository_id": {"type": "integer", "minimum": 1},
+    "repository": {"const": "NTHU-Physics-SA-IT/PastExamWeb_PHY"},
+    "branch": {"type": "string", "pattern": "^integration/[A-Za-z0-9][A-Za-z0-9._-]*$"},
+    "activation_id": {"type": "string", "format": "uuid"},
+    "grant_path": {"type": "string", "pattern": "^\\.github/trusted-activation/grants/[0-9a-f-]{36}\\.json$"},
+    "grant_commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "grant_blob_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "policy_version": {"const": "trusted-activation-v1"},
+    "policy_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "ruleset_id": {"type": "integer", "minimum": 1},
+    "ruleset_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "verifier_app_id": {"type": "integer", "minimum": 1}
+  }
+}
