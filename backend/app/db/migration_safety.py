@@ -487,9 +487,28 @@ def _normalize_predicate(value: Any) -> str | None:
     # operators, literals, functions, and boolean structure remain visible.
     normalized = IDENTIFIER_TEXT_CAST.sub(r"\g<identifier>", normalized)
     normalized = re.sub(r"\(\(([^()]*)\)\)", r"(\1)", normalized)
-    normalized = re.sub(r"^\((.*)\)$", r"\1", normalized)
+    while normalized.startswith("(") and normalized.endswith(")"):
+        depth = 0
+        encloses_expression = True
+        for position, character in enumerate(normalized):
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+                if depth == 0 and position != len(normalized) - 1:
+                    encloses_expression = False
+                    break
+        if not encloses_expression or depth != 0:
+            break
+        normalized = normalized[1:-1].strip()
+    normalized = re.sub(r"\(([\w.]+)\)", r"\1", normalized)
     normalized = re.sub(
-        r"^\(([\w.]+)\)(?=\s*(?:=|<>|in|not))",
+        r"\(([\w.]+\s*(?:=|<>)\s*'[^']*')\)",
+        r"\1",
+        normalized,
+    )
+    normalized = re.sub(
+        r"\(([\w.]+\s+is\s+(?:not\s+)?null)\)",
         r"\1",
         normalized,
     )

@@ -6,7 +6,7 @@ from sqlalchemy import UniqueConstraint
 from sqlalchemy.dialects.sqlite import dialect as sqlite_dialect
 from sqlalchemy.schema import CreateTable
 
-from app.db.migration_safety import metadata_for_revision
+from app.db.migration_safety import _normalize_predicate, metadata_for_revision
 from app.db.schema_manifests import (
     HEAD_SCHEMA_REVISION,
     get_manifest_spec,
@@ -58,6 +58,13 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
         "pre_archive_report_active_pending_uniqueness"
     )
     assert get_manifest_spec("c8e4a1f7b2d9").metadata_variant == "head"
+
+
+def test_compound_partial_index_predicate_normalizes_postgresql_parentheses() -> None:
+    expected = "status = 'pending' AND deleted_at IS NULL"
+    reflected = "((status)::text = 'pending'::text) AND (deleted_at IS NULL)"
+
+    assert _normalize_predicate(reflected) == _normalize_predicate(expected)
 
 
 def test_recovery_manifest_is_versioned_and_revision_bound() -> None:
