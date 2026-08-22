@@ -6,12 +6,37 @@
           <h1>{{ $t('關於我們') }}</h1>
           <p>{{ $t('認識清大物理考古題網站與維護團隊。') }}</p>
         </div>
-        <Button
-          v-if="isAdmin"
-          :label="$t('新增關於我們內容')"
-          icon="pi pi-plus"
-          @click="openCreate"
-        />
+        <div v-if="isAdmin || entries.length > 1" class="about-us-header-actions">
+          <Button
+            v-if="isAdmin"
+            :label="$t('新增關於我們內容')"
+            icon="pi pi-plus"
+            @click="openCreate"
+          />
+          <nav
+            v-if="entries.length > 1"
+            class="about-us-pagination"
+            :aria-label="$t('瀏覽關於我們內容')"
+          >
+            <Button
+              v-for="(entry, index) in entries"
+              :key="entry.id"
+              :label="String(index + 1)"
+              class="about-us-pagination-page"
+              :severity="index === currentEntryIndex ? 'primary' : 'secondary'"
+              :outlined="index !== currentEntryIndex"
+              size="small"
+              :aria-label="
+                $t('第 {current} / {total} 則', {
+                  current: index + 1,
+                  total: entries.length,
+                })
+              "
+              :aria-current="index === currentEntryIndex ? 'page' : undefined"
+              @click="selectEntry(index)"
+            />
+          </nav>
+        </div>
       </header>
 
       <div v-if="loading" class="about-us-state" role="status">
@@ -83,29 +108,6 @@
             ></div>
           </template>
         </Card>
-        <nav
-          v-if="entries.length > 1"
-          class="about-us-pagination"
-          :aria-label="$t('瀏覽關於我們內容')"
-        >
-          <Button
-            v-for="(entry, index) in entries"
-            :key="entry.id"
-            :label="String(index + 1)"
-            class="about-us-pagination-page"
-            :severity="index === currentEntryIndex ? 'primary' : 'secondary'"
-            :outlined="index !== currentEntryIndex"
-            size="small"
-            :aria-label="
-              $t('第 {current} / {total} 則', {
-                current: index + 1,
-                total: entries.length,
-              })
-            "
-            :aria-current="index === currentEntryIndex ? 'page' : undefined"
-            @click="selectEntry(index)"
-          />
-        </nav>
       </div>
     </section>
 
@@ -355,6 +357,16 @@ onMounted(loadEntries)
   margin-bottom: 1.5rem;
 }
 
+.about-us-header-actions {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem 0.75rem;
+  min-width: 0;
+}
+
 .about-us-header h1,
 .about-us-preview h3 {
   margin: 0;
@@ -468,6 +480,9 @@ onMounted(loadEntries)
 
 :deep(.markdown-content p) {
   margin: 0 0 1.1rem;
+  text-align: justify;
+  text-align-last: left;
+  text-justify: auto;
 }
 
 :deep(.markdown-content strong) {
@@ -514,24 +529,22 @@ onMounted(loadEntries)
   content: '';
 }
 
-@media (min-width: 641px) {
-  :deep(.markdown-content img.about-us-image--align-left.about-us-image--wrap) {
-    float: left;
-    margin: 0.25rem 1rem 0.75rem 0;
-  }
+:deep(.markdown-content img.about-us-image--align-left.about-us-image--wrap) {
+  float: left;
+  margin: 0.25rem 1rem 0.75rem 0;
+}
 
-  :deep(.markdown-content img.about-us-image--align-right.about-us-image--wrap) {
-    float: right;
-    margin: 0.25rem 0 0.75rem 1rem;
-  }
+:deep(.markdown-content img.about-us-image--align-right.about-us-image--wrap) {
+  float: right;
+  margin: 0.25rem 0 0.75rem 1rem;
+}
 
-  :deep(.markdown-content h1),
-  :deep(.markdown-content h2),
-  :deep(.markdown-content h3),
-  :deep(.markdown-content hr),
-  :deep(.markdown-content blockquote) {
-    clear: both;
-  }
+:deep(.markdown-content h1),
+:deep(.markdown-content h2),
+:deep(.markdown-content h3),
+:deep(.markdown-content hr),
+:deep(.markdown-content blockquote) {
+  clear: both;
 }
 
 :deep(.markdown-content ul),
@@ -607,6 +620,7 @@ onMounted(loadEntries)
   color: var(--text-secondary);
   line-height: 1.7;
   text-align: end;
+  text-align-last: auto;
 }
 
 :deep(.markdown-content hr + p strong),
@@ -639,6 +653,11 @@ onMounted(loadEntries)
     flex-direction: column;
   }
 
+  .about-us-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .about-us-edit-actions {
     flex-wrap: wrap;
   }
@@ -653,10 +672,6 @@ onMounted(loadEntries)
 
   :deep(.markdown-content blockquote) {
     padding: 0.8rem 0.9rem;
-  }
-
-  :deep(.markdown-content img.about-us-image--wrap) {
-    float: none;
   }
 }
 </style>

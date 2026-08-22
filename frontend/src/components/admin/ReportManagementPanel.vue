@@ -536,7 +536,7 @@
                     <dd>{{ localizedCourseSnapshotName(data) }} · {{ data.archive_name }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
-                    <dt>{{ $t('審核') }}</dt>
+                    <dt>{{ $t('審核人') }}</dt>
                     <dd>{{ data.reviewer_name || $t('尚未審核') }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
@@ -811,7 +811,7 @@
                     <dt>{{ $t('考試名稱') }}</dt>
                     <dd>{{ data.archive_name }}</dd>
                   </div>
-                  <div class="report-mobile-info-item">
+                  <div class="report-mobile-info-item report-mobile-info-item--wide">
                     <dt>{{ $t('考古題編號') }}</dt>
                     <dd>#{{ data.archive_id_snapshot }}</dd>
                   </div>
@@ -991,7 +991,7 @@
         <Column
           field="created_at"
           sortField="created_at"
-          :header="$t('回報者')"
+          :header="$t('回報')"
           sortable
           style="width: 10rem"
         >
@@ -1065,7 +1065,7 @@
                     <dd>{{ formatWishTargetSummary(data.target_summary) }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
-                    <dt>{{ $t('審核') }}</dt>
+                    <dt>{{ $t('審核人') }}</dt>
                     <dd>{{ data.reviewer_name || $t('尚未審核') }}</dd>
                   </div>
                   <div class="report-mobile-info-item">
@@ -1139,6 +1139,34 @@
               :severity="statusSeverity(data.status)"
               :value="statusLabel(data.status)" /></template
         ></Column>
+        <Column
+          field="reviewed_at"
+          sortField="reviewed_at"
+          :header="$t('審核')"
+          sortable
+          headerClass="report-review-column"
+          bodyClass="report-review-column"
+          style="width: 10rem; min-width: 10rem"
+          ><template #body="{ data }"
+            ><div v-if="!isCardLayout" class="report-person-time">
+              <span
+                class="report-person-time__name"
+                :class="{ 'report-person-time__name--empty': !data.reviewer_name }"
+                :title="data.reviewer_name || $t('尚未審核')"
+              >
+                {{ data.reviewer_name || $t('尚未審核') }}
+              </span>
+              <time
+                v-if="data.reviewed_at"
+                class="report-person-time__time"
+                :datetime="data.reviewed_at"
+              >
+                {{ formatDateTime(data.reviewed_at, true) }}
+              </time>
+              <span v-else class="report-person-time__time">--</span>
+            </div>
+          </template>
+        </Column>
         <Column :header="$t('操作')" style="width: 17rem">
           <template #body="{ data }"
             ><footer v-if="!isCardLayout" class="report-desktop-actions">

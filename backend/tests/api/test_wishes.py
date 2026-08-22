@@ -446,7 +446,14 @@ async def test_wish_duplicate_heart_fulfillment_report_and_admin_delete(
             second_report_id,
             first_report_id,
         ]
-        for sort_by in ("created_at", "reason", "wisher", "wish_target", "status"):
+        for sort_by in (
+            "created_at",
+            "reason",
+            "wisher",
+            "wish_target",
+            "status",
+            "reviewed_at",
+        ):
             sorted_reports = await client.get(
                 "/wishes/admin/reports",
                 params={"sort_by": sort_by, "sort_order": "asc"},

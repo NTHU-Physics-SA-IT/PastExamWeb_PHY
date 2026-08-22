@@ -2306,6 +2306,16 @@
                   <Column :header="$t('操作')">
                     <template #body="{ data }">
                       <div class="review-row-action-area">
+                        <div
+                          v-if="getReviewTrashNote(data)"
+                          :class="['review-card-action-note', getReviewTrashNoteClass(data)]"
+                          :title="getReviewTrashNote(data, true)"
+                        >
+                          <i :class="getReviewTrashNoteIcon(data)" aria-hidden="true"></i>
+                          <span class="review-card-action-note__text">{{
+                            getReviewTrashNote(data)
+                          }}</span>
+                        </div>
                         <div class="admin-card-actions review-card-actions">
                           <Button
                             class="review-action-button"
@@ -2343,16 +2353,6 @@
                             :text="action.text"
                             @click="runReviewRowAction(data, action.key)"
                           />
-                        </div>
-                        <div
-                          v-if="getReviewTrashNote(data)"
-                          :class="['review-card-action-note', getReviewTrashNoteClass(data)]"
-                          :title="getReviewTrashNote(data, true)"
-                        >
-                          <i :class="getReviewTrashNoteIcon(data)" aria-hidden="true"></i>
-                          <span class="review-card-action-note__text">{{
-                            getReviewTrashNote(data)
-                          }}</span>
                         </div>
                       </div>
                     </template>
@@ -2661,6 +2661,16 @@
                   <Column :header="$t('操作')">
                     <template #body="{ data }">
                       <div class="review-row-action-area">
+                        <div
+                          v-if="getReviewTrashNote(data)"
+                          :class="['review-card-action-note', getReviewTrashNoteClass(data)]"
+                          :title="getReviewTrashNote(data, true)"
+                        >
+                          <i :class="getReviewTrashNoteIcon(data)" aria-hidden="true"></i>
+                          <span class="review-card-action-note__text">{{
+                            getReviewTrashNote(data)
+                          }}</span>
+                        </div>
                         <div class="admin-card-actions review-card-actions">
                           <Button
                             class="review-action-button"
@@ -2698,16 +2708,6 @@
                             :text="action.text"
                             @click="runReviewRowAction(data, action.key)"
                           />
-                        </div>
-                        <div
-                          v-if="getReviewTrashNote(data)"
-                          :class="['review-card-action-note', getReviewTrashNoteClass(data)]"
-                          :title="getReviewTrashNote(data, true)"
-                        >
-                          <i :class="getReviewTrashNoteIcon(data)" aria-hidden="true"></i>
-                          <span class="review-card-action-note__text">{{
-                            getReviewTrashNote(data)
-                          }}</span>
                         </div>
                       </div>
                     </template>
@@ -3648,6 +3648,9 @@
               v-model="archiveRequestEditForm.review_note"
               rows="4"
               autoResize
+              :placeholder="
+                $t('可留空；若未填寫，投稿者將看到「尚無審核留言」。此留言會隨投稿紀錄保留。')
+              "
               :disabled="!canEditSelectedArchiveReviewNote"
             />
           </div>
@@ -13609,6 +13612,16 @@ onBeforeUnmount(() => {
   display: none;
 }
 
+@media (min-width: 1400px) {
+  :deep(.review-row-action-area > .review-card-actions) {
+    order: 1;
+  }
+
+  :deep(.review-row-action-area > .review-card-action-note) {
+    order: 2;
+  }
+}
+
 @media (max-width: 1399px) {
   .review-center {
     padding: 0.75rem !important;
@@ -13718,7 +13731,6 @@ onBeforeUnmount(() => {
 
   :deep(.review-request-table .p-datatable-tbody > tr > td:last-child) {
     order: 2;
-    padding-top: 0.75rem !important;
   }
 
   :deep(.review-mobile-card-header) {
@@ -13856,30 +13868,43 @@ onBeforeUnmount(() => {
   }
 
   :deep(.review-row-action-area) {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
     width: 100%;
-    gap: 0.55rem;
+    min-width: 0;
+    column-gap: 0.75rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
   }
 
   :deep(.review-card-action-note) {
-    order: 1;
-    width: 100%;
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: start;
+    width: fit-content;
     max-width: 100%;
+    min-width: 0;
     margin: 0;
+    margin-inline: 0;
   }
 
   :deep(.p-datatable .review-card-actions),
   :deep(.review-card-actions) {
-    order: 2;
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: flex-end;
-    width: 100%;
+    margin: 0;
+    width: auto;
+    min-width: 0;
     gap: 0.45rem;
     overflow-x: visible;
     padding-bottom: 0.05rem;
+    white-space: nowrap;
   }
 
   :deep(.p-datatable .review-card-actions .p-button),
@@ -13933,7 +13958,7 @@ onBeforeUnmount(() => {
   :deep(.review-card-actions) {
     display: flex;
     flex-wrap: nowrap;
-    justify-content: stretch;
+    justify-content: flex-end;
     overflow-x: visible;
   }
 

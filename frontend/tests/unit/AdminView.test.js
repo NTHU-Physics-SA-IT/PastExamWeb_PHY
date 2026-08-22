@@ -876,6 +876,9 @@ describe('AdminView', () => {
     await wrapper.vm.openArchiveRequestDialog(request)
     expect(wrapper.vm.canEditSelectedArchiveMetadata).toBe(false)
     expect(wrapper.vm.canEditSelectedArchiveReviewNote).toBe(true)
+    expect(adminTemplateSource).toContain(
+      '可留空；若未填寫，投稿者將看到「尚無審核留言」。此留言會隨投稿紀錄保留。'
+    )
 
     wrapper.vm.archiveRequestEditForm.review_note = '  stage-a-review-note-check  '
     await wrapper.vm.saveArchiveRequestEdit()
@@ -1229,6 +1232,21 @@ describe('AdminView', () => {
     )
     expect(adminViewSource).toMatch(
       /review-card-action-note[\s\S]*?width:\s*max-content[\s\S]*?max-width:\s*100%/
+    )
+    expect(adminViewSource).toMatch(
+      /review-row-action-area[\s\S]*?display:\s*grid[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) auto[\s\S]*?align-items:\s*center[\s\S]*?border-top:\s*1px solid color-mix\(in srgb, var\(--border-color\) 78%, transparent\)/
+    )
+    expect(adminViewSource).toMatch(
+      /review-card-action-note\)\s*\{[\s\S]*?grid-column:\s*1[\s\S]*?grid-row:\s*1[\s\S]*?justify-self:\s*start[\s\S]*?width:\s*fit-content[\s\S]*?min-width:\s*0[\s\S]*?margin-inline:\s*0/
+    )
+    expect(adminViewSource).toMatch(
+      /review-card-actions\)\s*\{[\s\S]*?grid-column:\s*2[\s\S]*?grid-row:\s*1[\s\S]*?justify-self:\s*end[\s\S]*?flex-wrap:\s*nowrap[\s\S]*?justify-content:\s*flex-end[\s\S]*?margin:\s*0[\s\S]*?white-space:\s*nowrap/
+    )
+    expect(adminViewSource).toMatch(
+      /@media \(min-width: 1400px\)[\s\S]*?review-row-action-area > \.review-card-actions\)\s*\{[\s\S]*?order:\s*1[\s\S]*?review-row-action-area > \.review-card-action-note\)\s*\{[\s\S]*?order:\s*2/
+    )
+    expect(adminViewSource).toMatch(
+      /@media \(max-width: 640px\)[\s\S]*?review-card-actions\)\s*\{[\s\S]*?justify-content:\s*flex-end/
     )
     expect(adminViewSource).not.toContain('max-width: min(18rem, 100%)')
     expect(adminViewSource.match(/'review-mobile-card-status-badge'/g)).toHaveLength(2)
