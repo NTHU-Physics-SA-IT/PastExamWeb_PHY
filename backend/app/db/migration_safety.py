@@ -288,6 +288,24 @@ def _remove_wish_pool_and_bilingual_content(metadata: MetaData) -> None:
         table._columns.remove(table.c.body_en)
 
 
+def _restore_pre_archive_report_active_pending_uniqueness(
+    metadata: MetaData,
+) -> None:
+    report_table = metadata.tables["archive_reports"]
+    pending_indexes = [
+        index
+        for index in report_table.indexes
+        if index.name == ARCHIVE_REPORT_PENDING_UNIQUE
+    ]
+    if len(pending_indexes) != 1:
+        raise ValueError(
+            "Expected exactly one ArchiveReport active-pending unique index"
+        )
+    pending_indexes[0].dialect_options["postgresql"]["where"] = text(
+        "status = 'pending'"
+    )
+
+
 def _metadata_for_variant(variant: str) -> MetaData:
     metadata = head_metadata()
     if variant == "head":
@@ -313,16 +331,8 @@ def _metadata_for_variant(variant: str) -> MetaData:
     }:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
 
+    _restore_pre_archive_report_active_pending_uniqueness(metadata)
     if variant == "pre_archive_report_active_pending_uniqueness":
-        report_table = metadata.tables["archive_reports"]
-        pending_index = next(
-            index
-            for index in report_table.indexes
-            if index.name == ARCHIVE_REPORT_PENDING_UNIQUE
-        )
-        pending_index.dialect_options["postgresql"]["where"] = text(
-            "status = 'pending'"
-        )
         return metadata
 
     if variant == "pre_wish_optional_semester":

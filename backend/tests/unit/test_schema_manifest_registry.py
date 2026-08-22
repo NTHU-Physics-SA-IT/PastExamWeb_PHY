@@ -207,16 +207,26 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
         for index in previous_archive_report_head.tables["archive_reports"].indexes
         if index.name == "uq_archive_reports_pending_reporter_archive"
     )
+    older_pending_index = next(
+        index
+        for index in a7.tables["archive_reports"].indexes
+        if index.name == "uq_archive_reports_pending_reporter_archive"
+    )
     current_predicate = str(
         current_pending_index.dialect_options["postgresql"]["where"]
     ).lower()
     previous_predicate = str(
         previous_pending_index.dialect_options["postgresql"]["where"]
     ).lower()
+    older_predicate = str(
+        older_pending_index.dialect_options["postgresql"]["where"]
+    ).lower()
     assert "status = 'pending'" in current_predicate
     assert "deleted_at is null" in current_predicate
     assert "status = 'pending'" in previous_predicate
     assert "deleted_at" not in previous_predicate
+    assert "status = 'pending'" in older_predicate
+    assert "deleted_at" not in older_predicate
     assert any(
         isinstance(constraint, UniqueConstraint)
         and constraint.name == "uq_users_oauth_provider_sub"
