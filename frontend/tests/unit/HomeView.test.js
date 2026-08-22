@@ -32,8 +32,11 @@ vi.mock('@/composables/useFormulaPhysics', () => ({
 }))
 
 let prefersReducedMotion = false
+let desktopHeroLayout = false
 const matchMediaMock = vi.fn((query) => ({
-  matches: query === '(prefers-reduced-motion: reduce)' && prefersReducedMotion,
+  matches:
+    (query === '(prefers-reduced-motion: reduce)' && prefersReducedMotion) ||
+    (query === '(min-width: 1181px)' && desktopHeroLayout),
   media: query,
   addEventListener: vi.fn(),
   removeEventListener: vi.fn(),
@@ -67,16 +70,20 @@ const originalRequestAnimationFrame = window.requestAnimationFrame
 const originalCancelAnimationFrame = window.cancelAnimationFrame
 const originalResizeObserver = globalThis.ResizeObserver
 const originalScrollIntoView = HTMLElement.prototype.scrollIntoView
+const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect
+const originalGetScreenCTM = SVGElement.prototype.getScreenCTM
 
 describe('HomeView', () => {
   beforeEach(() => {
     prefersReducedMotion = false
+    desktopHeroLayout = false
     nextAnimationFrameId = 1
     animationFrameCallbacks = new Map()
     window.matchMedia = matchMediaMock
     window.requestAnimationFrame = requestAnimationFrameMock
     window.cancelAnimationFrame = cancelAnimationFrameMock
     globalThis.ResizeObserver = ResizeObserverMock
+    SVGElement.prototype.getScreenCTM = vi.fn(() => null)
     statisticsServiceMock.getSystemStatistics.mockReset()
     routerPushMock.mockReset()
     statisticsServiceMock.getSystemStatistics.mockResolvedValue({
@@ -92,6 +99,12 @@ describe('HomeView', () => {
     window.cancelAnimationFrame = originalCancelAnimationFrame
     globalThis.ResizeObserver = originalResizeObserver
     HTMLElement.prototype.scrollIntoView = originalScrollIntoView
+    HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect
+    if (originalGetScreenCTM) {
+      SVGElement.prototype.getScreenCTM = originalGetScreenCTM
+    } else {
+      delete SVGElement.prototype.getScreenCTM
+    }
     setLocale('zh-TW')
   })
 
@@ -107,11 +120,173 @@ describe('HomeView', () => {
     )
   })
 
+  it('uses the existing responsive tiers for the centered hero action composition', () => {
+    expect(homeSource).toContain('class="hero-action-divider"')
+    expect(homeSource).toMatch(/\.hero-action-divider\s*\{[^}]*display:\s*none;/)
+    expect(homeSource).toMatch(
+      /@media \(max-width: 1180px\)[\s\S]*?\.hero-actions\s*\{[^}]*flex-direction:\s*column;[^}]*align-items:\s*center;/
+    )
+    expect(homeSource).toMatch(
+      /@media \(max-width: 1180px\)[\s\S]*?\.hero-actions\s+:deep\(\.p-button\)\s*\{[^}]*width:\s*100%;[^}]*min-height:\s*3\.15rem;/
+    )
+    expect(homeSource).toMatch(
+      /@media \(max-width: 1180px\)[\s\S]*?\.hero-action-divider\s*\{[^}]*display:\s*block;[^}]*width:\s*100%;/
+    )
+    expect(homeSource).toMatch(
+      /@media \(max-width: 560px\)[\s\S]*?\.title-line\s*\{[^}]*display:\s*block;/
+    )
+    expect(homeSource).toMatch(
+      /@media \(max-width: 560px\)[\s\S]*?\.subtitle\s*\{[^}]*display:\s*none;/
+    )
+    expect(homeSource).toMatch(
+      /@media \(max-width: 1180px\)[\s\S]*?\.hero-actions\s+:deep\(\.p-button:nth-child\(2\)\)[\s\S]*?border-width:\s*1px;[^}]*border-style:\s*solid;[^}]*background:\s*transparent;/
+    )
+    expect(homeSource).toMatch(
+      /@media \(max-width: 1180px\)[\s\S]*?\.hero-actions\s+:deep\(\.p-button\.p-button-secondary\.p-button-outlined:last-child\)\s*\{[^}]*border-color:\s*transparent;/
+    )
+  })
+
+  it('uses one catalog action with a deferred desktop placement target', () => {
+    expect(homeSource).toContain("const catalogActionLabel = computed(() => t('瀏覽公開課程目錄'))")
+    expect(homeSource).toMatch(
+      /<Teleport\s+defer\s+to="#desktop-catalog-action"\s+:disabled="!isDesktopHeroLayout">/
+    )
+    expect(homeSource).toContain('id="desktop-catalog-action"')
+    expect(homeSource).toContain("window.matchMedia('(min-width: 1181px)')")
+    expect(homeSource).toMatch(
+      /@media \(min-width: 1181px\)[\s\S]*?\.hero-layout\s*\{[^}]*display:\s*grid;[^}]*align-items:\s*center;/
+    )
+    expect(homeSource).toMatch(
+      /@media \(min-width: 1181px\)[\s\S]*?\.dashboard-strip\s*\{[^}]*position:\s*relative;[^}]*top:\s*auto;[^}]*transform:\s*none;/
+    )
+    expect(homeSource).toMatch(
+      /@media \(min-width: 1181px\)[\s\S]*?\.desktop-catalog-target\s*\{[^}]*justify-self:\s*start;/
+    )
+    expect(homeSource).toMatch(
+      /@media \(min-width: 1181px\)[\s\S]*?\.hero-actions\s+:deep\(\.p-button:nth-child\(2\)\)[\s\S]*?border-width:\s*1px;[^}]*background:\s*transparent;/
+    )
+    expect(homeSource).toMatch(
+      /@media \(min-width: 1181px\)[\s\S]*?\.desktop-catalog-target::before\s*\{[^}]*width:\s*100%;[^}]*height:\s*1px;/
+    )
+  })
+
+  it('derives the desktop mass-core entry offset from the boundary between 理 and 考', async () => {
+    desktopHeroLayout = true
+    HTMLElement.prototype.getBoundingClientRect = vi.fn(function () {
+      if (this.classList.contains('title-line-leading')) {
+        return {
+          bottom: 300,
+          height: 100,
+          left: 100,
+          right: 260,
+          top: 200,
+          width: 160,
+          x: 100,
+          y: 200,
+          toJSON: () => ({}),
+        }
+      }
+      if (this.classList.contains('title-line-trailing')) {
+        return {
+          bottom: 300,
+          height: 100,
+          left: 300,
+          right: 500,
+          top: 200,
+          width: 200,
+          x: 300,
+          y: 200,
+          toJSON: () => ({}),
+        }
+      }
+      return originalGetBoundingClientRect.call(this)
+    })
+    SVGElement.prototype.getScreenCTM = vi.fn(function () {
+      if (!this.classList.contains('mass-core-entry')) return null
+      return { a: 2, b: 0, c: 0, d: 2, e: 10, f: 20 }
+    })
+
+    const wrapper = mount(HomeView, {
+      global: { stubs: { Teleport: true } },
+    })
+    await flushPromises()
+
+    const entry = wrapper.get('.mass-core-entry')
+    const circle = wrapper.get('.mass-core')
+    expect(circle.attributes()).toMatchObject({ cx: '760', cy: '380', r: '92' })
+    expect(entry.classes()).toContain('mass-core-entry-ready')
+    expect(entry.classes()).toContain('mass-core-entry-animate')
+    expect(entry.element.style.getPropertyValue('--mass-core-entry-x')).toBe('-625px')
+    expect(entry.element.style.getPropertyValue('--mass-core-entry-y')).toBe('-265px')
+
+    entry.element.dispatchEvent(new Event('animationend'))
+    expect(entry.classes()).not.toContain('mass-core-entry-animate')
+    expect(entry.element.style.getPropertyValue('--mass-core-entry-x')).toBe('')
+    expect(entry.element.style.getPropertyValue('--mass-core-entry-y')).toBe('')
+
+    wrapper.unmount()
+  })
+
+  it('keeps mass-core entry neutral outside desktop or when reduced motion is requested', async () => {
+    const tabletWrapper = mount(HomeView)
+    await flushPromises()
+    expect(tabletWrapper.get('.mass-core-entry').classes()).toContain('mass-core-entry-ready')
+    expect(tabletWrapper.get('.mass-core-entry').classes()).not.toContain('mass-core-entry-animate')
+    tabletWrapper.unmount()
+
+    desktopHeroLayout = true
+    prefersReducedMotion = true
+    const reducedMotionWrapper = mount(HomeView, {
+      global: { stubs: { Teleport: true } },
+    })
+    await flushPromises()
+    expect(reducedMotionWrapper.get('.mass-core-entry').classes()).toContain(
+      'mass-core-entry-ready'
+    )
+    expect(reducedMotionWrapper.get('.mass-core-entry').classes()).not.toContain(
+      'mass-core-entry-animate'
+    )
+    reducedMotionWrapper.unmount()
+  })
+
+  it('scopes each CTA sweep to its intended visual content and disables motion when requested', () => {
+    expect(homeSource).toMatch(
+      /\.hero-actions\s+:deep\(\.p-button\)::before\s*\{[\s\S]*?z-index:\s*2;[\s\S]*?pointer-events:\s*none;[\s\S]*?transform:\s*translateX\(0\)\s+skewX\(-18deg\);[\s\S]*?transition:\s*none;/
+    )
+    expect(homeSource).toMatch(
+      /\.hero-actions\s+:deep\(\.p-button:not\(:disabled\):hover\)::before\s*\{[\s\S]*?transform:\s*translateX\(510%\)\s+skewX\(-18deg\);[\s\S]*?transition:\s*transform\s+1s/
+    )
+    expect(homeSource).toMatch(/:deep\(\.catalog-action\)::before\s*\{[^}]*display:\s*none;/)
+    expect(homeSource).toMatch(
+      /:deep\(\.catalog-action\.p-button\.p-button-secondary\.p-button-outlined:not\(:disabled\):hover\)\s*\{[^}]*border-color:\s*transparent;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/
+    )
+    expect(homeSource).toContain("'data-catalog-label': catalogActionLabel")
+    expect(homeSource).toMatch(
+      /:deep\(\.catalog-action \.p-button-label\)::before\s*\{[\s\S]*?width:\s*0;[\s\S]*?overflow:\s*hidden;[\s\S]*?content:\s*attr\(data-catalog-label\);[\s\S]*?transition:\s*width\s+300ms\s+ease-out;/
+    )
+    expect(homeSource).toMatch(
+      /:deep\(\.catalog-action \.p-button-label\)::after\s*\{[\s\S]*?left:\s*0;[\s\S]*?width:\s*0;[\s\S]*?transition:\s*width\s+300ms\s+ease-out;/
+    )
+    expect(homeSource).toMatch(
+      /:deep\(\.catalog-action:not\(:disabled\):hover \.p-button-label\)::before,[\s\S]*?:deep\(\.catalog-action:not\(:disabled\):hover \.p-button-label\)::after[\s\S]*?\{[^}]*width:\s*100%;/
+    )
+    expect(homeSource).not.toMatch(
+      /:deep\(\.catalog-action:hover \.p-button-(?:icon|label)\)\s*\{[^}]*transform:/
+    )
+    expect(homeSource).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)\s*\{[\s\S]*?\.hero-actions\s+:deep\(\.p-button\)::before\s*\{[^}]*display:\s*none;/
+    )
+    expect(homeSource).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)\s*\{[\s\S]*?:deep\(\.catalog-action \.p-button-label\)::before,[\s\S]*?:deep\(\.catalog-action \.p-button-label\)::after\s*\{[^}]*transition:\s*none;/
+    )
+  })
+
   it('renders the physics landing page and fetched statistics', async () => {
     const wrapper = mount(HomeView)
     await flushPromises()
 
     expect(wrapper.text()).toContain('清大物理')
+    expect(wrapper.find('.eyebrow').text()).toBe('PHYS ARCHIVE')
     const heroActions = wrapper.findAll('.hero-actions button')
     expect(heroActions.map((button) => button.text())).toEqual([
       '清華校務系統登入',
@@ -132,6 +307,7 @@ describe('HomeView', () => {
 
     expect(wrapper.vm.animatedValues.totalArchives).toBe('0')
     expect(wrapper.vm.animatedValues.totalUsers).toBe('0')
+    expect(requestAnimationFrameMock).toHaveBeenCalledTimes(1)
 
     runAnimationFrame(100)
     runAnimationFrame(1900)
@@ -177,6 +353,36 @@ describe('HomeView', () => {
     expect(animationFrameCallbacks.size).toBe(0)
 
     wrapper.unmount()
+  })
+
+  it('updates on consecutive animation frames while skipping unchanged display values', async () => {
+    const wrapper = mount(HomeView)
+    await flushPromises()
+
+    const initialValues = wrapper.vm.animatedValues
+    runAnimationFrame(100)
+    const firstFrameValues = wrapper.vm.animatedValues
+    runAnimationFrame(110)
+    await wrapper.vm.$nextTick()
+
+    expect(firstFrameValues).toBe(initialValues)
+    expect(wrapper.vm.animatedValues).not.toBe(firstFrameValues)
+
+    runAnimationFrame(1900)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.vm.animatedValues.totalUsers).toBe('120')
+    expect(animationFrameCallbacks.size).toBe(0)
+
+    wrapper.unmount()
+  })
+
+  it('keeps the animated statistics cards compositor-friendly', () => {
+    const statCardRule = homeSource.match(/\.stat-card\s*\{([^}]*)\}/)?.[1] ?? ''
+
+    expect(homeSource).not.toContain('COUNTER_RENDER_INTERVAL_MS')
+    expect(statCardRule).toContain('contain: layout style')
+    expect(statCardRule).toContain('transform: translate3d(0, 12px, 0)')
+    expect(statCardRule).not.toContain('backdrop-filter')
   })
 
   it('shows final values immediately when reduced motion is requested', async () => {

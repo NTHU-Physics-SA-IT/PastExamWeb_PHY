@@ -35,6 +35,10 @@ describe('PublicCourses', () => {
     setSeoMock.mockReset()
   })
 
+  it('uses the catalog header selector for the bold page title', () => {
+    expect(publicCoursesSource).toMatch(/\.catalog-header h1\s*\{[^}]*font-weight:\s*700;/s)
+  })
+
   it('uses plain breadcrumbs and stable responsive gutters', () => {
     expect(publicCoursesSource).toMatch(
       /\.breadcrumbs a\s*\{[^}]*padding:\s*0;[^}]*text-decoration:\s*none/s
