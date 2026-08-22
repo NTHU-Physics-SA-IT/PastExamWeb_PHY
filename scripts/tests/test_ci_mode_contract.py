@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from datetime import UTC, datetime, timedelta
 import importlib
-from pathlib import Path
 import subprocess
 import sys
+from copy import deepcopy
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
-
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
 MAIN_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "main.yml"
@@ -20,6 +19,7 @@ sys.path.insert(0, str(CI_SCRIPTS))
 ci = importlib.import_module("classify_ci_mode")
 gate = importlib.import_module("validate_ci_gate")
 project_governance = importlib.import_module("project_governance")
+trusted_activation = importlib.import_module("trusted_activation")
 
 COORDINATION_BRANCH = "integration/current"
 COORDINATION_REF = f"refs/heads/{COORDINATION_BRANCH}"
@@ -375,6 +375,11 @@ def test_e2e_families_and_aggregate_are_required_authority() -> None:
         ("refs/heads/hotfix/production/db", ("docs/guide.md",), "full"),
         ("refs/heads/topic", (".github/workflows/main.yml",), "full"),
         ("refs/heads/topic", (".github/project-governance.json",), "full"),
+        (
+            "refs/heads/topic",
+            (".github/trusted-activation/claim.json",),
+            "full",
+        ),
         ("refs/heads/topic", ("scripts/ci/helper.py",), "full"),
         ("refs/heads/topic", ("backend/Dockerfile",), "full"),
         ("refs/heads/topic", ("frontend/pnpm-lock.yaml",), "full"),
@@ -495,6 +500,59 @@ def test_null_governance_grants_no_coordination_or_equivalent_privilege(
     )
     assert push_result.ci_mode == "docs-only"
     assert push_result.reason == "all changed paths are documentation-only"
+
+
+def test_external_trusted_activation_is_required_before_equivalent(
+    tmp_path: Path,
+) -> None:
+    fixture = _equivalent_repository(tmp_path)
+    active = trusted_activation.AuthorityResolution(
+        state=trusted_activation.AuthorityState.ACTIVE,
+        active=True,
+        branch=COORDINATION_BRANCH,
+        activation_id="123e4567-e89b-42d3-a456-426614174000",
+        reason_code="trusted_activation_valid",
+        reason="test authority",
+    )
+    inactive = trusted_activation.AuthorityResolution(
+        state=trusted_activation.AuthorityState.PROTECTED_INACTIVE,
+        active=False,
+        branch=COORDINATION_BRANCH,
+        activation_id="123e4567-e89b-42d3-a456-426614174000",
+        reason_code="grant_without_claim",
+        reason="test transition",
+    )
+
+    missing = ci.classify_ci_mode(
+        event=_pr_event(fixture),
+        git=fixture["git"],
+        api=FakePRAPI(fixture),
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
+        require_trusted_activation=True,
+        now=NOW,
+    )
+    transition = ci.classify_ci_mode(
+        event=_pr_event(fixture),
+        git=fixture["git"],
+        api=FakePRAPI(fixture),
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
+        trusted_activation=inactive,
+        require_trusted_activation=True,
+        now=NOW,
+    )
+    authorized = ci.classify_ci_mode(
+        event=_pr_event(fixture),
+        git=fixture["git"],
+        api=FakePRAPI(fixture),
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
+        trusted_activation=active,
+        require_trusted_activation=True,
+        now=NOW,
+    )
+
+    assert missing.ci_mode == "full"
+    assert transition.ci_mode == "full"
+    assert authorized.ci_mode == "equivalent-merge"
 
 
 def test_valid_two_parent_equivalent_merge_is_eligible(tmp_path: Path) -> None:
@@ -1396,6 +1454,15 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
         "EVENT_HEAD_REPOSITORY_ID": (
             "${{ github.event.pull_request.head.repo.id || 0 }}"
         ),
+        "TRUSTED_VERIFIER_APP_ID": (
+            "${{ vars.TRUSTED_GOVERNANCE_APP_ID || 0 }}"
+        ),
+        "TRUSTED_RULESET_ID": (
+            "${{ vars.TRUSTED_INTEGRATION_RULESET_ID || 0 }}"
+        ),
+        "TRUSTED_RULESET_DIGEST": (
+            "${{ vars.TRUSTED_INTEGRATION_RULESET_DIGEST }}"
+        ),
     }
     for option in (
         "--action",
@@ -1407,6 +1474,9 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
         "--head-sha",
         "--head-repository",
         "--head-repository-id",
+        "--trusted-verifier-app-id",
+        "--trusted-ruleset-id",
+        "--trusted-ruleset-digest",
     ):
         assert option in docs_revalidation["run"]
     assert "CI Gate" not in pr_workflow
@@ -1414,6 +1484,17 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
     assert set(pr_parsed["jobs"]) == {"check-branch"}
     assert pr_parsed["jobs"]["check-branch"]["permissions"] == {"contents": "read"}
     steps = pr_parsed["jobs"]["check-branch"]["steps"]
+    main_checkout = next(
+        step
+        for step in steps
+        if step["name"] == "Checkout current protected main authority"
+    )
+    assert main_checkout["with"] == {
+        "fetch-depth": "1",
+        "path": "trusted-main",
+        "persist-credentials": "false",
+        "ref": "${{ github.event.repository.default_branch }}",
+    }
     checkout = next(
         step for step in steps if step["name"] == "Checkout immutable pull request base"
     )
@@ -1424,12 +1505,12 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
         "ref": "${{ github.event.pull_request.base.sha }}",
     }
     assert "scripts/ci/project_governance.py" in pr_workflow
-    assert 'gh api --paginate "repos/$REPOSITORY/branches"' in pr_workflow
-    assert ".protected == true" in pr_workflow
-    assert '"${#protected_coordination_branches[@]}" -ne 1' in pr_workflow
-    assert '"$BASE_BRANCH" != "${protected_coordination_branches[0]:-}"' in (
-        pr_workflow
-    )
+    assert "scripts/ci/trusted_governance_gate.py" in pr_workflow
+    assert "TRUSTED_GOVERNANCE_APP_ID" in pr_workflow
+    assert "TRUSTED_INTEGRATION_RULESET_ID" in pr_workflow
+    assert "TRUSTED_INTEGRATION_RULESET_DIGEST" in pr_workflow
+    assert "gh api --paginate" not in pr_workflow
+    assert "protected_coordination_branches" not in pr_workflow
     assert COORDINATION_BRANCH not in pr_workflow
     assert "pull_request_target" not in pr_parsed["on"]
     assert "merge_group" not in pr_parsed["on"]

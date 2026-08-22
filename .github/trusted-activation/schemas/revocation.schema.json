@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/NTHU-Physics-SA-IT/PastExamWeb_PHY/.github/trusted-activation/schemas/revocation.schema.json",
+  "title": "Trusted Activation Revocation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "record_type", "repository_id", "repository", "branch", "activation_id", "frozen_head_sha", "reason", "revoked_at"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "record_type": {"const": "revocation"},
+    "repository_id": {"type": "integer", "minimum": 1},
+    "repository": {"const": "NTHU-Physics-SA-IT/PastExamWeb_PHY"},
+    "branch": {"type": "string", "pattern": "^integration/[A-Za-z0-9][A-Za-z0-9._-]*$"},
+    "activation_id": {"type": "string", "format": "uuid"},
+    "frozen_head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 240},
+    "revoked_at": {"type": "string", "format": "date-time"}
+  }
+}

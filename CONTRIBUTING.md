@@ -11,6 +11,7 @@ Use these sources instead of duplicating their rules here:
 - [Local development environment](docs/development/local-environment.md)
 - [Feature development workflow](docs/development/feature-development-workflow.md)
 - [Validation policy](docs/development/validation.md)
+- [Trusted Activation operator runbook](docs/runbooks/trusted-activation.md)
 
 ## Feature and behavior changes
 
@@ -54,6 +55,11 @@ directions, and coherent updates to affected operating documents or code.
   is its ancestor. If it is stale, refresh it in a separately scoped pull
   request through the allowed protected-branch workflow; do not bypass
   protection or rewrite it.
+- A configured coordination branch is eligible only while the protected-main
+  grant, branch-local claim, independent App, pre-existing ruleset, current-main
+  ancestry, and non-revoked/non-retired identity all validate. A local
+  coordination value is never sufficient authority. Use the
+  [Trusted Activation runbook](docs/runbooks/trusted-activation.md).
 - Keep task branches developer-owned; a visible branch name does not grant
   project authority or make an external, bot, analytics, backup, or recovery
   branch a valid target.

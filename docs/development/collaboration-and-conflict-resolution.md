@@ -36,6 +36,9 @@ compatibility evidence.
    `python3 scripts/ci/project_governance.py coordination-branch`, fresh-fetch
    it and `main`, and prove current `main` is its ancestor. If not, stop: the
    branch is stale and needs a separately scoped protected refresh.
+   Resolution also requires active Trusted Activation authority from protected
+   main; a visible ref or local governance value cannot authorize coordination.
+   Follow the [Trusted Activation runbook](../runbooks/trusted-activation.md).
 5. Read the [Decision Record index](../decisions/README.md). Identify relevant
    Accepted records by changed path, affected conceptual or Domain scope, and
    linked canonical documents.
