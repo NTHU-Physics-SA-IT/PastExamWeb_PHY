@@ -189,16 +189,54 @@ def _serialize_archive_submission_action(
     return ArchiveSubmissionActionRead.model_validate(payload)
 
 
-def _ensure_archive_submission_editable(submission: ArchiveSubmission) -> None:
+def _normalize_archive_submission_update(
+    submission_data: ArchiveSubmissionUpdate,
+) -> dict[str, object | None]:
+    values: dict[str, object | None] = {}
+    for field in submission_data.model_fields_set:
+        value = getattr(submission_data, field)
+        if field != "review_note" and value is None:
+            continue
+        if field == "subject":
+            value = format_course_display_name(value)
+        elif field == "requested_course_name":
+            value = format_course_display_name(value) or None
+        elif field in {
+            "requested_course_name_en",
+            "requested_category_name",
+            "requested_category_name_en",
+            "requested_category_label",
+            "requested_category_label_en",
+            "requested_category_icon",
+            "review_note",
+        }:
+            value = value.strip() if value is not None else None
+            value = value or None
+        elif field == "requested_category_key":
+            key = value.strip()
+            value = _normalize_category_key(key) if key else None
+        values[field] = value
+    return values
+
+
+def _ensure_archive_submission_editable(
+    submission: ArchiveSubmission,
+    changed_fields: set[str],
+) -> None:
     actual_status = _resolve_submission_actual_status(
         submission.status,
         deleted_at=submission.deleted_at,
     )
-    if actual_status in {SubmissionStatus.APPROVED, SubmissionStatus.DELETED}:
+    if actual_status == SubmissionStatus.DELETED or (
+        actual_status == SubmissionStatus.APPROVED
+        and changed_fields - {"review_note"}
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=dict(ARCHIVE_SUBMISSION_EDIT_FORBIDDEN_DETAIL),
         )
+    if actual_status == SubmissionStatus.APPROVED:
+        return
     if actual_status not in {
         SubmissionStatus.PENDING,
         SubmissionStatus.REJECTED,
@@ -1504,61 +1542,27 @@ async def update_archive_submission_for_admin(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Submission not found",
             )
-        _ensure_archive_submission_editable(submission)
+        normalized_values = _normalize_archive_submission_update(submission_data)
+        changed_values = {
+            field: value
+            for field, value in normalized_values.items()
+            if getattr(submission, field) != value
+        }
+        _ensure_archive_submission_editable(submission, set(changed_values))
 
-        if submission_data.subject is not None:
-            submission.subject = format_course_display_name(submission_data.subject)
-        if submission_data.category is not None:
-            if not (
-                submission_data.requested_category_key
-                or submission.requested_category_key
-            ):
-                await _ensure_category(db, submission_data.category)
-            submission.category = submission_data.category
-        if submission_data.name is not None:
-            submission.name = submission_data.name
-        if submission_data.academic_year is not None:
-            submission.academic_year = submission_data.academic_year
-        if submission_data.archive_type is not None:
-            submission.archive_type = submission_data.archive_type
-        if submission_data.professor is not None:
-            submission.professor = submission_data.professor
-        if submission_data.has_answers is not None:
-            submission.has_answers = submission_data.has_answers
-        if submission_data.requested_course_name is not None:
-            submission.requested_course_name = (
-                format_course_display_name(submission_data.requested_course_name)
-                or None
+        if "category" in changed_values and not (
+            changed_values.get(
+                "requested_category_key", submission.requested_category_key
             )
-        if submission_data.requested_course_name_en is not None:
-            submission.requested_course_name_en = (
-                submission_data.requested_course_name_en.strip() or None
-            )
-        if submission_data.requested_category_key is not None:
-            key = submission_data.requested_category_key.strip()
-            submission.requested_category_key = (
-                _normalize_category_key(key) if key else None
-            )
-        if submission_data.requested_category_name is not None:
-            submission.requested_category_name = (
-                submission_data.requested_category_name.strip() or None
-            )
-        if submission_data.requested_category_name_en is not None:
-            submission.requested_category_name_en = (
-                submission_data.requested_category_name_en.strip() or None
-            )
-        if submission_data.requested_category_label is not None:
-            submission.requested_category_label = (
-                submission_data.requested_category_label.strip() or None
-            )
-        if submission_data.requested_category_label_en is not None:
-            submission.requested_category_label_en = (
-                submission_data.requested_category_label_en.strip() or None
-            )
-        if submission_data.requested_category_icon is not None:
-            submission.requested_category_icon = (
-                submission_data.requested_category_icon.strip() or None
-            )
+            or submission.requested_category_key
+        ):
+            await _ensure_category(db, changed_values["category"])
+        if "review_note" in changed_values and _is_admin_upload_submission(
+            submission
+        ):
+            submission.is_admin_upload = True
+        for field, value in changed_values.items():
+            setattr(submission, field, value)
 
         await db.commit()
         await db.refresh(submission)
@@ -1706,7 +1710,6 @@ async def approve_archive_submission(
         ):
             submission.status = SubmissionStatus.APPROVED
             submission.reviewer_id = current_user.user_id
-            submission.review_note = decision.note if decision else None
             submission.created_archive_id = archive.id
             submission.reviewed_at = datetime.now(UTC)
             await enqueue_submission_status_notification(
@@ -1771,7 +1774,6 @@ async def reject_archive_submission(
         ):
             submission.status = SubmissionStatus.REJECTED
             submission.reviewer_id = current_user.user_id
-            submission.review_note = decision.note if decision else None
             submission.reviewed_at = datetime.now(UTC)
             await enqueue_submission_status_notification(
                 db,
@@ -1820,7 +1822,7 @@ async def takedown_archive_submission(
             db,
             submission,
             reviewer_id=current_user.user_id,
-            note=decision.note if decision else None,
+            lifecycle_reason=decision.note if decision else None,
         )
         await db.commit()
         await db.refresh(submission)
@@ -1911,7 +1913,6 @@ async def republish_archive_submission_endpoint(
             db,
             submission,
             reviewer_id=current_user.user_id,
-            note=decision.note if decision else None,
         )
         await db.commit()
         await db.refresh(submission)

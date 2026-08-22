@@ -161,6 +161,7 @@ const sampleNotifications = [
 ]
 
 const getCoursesMock = vi.hoisted(() => vi.fn())
+const getAdminAttentionSummaryMock = vi.hoisted(() => vi.fn())
 const createCourseMock = vi.hoisted(() => vi.fn())
 const updateCourseMock = vi.hoisted(() => vi.fn())
 const deleteCourseMock = vi.hoisted(() => vi.fn())
@@ -188,6 +189,7 @@ const approveSubmissionMock = vi.hoisted(() => vi.fn())
 const rejectSubmissionMock = vi.hoisted(() => vi.fn())
 const takedownSubmissionMock = vi.hoisted(() => vi.fn())
 const republishSubmissionMock = vi.hoisted(() => vi.fn())
+const updateSubmissionMock = vi.hoisted(() => vi.fn())
 const deleteSubmissionMock = vi.hoisted(() => vi.fn())
 const downloadArchiveBackupMock = vi.hoisted(() => vi.fn())
 
@@ -235,6 +237,7 @@ vi.mock('@/utils/analytics', () => ({
 
 vi.mock('@/api', () => ({
   getCourses: getCoursesMock,
+  getAdminAttentionSummary: getAdminAttentionSummaryMock,
   createCourse: createCourseMock,
   updateCourse: updateCourseMock,
   deleteCourse: deleteCourseMock,
@@ -265,6 +268,7 @@ vi.mock('@/api', () => ({
     rejectSubmission: rejectSubmissionMock,
     takedownSubmission: takedownSubmissionMock,
     republishSubmission: republishSubmissionMock,
+    updateSubmission: updateSubmissionMock,
     deleteSubmission: deleteSubmissionMock,
     downloadArchiveBackup: downloadArchiveBackupMock,
   },
@@ -300,6 +304,18 @@ describe('AdminView', () => {
     vi.useFakeTimers()
     vi.setSystemTime(now)
     getCoursesMock.mockResolvedValue({ data: sampleCourses })
+    getAdminAttentionSummaryMock.mockResolvedValue({
+      data: {
+        review_center: { new_course_or_category: 0, existing_course: 0, total: 0 },
+        report_management: {
+          archive_reports: 0,
+          comment_reports: 0,
+          wish_reports: 0,
+          system_issues: 0,
+          total: 0,
+        },
+      },
+    })
     listAdminCategoriesMock.mockResolvedValue({
       data: [{ id: 1, key: 'freshman', name: '基礎必修', label: '基礎', is_active: true }],
     })
@@ -336,12 +352,14 @@ describe('AdminView', () => {
     rejectSubmissionMock.mockReset()
     takedownSubmissionMock.mockReset()
     republishSubmissionMock.mockReset()
+    updateSubmissionMock.mockReset()
     deleteSubmissionMock.mockReset()
     downloadArchiveBackupMock.mockReset()
     approveSubmissionMock.mockResolvedValue({ data: {} })
     rejectSubmissionMock.mockResolvedValue({ data: {} })
     takedownSubmissionMock.mockResolvedValue({ data: {} })
     republishSubmissionMock.mockResolvedValue({ data: {} })
+    updateSubmissionMock.mockResolvedValue({ data: {} })
     deleteSubmissionMock.mockResolvedValue({ data: { changed: true } })
     downloadArchiveBackupMock.mockResolvedValue({
       data: new Blob(['backup']),
@@ -834,6 +852,51 @@ describe('AdminView', () => {
     expect(listSubmissionComparisonsMock).toHaveBeenCalledWith(currentSubmissionId)
     expect(wrapper.vm.comparisonArchives.map(({ id }) => id)).toEqual(candidateIds)
     expect(wrapper.vm.comparisonArchives).toEqual(comparisons)
+  })
+
+  it('sends an annotation-only diff when an approved review note changes', async () => {
+    const request = {
+      id: 7050,
+      status: 'approved',
+      subject: '普通物理（一）',
+      category: 'freshman',
+      name: 'final',
+      academic_year: 1131,
+      archive_type: 'final',
+      professor: '王進維',
+      has_answers: false,
+      review_note: null,
+    }
+    updateSubmissionMock.mockResolvedValueOnce({
+      data: { ...request, review_note: 'stage-a-review-note-check' },
+    })
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    await wrapper.vm.openArchiveRequestDialog(request)
+    expect(wrapper.vm.canEditSelectedArchiveMetadata).toBe(false)
+    expect(wrapper.vm.canEditSelectedArchiveReviewNote).toBe(true)
+
+    wrapper.vm.archiveRequestEditForm.review_note = '  stage-a-review-note-check  '
+    await wrapper.vm.saveArchiveRequestEdit()
+
+    expect(updateSubmissionMock).toHaveBeenCalledWith(7050, {
+      review_note: 'stage-a-review-note-check',
+    })
+  })
+
+  it('caps attention badges, hides zero, and assigns child presentation classes', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    expect(wrapper.vm.formatAttentionBadge(0)).toBeNull()
+    expect(wrapper.vm.formatAttentionBadge(1)).toBe(1)
+    expect(wrapper.vm.formatAttentionBadge(99)).toBe(99)
+    expect(wrapper.vm.formatAttentionBadge(100)).toBe('99+')
+    expect(adminTemplateSource).toContain('class="admin-attention-badge"')
+    expect(adminTemplateSource).toContain(
+      'class="admin-attention-badge admin-attention-badge--child"'
+    )
   })
 
   it('uses each review row status as the direct review precondition', async () => {

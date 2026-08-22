@@ -428,7 +428,7 @@ async def take_down_archive_submission(
     submission: ArchiveSubmission,
     *,
     reviewer_id: int,
-    note: str | None = None,
+    lifecycle_reason: str | None = None,
 ) -> None:
     current_status = normalize_submission_status(submission.status)
     if submission.deleted_at is not None or current_status in {
@@ -446,7 +446,8 @@ async def take_down_archive_submission(
     ):
         submission.status = SubmissionStatus.TAKEDOWN
         submission.reviewer_id = reviewer_id
-        submission.review_note = note if note is not None else submission.review_note
+        if lifecycle_reason is not None:
+            submission.lifecycle_reason = lifecycle_reason.strip() or None
         submission.reviewed_at = datetime.now(UTC)
         await enqueue_submission_status_notification(
             db, submission, SubmissionStatus.TAKEDOWN
@@ -458,7 +459,6 @@ async def republish_archive_submission(
     submission: ArchiveSubmission,
     *,
     reviewer_id: int,
-    note: str | None = None,
 ) -> None:
     current_status = normalize_submission_status(submission.status)
     if submission.deleted_at is not None or current_status == SubmissionStatus.DELETED:
@@ -482,7 +482,6 @@ async def republish_archive_submission(
     submission.status = SubmissionStatus.APPROVED
     submission.lifecycle_reason = None
     submission.reviewer_id = reviewer_id
-    submission.review_note = note if note is not None else submission.review_note
     submission.reviewed_at = datetime.now(UTC)
     await enqueue_personal_notification(
         db,

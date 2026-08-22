@@ -85,7 +85,12 @@ const rowDataTableStub = {
   },
 }
 
-function mountPanel({ renderRows = false, cardLayout = false, mediaQuery = null } = {}) {
+function mountPanel({
+  renderRows = false,
+  cardLayout = false,
+  mediaQuery = null,
+  props = {},
+} = {}) {
   if (renderRows) {
     window.matchMedia = vi.fn(
       () =>
@@ -97,6 +102,7 @@ function mountPanel({ renderRows = false, cardLayout = false, mediaQuery = null 
     )
   }
   return mount(ReportManagementPanel, {
+    props,
     global: {
       stubs: {
         Tabs: slotStub,
@@ -122,6 +128,10 @@ function mountPanel({ renderRows = false, cardLayout = false, mediaQuery = null 
         Message: slotStub,
         Textarea: true,
         Checkbox: true,
+        Badge: {
+          props: ['value'],
+          template: '<span v-bind="$attrs">{{ value }}</span>',
+        },
       },
     },
   })
@@ -197,6 +207,24 @@ describe('ReportManagementPanel', () => {
     expect(reportManagementSource).toContain('rel="noopener noreferrer"')
   })
 
+  it('renders capped child attention badges and hides zero counts', async () => {
+    const wrapper = mountPanel({
+      props: {
+        attentionCounts: {
+          archive_reports: 1,
+          comment_reports: 0,
+          wish_reports: 100,
+          system_issues: 2,
+        },
+      },
+    })
+    await flushPromises()
+
+    const badges = wrapper.findAll('.admin-attention-badge--child')
+    expect(badges.map((badge) => badge.text())).toEqual(['1', '99+', '2'])
+    expect(badges.every((badge) => badge.classes('admin-attention-badge'))).toBe(true)
+  })
+
   it('keeps wish report inspect, review, and permanent-delete actions wired', async () => {
     const report = {
       id: 303,
@@ -218,6 +246,7 @@ describe('ReportManagementPanel', () => {
 
     const wrapper = mountPanel()
     await flushPromises()
+    const initialAttentionEvents = wrapper.emitted('attention-change')?.length || 0
 
     await wrapper.vm.openWishReport(report.id)
     expect(mocks.getWishReport).toHaveBeenCalledWith(report.id)
@@ -236,6 +265,7 @@ describe('ReportManagementPanel', () => {
       status: 'upheld',
       admin_response: '已確認',
     })
+    expect(wrapper.emitted('attention-change')).toHaveLength(initialAttentionEvents + 1)
 
     wrapper.vm.confirmDeleteWishReport(report)
     await flushPromises()
@@ -515,6 +545,7 @@ describe('ReportManagementPanel', () => {
     })
     const wrapper = mountPanel()
     await flushPromises()
+    const initialAttentionEvents = wrapper.emitted('attention-change')?.length || 0
 
     await wrapper.vm.openArchiveReport(report.id)
     expect(wrapper.get('#archive-admin-response').attributes('placeholder')).toBe(
@@ -530,6 +561,7 @@ describe('ReportManagementPanel', () => {
       admin_response: null,
       take_down_archive: false,
     })
+    expect(wrapper.emitted('attention-change')).toHaveLength(initialAttentionEvents + 1)
     expect(wrapper.text()).toContain('管理員答覆：')
     expect(wrapper.text()).toContain('未提供答覆')
   })
@@ -558,6 +590,7 @@ describe('ReportManagementPanel', () => {
       .mockResolvedValueOnce({ data: { ...report, is_read: false } })
     const wrapper = mountPanel()
     await flushPromises()
+    const initialAttentionEvents = wrapper.emitted('attention-change')?.length || 0
 
     await wrapper.vm.openSystemReport(report)
     expect(mocks.updateSystemReadState).not.toHaveBeenCalled()
@@ -565,6 +598,7 @@ describe('ReportManagementPanel', () => {
     wrapper.vm.systemReadForm = true
     await wrapper.vm.saveSystemReadState()
     expect(mocks.updateSystemReadState).toHaveBeenNthCalledWith(1, report.id, true)
+    expect(wrapper.emitted('attention-change')).toHaveLength(initialAttentionEvents + 1)
     expect(wrapper.vm.selectedSystemReport.is_read).toBe(true)
 
     wrapper.vm.systemReadForm = false
@@ -577,7 +611,7 @@ describe('ReportManagementPanel', () => {
   it('keeps the previous read state when saving fails', async () => {
     const report = { id: 52, is_read: false }
     mocks.getSystem.mockResolvedValue({ data: report })
-    mocks.updateSystemReadState.mockRejectedValueOnce(new Error('unavailable'))
+    mocks.updateSystemReadState.mockReset().mockRejectedValueOnce(new Error('unavailable'))
     const wrapper = mountPanel()
     await flushPromises()
     await wrapper.vm.openSystemReport(report)
@@ -1178,9 +1212,7 @@ describe('ReportManagementPanel', () => {
     expect(reportManagementSource).toContain("<dt>{{ $t('回報者') }}</dt>")
     expect(reportManagementSource).toContain("<dt>{{ $t('留言者') }}</dt>")
     expect(reportManagementSource).toContain("<dt>{{ $t('審核時間') }}</dt>")
-    expect(reportManagementSource).toMatch(
-      /\.report-mobile-card__footer\s*\{[\s\S]*?border-top:\s*1px solid/
-    )
+    expect(reportManagementSource).not.toMatch(/\.report-mobile-card__footer\s*\{[^}]*background:/)
     expect(reportManagementSource).toMatch(
       /\.report-row-actions\s*\{[\s\S]*?justify-content:\s*flex-end;/
     )

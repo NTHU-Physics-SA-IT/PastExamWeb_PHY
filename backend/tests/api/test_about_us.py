@@ -33,9 +33,7 @@ async def test_about_us_is_readable_and_admin_managed(
             await client.post(
                 "/about-us/admin/entries",
                 json={
-                    "title": "Forbidden",
                     "body": "Nope",
-                    "title_en": "Forbidden in English",
                     "body_en": "Nope in English",
                 },
             )
@@ -46,16 +44,14 @@ async def test_about_us_is_readable_and_admin_managed(
         )
         missing_english = await client.post(
             "/about-us/admin/entries",
-            json={"title": "Missing English", "body": "Missing English body"},
+            json={"body": "Missing English body"},
         )
         assert missing_english.status_code == 422
         for title in ("First", "Second"):
             response = await client.post(
                 "/about-us/admin/entries",
                 json={
-                    "title": title,
                     "body": f"# {title}\n\n**Markdown**",
-                    "title_en": f"{title} English",
                     "body_en": f"# {title} English\n\n**Markdown**",
                 },
             )
@@ -66,23 +62,70 @@ async def test_about_us_is_readable_and_admin_managed(
         response = await client.put(
             f"/about-us/admin/entries/{created_ids[0]}",
             json={
-                "title": "First updated",
-                "body": "- persisted",
-                "title_en": "First updated in English",
-                "body_en": "- persisted in English",
+                "body": "# First updated\n\n- persisted",
+                "body_en": "# First updated in English\n\n- persisted in English",
             },
         )
         assert response.status_code == 200
-        assert response.json()["body_en"] == "- persisted in English"
+        assert response.json()["title"] == "First updated"
+        assert response.json()["title_en"] == "First updated in English"
+
+        content_only = await client.put(
+            f"/about-us/admin/entries/{created_ids[0]}",
+            json={"body": "# First content-only edit\n\n- persisted"},
+        )
+        assert content_only.status_code == 200
+        assert content_only.json()["title"] == "First content-only edit"
+        assert content_only.json()["body_en"] == (
+            "# First updated in English\n\n- persisted in English"
+        )
+        assert content_only.json()["title_en"] == "First updated in English"
+        content_only_order = content_only.json()["order_index"]
+
+        app.dependency_overrides[get_current_user] = _override_user(
+            user.id, is_admin=False
+        )
+        forbidden_reorder = await client.put(
+            "/about-us/admin/entries/reorder",
+            json={"entry_ids": created_ids},
+        )
+        assert forbidden_reorder.status_code == 403
+
+        app.dependency_overrides[get_current_user] = _override_user(
+            admin.id, is_admin=True
+        )
+        incomplete_reorder = await client.put(
+            "/about-us/admin/entries/reorder",
+            json={"entry_ids": created_ids[:1]},
+        )
+        assert incomplete_reorder.status_code == 409
+        duplicate_reorder = await client.put(
+            "/about-us/admin/entries/reorder",
+            json={"entry_ids": [created_ids[0], created_ids[0]]},
+        )
+        assert duplicate_reorder.status_code == 409
+        reordered = await client.put(
+            "/about-us/admin/entries/reorder",
+            json={"entry_ids": created_ids},
+        )
+        assert reordered.status_code == 200
 
         app.dependency_overrides[get_current_user] = _override_user(
             user.id, is_admin=False
         )
         entries = (await client.get("/about-us")).json()
-        assert [entry["title"] for entry in entries] == ["First updated", "Second"]
-        assert entries[0]["body"] == "- persisted"
+        assert [entry["title"] for entry in entries] == [
+            "First content-only edit",
+            "Second",
+        ]
+        assert [entry["order_index"] for entry in entries] == [0, 1]
+        assert content_only_order == 1
+        assert entries[0]["body"] == "# First content-only edit\n\n- persisted"
         assert entries[0]["title_en"] == "First updated in English"
-        assert entries[0]["body_en"] == "- persisted in English"
+        assert (
+            entries[0]["body_en"]
+            == "# First updated in English\n\n- persisted in English"
+        )
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
@@ -106,10 +149,8 @@ async def test_about_us_permanent_delete_requires_admin(
         created = await client.post(
             "/about-us/admin/entries",
             json={
-                "title": "Delete me",
-                "body": "Body",
-                "title_en": "Delete me in English",
-                "body_en": "Body in English",
+                "body": "# Delete me\n\nBody",
+                "body_en": "# Delete me in English\n\nBody in English",
             },
         )
         assert created.status_code == 201

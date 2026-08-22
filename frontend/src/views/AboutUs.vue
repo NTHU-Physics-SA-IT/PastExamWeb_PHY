@@ -31,17 +31,41 @@
         </template>
       </Card>
       <div v-else class="about-us-list">
-        <Card v-for="entry in entries" :key="entry.id" class="about-us-entry">
-          <template #title>
-            <div class="about-us-entry-title">
-              <h2>{{ localizedField(entry, 'title') }}</h2>
-              <div v-if="isAdmin" class="flex gap-2">
+        <Card v-if="currentEntry" :key="currentEntry.id" class="about-us-entry">
+          <template #content>
+            <div v-if="isAdmin" class="about-us-entry-actions">
+              <div class="about-us-order-actions" :aria-label="$t('關於我們內容順序')">
+                <span class="about-us-control-label">{{ $t('排序') }}</span>
+                <Button
+                  icon="pi pi-arrow-left"
+                  severity="secondary"
+                  size="small"
+                  text
+                  rounded
+                  :disabled="!canMoveEntry(currentEntry, -1) || orderSaving"
+                  :aria-label="$t('移到前面')"
+                  :title="$t('移到前面')"
+                  @click="moveEntry(currentEntry, -1)"
+                />
+                <Button
+                  icon="pi pi-arrow-right"
+                  severity="secondary"
+                  size="small"
+                  text
+                  rounded
+                  :disabled="!canMoveEntry(currentEntry, 1) || orderSaving"
+                  :aria-label="$t('移到後面')"
+                  :title="$t('移到後面')"
+                  @click="moveEntry(currentEntry, 1)"
+                />
+              </div>
+              <div class="about-us-edit-actions">
                 <Button
                   :label="$t('編輯')"
                   icon="pi pi-pencil"
                   size="small"
                   text
-                  @click="openEdit(entry)"
+                  @click="openEdit(currentEntry)"
                 />
                 <Button
                   :label="$t('永久刪除')"
@@ -49,18 +73,39 @@
                   severity="danger"
                   size="small"
                   text
-                  @click="requestDelete(entry)"
+                  @click="requestDelete(currentEntry)"
                 />
               </div>
             </div>
-          </template>
-          <template #content>
             <div
               class="markdown-content"
-              v-html="renderMarkdown(localizedField(entry, 'body'))"
+              v-html="renderMarkdown(localizedField(currentEntry, 'body'))"
             ></div>
           </template>
         </Card>
+        <nav
+          v-if="entries.length > 1"
+          class="about-us-pagination"
+          :aria-label="$t('瀏覽關於我們內容')"
+        >
+          <Button
+            v-for="(entry, index) in entries"
+            :key="entry.id"
+            :label="String(index + 1)"
+            class="about-us-pagination-page"
+            :severity="index === currentEntryIndex ? 'primary' : 'secondary'"
+            :outlined="index !== currentEntryIndex"
+            size="small"
+            :aria-label="
+              $t('第 {current} / {total} 則', {
+                current: index + 1,
+                total: entries.length,
+              })
+            "
+            :aria-current="index === currentEntryIndex ? 'page' : undefined"
+            @click="selectEntry(index)"
+          />
+        </nav>
       </div>
     </section>
 
@@ -73,36 +118,6 @@
     >
       <form class="about-us-form" @submit.prevent="saveEntry">
         <div class="field">
-          <label for="about-us-title">{{ $t('標題') }}</label>
-          <InputText
-            id="about-us-title"
-            v-model="form.title"
-            class="w-full"
-            maxlength="150"
-            :class="{ 'p-invalid': errors.title }"
-            :aria-invalid="Boolean(errors.title)"
-            :aria-describedby="errors.title ? 'about-us-title-error' : undefined"
-          />
-          <small v-if="errors.title" id="about-us-title-error" class="p-error" role="alert">
-            {{ errors.title }}
-          </small>
-        </div>
-        <div class="field">
-          <label for="about-us-title-en">{{ $t('英文標題') }}</label>
-          <InputText
-            id="about-us-title-en"
-            v-model="form.title_en"
-            class="w-full"
-            maxlength="150"
-            :class="{ 'p-invalid': errors.title_en }"
-            :aria-invalid="Boolean(errors.title_en)"
-            :aria-describedby="errors.title_en ? 'about-us-title-en-error' : undefined"
-          />
-          <small v-if="errors.title_en" id="about-us-title-en-error" class="p-error" role="alert">{{
-            errors.title_en
-          }}</small>
-        </div>
-        <div class="field">
           <label for="about-us-body">{{ $t('Markdown 內容') }}</label>
           <Textarea
             id="about-us-body"
@@ -112,7 +127,9 @@
             autoResize
             :class="{ 'p-invalid': errors.body }"
             :aria-invalid="Boolean(errors.body)"
-            :aria-describedby="errors.body ? 'about-us-body-error' : undefined"
+            :aria-describedby="
+              errors.body ? 'about-us-body-error about-us-image-help' : 'about-us-image-help'
+            "
           />
           <small v-if="errors.body" id="about-us-body-error" class="p-error" role="alert">
             {{ errors.body }}
@@ -128,15 +145,28 @@
             autoResize
             :class="{ 'p-invalid': errors.body_en }"
             :aria-invalid="Boolean(errors.body_en)"
-            :aria-describedby="errors.body_en ? 'about-us-body-en-error' : undefined"
+            :aria-describedby="
+              errors.body_en ? 'about-us-body-en-error about-us-image-help' : 'about-us-image-help'
+            "
           />
+          <small id="about-us-image-help" class="about-us-editor-hint">{{
+            $t('aboutUsImageHelp')
+          }}</small>
           <small v-if="errors.body_en" id="about-us-body-en-error" class="p-error" role="alert">{{
             errors.body_en
           }}</small>
         </div>
         <section v-if="form.body.trim()" class="about-us-preview" :aria-label="$t('Markdown 預覽')">
-          <h3>{{ $t('預覽') }}</h3>
+          <h3>{{ $t('中文預覽') }}</h3>
           <div class="markdown-content" v-html="renderMarkdown(form.body)"></div>
+        </section>
+        <section
+          v-if="form.body_en.trim()"
+          class="about-us-preview"
+          :aria-label="$t('英文 Markdown 預覽')"
+        >
+          <h3>{{ $t('英文預覽') }}</h3>
+          <div class="markdown-content" v-html="renderMarkdown(form.body_en)"></div>
         </section>
         <Message v-if="saveError" severity="error" :closable="false">{{ saveError }}</Message>
         <div class="about-us-form-actions">
@@ -154,7 +184,7 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { aboutUsService } from '@/api'
 import { getCurrentUser } from '@/utils/auth.js'
@@ -163,21 +193,30 @@ import { renderMarkdown } from '@/utils/markdown.js'
 const { t, locale } = useI18n()
 const isAdmin = Boolean(getCurrentUser()?.is_admin)
 const entries = ref([])
+const currentEntryIndex = ref(0)
+const currentEntry = computed(() => entries.value[currentEntryIndex.value] || null)
 const loading = ref(true)
 const loadError = ref('')
 const saving = ref(false)
+const orderSaving = ref(false)
 const saveError = ref('')
 const dialogVisible = ref(false)
 const editingEntry = ref(null)
-const form = reactive({ title: '', body: '', title_en: '', body_en: '' })
-const errors = reactive({ title: '', body: '', title_en: '', body_en: '' })
+const form = reactive({ body: '', body_en: '' })
+const errors = reactive({ body: '', body_en: '' })
 
 async function loadEntries() {
   loading.value = true
   loadError.value = ''
   try {
+    const currentEntryId = currentEntry.value?.id
     const response = await aboutUsService.list()
     entries.value = Array.isArray(response.data) ? response.data : []
+    const retainedIndex = entries.value.findIndex((entry) => entry.id === currentEntryId)
+    currentEntryIndex.value =
+      retainedIndex >= 0
+        ? retainedIndex
+        : Math.min(currentEntryIndex.value, Math.max(entries.value.length - 1, 0))
   } catch {
     loadError.value = t('關於我們內容載入失敗，請稍後再試。')
   } finally {
@@ -186,13 +225,9 @@ async function loadEntries() {
 }
 
 function resetForm() {
-  form.title = ''
   form.body = ''
-  form.title_en = ''
   form.body_en = ''
-  errors.title = ''
   errors.body = ''
-  errors.title_en = ''
   errors.body_en = ''
   saveError.value = ''
 }
@@ -206,19 +241,15 @@ function openCreate() {
 function openEdit(entry) {
   editingEntry.value = entry
   resetForm()
-  form.title = entry.title
   form.body = entry.body
-  form.title_en = entry.title_en || ''
   form.body_en = entry.body_en || ''
   dialogVisible.value = true
 }
 
 function validate() {
-  errors.title = form.title.trim() ? '' : t('標題是必填欄位')
   errors.body = form.body.trim() ? '' : t('內容是必填欄位')
-  errors.title_en = form.title_en.trim() ? '' : t('英文標題是必填欄位')
   errors.body_en = form.body_en.trim() ? '' : t('英文內容是必填欄位')
-  return !errors.title && !errors.body && !errors.title_en && !errors.body_en
+  return !errors.body && !errors.body_en
 }
 
 async function saveEntry() {
@@ -226,9 +257,7 @@ async function saveEntry() {
   saving.value = true
   saveError.value = ''
   const payload = {
-    title: form.title.trim(),
     body: form.body.trim(),
-    title_en: form.title_en.trim(),
     body_en: form.body_en.trim(),
   }
   try {
@@ -252,21 +281,50 @@ function localizedField(entry, field) {
   return entry[field]
 }
 
+function canMoveEntry(entry, direction) {
+  const index = entries.value.findIndex((item) => item.id === entry.id)
+  const target = index + direction
+  return index >= 0 && target >= 0 && target < entries.value.length
+}
+
+function selectEntry(index) {
+  if (index >= 0 && index < entries.value.length) currentEntryIndex.value = index
+}
+
+async function moveEntry(entry, direction) {
+  if (!canMoveEntry(entry, direction) || orderSaving.value) return
+  const index = entries.value.findIndex((item) => item.id === entry.id)
+  const reordered = [...entries.value]
+  const [moved] = reordered.splice(index, 1)
+  reordered.splice(index + direction, 0, moved)
+  orderSaving.value = true
+  loadError.value = ''
+  try {
+    const response = await aboutUsService.reorder(reordered.map((item) => item.id))
+    entries.value = Array.isArray(response.data) ? response.data : reordered
+    currentEntryIndex.value = entries.value.findIndex((item) => item.id === entry.id)
+  } catch {
+    loadError.value = t('關於我們內容順序儲存失敗，請稍後再試。')
+  } finally {
+    orderSaving.value = false
+  }
+}
+
 async function deleteEntry(entry) {
   try {
     await aboutUsService.remove(entry.id)
     entries.value = entries.value.filter((item) => item.id !== entry.id)
+    currentEntryIndex.value = Math.min(
+      currentEntryIndex.value,
+      Math.max(entries.value.length - 1, 0)
+    )
   } catch {
     loadError.value = t('關於我們內容永久刪除失敗，請稍後再試。')
   }
 }
 
 function requestDelete(entry) {
-  if (
-    window.confirm(
-      t('確定要永久刪除「{title}」嗎？此動作無法復原。', { title: localizedField(entry, 'title') })
-    )
-  ) {
+  if (window.confirm(t('確定要永久刪除這筆關於我們內容嗎？此動作無法復原。'))) {
     void deleteEntry(entry)
   }
 }
@@ -286,7 +344,6 @@ onMounted(loadEntries)
 }
 
 .about-us-header,
-.about-us-entry-title,
 .about-us-form-actions {
   display: flex;
   align-items: center;
@@ -299,7 +356,6 @@ onMounted(loadEntries)
 }
 
 .about-us-header h1,
-.about-us-entry-title h2,
 .about-us-preview h3 {
   margin: 0;
 }
@@ -313,6 +369,42 @@ onMounted(loadEntries)
 .about-us-form {
   display: grid;
   gap: 1rem;
+}
+
+.about-us-entry-actions,
+.about-us-order-actions,
+.about-us-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.about-us-entry-actions {
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.about-us-control-label {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.about-us-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.about-us-pagination-page {
+  width: 2.25rem;
+  min-width: 2.25rem;
+  height: 2.25rem;
+  padding: 0.25rem;
 }
 
 .about-us-state,
@@ -385,14 +477,61 @@ onMounted(loadEntries)
 :deep(.markdown-content blockquote) {
   margin: 1.5rem 0;
   padding: 0.9rem 1.1rem;
-  border-inline-start: 0.25rem solid var(--title-gradient-start);
+  border: 1px solid var(--border-color);
+  border-inline-start-width: 0.22rem;
   border-radius: 0.5rem;
-  background: color-mix(in srgb, var(--bg-primary) 82%, var(--title-gradient-start));
+  background: color-mix(in srgb, var(--bg-secondary) 92%, transparent);
   color: var(--text-primary);
 }
 
 :deep(.markdown-content blockquote p) {
   margin: 0;
+}
+
+:deep(.markdown-content img) {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin: 1.25rem auto;
+}
+
+:deep(.markdown-content img.about-us-image--align-left) {
+  margin-inline: 0 auto;
+}
+
+:deep(.markdown-content img.about-us-image--align-center) {
+  margin-inline: auto;
+}
+
+:deep(.markdown-content img.about-us-image--align-right) {
+  margin-inline: auto 0;
+}
+
+:deep(.markdown-content::after) {
+  display: block;
+  clear: both;
+  content: '';
+}
+
+@media (min-width: 641px) {
+  :deep(.markdown-content img.about-us-image--align-left.about-us-image--wrap) {
+    float: left;
+    margin: 0.25rem 1rem 0.75rem 0;
+  }
+
+  :deep(.markdown-content img.about-us-image--align-right.about-us-image--wrap) {
+    float: right;
+    margin: 0.25rem 0 0.75rem 1rem;
+  }
+
+  :deep(.markdown-content h1),
+  :deep(.markdown-content h2),
+  :deep(.markdown-content h3),
+  :deep(.markdown-content hr),
+  :deep(.markdown-content blockquote) {
+    clear: both;
+  }
 }
 
 :deep(.markdown-content ul),
@@ -480,6 +619,12 @@ onMounted(loadEntries)
   gap: 0.5rem;
 }
 
+.about-us-editor-hint {
+  color: var(--text-secondary);
+  line-height: 1.45;
+  white-space: pre-line;
+}
+
 .about-us-preview {
   padding: 1rem;
   border: 1px solid var(--border-color);
@@ -489,9 +634,17 @@ onMounted(loadEntries)
 
 @media (max-width: 640px) {
   .about-us-header,
-  .about-us-entry-title {
+  .about-us-entry-actions {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .about-us-edit-actions {
+    flex-wrap: wrap;
+  }
+
+  .about-us-order-actions {
+    flex-wrap: wrap;
   }
 
   :deep(.markdown-content) {
@@ -500,6 +653,10 @@ onMounted(loadEntries)
 
   :deep(.markdown-content blockquote) {
     padding: 0.8rem 0.9rem;
+  }
+
+  :deep(.markdown-content img.about-us-image--wrap) {
+    float: none;
   }
 }
 </style>
