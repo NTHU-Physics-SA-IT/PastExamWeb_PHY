@@ -175,6 +175,21 @@ boundary. Metadata mutation and reparenting retain one caller-owned database
 transaction, so validation, lifecycle drift, or commit failure leaves both
 metadata and the Course relationship unchanged.
 
+The Archive edit endpoint may receive `target_course_id` together with exam
+metadata. Both edit-only and move-only routes call the same lock-aware mutation
+boundary, while the route owns exactly one commit. The combined operation
+validates and locks the destination before applying either part; it cannot
+commit corrected metadata and then fail the move. Neither surface changes any
+linked ArchiveSubmission field. The Review Center submission editor remains a
+separate surface governed by the direct-edit matrix above.
+
+Republish uses the exact linked Archive and therefore preserves its current
+Course placement. Reapproval under the `rejected → approved` edge also preserves
+the exact linked Archive placement; it applies editable non-placement snapshot
+corrections to that Archive without re-resolving the originally proposed
+Course. Only first approval of an unlinked submission uses proposed parent
+metadata and may create missing Category or Course rows.
+
 | Value | Canonical Chinese label |
 | --- | --- |
 | `pending` | 待審核 |
@@ -196,10 +211,12 @@ authorize the administrator, discover the exact parent relationship without
 locking, then acquire the canonical lifecycle plan before enforcing the
 expected-state classifier and transition policy. Existing exact parents lock
 Course, Archive, then ArchiveSubmission rows by ascending numeric primary key;
-approve also takes its established normalized approval-namespace advisory
-mutex before any row lock and locks every exact-linked sibling when it may
-update Archive metadata. The one-to-one guard requires that exact source set
-to contain at most the target submission; multiple exact sources are a static
+approve takes its normalized approval-namespace advisory mutex before any row
+lock only when first approval must resolve the proposed parent. Linked
+reapproval instead plans from the exact current Archive parent and locks every
+exact-linked sibling when it may update Archive metadata. The one-to-one guard
+requires that exact source set to contain at most the target submission;
+multiple exact sources are a static
 integrity anomaly and fail closed before a lock plan is accepted. Reject,
 takedown, and republish lock only the target submission after its exact
 ancestors. Missing, stale, illegal, and same-target requests short-circuit

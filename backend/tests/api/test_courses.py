@@ -1195,6 +1195,135 @@ async def test_update_archive_course_transfers_to_existing_course(
 
 
 @pytest.mark.asyncio
+async def test_update_archive_atomically_edits_and_transfers_without_rewriting_submission(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    admin = await make_user(is_admin=True)
+    course_a = await _create_course(session_maker, name=f"Atomic source {uuid.uuid4().hex}")
+    course_b = await _create_course(session_maker, name=f"Atomic target {uuid.uuid4().hex}")
+    archive = await _create_archive(
+        session_maker,
+        course_id=course_a.id,
+        uploader_id=admin.id,
+    )
+    submission = await _create_linked_submission(
+        session_maker,
+        archive=archive,
+        requester_id=admin.id,
+    )
+    original_submission = {
+        "subject": submission.subject,
+        "name": submission.name,
+        "professor": submission.professor,
+        "academic_year": submission.academic_year,
+        "archive_type": submission.archive_type,
+        "has_answers": submission.has_answers,
+    }
+
+    app.dependency_overrides[get_current_user] = _override_user(admin)
+    try:
+        response = await client.patch(
+            f"/courses/{course_a.id}/archives/{archive.id}",
+            data={
+                "name": "Atomic corrected exam",
+                "professor": "Atomic corrected professor",
+                "archive_type": ArchiveType.QUIZ.value,
+                "has_answers": "true",
+                "academic_year": "2027",
+                "target_course_id": str(course_b.id),
+            },
+        )
+        assert response.status_code == 200
+
+        async with session_maker() as session:
+            stored_archive = await session.get(Archive, archive.id)
+            stored_submission = await session.get(ArchiveSubmission, submission.id)
+            assert stored_archive.course_id == course_b.id
+            assert stored_archive.name == "Atomic corrected exam"
+            assert stored_archive.professor == "Atomic corrected professor"
+            assert stored_archive.archive_type == ArchiveType.QUIZ
+            assert stored_archive.has_answers is True
+            assert stored_archive.academic_year == 2027
+            assert {
+                "subject": stored_submission.subject,
+                "name": stored_submission.name,
+                "professor": stored_submission.professor,
+                "academic_year": stored_submission.academic_year,
+                "archive_type": stored_submission.archive_type,
+                "has_answers": stored_submission.has_answers,
+            } == original_submission
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(ArchiveSubmission).where(ArchiveSubmission.id == submission.id)
+            )
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(
+                delete(Course).where(Course.id.in_([course_a.id, course_b.id]))
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_update_archive_combined_transfer_validation_failure_rolls_back_metadata(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    admin = await make_user(is_admin=True)
+    course = await _create_course(session_maker, name=f"Atomic rollback {uuid.uuid4().hex}")
+    archive = await _create_archive(
+        session_maker,
+        course_id=course.id,
+        uploader_id=admin.id,
+    )
+    original = {
+        "course_id": archive.course_id,
+        "name": archive.name,
+        "professor": archive.professor,
+        "academic_year": archive.academic_year,
+        "archive_type": archive.archive_type,
+        "has_answers": archive.has_answers,
+    }
+
+    app.dependency_overrides[get_current_user] = _override_user(admin)
+    try:
+        response = await client.patch(
+            f"/courses/{course.id}/archives/{archive.id}",
+            data={
+                "name": "Must roll back",
+                "professor": "Must roll back",
+                "archive_type": ArchiveType.MIDTERM.value,
+                "has_answers": "true",
+                "academic_year": "2028",
+                "target_course_id": "999999999",
+            },
+        )
+        assert response.status_code == 404
+        assert response.json()["detail"]["code"] == "archive_move_target_course_not_found"
+
+        async with session_maker() as session:
+            stored = await session.get(Archive, archive.id)
+            assert {
+                "course_id": stored.course_id,
+                "name": stored.name,
+                "professor": stored.professor,
+                "academic_year": stored.academic_year,
+                "archive_type": stored.archive_type,
+                "has_answers": stored.has_answers,
+            } == original
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
+            await session.commit()
+
+
+@pytest.mark.asyncio
 async def test_update_archive_course_name_uses_unique_active_with_trashed_duplicates(
     client: AsyncClient,
     session_maker,

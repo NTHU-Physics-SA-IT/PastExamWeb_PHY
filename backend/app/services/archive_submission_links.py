@@ -30,6 +30,7 @@ ArchiveSubmissionLinkOperation = Literal[
     "archive_restore",
     "archive_edit",
     "archive_move",
+    "archive_edit_move",
     "course_trash",
     "course_restore",
     "archive_report_review",

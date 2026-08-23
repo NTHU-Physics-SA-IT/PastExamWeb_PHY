@@ -2179,6 +2179,21 @@ class CourseSubmissionRead(BaseModel):
         from_attributes = True
 
 
+class ArchiveSubmissionCurrentArchiveRead(BaseModel):
+    id: int
+    course_id: int
+    course_name: str
+    course_name_en: str | None = None
+    course_category: str
+    name: str
+    academic_year: int
+    archive_type: ArchiveType
+    professor: str
+    has_answers: bool
+    is_deleted: bool
+    course_is_deleted: bool
+
+
 class ArchiveSubmissionRead(BaseModel):
     id: int
     subject: str
@@ -2217,6 +2232,7 @@ class ArchiveSubmissionRead(BaseModel):
 
 
 class ArchiveSubmissionAdminRead(ArchiveSubmissionRead):
+    current_archive: ArchiveSubmissionCurrentArchiveRead | None = None
     available_actions: list[ArchiveSubmissionAdminAction]
 
 

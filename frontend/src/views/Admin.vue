@@ -2036,8 +2036,14 @@
                         class="mobile-primary-text review-card-title review-course-cell review-desktop-course-cell"
                       >
                         <div class="review-desktop-course-cell__name">
-                          {{ localizedSubmissionCourseName(data) }}
+                          {{ getReviewDisplayCourseName(data) }}
                         </div>
+                        <small
+                          v-if="getReviewCourseHistoryLabel(data)"
+                          class="review-desktop-course-cell__history"
+                        >
+                          {{ getReviewCourseHistoryLabel(data) }}
+                        </small>
                         <div
                           v-if="data.is_admin_upload"
                           class="review-desktop-course-cell__admin-row"
@@ -2046,7 +2052,7 @@
                             class="soft-badge soft-badge--admin review-admin-upload-chip review-course-cell__admin-tag"
                             severity="info"
                           >
-                            {{ $t('管理員投稿（審核中心）') }}
+                            {{ $t('管理員投稿') }}
                           </Tag>
                         </div>
                       </div>
@@ -2072,7 +2078,7 @@
                               class="soft-badge soft-badge--admin review-admin-upload-chip"
                               severity="info"
                             >
-                              {{ $t('管理員投稿（審核中心）') }}
+                              {{ $t('管理員投稿') }}
                             </Tag>
                           </div>
                         </div>
@@ -2402,8 +2408,14 @@
                         class="mobile-primary-text review-card-title review-course-cell review-desktop-course-cell"
                       >
                         <div class="review-desktop-course-cell__name">
-                          {{ localizedSubmissionCourseName(data) }}
+                          {{ getReviewDisplayCourseName(data) }}
                         </div>
+                        <small
+                          v-if="getReviewCourseHistoryLabel(data)"
+                          class="review-desktop-course-cell__history"
+                        >
+                          {{ getReviewCourseHistoryLabel(data) }}
+                        </small>
                         <div
                           v-if="data.is_admin_upload"
                           class="review-desktop-course-cell__admin-row"
@@ -2412,7 +2424,7 @@
                             class="soft-badge soft-badge--admin review-admin-upload-chip review-course-cell__admin-tag"
                             severity="info"
                           >
-                            {{ $t('管理員投稿（審核中心）') }}
+                            {{ $t('管理員投稿') }}
                           </Tag>
                         </div>
                       </div>
@@ -2426,7 +2438,7 @@
                               class="soft-badge soft-badge--admin review-admin-upload-chip"
                               severity="info"
                             >
-                              {{ $t('管理員投稿（審核中心）') }}
+                              {{ $t('管理員投稿') }}
                             </Tag>
                           </div>
                         </div>
@@ -2612,7 +2624,6 @@
                             'review-card-chip',
                             'review-status-chip',
                             'admin-desktop-status-tag',
-                            'existing-course-status-pill',
                             getSubmissionStatusClass(data.status),
                           ]"
                           :severity="getSubmissionSeverity(data.status)"
@@ -3463,17 +3474,23 @@
               {{ $t('投稿編號：{ids}', { ids: formatSubmissionLabel(selectedArchiveRequest) }) }}
             </small>
           </div>
-          <p
-            v-if="selectedArchiveRequest?.requested_course_name"
-            class="request-summary__description"
-          >
+          <p v-if="selectedArchiveRequest?.current_archive" class="request-summary__description">
             {{
-              $t('這筆投稿通過後會建立或使用新課程「{course}」。', {
-                course: localizedSubmissionCourseName(selectedArchiveRequest),
+              $t('目前課程：{course}', {
+                course: getReviewCurrentCourseName(selectedArchiveRequest),
               })
             }}
           </p>
-          <p v-else class="request-summary__description">{{ $t('這筆投稿會掛到既有課程。') }}</p>
+          <p v-else class="request-summary__description">
+            {{ $t('此投稿尚未建立關聯考古題；以下為投稿時的課程資料。') }}
+          </p>
+          <p class="request-summary__description">
+            {{
+              $t('投稿時課程：{course}', {
+                course: getReviewHistoricalCourseName(selectedArchiveRequest) || '—',
+              })
+            }}
+          </p>
         </div>
         <Message
           v-if="archiveRequestReadonlyMessage"
@@ -4907,6 +4924,7 @@ import {
   localizedCategoryLabel,
   localizedCategoryName,
   localizedCourseName,
+  localizedSubmissionCurrentCourseName,
   localizedSubmissionCourseName,
   localizedTrashCourseName,
   localizedTrashDisplayName,
@@ -5418,6 +5436,11 @@ const isReadonlyReviewSubmission = (item) => {
 const getReadonlyReviewSubmissionMessage = (item) => {
   const status = getReviewItemStatus(item)
   if (status === 'deleted') return t('此投稿已刪除，僅能查看，請至垃圾桶處理復原或永久刪除。')
+  if (status === 'approved') {
+    return t(
+      '此投稿已通過，投稿資料已鎖定。若要移動目前的考古題，請使用「轉移到其他課程」；若要修改投稿資料，請先將狀態改為「已下架」或「未通過」。'
+    )
+  }
   return ''
 }
 const canEditSelectedArchiveMetadata = computed(() => {
@@ -5486,9 +5509,18 @@ const formatReviewReviewedTime = (item) => {
   const value = getReviewReviewedAt(item)
   return formatRelativeOrAbsoluteDateTime(value, locale.value)
 }
-const getReviewMobileCourseName = (item) => {
-  return localizedSubmissionCourseName(item) || item?.requestedCourseName || '—'
+const getReviewCurrentCourseName = (item) => localizedSubmissionCurrentCourseName(item)
+const getReviewHistoricalCourseName = (item) =>
+  localizedSubmissionCourseName(item) || item?.requestedCourseName || ''
+const getReviewDisplayCourseName = (item) =>
+  getReviewCurrentCourseName(item) || getReviewHistoricalCourseName(item) || '—'
+const getReviewCourseHistoryLabel = (item) => {
+  const current = getReviewCurrentCourseName(item)
+  const historical = getReviewHistoricalCourseName(item)
+  if (!current || !historical || current === historical) return ''
+  return t('投稿時課程：{course}', { course: historical })
 }
+const getReviewMobileCourseName = (item) => getReviewDisplayCourseName(item)
 const getReviewSortValue = (item, key) => {
   if (key === 'status') return getReviewItemStatusPriority(item)
   if (key === 'submitted_at') return getReviewTimestamp(item)
@@ -5500,6 +5532,7 @@ const getReviewSortValue = (item, key) => {
   }
   if (key === 'academic_year') return Number(item.academic_year) || null
   if (key === 'kind') return getArchiveSubmissionKind(item)
+  if (key === 'subject') return getReviewDisplayCourseName(item)
   return String(item?.[key] || '').trim()
 }
 const isMissingReviewSortValue = (value, key) => {
@@ -5554,6 +5587,10 @@ const getReviewSearchHaystack = (item) => {
     item?.requested_category_name_en,
     item?.requested_category_label,
     item?.requested_category_label_en,
+    item?.current_archive?.course_name,
+    item?.current_archive?.course_name_en,
+    item?.current_archive?.name,
+    item?.current_archive?.professor,
     item?.requester_name,
     item?.requester_email,
     item?.professor,
@@ -11394,6 +11431,7 @@ onBeforeUnmount(() => {
 }
 
 :deep(.review-desktop-course-cell__name),
+:deep(.review-desktop-course-cell__history),
 :deep(.review-desktop-course-cell__admin-row) {
   display: block;
   width: 100%;
@@ -11402,6 +11440,12 @@ onBeforeUnmount(() => {
 }
 
 :deep(.review-desktop-course-cell__name) {
+  overflow-wrap: anywhere;
+}
+
+:deep(.review-desktop-course-cell__history) {
+  color: var(--text-color-secondary);
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
@@ -11634,29 +11678,9 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-:deep(
-  .admin-desktop-status-cell
-    > .p-tag.existing-course-status-pill.soft-badge.admin-desktop-status-tag
-) {
-  box-sizing: border-box;
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  inline-size: fit-content;
-  min-inline-size: 0;
-  max-inline-size: none;
-  max-width: none;
-  block-size: 1.9rem;
-  min-block-size: 1.9rem !important;
-  max-block-size: 1.9rem;
-  padding-block: 0.32rem !important;
-  padding-inline: 0.74rem !important;
-  border-radius: 999px;
-  font-size: var(--app-badge-font-size) !important;
-  font-weight: 650 !important;
-  line-height: 1.25 !important;
-  vertical-align: middle;
+:deep(.review-admin-upload-chip.soft-badge),
+:deep(.review-admin-upload-chip .p-tag-label) {
+  overflow-wrap: normal;
   white-space: nowrap;
 }
 

@@ -558,6 +558,214 @@ async def test_rejected_submission_can_be_approved(
 
 
 @pytest.mark.asyncio
+async def test_transferred_archive_republish_and_option_two_reapproval_preserve_course(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    course_a, submission = await _create_pending_review_context(
+        session_maker,
+        requester_id=requester.id,
+    )
+    course_b = await _create_upload_course(
+        session_maker,
+        name=f"Transferred destination {uuid.uuid4().hex}",
+    )
+
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    archive_id = None
+    try:
+        approved = await client.post(
+            f"/archives/admin/submissions/{submission.id}/approve",
+            json={"expected_status": "pending"},
+        )
+        assert approved.status_code == 200
+        archive_id = approved.json()["created_archive_id"]
+
+        transferred = await client.patch(
+            f"/courses/{course_a.id}/archives/{archive_id}/course",
+            json={"course_id": course_b.id},
+        )
+        assert transferred.status_code == 200
+
+        taken_down = await client.post(
+            f"/archives/admin/submissions/{submission.id}/takedown",
+            json={"expected_status": "approved"},
+        )
+        assert taken_down.status_code == 200
+        edited_while_down = await client.put(
+            f"/archives/admin/submissions/{submission.id}",
+            json={
+                "subject": "Historical correction while down",
+                "name": "Snapshot while down",
+                "professor": "Snapshot professor while down",
+            },
+        )
+        assert edited_while_down.status_code == 200
+        republished = await client.post(
+            f"/archives/admin/submissions/{submission.id}/republish",
+            json={"expected_status": "takedown"},
+        )
+        assert republished.status_code == 200
+
+        async with session_maker() as session:
+            after_republish = await session.get(Archive, archive_id)
+            assert after_republish.course_id == course_b.id
+
+        rejected = await client.post(
+            f"/archives/admin/submissions/{submission.id}/reject",
+            json={"expected_status": "approved"},
+        )
+        assert rejected.status_code == 200
+        corrected = await client.put(
+            f"/archives/admin/submissions/{submission.id}",
+            json={
+                "subject": "Historical proposed course remains history",
+                "name": "Reapproved corrected exam",
+                "professor": "Reapproved corrected professor",
+                "academic_year": 2029,
+                "archive_type": "quiz",
+                "has_answers": True,
+            },
+        )
+        assert corrected.status_code == 200
+        reapproved = await client.post(
+            f"/archives/admin/submissions/{submission.id}/approve",
+            json={"expected_status": "rejected"},
+        )
+        assert reapproved.status_code == 200
+        assert reapproved.json()["current_archive"]["course_id"] == course_b.id
+
+        async with session_maker() as session:
+            stored_archive = await session.get(Archive, archive_id)
+            stored_submission = await session.get(ArchiveSubmission, submission.id)
+            assert stored_archive.course_id == course_b.id
+            assert stored_archive.name == "Reapproved corrected exam"
+            assert stored_archive.professor == "Reapproved corrected professor"
+            assert stored_archive.academic_year == 2029
+            assert stored_archive.archive_type == ArchiveType.QUIZ
+            assert stored_archive.has_answers is True
+            assert stored_submission.subject == "Historical proposed course remains history"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(PersonalNotification).where(
+                    PersonalNotification.source_type == "archive_submission",
+                    PersonalNotification.source_id == submission.id,
+                )
+            )
+            await session.execute(
+                delete(ArchiveSubmission).where(ArchiveSubmission.id == submission.id)
+            )
+            if archive_id is not None:
+                await session.execute(delete(Archive).where(Archive.id == archive_id))
+            await session.execute(
+                delete(Course).where(Course.id.in_([course_a.id, course_b.id]))
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_admin_projection_tracks_current_archive_course_without_rewriting_history(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    course_a = await _create_upload_course(
+        session_maker,
+        name=f"Projection source {uuid.uuid4().hex}",
+    )
+    course_b = await _create_upload_course(
+        session_maker,
+        name=f"Projection target {uuid.uuid4().hex}",
+    )
+    async with session_maker() as session:
+        archive = Archive(
+            course_id=course_a.id,
+            name="Projection archive",
+            academic_year=2026,
+            archive_type=ArchiveType.FINAL,
+            professor="Projection professor",
+            object_name=f"archives/projection-{uuid.uuid4().hex}.pdf",
+            uploader_id=requester.id,
+        )
+        session.add(archive)
+        await session.flush()
+        linked = ArchiveSubmission(
+            subject="Historical course snapshot",
+            category=CourseCategory.FRESHMAN.value,
+            name="Historical exam snapshot",
+            academic_year=2025,
+            archive_type=ArchiveType.MIDTERM,
+            professor="Historical professor",
+            object_name=f"submissions/projection-{uuid.uuid4().hex}.pdf",
+            requested_course_name="Historical requested course",
+            requester_id=requester.id,
+            status=SubmissionStatus.APPROVED,
+            created_archive_id=archive.id,
+        )
+        unlinked = ArchiveSubmission(
+            subject="Unlinked historical course",
+            category=CourseCategory.FRESHMAN.value,
+            name="Unlinked exam",
+            academic_year=2026,
+            archive_type=ArchiveType.FINAL,
+            professor="Unlinked professor",
+            object_name=f"submissions/unlinked-{uuid.uuid4().hex}.pdf",
+            requester_id=requester.id,
+            status=SubmissionStatus.PENDING,
+        )
+        session.add(linked)
+        session.add(unlinked)
+        await session.commit()
+        await session.refresh(archive)
+        await session.refresh(linked)
+        await session.refresh(unlinked)
+
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        before = await client.get("/archives/admin/submissions")
+        assert before.status_code == 200
+        before_linked = next(item for item in before.json() if item["id"] == linked.id)
+        before_unlinked = next(item for item in before.json() if item["id"] == unlinked.id)
+        assert before_linked["current_archive"]["course_id"] == course_a.id
+        assert before_linked["current_archive"]["course_name"] == course_a.name
+        assert before_linked["requested_course_name"] == "Historical requested course"
+        assert before_linked["subject"] == "Historical course snapshot"
+        assert before_unlinked["current_archive"] is None
+
+        moved = await client.patch(
+            f"/courses/{course_a.id}/archives/{archive.id}/course",
+            json={"course_id": course_b.id},
+        )
+        assert moved.status_code == 200
+        after = await client.get("/archives/admin/submissions")
+        after_linked = next(item for item in after.json() if item["id"] == linked.id)
+        assert after_linked["current_archive"]["course_id"] == course_b.id
+        assert after_linked["current_archive"]["course_name"] == course_b.name
+        assert after_linked["requested_course_name"] == "Historical requested course"
+        assert after_linked["subject"] == "Historical course snapshot"
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(
+                delete(ArchiveSubmission).where(
+                    ArchiveSubmission.id.in_([linked.id, unlinked.id])
+                )
+            )
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(
+                delete(Course).where(Course.id.in_([course_a.id, course_b.id]))
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
 async def test_archive_review_statuses_create_deduplicated_notifications(
     client: AsyncClient, session_maker, make_user
 ):

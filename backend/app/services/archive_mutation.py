@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import HTTPException, status
 from sqlmodel import select
@@ -226,3 +228,68 @@ async def acquire_stable_archive_mutation_locks(
             raise ArchiveMutationLifecycleConflict(
                 "Archive mutation membership did not stabilize"
             ) from error
+
+
+async def mutate_current_archive(
+    db: AsyncSession,
+    *,
+    archive_id: int,
+    source_course_id: int,
+    target: ArchiveMoveTarget | None,
+    metadata: dict[str, Any],
+    operation: ArchiveSubmissionLinkOperation,
+) -> tuple[Archive, Course | None]:
+    """Apply current Archive metadata and placement under one stable lock plan.
+
+    Transaction ownership deliberately remains with the API caller so a combined
+    edit and move can be committed once or rolled back as one unit.
+    """
+
+    locked = await acquire_stable_archive_mutation_locks(
+        db,
+        archive_id=archive_id,
+        target_course_id=target.course_id if target is not None else None,
+        operation=operation,
+    )
+    archive = locked.archive(archive_id) if locked is not None else None
+    if (
+        archive is None
+        or archive.course_id != source_course_id
+        or archive.deleted_at is not None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Archive not found",
+        )
+
+    target_course = None
+    if target is not None:
+        if target.course_id == source_course_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot transfer archive to the same course",
+            )
+        target_course = locked.course(target.course_id)
+        if target_course is None:
+            raise archive_move_target_not_found_error()
+        if target_course.deleted_at is not None:
+            raise archive_move_target_trashed_error()
+        if target.normalized_name is not None:
+            revalidated_target = await resolve_archive_move_target(
+                db,
+                course_id=None,
+                normalized_name=target.normalized_name,
+                category=target.category,
+            )
+            if revalidated_target.course_id != target.course_id:
+                raise ArchiveMutationLifecycleConflict(
+                    "Archive move target changed during mutation"
+                )
+
+    for field, value in metadata.items():
+        if value is not None:
+            setattr(archive, field, value)
+    if target is not None:
+        archive.course_id = target.course_id
+    archive.updated_at = datetime.now(UTC)
+    return archive, target_course
