@@ -1,24 +1,34 @@
-name: Trusted Governance Verifier
+name: Start or Close Coordination
+
+run-name: ${{ inputs.operation }} coordination ${{ inputs.name }}
 
 on:
-  workflow_run:
-    workflows:
-      - CI/CD Pipeline
-    types:
-      - completed
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Human coordination intent
+        required: true
+        type: choice
+        options:
+          - start
+          - close
+      name:
+        description: Human name such as stage-5e
+        required: true
+        type: string
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
-  trusted_governance_gate:
-    name: Emit independent Trusted Governance Gate
-    if: >-
-      ${{ vars.TRUSTED_GOVERNANCE_ENABLED == 'true' &&
-          vars.TRUSTED_GOVERNANCE_GATE_ENABLED != 'false' }}
+  coordination_lifecycle:
+    name: Apply protected coordination intent
+    if: ${{ vars.TRUSTED_GOVERNANCE_ENABLED == 'true' }}
     runs-on: ubuntu-latest
-    environment: trusted-governance-verifier
+    environment: trusted-coordination-issuance
     permissions:
+      actions: read
       contents: read
     steps:
       - name: Checkout current protected main only
@@ -28,16 +38,13 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event.repository.default_branch }}
 
-      - name: Create downscoped verifier and check App token
-        id: app-token
+      - name: Create Contents-only lifecycle App token
+        id: ref-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
           client-id: ${{ vars.TRUSTED_GOVERNANCE_APP_CLIENT_ID }}
           private-key: ${{ secrets.TRUSTED_GOVERNANCE_APP_PRIVATE_KEY }}
-          permission-actions: read
-          permission-checks: write
-          permission-contents: read
-          permission-pull-requests: read
+          permission-contents: write
 
       - name: Create isolated ruleset-auditor App token
         id: ruleset-auditor-token
@@ -47,25 +54,20 @@ jobs:
           private-key: ${{ secrets.TRUSTED_GOVERNANCE_APP_PRIVATE_KEY }}
           permission-administration: write
 
-      - name: Verify live authority and emit App-owned check
+      - name: Resolve authority and apply intent
         env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_TOKEN: ${{ steps.ref-token.outputs.token }}
+          GITHUB_ACTIONS_READ_TOKEN: ${{ github.token }}
           GITHUB_RULESET_AUDITOR_TOKEN: ${{ steps.ruleset-auditor-token.outputs.token }}
           EXPECTED_APP_ID: ${{ vars.TRUSTED_GOVERNANCE_APP_ID }}
-          EXPECTED_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           RULESET_ID: ${{ vars.TRUSTED_INTEGRATION_RULESET_ID }}
-          RULESET_DIGEST: ${{ vars.TRUSTED_INTEGRATION_RULESET_DIGEST }}
-          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
-          SOURCE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          OPERATION: ${{ inputs.operation }}
+          COORDINATION_NAME: ${{ inputs.name }}
         run: >-
-          python3 scripts/ci/trusted_governance_gate.py
+          python3 scripts/ci/coordination.py
           --api-url '${{ github.api_url }}'
           --repository '${{ github.repository }}'
-          --repository-root .
-          verify-workflow-run
-          --run-id "$SOURCE_RUN_ID"
-          --run-attempt "$SOURCE_RUN_ATTEMPT"
-          --expected-app-slug "$EXPECTED_APP_SLUG"
           --expected-app-id "$EXPECTED_APP_ID"
           --ruleset-id "$RULESET_ID"
-          --ruleset-digest "$RULESET_DIGEST"
+          "$OPERATION"
+          "$COORDINATION_NAME"

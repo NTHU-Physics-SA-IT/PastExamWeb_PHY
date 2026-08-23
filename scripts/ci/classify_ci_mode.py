@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
-import os
 import re
 import subprocess
 import sys
@@ -22,12 +21,6 @@ from project_governance import (
     GovernanceConfigError,
     ProjectGovernance,
     load_project_governance,
-)
-from trusted_activation import (
-    AuthorityError,
-    AuthorityResolution,
-    AuthorityState,
-    resolve_git_authority,
 )
 
 CI_MODES = frozenset({"full", "equivalent-merge", "docs-only"})
@@ -1161,8 +1154,6 @@ def classify_ci_mode(
     governance: ProjectGovernance | None = None,
     equivalent_allowlist: frozenset[str] | None = None,
     pr_equivalent_allowlist: frozenset[str] | None = None,
-    trusted_activation: AuthorityResolution | None = None,
-    require_trusted_activation: bool = False,
     now: datetime | None = None,
 ) -> Classification:
     if event.ref == "refs/heads/main":
@@ -1187,28 +1178,23 @@ def classify_ci_mode(
         except GovernanceConfigError as error:
             return _full(f"project governance failed closed: {error}")
     coordination_branch = governance.coordination_branch
-    if (
-        coordination_branch is not None
-        and require_trusted_activation
-        and (
-            trusted_activation is None
-            or trusted_activation.state is not AuthorityState.ACTIVE
-            or not trusted_activation.active
-            or trusted_activation.branch != coordination_branch
-        )
-    ):
-        coordination_branch = None
     coordination_branches = (
         frozenset({coordination_branch})
         if coordination_branch is not None
         else frozenset()
     )
-    if equivalent_allowlist is None:
-        equivalent_allowlist = frozenset(
-            f"refs/heads/{branch}" for branch in coordination_branches
+    if coordination_branch is not None and (
+        event.ref == governance.coordination_ref
+        or (
+            event.event_name == "pull_request"
+            and event.base_ref == coordination_branch
         )
+    ):
+        return _full("simplified protected coordination is Full-only")
+    if equivalent_allowlist is None:
+        equivalent_allowlist = frozenset()
     if pr_equivalent_allowlist is None:
-        pr_equivalent_allowlist = coordination_branches
+        pr_equivalent_allowlist = frozenset()
 
     if event.event_name == "pull_request":
         if event.base_ref not in coordination_branches:
@@ -1355,9 +1341,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--head-repository-id", type=int, default=0)
     parser.add_argument("--api-url", default="https://api.github.com")
     parser.add_argument("--repository-root", type=Path, default=Path.cwd())
-    parser.add_argument("--trusted-verifier-app-id", type=int, default=0)
-    parser.add_argument("--trusted-ruleset-id", type=int, default=0)
-    parser.add_argument("--trusted-ruleset-digest", default="")
     parser.add_argument("--github-output", type=Path)
     parser.add_argument("--expect-mode", choices=sorted(CI_MODES))
     return parser
@@ -1390,58 +1373,10 @@ def main(argv: list[str] | None = None) -> int:
     except GovernanceConfigError as error:
         classification = _full(f"project governance failed closed: {error}")
     else:
-        coordination_branch = governance.coordination_branch
-        coordination_ref = governance.coordination_ref
-        api: GitHubActionsAPI | None = None
-        activation: AuthorityResolution | None = None
-        if coordination_ref is not None and (
-            event.ref == coordination_ref or event.base_ref == coordination_branch
-        ):
-            try:
-                api = GitHubActionsAPI(
-                    api_url=arguments.api_url,
-                    repository=event.repository,
-                    token=os.environ.get("GITHUB_TOKEN", ""),
-                )
-            except ClassificationFailure:
-                api = None
-            if (
-                arguments.trusted_verifier_app_id > 0
-                and arguments.trusted_ruleset_id > 0
-                and arguments.trusted_ruleset_digest
-            ):
-                authority_revision = (
-                    event.base_sha
-                    if event.event_name == "pull_request"
-                    else event.current_sha
-                )
-                try:
-                    activation = resolve_git_authority(
-                        repository_root=arguments.repository_root,
-                        repository_id=event.repository_id,
-                        repository=event.repository,
-                        branch=coordination_branch,
-                        branch_revision=authority_revision,
-                        main_revision="origin/main",
-                        verifier_app_id=arguments.trusted_verifier_app_id,
-                        ruleset_id=arguments.trusted_ruleset_id,
-                        ruleset_digest=arguments.trusted_ruleset_digest,
-                    )
-                except (
-                    AuthorityError,
-                    OSError,
-                    subprocess.SubprocessError,
-                    TypeError,
-                    ValueError,
-                ):
-                    activation = None
         classification = classify_ci_mode(
             event=event,
             git=git,
-            api=api,
             governance=governance,
-            trusted_activation=activation,
-            require_trusted_activation=True,
         )
     if arguments.github_output:
         _write_outputs(classification, arguments.github_output)

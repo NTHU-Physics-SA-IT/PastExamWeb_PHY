@@ -10,14 +10,6 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout current protected main authority
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 1
-          path: trusted-main
-          persist-credentials: false
-          ref: ${{ github.event.repository.default_branch }}
-
       - name: Checkout immutable pull request base
         uses: actions/checkout@v7
         with:
@@ -26,17 +18,20 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event.pull_request.base.sha }}
 
+      - name: Checkout immutable pull request head
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          path: proposed-head
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+
       - name: Require an approved pull request base
         shell: bash
         env:
           BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
           TRUSTED_ROOT: trusted-base
-          TRUSTED_MAIN_ROOT: trusted-main
-          TRUSTED_VERIFIER_APP_ID: ${{ vars.TRUSTED_GOVERNANCE_APP_ID || 0 }}
-          TRUSTED_RULESET_ID: ${{ vars.TRUSTED_INTEGRATION_RULESET_ID || 0 }}
-          TRUSTED_RULESET_DIGEST: ${{ vars.TRUSTED_INTEGRATION_RULESET_DIGEST }}
+          PROPOSED_ROOT: proposed-head
         run: |
           set -euo pipefail
 
@@ -48,6 +43,10 @@ jobs:
               --repository-root "$TRUSTED_ROOT" \
               validate-pr-base \
               --base "$BASE_BRANCH"
+            python3 "$resolver" \
+              --repository-root "$PROPOSED_ROOT" \
+              validate-branch-authority \
+              --branch "$BASE_BRANCH"
             exit 0
           fi
 
@@ -66,21 +65,11 @@ jobs:
             exit 1
           fi
 
-          trusted_validator="$TRUSTED_MAIN_ROOT/scripts/ci/trusted_governance_gate.py"
-          if [[ ! -f "$trusted_validator" || \
-                "$TRUSTED_VERIFIER_APP_ID" == "0" || \
-                "$TRUSTED_RULESET_ID" == "0" || \
-                -z "$TRUSTED_RULESET_DIGEST" ]]; then
-            echo "Trusted Activation authority is unavailable." >&2
-            exit 2
-          fi
-
-          GITHUB_TOKEN="$GH_TOKEN" python3 "$trusted_validator" \
-            --api-url '${{ github.api_url }}' \
-            --repository "$REPOSITORY" \
-            --repository-root "$TRUSTED_MAIN_ROOT" \
+          python3 "$resolver" \
+            --repository-root "$TRUSTED_ROOT" \
             validate-pr-base \
-            --base "$BASE_BRANCH" \
-            --expected-app-id "$TRUSTED_VERIFIER_APP_ID" \
-            --ruleset-id "$TRUSTED_RULESET_ID" \
-            --ruleset-digest "$TRUSTED_RULESET_DIGEST"
+            --base "$BASE_BRANCH"
+          python3 "$resolver" \
+            --repository-root "$PROPOSED_ROOT" \
+            validate-branch-authority \
+            --branch "$BASE_BRANCH"

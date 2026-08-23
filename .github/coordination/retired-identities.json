@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "retired_identities": [
+    {
+      "activation_id": "714d9c51-8b6b-405d-bd7c-4c92f6f26699",
+      "branch": "integration/trusted-activation-rehearsal-714d9c51",
+      "retirement_kind": "aborted-before-issuance",
+      "reason": "Obsolete heavy-model rehearsal was cancelled before ref issuance.",
+      "retired_at": "2026-08-23T10:44:47Z"
+    }
+  ]
+}
