@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import importlib
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
-
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 CI_SCRIPTS = REPOSITORY_ROOT / "scripts" / "ci"
@@ -50,6 +49,27 @@ def test_schema_allows_coordination_branch_to_be_unconfigured(tmp_path: Path) ->
     assert resolved.coordination_branch is None
     assert resolved.coordination_ref is None
     assert not resolved.allows_pr_base("integration/current")
+
+
+def test_main_null_and_branch_local_active_coordination_are_distinct(
+    tmp_path: Path,
+) -> None:
+    main_root = tmp_path / "main"
+    integration_root = tmp_path / "integration"
+    _write_config(main_root, _valid_payload(coordination_branch=None))
+    _write_config(integration_root, _valid_payload())
+
+    main = governance.load_project_governance(main_root)
+    active = governance.load_project_governance(integration_root)
+
+    assert main.coordination_branch is None
+    assert active.coordination_branch == "integration/current"
+    assert main.is_valid_branch_local_authority("main")
+    assert not main.is_valid_branch_local_authority("integration/current")
+    assert not active.is_valid_branch_local_authority("main")
+    assert active.is_valid_branch_local_authority("integration/current")
+    assert not main.allows_pr_base("integration/current")
+    assert active.allows_pr_base("integration/current")
 
 
 @pytest.mark.parametrize(
@@ -146,3 +166,37 @@ def test_cli_accepts_only_exact_configured_bases(tmp_path: Path) -> None:
             check=False,
         )
         assert process.returncode == expected
+
+
+@pytest.mark.parametrize(
+    ("coordination_branch", "branch", "expected"),
+    (
+        (None, "main", 0),
+        ("integration/current", "main", 1),
+        ("integration/current", "integration/current", 0),
+        (None, "integration/current", 1),
+        ("integration/current", "integration/other", 1),
+    ),
+)
+def test_cli_validates_exact_branch_local_authority(
+    tmp_path: Path,
+    coordination_branch: str | None,
+    branch: str,
+    expected: int,
+) -> None:
+    _write_config(tmp_path, _valid_payload(coordination_branch=coordination_branch))
+    process = subprocess.run(
+        [
+            sys.executable,
+            str(CI_SCRIPTS / "project_governance.py"),
+            "--repository-root",
+            str(tmp_path),
+            "validate-branch-authority",
+            "--branch",
+            branch,
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert process.returncode == expected
