@@ -1990,11 +1990,11 @@ async function saveWishReview() {
 function confirmDeleteWishReport(report) {
   if (!report?.id || deletingWishReportId.value !== null) return
   confirm.require({
-    header: t('永久刪除這筆回報？'),
-    message: t('這筆許願回報將永久刪除且無法復原。'),
+    header: t('刪除這筆回報？'),
+    message: t('回報會移至垃圾桶，可由管理員在垃圾桶中還原或永久刪除。'),
     icon: 'pi pi-exclamation-triangle',
     rejectLabel: t('取消'),
-    acceptLabel: t('永久刪除'),
+    acceptLabel: t('刪除'),
     acceptClass: 'p-button-danger',
     defaultFocus: 'reject',
     accept: () => removeWishReport(report),
@@ -2009,8 +2009,8 @@ async function removeWishReport(report) {
     if (selectedWishReport.value?.id === report.id) wishReviewVisible.value = false
     toast.add({
       severity: 'success',
-      summary: t('回報已永久刪除'),
-      detail: t('許願回報已永久移除'),
+      summary: t('回報已移至垃圾桶'),
+      detail: t('回報會移至垃圾桶，可由管理員在垃圾桶中還原或永久刪除。'),
       life: 3000,
     })
     await loadWishReports()
