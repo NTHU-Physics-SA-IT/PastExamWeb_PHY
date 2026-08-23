@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "record_type": "grant",
+  "repository_id": 1271339534,
+  "repository": "NTHU-Physics-SA-IT/PastExamWeb_PHY",
+  "branch": "integration/trusted-activation-rehearsal-714d9c51",
+  "activation_id": "714d9c51-8b6b-405d-bd7c-4c92f6f26699",
+  "grant_parent_sha": "dd0292ceb562f4763049fdc739dbc01d461206cd",
+  "policy_version": "trusted-activation-v1",
+  "policy_digest": "824c6cc79d7e5725bf3eb95fa92c097c2be09d2964b7e8310db52d640c324f81",
+  "ruleset_id": 21226609,
+  "ruleset_digest": "86edfc85abe3534b9e98ea98db0a464804a31a32ec22b40cbfd37841a0edd13f",
+  "verifier_app_id": 4688858,
+  "issuance_contract": "protected-main-app-environment-v1",
+  "issued_at": "2026-08-23T08:00:33Z"
+}
