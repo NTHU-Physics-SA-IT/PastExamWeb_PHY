@@ -210,7 +210,7 @@ test.describe('Admin › Archive management', () => {
       })
     })
     await page.route('**/api/courses/101/archives/201', (route) => {
-      if (route.request().method() === 'PUT') {
+      if (route.request().method() === 'PATCH') {
         return route.fulfill({
           status: moveResponse.status,
           headers: JSON_HEADERS,
