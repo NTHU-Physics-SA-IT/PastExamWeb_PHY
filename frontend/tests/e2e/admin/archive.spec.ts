@@ -245,13 +245,14 @@ test.describe('Admin › Archive management', () => {
     }
 
     let dialog = await openEditor()
-    await dialog.locator('#archive-edit-target-course').fill('不存在課程')
+    await clickWhenVisible(dialog.locator('#archive-edit-target-course'))
+    await clickWhenVisible(page.getByRole('option', { name: '電磁學(一)', exact: true }))
     const requestCountBeforeMissingMove = courseListRequestCount
     await clickWhenVisible(dialog.getByRole('button', { name: '儲存並轉移' }))
     await expect(page.getByText('目標課程不存在，請先建立課程。')).toBeVisible()
     await expect(dialog).toBeVisible()
     await expect(dialog.locator('#archive-edit-name')).toHaveValue('保留的考試名稱')
-    await expect(dialog.locator('#archive-edit-target-course')).toHaveValue('不存在課程')
+    await expect(dialog.locator('#archive-edit-target-course')).toHaveValue('電磁學(一)')
     expect(courseListRequestCount).toBe(requestCountBeforeMissingMove)
     await page.screenshot({
       path: testInfo.outputPath('archive-move-404-dialog.png'),
@@ -268,13 +269,14 @@ test.describe('Admin › Archive management', () => {
       },
     }
     dialog = await openEditor()
-    await dialog.locator('#archive-edit-target-course').fill('已刪除課程')
+    await clickWhenVisible(dialog.locator('#archive-edit-target-course'))
+    await clickWhenVisible(page.getByRole('option', { name: '電磁學(一)', exact: true }))
     const requestCountBeforeLifecycleConflict = courseListRequestCount
     await clickWhenVisible(dialog.getByRole('button', { name: '儲存並轉移' }))
     await expect(page.getByText('目標課程已在垃圾桶，請先恢復課程。')).toBeVisible()
     await expect(dialog).toBeVisible()
     await expect(dialog.locator('#archive-edit-name')).toHaveValue('保留的考試名稱')
-    await expect(dialog.locator('#archive-edit-target-course')).toHaveValue('已刪除課程')
+    await expect(dialog.locator('#archive-edit-target-course')).toHaveValue('電磁學(一)')
     expect(courseListRequestCount).toBe(requestCountBeforeLifecycleConflict)
     await page.screenshot({
       path: testInfo.outputPath('archive-move-409-dialog.png'),
