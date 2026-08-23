@@ -1,6 +1,6 @@
 <div align="center">
   <img
-    src="./frontend/public/physics-symbol.png"
+    src="./frontend/public/physics-symbol-white-circle-background.png"
     alt="清大物理考古系統標誌"
     width="180"
   />
