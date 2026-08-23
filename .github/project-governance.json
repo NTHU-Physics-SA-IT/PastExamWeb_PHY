@@ -1,5 +1,5 @@
 {
   "schema_version": 1,
   "default_development_base": "main",
-  "coordination_branch": null
+  "coordination_branch": "integration/governance-rehearsal-8032aef1"
 }
