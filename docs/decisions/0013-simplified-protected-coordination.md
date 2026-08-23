@@ -94,6 +94,9 @@ The stable human interface is:
 
 The Actions fallback requires only `operation` and `name`. Humans never enter
 UUIDs, SHAs, repository/App/installation/ruleset IDs, or digests.
+The protected workflow is the canonical operator path for both humans and
+Codex. Direct helper invocation is an implementation and test boundary, not an
+alternative operator interface for supplying resolved machine metadata.
 
 The workflow keeps three privilege boundaries: the ref-lifecycle App token has
 only Contents write; exact-main CI evidence uses the workflow's separate
