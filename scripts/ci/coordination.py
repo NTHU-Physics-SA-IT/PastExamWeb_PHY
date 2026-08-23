@@ -293,7 +293,11 @@ class RefLifecycleClient:
         if not isinstance(payload, dict) or payload.get("encoding") != "base64":
             raise CoordinationError(f"repository content is unavailable: {path}@{ref}")
         try:
-            return base64.b64decode(payload["content"], validate=True)
+            encoded = payload["content"]
+            if not isinstance(encoded, str):
+                raise TypeError("base64 content must be a string")
+            normalized = encoded.replace("\r", "").replace("\n", "")
+            return base64.b64decode(normalized, validate=True)
         except (KeyError, TypeError, ValueError) as error:
             raise CoordinationError(f"repository content is malformed: {path}@{ref}") from error
 
