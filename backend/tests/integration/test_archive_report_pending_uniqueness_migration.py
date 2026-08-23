@@ -21,6 +21,7 @@ from app.db.test_database_guard import (
 PREVIOUS_PREVIOUS_REVISION = "f3a7c1e9d5b2"
 PREVIOUS_REVISION = "c7e4a9b2d6f1"
 NEW_REVISION = "c8e4a1f7b2d9"
+NEXT_REVISION = "d1f5a9c3e7b2"
 INDEX_NAME = "uq_archive_reports_pending_reporter_archive"
 NOW = datetime(2026, 8, 22, 12, 0, tzinfo=UTC)
 
@@ -241,8 +242,9 @@ def _report_counts(engine: Engine) -> tuple[int, int]:
 def test_revision_is_the_sole_forward_head() -> None:
     script, heads = revision_graph()
 
-    assert HEAD_SCHEMA_REVISION == NEW_REVISION
-    assert heads == [NEW_REVISION]
+    assert HEAD_SCHEMA_REVISION == NEXT_REVISION
+    assert heads == [HEAD_SCHEMA_REVISION]
+    assert script.get_revision(NEXT_REVISION).down_revision == NEW_REVISION
     assert script.get_revision(NEW_REVISION).down_revision == PREVIOUS_REVISION
     assert (
         script.get_revision(PREVIOUS_REVISION).down_revision
