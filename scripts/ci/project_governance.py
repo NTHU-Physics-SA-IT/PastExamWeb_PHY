@@ -1,16 +1,14 @@
-#!/usr/bin/env python3
 """Resolve canonical development and coordination branch authority."""
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import json
-from pathlib import Path
 import subprocess
 import sys
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
-
 
 CONFIG_RELATIVE_PATH = Path(".github/project-governance.json")
 SUPPORTED_SCHEMA_VERSION = 1
@@ -41,6 +39,14 @@ class ProjectGovernance:
     def allows_pr_base(self, branch: str) -> bool:
         return branch == self.default_development_base or (
             self.coordination_branch is not None and branch == self.coordination_branch
+        )
+
+    def is_valid_branch_local_authority(self, branch: str) -> bool:
+        if branch == self.default_development_base:
+            return self.coordination_branch is None
+        return (
+            self.coordination_branch is not None
+            and branch == self.coordination_branch
         )
 
 
@@ -163,6 +169,8 @@ def _parser() -> argparse.ArgumentParser:
     subparsers.add_parser("coordination-ref")
     validate = subparsers.add_parser("validate-pr-base")
     validate.add_argument("--base", required=True)
+    branch_authority = subparsers.add_parser("validate-branch-authority")
+    branch_authority.add_argument("--branch", required=True)
     return parser
 
 
@@ -194,6 +202,14 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
         print("Pull request base branch is allowed.")
+    elif arguments.command == "validate-branch-authority":
+        if not governance.is_valid_branch_local_authority(arguments.branch):
+            print(
+                "branch-local project governance does not match the exact branch",
+                file=sys.stderr,
+            )
+            return 1
+        print("Branch-local project governance matches the exact branch.")
     return 0
 
 
