@@ -26,21 +26,29 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event.repository.default_branch }}
 
-      - name: Create downscoped verifier App token
+      - name: Create downscoped verifier and check App token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
         with:
           client-id: ${{ vars.TRUSTED_GOVERNANCE_APP_CLIENT_ID }}
           private-key: ${{ secrets.TRUSTED_GOVERNANCE_APP_PRIVATE_KEY }}
           permission-actions: read
-          permission-administration: read
           permission-checks: write
           permission-contents: read
           permission-pull-requests: read
 
+      - name: Create isolated ruleset-auditor App token
+        id: ruleset-auditor-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ vars.TRUSTED_GOVERNANCE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TRUSTED_GOVERNANCE_APP_PRIVATE_KEY }}
+          permission-administration: write
+
       - name: Verify live authority and emit App-owned check
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_RULESET_AUDITOR_TOKEN: ${{ steps.ruleset-auditor-token.outputs.token }}
           EXPECTED_APP_ID: ${{ vars.TRUSTED_GOVERNANCE_APP_ID }}
           EXPECTED_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
           RULESET_ID: ${{ vars.TRUSTED_INTEGRATION_RULESET_ID }}

@@ -3,11 +3,13 @@
 Status: Active
 
 Source of truth for: configuring and operating the temporary protected
-coordination trust root defined by ADR-0011
+coordination trust root defined by ADR-0012
 
 Related authority:
 
+- [ADR-0012](../decisions/0012-trusted-ruleset-visibility-permission-boundary.md)
 - [ADR-0011](../decisions/0011-trusted-activation-for-protected-coordination.md)
+  (superseded lifecycle foundation retained by ADR-0012)
 - [Validation policy](../development/validation.md)
 - [Collaboration runbook](../development/collaboration-and-conflict-resolution.md)
 - [Contributor workflow](../../CONTRIBUTING.md)
@@ -64,15 +66,26 @@ generation-specific name and install it only on this repository.
 | Metadata | Read | repository identity |
 | Contents | Read and write | read state; trusted ref create/delete |
 | Checks | Read and write | list, create, and update the App-owned gate |
-| Actions | Read | bind workflow run, attempt, jobs, and Full evidence |
+| Actions | Read and write | allow downscoped Actions-read verifier tokens |
 | Pull requests | Read | bind PR head/base/files |
-| Administration | Read | read the ruleset |
+| Administration | Write | make live ruleset `bypass_actors` visible to the isolated GET-only auditor |
 
-The App has no unrelated permission. Installation tokens are downscoped again:
+The App has no unrelated permission. GitHub requires ruleset write access
+before its read response includes `bypass_actors`; this platform capability is
+not operational authority to mutate repository settings. Installation tokens
+and clients are separated again:
 
-- verifier: Actions read, Administration read, Contents read, Pull requests
-  read, and Checks write;
-- issuance: Administration read and Contents write, with no Checks write.
+- verifier/check client: Actions read, Contents read, Pull requests read, and
+  Checks write, with no Administration permission;
+- issuance/ref client: Contents write, with no Administration or Checks
+  permission; and
+- ruleset auditor: Administration write only, accepted by a dedicated client
+  that permits GET solely to the exact repository-ruleset-by-ID endpoint.
+
+The ruleset auditor rejects POST, PUT, PATCH, DELETE, branch-protection paths,
+ruleset mutation paths, and every other administration endpoint before network
+access. Never pass its token to the general verifier, check emitter, or ref
+lifecycle client.
 
 The App ID must differ from 15368. Record the permission response returned by
 GitHub rather than only requested UI values.

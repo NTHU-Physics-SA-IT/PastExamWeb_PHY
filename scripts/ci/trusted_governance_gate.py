@@ -242,12 +242,6 @@ class GitHubAPI:
             raise APIError("compare response is malformed")
         return payload
 
-    def ruleset(self, ruleset_id: int) -> dict[str, Any]:
-        payload = self.get(f"/repos/{self.repository}/rulesets/{ruleset_id}")
-        if not isinstance(payload, dict):
-            raise APIError("ruleset response is malformed")
-        return payload
-
     def app(self, slug: str) -> dict[str, Any]:
         if not slug or quote(slug, safe="") != slug:
             raise APIError("GitHub App slug is malformed")
@@ -255,7 +249,6 @@ class GitHubAPI:
         if not isinstance(payload, dict):
             raise APIError("GitHub App response is malformed")
         return payload
-
     def branch(self, branch: str) -> dict[str, Any]:
         payload = self.get(
             f"/repos/{self.repository}/branches/{quote(branch, safe='')}"
@@ -337,6 +330,84 @@ class GitHubAPI:
         self.delete(
             f"/repos/{self.repository}/git/refs/{quote(f'heads/{branch}', safe='')}"
         )
+
+
+class RulesetAuditAPI:
+    """GET-only boundary for the App's administration-capable token."""
+
+    def __init__(self, *, api_url: str, repository: str, token: str) -> None:
+        if not token:
+            raise APIError("ruleset auditor installation token is unavailable")
+        if repository.count("/") != 1 or any(
+            not component or quote(component, safe="") != component
+            for component in repository.split("/")
+        ):
+            raise APIError("ruleset auditor repository is malformed")
+        self.api_url = api_url.rstrip("/")
+        self.repository = repository
+        self.token = token
+
+    def _request(self, method: str, path: str) -> Any:
+        expected_prefix = f"/repos/{self.repository}/rulesets/"
+        ruleset_suffix = path.removeprefix(expected_prefix)
+        if method != "GET":
+            raise APIError("ruleset auditor permits only GET")
+        if (
+            not path.startswith(expected_prefix)
+            or not ruleset_suffix.isascii()
+            or not ruleset_suffix.isdigit()
+            or int(ruleset_suffix) < 1
+        ):
+            raise APIError("ruleset auditor path is not allowlisted")
+        request = Request(
+            f"{self.api_url}{path}",
+            method="GET",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self.token}",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        try:
+            with urlopen(request, timeout=20) as response:
+                raw = response.read()
+        except HTTPError as error:
+            try:
+                message = json.loads(error.read().decode("utf-8")).get(
+                    "message",
+                    "GitHub API error",
+                )
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                message = "GitHub API error"
+            raise APIError(
+                f"GitHub API GET {path} failed: {message}",
+                status=error.code,
+            ) from error
+        except (URLError, TimeoutError) as error:
+            raise APIError(
+                f"GitHub API GET {path} unavailable: {type(error).__name__}"
+            ) from error
+        if not raw:
+            raise APIError("ruleset auditor returned an empty response")
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise APIError("ruleset auditor returned malformed JSON") from error
+
+    def ruleset(self, ruleset_id: int) -> dict[str, Any]:
+        if (
+            not isinstance(ruleset_id, int)
+            or isinstance(ruleset_id, bool)
+            or ruleset_id < 1
+        ):
+            raise APIError("ruleset ID is malformed")
+        payload = self._request(
+            "GET",
+            f"/repos/{self.repository}/rulesets/{ruleset_id}",
+        )
+        if not isinstance(payload, dict):
+            raise APIError("ruleset response is malformed")
+        return payload
 
 
 def normalize_ruleset(payload: dict[str, Any]) -> dict[str, Any]:
@@ -422,6 +493,7 @@ def _require_ruleset_contract(
 
 def validate_live_trust_root(
     api: GitHubAPI,
+    ruleset_api: RulesetAuditAPI,
     *,
     expected_app_slug: str,
     expected_app_id: int,
@@ -431,7 +503,7 @@ def validate_live_trust_root(
     app = api.app(expected_app_slug)
     if app.get("id") != expected_app_id or expected_app_id == GITHUB_ACTIONS_APP_ID:
         raise AuthorityError("installation token App identity does not match")
-    ruleset = api.ruleset(ruleset_id)
+    ruleset = ruleset_api.ruleset(ruleset_id)
     if ruleset.get("id") != ruleset_id:
         raise AuthorityError("ruleset identity does not match")
     if ruleset_digest(ruleset) != expected_ruleset_digest:
@@ -807,6 +879,7 @@ def _validate_main_ledger_changes(
 
 def evaluate_workflow_run(
     api: GitHubAPI,
+    ruleset_api: RulesetAuditAPI,
     *,
     root: Path,
     run_id: int,
@@ -831,6 +904,7 @@ def evaluate_workflow_run(
         raise AuthorityError("workflow run repository identity does not match")
     validate_live_trust_root(
         api,
+        ruleset_api,
         expected_app_slug=expected_app_slug,
         expected_app_id=expected_app_id,
         ruleset_id=ruleset_id,
@@ -1051,6 +1125,7 @@ def _load_grant_for_operation(
 
 def operate_ref(
     api: GitHubAPI,
+    ruleset_api: RulesetAuditAPI,
     *,
     root: Path,
     operation: str,
@@ -1063,6 +1138,7 @@ def operate_ref(
 ) -> dict[str, Any]:
     validate_live_trust_root(
         api,
+        ruleset_api,
         expected_app_slug=expected_app_slug,
         expected_app_id=expected_app_id,
         ruleset_id=ruleset_id,
@@ -1240,7 +1316,12 @@ def main(argv: list[str] | None = None) -> int:
             token=os.environ.get("GITHUB_TOKEN", ""),
         )
         if arguments.command == "ruleset-digest":
-            print(ruleset_digest(api.ruleset(arguments.ruleset_id)))
+            ruleset_api = RulesetAuditAPI(
+                api_url=arguments.api_url,
+                repository=arguments.repository,
+                token=os.environ.get("GITHUB_RULESET_AUDITOR_TOKEN", ""),
+            )
+            print(ruleset_digest(ruleset_api.ruleset(arguments.ruleset_id)))
             return 0
         if arguments.command == "validate-pr-base":
             result = validate_trusted_pr_base(
@@ -1254,8 +1335,14 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result.as_dict(), sort_keys=True))
             return 0
         if arguments.command == "operate-ref":
+            ruleset_api = RulesetAuditAPI(
+                api_url=arguments.api_url,
+                repository=arguments.repository,
+                token=os.environ.get("GITHUB_RULESET_AUDITOR_TOKEN", ""),
+            )
             result = operate_ref(
                 api,
+                ruleset_api,
                 root=arguments.repository_root,
                 operation=arguments.operation,
                 activation_id=arguments.activation_id,
@@ -1268,9 +1355,15 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, sort_keys=True))
             return 0
         run: dict[str, Any] | None = None
+        ruleset_api = RulesetAuditAPI(
+            api_url=arguments.api_url,
+            repository=arguments.repository,
+            token=os.environ.get("GITHUB_RULESET_AUDITOR_TOKEN", ""),
+        )
         try:
             verdict, run = evaluate_workflow_run(
                 api,
+                ruleset_api,
                 root=arguments.repository_root,
                 run_id=arguments.run_id,
                 run_attempt=arguments.run_attempt,

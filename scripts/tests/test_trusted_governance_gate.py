@@ -125,7 +125,7 @@ def test_privileged_workflows_are_dormant_and_main_sourced() -> None:
     assert "actions/cache" not in verifier_text
     assert "restore-keys" not in verifier_text
     assert "trusted_governance_gate.py" in verifier_text
-    assert "actions/create-github-app-token@" in verifier_text
+    assert verifier_text.count("actions/create-github-app-token@") == 2
     assert "client-id: ${{ vars.TRUSTED_GOVERNANCE_APP_CLIENT_ID }}" in verifier_text
     assert "EXPECTED_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}" in verifier_text
     assert '--expected-app-slug "$EXPECTED_APP_SLUG"' in verifier_text
@@ -133,20 +133,63 @@ def test_privileged_workflows_are_dormant_and_main_sourced() -> None:
     assert "permission-contents: read" in verifier_text
     assert "permission-actions: read" in verifier_text
     assert "permission-pull-requests: read" in verifier_text
-    assert "permission-administration: read" in verifier_text
+    assert "permission-administration: write" in verifier_text
+    assert "permission-administration: read" not in verifier_text
+    assert "GITHUB_RULESET_AUDITOR_TOKEN" in verifier_text
     assert "permission-contents: write" not in verifier_text
+    verifier_tokens = {
+        step["name"]: step["with"]
+        for step in job["steps"]
+        if "actions/create-github-app-token@" in step.get("uses", "")
+    }
+    assert verifier_tokens == {
+        "Create downscoped verifier and check App token": {
+            "client-id": "${{ vars.TRUSTED_GOVERNANCE_APP_CLIENT_ID }}",
+            "private-key": "${{ secrets.TRUSTED_GOVERNANCE_APP_PRIVATE_KEY }}",
+            "permission-actions": "read",
+            "permission-checks": "write",
+            "permission-contents": "read",
+            "permission-pull-requests": "read",
+        },
+        "Create isolated ruleset-auditor App token": {
+            "client-id": "${{ vars.TRUSTED_GOVERNANCE_APP_CLIENT_ID }}",
+            "private-key": "${{ secrets.TRUSTED_GOVERNANCE_APP_PRIVATE_KEY }}",
+            "permission-administration": "write",
+        },
+    }
 
     assert set(issuance["on"]) == {"workflow_dispatch"}
     issuance_job = issuance["jobs"]["trusted_ref_lifecycle"]
     assert issuance_job["if"] == "${{ vars.TRUSTED_GOVERNANCE_ENABLED == 'true' }}"
     assert issuance_job["environment"] == "trusted-coordination-issuance"
     assert "permission-contents: write" in issuance_text
+    assert issuance_text.count("actions/create-github-app-token@") == 2
+    assert "permission-administration: write" in issuance_text
+    assert "permission-administration: read" not in issuance_text
+    assert "GITHUB_RULESET_AUDITOR_TOKEN" in issuance_text
     assert "EXPECTED_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}" in issuance_text
     assert '--expected-app-slug "$EXPECTED_APP_SLUG"' in issuance_text
     assert "permission-checks: write" not in issuance_text
     assert "download-artifact" not in issuance_text
     assert "actions/cache" not in issuance_text
     assert "github.event.pull_request" not in issuance_text
+    issuance_tokens = {
+        step["name"]: step["with"]
+        for step in issuance_job["steps"]
+        if "actions/create-github-app-token@" in step.get("uses", "")
+    }
+    assert issuance_tokens == {
+        "Create downscoped issuance App token": {
+            "client-id": "${{ vars.TRUSTED_GOVERNANCE_APP_CLIENT_ID }}",
+            "private-key": "${{ secrets.TRUSTED_GOVERNANCE_APP_PRIVATE_KEY }}",
+            "permission-contents": "write",
+        },
+        "Create isolated ruleset-auditor App token": {
+            "client-id": "${{ vars.TRUSTED_GOVERNANCE_APP_CLIENT_ID }}",
+            "private-key": "${{ secrets.TRUSTED_GOVERNANCE_APP_PRIVATE_KEY }}",
+            "permission-administration": "write",
+        },
+    }
 
 
 def test_ruleset_digest_is_order_normalized() -> None:
@@ -170,6 +213,75 @@ def test_repository_content_accepts_github_wrapped_base64() -> None:
     }
 
     assert api.content("policy.json", "main") == (b"trusted content", "a" * 40)
+
+
+def test_ruleset_auditor_rejects_mutation_before_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api = gate.RulesetAuditAPI(
+        api_url="https://api.github.invalid",
+        repository="owner/repository",
+        token="not-a-real-token",
+    )
+    monkeypatch.setattr(
+        gate,
+        "urlopen",
+        lambda *_args, **_kwargs: pytest.fail("network must not be reached"),
+    )
+
+    with pytest.raises(gate.APIError, match="only GET"):
+        api._request("PATCH", "/repos/owner/repository/rulesets/991")
+    with pytest.raises(gate.APIError, match="only GET"):
+        api._request("DELETE", "/repos/owner/repository/rulesets/991")
+    assert not any(hasattr(api, method) for method in ("post", "put", "patch", "delete"))
+
+
+def test_ruleset_auditor_uses_only_exact_ruleset_read_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api = gate.RulesetAuditAPI(
+        api_url="https://api.github.invalid",
+        repository="owner/repository",
+        token="not-a-real-token",
+    )
+    calls: list[tuple[str, str]] = []
+
+    def record(method: str, path: str) -> dict[str, Any]:
+        calls.append((method, path))
+        return _ruleset()
+
+    monkeypatch.setattr(api, "_request", record)
+
+    assert api.ruleset(RULESET_ID)["id"] == RULESET_ID
+    assert calls == [("GET", f"/repos/owner/repository/rulesets/{RULESET_ID}")]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/repos/owner/repository/branches/main/protection",
+        "/repos/owner/repository/rulesets",
+        "/repos/owner/repository/rulesets/991/bypass_actors",
+        "/repos/other/repository/rulesets/991",
+    ],
+)
+def test_ruleset_auditor_rejects_non_allowlisted_path_before_network(
+    path: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api = gate.RulesetAuditAPI(
+        api_url="https://api.github.invalid",
+        repository="owner/repository",
+        token="not-a-real-token",
+    )
+    monkeypatch.setattr(
+        gate,
+        "urlopen",
+        lambda *_args, **_kwargs: pytest.fail("network must not be reached"),
+    )
+
+    with pytest.raises(gate.APIError, match="not allowlisted"):
+        api._request("GET", path)
 
 
 def test_trusted_check_is_idempotently_updated_by_workflow_run() -> None:
@@ -218,6 +330,7 @@ def test_live_trust_root_requires_distinct_exact_app_and_ruleset() -> None:
 
     app, observed = gate.validate_live_trust_root(
         TrustRootAPI(),
+        TrustRootAPI(),
         expected_app_slug="test-trusted-app",
         expected_app_id=APP_ID,
         ruleset_id=RULESET_ID,
@@ -230,6 +343,7 @@ def test_live_trust_root_requires_distinct_exact_app_and_ruleset() -> None:
     with pytest.raises(trusted.AuthorityError, match="App identity"):
         gate.validate_live_trust_root(
             TrustRootAPI(app_id=15368),
+            TrustRootAPI(),
             expected_app_slug="test-trusted-app",
             expected_app_id=15368,
             ruleset_id=RULESET_ID,
@@ -237,6 +351,7 @@ def test_live_trust_root_requires_distinct_exact_app_and_ruleset() -> None:
         )
     with pytest.raises(trusted.AuthorityError, match="digest"):
         gate.validate_live_trust_root(
+            TrustRootAPI(),
             TrustRootAPI(),
             expected_app_slug="test-trusted-app",
             expected_app_id=APP_ID,
@@ -246,12 +361,25 @@ def test_live_trust_root_requires_distinct_exact_app_and_ruleset() -> None:
 
 
 def test_ruleset_requires_exact_app_bypass() -> None:
+    missing = _ruleset()
+    missing.pop("bypass_actors")
+    with pytest.raises(trusted.AuthorityError, match="bypass actors are malformed"):
+        gate.validate_live_trust_root(
+            TrustRootAPI(),
+            TrustRootAPI(ruleset=missing),
+            expected_app_slug="test-trusted-app",
+            expected_app_id=APP_ID,
+            ruleset_id=RULESET_ID,
+            expected_ruleset_digest="0" * 64,
+        )
+
     payload = _ruleset()
     payload["bypass_actors"] = []
     digest = gate.ruleset_digest(payload)
 
     with pytest.raises(trusted.AuthorityError, match="bypass"):
         gate.validate_live_trust_root(
+            TrustRootAPI(),
             TrustRootAPI(ruleset=payload),
             expected_app_slug="test-trusted-app",
             expected_app_id=APP_ID,
@@ -265,11 +393,36 @@ def test_ruleset_requires_exact_app_bypass() -> None:
     )
     with pytest.raises(trusted.AuthorityError, match="unique"):
         gate.validate_live_trust_root(
+            TrustRootAPI(),
             TrustRootAPI(ruleset=broad),
             expected_app_slug="test-trusted-app",
             expected_app_id=APP_ID,
             ruleset_id=RULESET_ID,
             expected_ruleset_digest=gate.ruleset_digest(broad),
+        )
+
+    wrong = _ruleset()
+    wrong["bypass_actors"][0]["actor_id"] = APP_ID + 1
+    with pytest.raises(trusted.AuthorityError, match="unique"):
+        gate.validate_live_trust_root(
+            TrustRootAPI(),
+            TrustRootAPI(ruleset=wrong),
+            expected_app_slug="test-trusted-app",
+            expected_app_id=APP_ID,
+            ruleset_id=RULESET_ID,
+            expected_ruleset_digest=gate.ruleset_digest(wrong),
+        )
+
+    malformed = _ruleset()
+    malformed["bypass_actors"] = "not-a-list"
+    with pytest.raises(trusted.AuthorityError, match="bypass actors are malformed"):
+        gate.validate_live_trust_root(
+            TrustRootAPI(),
+            TrustRootAPI(ruleset=malformed),
+            expected_app_slug="test-trusted-app",
+            expected_app_id=APP_ID,
+            ruleset_id=RULESET_ID,
+            expected_ruleset_digest="0" * 64,
         )
 
 
@@ -292,6 +445,7 @@ def test_ruleset_cannot_weaken_required_contract(
 
     with pytest.raises(trusted.AuthorityError, match=message):
         gate.validate_live_trust_root(
+            TrustRootAPI(),
             TrustRootAPI(ruleset=payload),
             expected_app_slug="test-trusted-app",
             expected_app_id=APP_ID,
@@ -501,6 +655,7 @@ def test_trusted_issue_creates_only_exact_granted_ref(
 
     result = gate.operate_ref(
         api,
+        api,
         root=tmp_path,
         operation="issue",
         activation_id=ACTIVATION_ID,
@@ -532,6 +687,7 @@ def test_replay_preflight_rejects_without_ref_mutation(
     )
 
     result = gate.operate_ref(
+        api,
         api,
         root=tmp_path,
         operation="replay-preflight",
