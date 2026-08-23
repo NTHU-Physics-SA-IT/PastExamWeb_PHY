@@ -52,6 +52,10 @@ choose:
 - operation: `start`
 - name: `stage-5e`
 
+Use a short lowercase semantic name containing at least one letter. Purely
+numeric values are machine identifiers and are rejected, as are names that
+look like full UUIDs, full commit SHAs, or complete ref names.
+
 Do not enter a UUID, SHA, repository/App/installation/ruleset ID, or digest.
 The system prints the generated branch, exact base main SHA, `ACTIVE` state,
 and expected pull-request base.
