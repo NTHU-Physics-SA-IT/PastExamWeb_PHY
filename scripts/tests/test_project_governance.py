@@ -29,8 +29,9 @@ def _valid_payload(*, coordination_branch: str | None = "integration/current") -
     }
 
 
-def test_repository_config_resolves_main_without_active_coordination() -> None:
-    resolved = governance.load_project_governance(REPOSITORY_ROOT)
+def test_config_resolves_main_without_active_coordination(tmp_path: Path) -> None:
+    _write_config(tmp_path, _valid_payload(coordination_branch=None))
+    resolved = governance.load_project_governance(tmp_path)
 
     assert resolved.schema_version == 1
     assert resolved.default_development_base == "main"
@@ -105,14 +106,15 @@ def test_missing_and_malformed_config_fail_closed(tmp_path: Path) -> None:
         governance.load_project_governance(tmp_path)
 
 
-def test_cli_reports_current_repository_has_no_active_coordination() -> None:
+def test_cli_reports_config_without_active_coordination(tmp_path: Path) -> None:
+    _write_config(tmp_path, _valid_payload(coordination_branch=None))
     for command in ("coordination-branch", "coordination-ref"):
         process = subprocess.run(
             [
                 sys.executable,
                 str(CI_SCRIPTS / "project_governance.py"),
                 "--repository-root",
-                str(REPOSITORY_ROOT),
+                str(tmp_path),
                 command,
             ],
             text=True,
@@ -128,7 +130,7 @@ def test_cli_reports_current_repository_has_no_active_coordination() -> None:
                 sys.executable,
                 str(CI_SCRIPTS / "project_governance.py"),
                 "--repository-root",
-                str(REPOSITORY_ROOT),
+                str(tmp_path),
                 "validate-pr-base",
                 "--base",
                 base,

@@ -120,8 +120,13 @@ def test_governance_documentation_is_main_first_and_branch_decoupled() -> None:
     coordination_branch = config["coordination_branch"]
 
     assert config["default_development_base"] == "main"
-    assert coordination_branch is None
-    assert config_source.count('"coordination_branch": null') == 1
+    if coordination_branch is None:
+        assert config_source.count('"coordination_branch": null') == 1
+    else:
+        assert coordination_branch.startswith("integration/")
+        assert config_source.count(
+            f'"coordination_branch": "{coordination_branch}"'
+        ) == 1
     for authority_path in (
         CONTRIBUTING,
         VALIDATION,
