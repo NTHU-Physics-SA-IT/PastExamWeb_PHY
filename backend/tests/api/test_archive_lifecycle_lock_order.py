@@ -1015,7 +1015,7 @@ async def test_two_course_reverse_input_plans_lock_identically(
 
 
 @pytest.mark.asyncio
-async def test_approve_existing_acquires_mutex_then_parent_first_one_to_one_plan(
+async def test_approve_linked_uses_current_parent_plan_without_proposal_mutex(
     client,
     session_maker,
     make_user,
@@ -1057,11 +1057,9 @@ async def test_approve_existing_acquires_mutex_then_parent_first_one_to_one_plan
         )
         assert response.status_code == 200
         assert trace == [
-            ("mutex", None),
             (
                 "rows",
                 [
-                    (LifecycleResourceClass.COURSE_CATEGORY, category.id),
                     (LifecycleResourceClass.COURSE, course.id),
                     (LifecycleResourceClass.ARCHIVE, archive.id),
                     (LifecycleResourceClass.ARCHIVE_SUBMISSION, target.id),
