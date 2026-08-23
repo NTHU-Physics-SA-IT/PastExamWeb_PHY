@@ -209,20 +209,20 @@ test.describe('Admin › Archive management', () => {
         body: JSON.stringify(COURSES_FIXTURE),
       })
     })
-    await page.route('**/api/courses/101/archives/201', (route) =>
-      route.fulfill({
+    await page.route('**/api/courses/101/archives/201', (route) => {
+      if (route.request().method() === 'PUT') {
+        return route.fulfill({
+          status: moveResponse.status,
+          headers: JSON_HEADERS,
+          body: JSON.stringify({ detail: moveResponse.detail }),
+        })
+      }
+      return route.fulfill({
         status: 200,
         headers: JSON_HEADERS,
         body: JSON.stringify(ARCHIVES_FIXTURE[101][0]),
       })
-    )
-    await page.route('**/api/courses/101/archives/201/course', (route) =>
-      route.fulfill({
-        status: moveResponse.status,
-        headers: JSON_HEADERS,
-        body: JSON.stringify({ detail: moveResponse.detail }),
-      })
-    )
+    })
 
     await page.goto('/archive', { waitUntil: 'networkidle' })
     await page.getByPlaceholder('搜尋課程').fill('普通物理')
