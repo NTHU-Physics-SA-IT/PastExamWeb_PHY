@@ -76,7 +76,10 @@ async def get_admin_attention_summary(
         CommentReport.deleted_at.is_(None),
     )
     wish_report_count = await _count(
-        db, ArchiveWishReport, ArchiveWishReport.status == pending_report
+        db,
+        ArchiveWishReport,
+        ArchiveWishReport.status == pending_report,
+        ArchiveWishReport.deleted_at.is_(None),
     )
     system_issue_count = await _count(
         db,

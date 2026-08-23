@@ -150,6 +150,13 @@ async def test_admin_attention_summary_uses_canonical_outstanding_states(
                     reason="other",
                     status="dismissed",
                 ),
+                ArchiveWishReport(
+                    reporter_user_id=user.id,
+                    wish_title_snapshot=f"Deleted pending wish {unique}",
+                    target_summary_snapshot="Target",
+                    reason="other",
+                    deleted_at=now,
+                ),
                 SystemIssueReport(
                     reporter_user_id=user.id,
                     report_type="bug",

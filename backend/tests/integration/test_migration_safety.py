@@ -35,6 +35,7 @@ from app.db.test_database_guard import (
 
 MERGED_HEAD = "b4d6f8a2c1e3"
 PRE_ABOUT_US_ORDERING_HEAD = "f3a7c1e9d5b2"
+PRE_ARCHIVE_REPORT_UNIQUENESS_HEAD = "c7e4a9b2d6f1"
 CURRENT_HEAD = HEAD_SCHEMA_REVISION
 E6_REVISION = "e6a1b3c5d7f9"
 E8_REVISION = "e8a4c1d7b2f6"
@@ -716,6 +717,10 @@ def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
     )
     assert (
         script.get_revision(PREVIOUS_HEAD_SCHEMA_REVISION).down_revision
+        == PRE_ARCHIVE_REPORT_UNIQUENESS_HEAD
+    )
+    assert (
+        script.get_revision(PRE_ARCHIVE_REPORT_UNIQUENESS_HEAD).down_revision
         == PRE_ABOUT_US_ORDERING_HEAD
     )
     assert (
@@ -733,6 +738,87 @@ def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
     after = inspect_database()
     assert after.current_revision == head_revision()
     assert after.schema_matches_head is True
+
+
+def test_archive_wish_report_trash_migration_is_additive_and_reversible(
+    clean_public_schema: Engine,
+) -> None:
+    previous_revision = "c8e4a1f7b2d9"
+    new_revision = "d1f5a9c3e7b2"
+    config = alembic_config()
+    upgrade(previous_revision)
+    with clean_public_schema.begin() as connection:
+        report_id = int(
+            connection.scalar(
+                text(
+                    """
+                    INSERT INTO archive_wish_reports (
+                        wish_title_snapshot,
+                        target_summary_snapshot,
+                        reason,
+                        status
+                    ) VALUES (
+                        'Preserved wish report',
+                        'Preserved target summary',
+                        'other',
+                        'upheld'
+                    )
+                    RETURNING id
+                    """
+                )
+            )
+        )
+
+    command.upgrade(config, new_revision)
+    with clean_public_schema.connect() as connection:
+        columns = {
+            column["name"]
+            for column in sa_inspect(connection).get_columns(
+                "archive_wish_reports", schema="public"
+            )
+        }
+        row = connection.execute(
+            text(
+                """
+                SELECT wish_title_snapshot, target_summary_snapshot, status,
+                       deleted_at, deleted_by_id
+                FROM archive_wish_reports
+                WHERE id = :report_id
+                """
+            ),
+            {"report_id": report_id},
+        ).one()
+    assert {"deleted_at", "deleted_by_id"} <= columns
+    assert tuple(row) == (
+        "Preserved wish report",
+        "Preserved target summary",
+        "upheld",
+        None,
+        None,
+    )
+
+    command.downgrade(config, previous_revision)
+    with clean_public_schema.connect() as connection:
+        columns = {
+            column["name"]
+            for column in sa_inspect(connection).get_columns(
+                "archive_wish_reports", schema="public"
+            )
+        }
+        preserved = connection.execute(
+            text(
+                "SELECT wish_title_snapshot, target_summary_snapshot, status "
+                "FROM archive_wish_reports WHERE id = :report_id"
+            ),
+            {"report_id": report_id},
+        ).one()
+    assert "deleted_at" not in columns
+    assert "deleted_by_id" not in columns
+    assert tuple(preserved) == (
+        "Preserved wish report",
+        "Preserved target summary",
+        "upheld",
+    )
 
 
 @pytest.mark.parametrize(

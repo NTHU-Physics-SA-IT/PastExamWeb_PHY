@@ -225,7 +225,7 @@ describe('ReportManagementPanel', () => {
     expect(badges.every((badge) => badge.classes('admin-attention-badge'))).toBe(true)
   })
 
-  it('keeps wish report inspect, review, and permanent-delete actions wired', async () => {
+  it('keeps wish report inspect, review, and trash actions wired', async () => {
     const report = {
       id: 303,
       reporter_name: '許願回報者',
@@ -270,6 +270,16 @@ describe('ReportManagementPanel', () => {
     wrapper.vm.confirmDeleteWishReport(report)
     await flushPromises()
     expect(mocks.deleteWishReport).toHaveBeenCalledWith(report.id)
+    expect(mocks.confirm).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        header: '刪除這筆回報？',
+        message: '回報會移至垃圾桶，可由管理員在垃圾桶中還原或永久刪除。',
+        acceptLabel: '刪除',
+      })
+    )
+    expect(mocks.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ summary: '回報已移至垃圾桶' })
+    )
   })
 
   it('renders a readable mobile wish report card with distinct reporter and wisher', async () => {

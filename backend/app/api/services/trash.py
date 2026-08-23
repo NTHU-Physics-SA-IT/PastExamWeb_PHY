@@ -34,6 +34,7 @@ from app.models.models import (
     ArchiveDiscussionMessage,
     ArchiveReport,
     ArchiveSubmission,
+    ArchiveWishReport,
     CommentReport,
     Course,
     CourseCategoryConfig,
@@ -1441,6 +1442,40 @@ async def list_trash_items(
                 )
             )
 
+    if normalized_item_type in (None, TrashEntityType.ARCHIVE_WISH_REPORT):
+        reports = (
+            (
+                await db.execute(
+                    select(ArchiveWishReport)
+                    .where(ArchiveWishReport.deleted_at.is_not(None))
+                    .order_by(ArchiveWishReport.deleted_at.desc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for report in reports:
+            items.append(
+                _to_trash_item(
+                    item_type=TrashEntityType.ARCHIVE_WISH_REPORT,
+                    item_id=report.id,
+                    display_name=report.wish_title_snapshot,
+                    deleted_at=report.deleted_at,
+                    deleted_by_id=report.deleted_by_id,
+                    deleted_by_name=_format_deleted_by(
+                        users_by_id, report.deleted_by_id
+                    ),
+                    status=report.status,
+                    reason=report.reason,
+                    created_at=report.created_at,
+                    reporter_name=_format_deleted_by(
+                        users_by_id, report.reporter_user_id
+                    ),
+                    comment_snapshot=report.target_summary_snapshot,
+                    dependencies=[],
+                )
+            )
+
     if normalized_item_type in (None, TrashEntityType.ARCHIVE_REPORT):
         reports = (
             (
@@ -2179,6 +2214,18 @@ async def restore_trash_item(
         await db.commit()
         return {"message": "留言回報已還原"}
 
+    if payload.item_type == TrashEntityType.ARCHIVE_WISH_REPORT:
+        report = await db.get(ArchiveWishReport, payload.item_id)
+        if not report or report.deleted_at is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Wish report not found",
+            )
+        report.deleted_at = None
+        report.deleted_by_id = None
+        await db.commit()
+        return {"message": "許願回報已還原"}
+
     if payload.item_type == TrashEntityType.ARCHIVE_REPORT:
         await acquire_archive_report_uniqueness_mutex_for_report(
             db,
@@ -2601,7 +2648,8 @@ async def bulk_permanently_delete_trash_items(
         TrashEntityType.USER: 6,
         TrashEntityType.SYSTEM_ISSUE_REPORT: 7,
         TrashEntityType.COMMENT_REPORT: 8,
-        TrashEntityType.ARCHIVE_REPORT: 9,
+        TrashEntityType.ARCHIVE_WISH_REPORT: 9,
+        TrashEntityType.ARCHIVE_REPORT: 10,
     }
     sorted_items = sorted(
         items,
@@ -2727,6 +2775,23 @@ async def _permanently_delete_trash_item(
             item_type=item_type,
             item_id=item_id,
             name=COMMENT_REPORT_REASON_LABELS.get(report.reason, report.reason),
+            deleted=1,
+            warnings=warnings,
+        )
+
+    if item_type == TrashEntityType.ARCHIVE_WISH_REPORT:
+        report = await db.get(ArchiveWishReport, item_id)
+        if not report or report.deleted_at is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Wish report not found",
+            )
+
+        await db.delete(report)
+        return _delete_result(
+            item_type=item_type,
+            item_id=item_id,
+            name=report.wish_title_snapshot,
             deleted=1,
             warnings=warnings,
         )

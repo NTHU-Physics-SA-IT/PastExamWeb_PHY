@@ -2801,7 +2801,12 @@
                 breakpoint="1023px"
                 :rowClass="getTrashRowClass"
               >
-                <Column field="deleted_at" style="width: 10.5rem; min-width: 10.5rem">
+                <Column
+                  field="deleted_at"
+                  headerClass="trash-deleted-column"
+                  bodyClass="trash-deleted-column"
+                  style="width: 13%"
+                >
                   <template #header>
                     <button
                       type="button"
@@ -2827,7 +2832,12 @@
                     </div>
                   </template>
                 </Column>
-                <Column field="item_type">
+                <Column
+                  field="item_type"
+                  headerClass="trash-type-column"
+                  bodyClass="trash-type-column"
+                  style="width: 11%"
+                >
                   <template #header>
                     <button
                       type="button"
@@ -2852,7 +2862,7 @@
                   field="display_name"
                   headerClass="trash-name-column"
                   bodyClass="trash-name-column"
-                  style="width: clamp(14rem, 18vw, 18rem); max-width: 18rem"
+                  style="width: 25%"
                 >
                   <template #header>
                     <button
@@ -2920,9 +2930,9 @@
                 </Column>
                 <Column
                   field="status"
-                  headerClass="admin-desktop-status-column"
-                  bodyClass="admin-desktop-status-column"
-                  style="width: 6rem; min-width: 6rem"
+                  headerClass="admin-desktop-status-column trash-status-column"
+                  bodyClass="admin-desktop-status-column trash-status-column"
+                  style="width: 9%"
                 >
                   <template #header>
                     <button
@@ -2970,7 +2980,7 @@
                   :header="$t('依賴與阻擋')"
                   headerClass="trash-dependencies-column"
                   bodyClass="trash-dependencies-column"
-                  style="width: clamp(17rem, 22vw, 23rem); max-width: 23rem"
+                  style="width: 25%"
                 >
                   <template #body="{ data }">
                     <div class="trash-dependencies">
@@ -2994,7 +3004,12 @@
                     </div>
                   </template>
                 </Column>
-                <Column :header="$t('操作')">
+                <Column
+                  :header="$t('操作')"
+                  headerClass="trash-actions-column"
+                  bodyClass="trash-actions-column"
+                  style="width: 17%"
+                >
                   <template #body="{ data }">
                     <div class="admin-card-actions">
                       <Button
@@ -5336,9 +5351,10 @@ const trashFilterOptions = computed(() => [
   { label: t('課程申請'), value: 'course_submission' },
   { label: t('公告'), value: 'notification' },
   { label: t('使用者'), value: 'user' },
-  { label: t('系統問題回報'), value: 'system_issue_report' },
-  { label: t('留言回報'), value: 'comment_report' },
   { label: t('考古題回報'), value: 'archive_report' },
+  { label: t('留言回報'), value: 'comment_report' },
+  { label: t('許願回報'), value: 'archive_wish_report' },
+  { label: t('系統問題回報'), value: 'system_issue_report' },
 ])
 const trashTypeLabels = computed(() =>
   trashFilterOptions.value.reduce((acc, option) => {
@@ -6022,6 +6038,16 @@ const getTrashReportDetails = (item) => {
         value:
           [localizedTrashCourseName(item), item.archive_name].filter(Boolean).join(' · ') || '—',
       },
+      {
+        label: t('回報時間'),
+        value: item.created_at ? formatAdminActorTime(item.created_at) : '—',
+      },
+    ]
+  }
+  if (item?.item_type === 'archive_wish_report') {
+    return [
+      { label: t('回報者'), value: item.reporter_name || '—' },
+      { label: t('許願目標'), value: item.comment_snapshot || '—' },
       {
         label: t('回報時間'),
         value: item.created_at ? formatAdminActorTime(item.created_at) : '—',
@@ -7606,7 +7632,11 @@ const getTrashSemesterValue = (item) => {
 }
 
 const getTrashStatusLabel = (statusValue, itemType = null) => {
-  if (['system_issue_report', 'comment_report', 'archive_report'].includes(itemType)) {
+  if (
+    ['system_issue_report', 'comment_report', 'archive_wish_report', 'archive_report'].includes(
+      itemType
+    )
+  ) {
     return t('已刪除')
   }
   const normalized = normalizeSubmissionStatus(statusValue || 'deleted')
@@ -7621,7 +7651,11 @@ const getTrashStatusLabel = (statusValue, itemType = null) => {
 }
 
 const getTrashStatusSeverity = (statusValue, itemType = null) => {
-  if (['system_issue_report', 'comment_report', 'archive_report'].includes(itemType))
+  if (
+    ['system_issue_report', 'comment_report', 'archive_wish_report', 'archive_report'].includes(
+      itemType
+    )
+  )
     return 'danger'
   const normalized = normalizeSubmissionStatus(statusValue || 'deleted')
   if (normalized === 'approved') return 'success'
@@ -7631,7 +7665,11 @@ const getTrashStatusSeverity = (statusValue, itemType = null) => {
 }
 
 const getTrashStatusClass = (statusValue, itemType = null) => {
-  if (['system_issue_report', 'comment_report', 'archive_report'].includes(itemType)) {
+  if (
+    ['system_issue_report', 'comment_report', 'archive_wish_report', 'archive_report'].includes(
+      itemType
+    )
+  ) {
     return 'review-status-deleted'
   }
   return getSubmissionStatusClass(statusValue)
@@ -11737,12 +11775,15 @@ onBeforeUnmount(() => {
 }
 
 .trash-name-cell {
-  display: inline-flex;
+  display: flex;
   flex-direction: column;
   gap: 0.2rem;
   width: 100%;
   min-width: 0;
   max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .trash-name-title {
@@ -11758,7 +11799,9 @@ onBeforeUnmount(() => {
 
 .trash-name-title__text {
   min-width: 0;
+  max-width: 100%;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .trash-user-name {
@@ -11787,8 +11830,14 @@ onBeforeUnmount(() => {
 }
 
 .trash-name-cell small {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
   color: var(--text-secondary);
   margin-left: 0.15rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .trash-dependencies {
@@ -11800,14 +11849,47 @@ onBeforeUnmount(() => {
   max-width: 100%;
 }
 
-:deep(.trash-table .trash-dependencies-column) {
-  width: clamp(17rem, 22vw, 23rem);
-  max-width: 23rem;
-}
+@media (min-width: 1400px) {
+  :deep(.trash-table .p-datatable-table) {
+    width: 100%;
+    table-layout: fixed;
+  }
 
-:deep(.trash-table .trash-name-column) {
-  width: clamp(14rem, 18vw, 18rem);
-  max-width: 18rem;
+  :deep(.trash-table .trash-deleted-column) {
+    width: 13%;
+  }
+
+  :deep(.trash-table .trash-type-column) {
+    width: 11%;
+  }
+
+  :deep(.trash-table .trash-name-column) {
+    width: 25%;
+    min-width: 0;
+    max-width: none;
+  }
+
+  :deep(.trash-table .trash-status-column) {
+    width: 9%;
+    min-width: 0;
+    max-width: none;
+    text-align: left;
+  }
+
+  :deep(.trash-table .trash-status-column .admin-desktop-status-cell) {
+    justify-content: flex-start;
+  }
+
+  :deep(.trash-table .trash-dependencies-column) {
+    width: 25%;
+    max-width: none;
+  }
+
+  :deep(.trash-table .trash-actions-column) {
+    width: 17%;
+    min-width: 0;
+    max-width: none;
+  }
 }
 
 :deep(.trash-table .trash-dependencies .trash-dependency-chip) {
@@ -14202,7 +14284,7 @@ onBeforeUnmount(() => {
   }
 }
 
-@media (max-width: 1399px) {
+@media (max-width: 1399.98px) {
   :deep(.trash-table) {
     display: none !important;
   }

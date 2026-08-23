@@ -76,7 +76,9 @@ Reviewed manifests currently cover:
 - `f3a7c1e9d5b2`: the reviewed schema before persisted About Us ordering; and
 - `c7e4a9b2d6f1`: the schema before active-pending ArchiveReport uniqueness
   excludes trashed rows; and
-- `c8e4a1f7b2d9`: the current repository head and SQLModel metadata contract.
+- `c8e4a1f7b2d9`: the reviewed schema before Archive Wish report Trash metadata;
+  and
+- `d1f5a9c3e7b2`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,
@@ -245,6 +247,13 @@ satisfy it; otherwise the PostgreSQL transaction aborts unchanged. The sealed
 `archive-report-active-pending-uniqueness` audit reports aggregate duplicate,
 trashed, mixed-scope, restore-conflict, detached-identity, and index-contract
 counts without returning identifiers or report content.
+
+The Archive Wish report Trash migration adds only nullable `deleted_at` and
+nullable `deleted_by_id` with the matching indexes and `ON DELETE SET NULL`
+administrator reference. Existing report rows remain active with both values
+null; no report, snapshot, moderation/review metadata, notification, Wish, or
+heart row is rewritten. Downgrade removes only the two lifecycle columns and
+their indexes/reference.
 
 
 On the first bootstrap, one missing canonical key or any extra custom category

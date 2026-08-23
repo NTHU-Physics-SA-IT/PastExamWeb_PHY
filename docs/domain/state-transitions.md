@@ -362,7 +362,14 @@ dismissed, read, or otherwise final record are excluded from attention counts.
 
 Archive Wish reports use the same one-way moderation vocabulary as comment and
 archive reports: `pending -> upheld|dismissed`. A final Wish report cannot be
-reviewed again. Permanent Wish deletion is administrator-only, is not a Trash
+reviewed again. Administrator deletion of an active Archive Wish report records
+deletion time and actor without changing its moderation or review data. The
+report leaves normal management and attention queries and can then only be
+restored or permanently deleted through administrator Trash. Restore clears the
+deletion provenance and preserves the report unchanged; permanent deletion
+physically removes only the report row. These lifecycle actions are silent.
+
+Permanent Wish deletion is administrator-only, is not a Trash
 transition, cascades hearts, detaches retained reports and Help Upload source
 links through `SET NULL`, and does not delete a matching Archive or submission.
 
@@ -549,6 +556,8 @@ takedown are separate concepts.
   localized wording to grant an action; missing, malformed, or non-boolean
   authority fails closed.
 - Course or Archive trash/restore does not notify submitters.
+- Comment and Archive Wish report trash/restore do not create notifications or
+  change their persisted moderation/review state.
 - Submission trash follows the paired-item rule in
   [Entity relationships](entity-relationships.md).
 - Restore applies the saved previous state and lifecycle reason; it is not an

@@ -19,6 +19,7 @@ from app.db.audit.registry import (
     ARCHIVE_REPORT_UNIQUENESS_REVISION,
     ELIGIBILITY_AUDIT_ID,
     WISH_OPTIONAL_SEMESTER_REVISION,
+    WISH_REPORT_TRASH_REVISION,
     get_audit_adapter,
 )
 from app.db.audit.runner import (
@@ -181,6 +182,7 @@ def test_bilingual_head_audit_is_new_version_and_preserves_lifecycle_classifier(
             WISH_OPTIONAL_SEMESTER_REVISION,
             ABOUT_US_ORDERING_REVISION,
             ARCHIVE_REPORT_UNIQUENESS_REVISION,
+            WISH_REPORT_TRASH_REVISION,
         }
     )
     previous = get_audit_adapter(ELIGIBILITY_AUDIT_ID, 3)
@@ -199,6 +201,7 @@ def test_archive_report_audit_is_revision_bounded_aggregate_only_and_read_only()
             WISH_OPTIONAL_SEMESTER_REVISION,
             ABOUT_US_ORDERING_REVISION,
             ARCHIVE_REPORT_UNIQUENESS_REVISION,
+            WISH_REPORT_TRASH_REVISION,
         }
     )
     assert set(adapter.approved_aggregate_labels) == {
