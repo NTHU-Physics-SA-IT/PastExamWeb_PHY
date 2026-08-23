@@ -11,7 +11,7 @@ Use these sources instead of duplicating their rules here:
 - [Local development environment](docs/development/local-environment.md)
 - [Feature development workflow](docs/development/feature-development-workflow.md)
 - [Validation policy](docs/development/validation.md)
-- [Trusted Activation operator runbook](docs/runbooks/trusted-activation.md)
+- [Protected coordination operator runbook](docs/runbooks/coordination.md)
 
 ## Feature and behavior changes
 
@@ -42,10 +42,10 @@ directions, and coherent updates to affected operating documents or code.
 - Fetch current remote refs before choosing a development base.
 - Normal independent work starts from fresh `main` unless the task or milestone
   explicitly declares coordinated work.
-- `main` publishes repository-wide authority. A `null` coordination branch in
-  canonical project governance means that no repository-wide coordinated
-  milestone is active; it does not prohibit a later separately authorized
-  milestone from activating coordination.
+- `main` publishes ordinary repository-wide authority. A `null` coordination
+  branch means only that main does not point to an active coordination target;
+  it does not prohibit a separately protected integration branch from carrying
+  branch-local coordination authority while main remains null.
 - Coordinated work starts from the optional configured coordination branch,
   when one is active, resolved by
   `python3 scripts/ci/project_governance.py coordination-branch`; its existence
@@ -55,11 +55,11 @@ directions, and coherent updates to affected operating documents or code.
   is its ancestor. If it is stale, refresh it in a separately scoped pull
   request through the allowed protected-branch workflow; do not bypass
   protection or rewrite it.
-- A configured coordination branch is eligible only while the protected-main
-  grant, branch-local claim, independent App, pre-existing ruleset, current-main
-  ancestry, and non-revoked/non-retired identity all validate. A local
-  coordination value is never sufficient authority. Use the
-  [Trusted Activation runbook](docs/runbooks/trusted-activation.md).
+- A configured coordination branch is usable only when its exact ref was
+  created by the protected lifecycle path, the integration ruleset remains
+  active, branch-local governance names the exact branch, and current `main` is
+  its ancestor. Coordination is Full-only; use the
+  [protected coordination runbook](docs/runbooks/coordination.md).
 - Keep task branches developer-owned; a visible branch name does not grant
   project authority or make an external, bot, analytics, backup, or recovery
   branch a valid target.
@@ -152,8 +152,8 @@ Before opening or updating a pull request, refresh the intended base and
 incorporate it safely. Pull requests to `main` use Full CI by default, except
 when the centralized classifier conclusively identifies every changed path as
 docs-only. For the configured coordination branch, the Repository classifier
-applies its existing exact-ref, provenance, governance-path, and fail-closed
-rules.
+requires Full CI. The simplified lifecycle does not use candidate evidence to
+claim Equivalent authority.
 
 For an ordinary independent main-target change, once the final source head,
 base freshness, and pull request content are ready, push that head and promptly

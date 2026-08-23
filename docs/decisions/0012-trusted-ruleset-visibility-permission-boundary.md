@@ -2,7 +2,7 @@
 
 - ID: ADR-0012
 - Title: Trusted Ruleset Visibility Permission Boundary
-- Status: Accepted
+- Status: Superseded
 - Date: 2026-08-23
 - Scope:
   - Paths: `.github/workflows/trusted-governance-gate.yml`,
@@ -18,7 +18,7 @@
   - [Validation policy](../development/validation.md)
 - Related PR / issue: Trusted Activation governance permission corrective
 - Supersedes: [ADR-0011](0011-trusted-activation-for-protected-coordination.md)
-- Superseded by: None
+- Superseded by: [ADR-0013](0013-simplified-protected-coordination.md)
 
 ## Context
 

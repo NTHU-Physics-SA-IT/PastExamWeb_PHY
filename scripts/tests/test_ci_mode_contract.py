@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import subprocess
 import sys
 from copy import deepcopy
@@ -19,7 +20,6 @@ sys.path.insert(0, str(CI_SCRIPTS))
 ci = importlib.import_module("classify_ci_mode")
 gate = importlib.import_module("validate_ci_gate")
 project_governance = importlib.import_module("project_governance")
-trusted_activation = importlib.import_module("trusted_activation")
 
 COORDINATION_BRANCH = "integration/current"
 COORDINATION_REF = f"refs/heads/{COORDINATION_BRANCH}"
@@ -502,57 +502,20 @@ def test_null_governance_grants_no_coordination_or_equivalent_privilege(
     assert push_result.reason == "all changed paths are documentation-only"
 
 
-def test_external_trusted_activation_is_required_before_equivalent(
+def test_simplified_coordination_is_full_only_without_candidate_authority(
     tmp_path: Path,
 ) -> None:
     fixture = _equivalent_repository(tmp_path)
-    active = trusted_activation.AuthorityResolution(
-        state=trusted_activation.AuthorityState.ACTIVE,
-        active=True,
-        branch=COORDINATION_BRANCH,
-        activation_id="123e4567-e89b-42d3-a456-426614174000",
-        reason_code="trusted_activation_valid",
-        reason="test authority",
-    )
-    inactive = trusted_activation.AuthorityResolution(
-        state=trusted_activation.AuthorityState.PROTECTED_INACTIVE,
-        active=False,
-        branch=COORDINATION_BRANCH,
-        activation_id="123e4567-e89b-42d3-a456-426614174000",
-        reason_code="grant_without_claim",
-        reason="test transition",
-    )
-
-    missing = ci.classify_ci_mode(
+    result = ci.classify_ci_mode(
         event=_pr_event(fixture),
         git=fixture["git"],
         api=FakePRAPI(fixture),
         governance=ACTIVE_COORDINATION_GOVERNANCE,
-        require_trusted_activation=True,
-        now=NOW,
-    )
-    transition = ci.classify_ci_mode(
-        event=_pr_event(fixture),
-        git=fixture["git"],
-        api=FakePRAPI(fixture),
-        governance=ACTIVE_COORDINATION_GOVERNANCE,
-        trusted_activation=inactive,
-        require_trusted_activation=True,
-        now=NOW,
-    )
-    authorized = ci.classify_ci_mode(
-        event=_pr_event(fixture),
-        git=fixture["git"],
-        api=FakePRAPI(fixture),
-        governance=ACTIVE_COORDINATION_GOVERNANCE,
-        trusted_activation=active,
-        require_trusted_activation=True,
         now=NOW,
     )
 
-    assert missing.ci_mode == "full"
-    assert transition.ci_mode == "full"
-    assert authorized.ci_mode == "equivalent-merge"
+    assert result.ci_mode == "full"
+    assert result.reason == "simplified protected coordination is Full-only"
 
 
 def test_valid_two_parent_equivalent_merge_is_eligible(tmp_path: Path) -> None:
@@ -566,7 +529,7 @@ def test_valid_two_parent_equivalent_merge_is_eligible(tmp_path: Path) -> None:
     assert result.source_tree == fixture["git"].tree_sha(fixture["source"])
 
 
-def test_live_push_allowlist_accepts_valid_equivalent_fixture(
+def test_live_coordination_push_is_full_only(
     tmp_path: Path,
 ) -> None:
     fixture = _equivalent_repository(tmp_path)
@@ -586,21 +549,22 @@ def test_live_push_allowlist_accepts_valid_equivalent_fixture(
         now=NOW,
     )
 
-    assert result.ci_mode == "equivalent-merge"
+    assert result.ci_mode == "full"
+    assert result.reason == "simplified protected coordination is Full-only"
 
 
-def test_valid_pr_synthetic_candidate_is_eligible(tmp_path: Path) -> None:
+def test_explicit_pr_equivalent_allowlist_cannot_override_full_only(
+    tmp_path: Path,
+) -> None:
     fixture = _equivalent_repository(tmp_path)
 
     result = _classify_pr_equivalent(fixture)
 
-    assert result.ci_mode == "equivalent-merge"
-    assert result.source_sha == fixture["source"]
-    assert result.source_run_id == "9001"
-    assert result.source_tree == fixture["git"].tree_sha(fixture["source"])
+    assert result.ci_mode == "full"
+    assert result.reason == "simplified protected coordination is Full-only"
 
 
-def test_live_pr_allowlist_accepts_valid_candidate(
+def test_live_coordination_pr_is_full_only(
     tmp_path: Path,
 ) -> None:
     fixture = _equivalent_repository(tmp_path)
@@ -618,7 +582,8 @@ def test_live_pr_allowlist_accepts_valid_candidate(
         now=NOW,
     )
 
-    assert result.ci_mode == "equivalent-merge", result.reason
+    assert result.ci_mode == "full"
+    assert result.reason == "simplified protected coordination is Full-only"
 
 
 def test_live_push_governance_merge_falls_back_to_full(
@@ -647,8 +612,7 @@ def test_live_push_governance_merge_falls_back_to_full(
     )
 
     assert result.ci_mode == "full"
-    assert result.reason.startswith("equivalent validation failed closed:")
-    assert "Case-B" in result.reason
+    assert result.reason == "simplified protected coordination is Full-only"
 
 
 def test_pr_governance_change_requires_full_before_allowlist(
@@ -670,7 +634,7 @@ def test_pr_governance_change_requires_full_before_allowlist(
     )
 
     assert result.ci_mode == "full"
-    assert result.reason.startswith("governance path requires full CI:")
+    assert result.reason == "simplified protected coordination is Full-only"
 
 
 @pytest.mark.parametrize(
@@ -1454,15 +1418,6 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
         "EVENT_HEAD_REPOSITORY_ID": (
             "${{ github.event.pull_request.head.repo.id || 0 }}"
         ),
-        "TRUSTED_VERIFIER_APP_ID": (
-            "${{ vars.TRUSTED_GOVERNANCE_APP_ID || 0 }}"
-        ),
-        "TRUSTED_RULESET_ID": (
-            "${{ vars.TRUSTED_INTEGRATION_RULESET_ID || 0 }}"
-        ),
-        "TRUSTED_RULESET_DIGEST": (
-            "${{ vars.TRUSTED_INTEGRATION_RULESET_DIGEST }}"
-        ),
     }
     for option in (
         "--action",
@@ -1474,9 +1429,6 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
         "--head-sha",
         "--head-repository",
         "--head-repository-id",
-        "--trusted-verifier-app-id",
-        "--trusted-ruleset-id",
-        "--trusted-ruleset-digest",
     ):
         assert option in docs_revalidation["run"]
     assert "CI Gate" not in pr_workflow
@@ -1484,17 +1436,9 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
     assert set(pr_parsed["jobs"]) == {"check-branch"}
     assert pr_parsed["jobs"]["check-branch"]["permissions"] == {"contents": "read"}
     steps = pr_parsed["jobs"]["check-branch"]["steps"]
-    main_checkout = next(
-        step
-        for step in steps
-        if step["name"] == "Checkout current protected main authority"
+    assert all(
+        step["name"] != "Checkout current protected main authority" for step in steps
     )
-    assert main_checkout["with"] == {
-        "fetch-depth": "1",
-        "path": "trusted-main",
-        "persist-credentials": "false",
-        "ref": "${{ github.event.repository.default_branch }}",
-    }
     checkout = next(
         step for step in steps if step["name"] == "Checkout immutable pull request base"
     )
@@ -1504,11 +1448,20 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
         "persist-credentials": "false",
         "ref": "${{ github.event.pull_request.base.sha }}",
     }
+    head_checkout = next(
+        step for step in steps if step["name"] == "Checkout immutable pull request head"
+    )
+    assert head_checkout["with"] == {
+        "fetch-depth": "1",
+        "path": "proposed-head",
+        "persist-credentials": "false",
+        "ref": "${{ github.event.pull_request.head.sha }}",
+    }
     assert "scripts/ci/project_governance.py" in pr_workflow
-    assert "scripts/ci/trusted_governance_gate.py" in pr_workflow
-    assert "TRUSTED_GOVERNANCE_APP_ID" in pr_workflow
-    assert "TRUSTED_INTEGRATION_RULESET_ID" in pr_workflow
-    assert "TRUSTED_INTEGRATION_RULESET_DIGEST" in pr_workflow
+    assert "scripts/ci/trusted_governance_gate.py" not in pr_workflow
+    assert "TRUSTED_GOVERNANCE_APP_ID" not in pr_workflow
+    assert "TRUSTED_INTEGRATION_RULESET_ID" not in pr_workflow
+    assert "TRUSTED_INTEGRATION_RULESET_DIGEST" not in pr_workflow
     assert "gh api --paginate" not in pr_workflow
     assert "protected_coordination_branches" not in pr_workflow
     assert COORDINATION_BRANCH not in pr_workflow
@@ -1542,6 +1495,7 @@ def test_check_branch_accepts_only_current_repository_bases(
             "GH_TOKEN": "test-only",
             "REPOSITORY": "NTHU-Physics-SA-IT/PastExamWeb_PHY",
             "TRUSTED_ROOT": str(REPOSITORY_ROOT),
+            "PROPOSED_ROOT": str(REPOSITORY_ROOT),
         },
         text=True,
         capture_output=True,
@@ -1550,6 +1504,63 @@ def test_check_branch_accepts_only_current_repository_bases(
     )
 
     assert process.returncode == expected_returncode
+
+
+def test_check_branch_accepts_exact_branch_local_coordination_base(
+    tmp_path: Path,
+) -> None:
+    parsed = yaml.load(PR_WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    run = next(
+        step["run"]
+        for step in parsed["jobs"]["check-branch"]["steps"]
+        if step["name"] == "Require an approved pull request base"
+    )
+    config = tmp_path / ".github" / "project-governance.json"
+    resolver = tmp_path / "scripts" / "ci" / "project_governance.py"
+    config.parent.mkdir(parents=True)
+    resolver.parent.mkdir(parents=True)
+    config.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "default_development_base": "main",
+                "coordination_branch": COORDINATION_BRANCH,
+            }
+        ),
+        encoding="utf-8",
+    )
+    resolver.write_text(
+        (CI_SCRIPTS / "project_governance.py").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    exact = subprocess.run(
+        ["bash", "-c", run],
+        env={
+            "BASE_BRANCH": COORDINATION_BRANCH,
+            "TRUSTED_ROOT": str(tmp_path),
+            "PROPOSED_ROOT": str(tmp_path),
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+        cwd=REPOSITORY_ROOT,
+    )
+    near_match = subprocess.run(
+        ["bash", "-c", run],
+        env={
+            "BASE_BRANCH": f"{COORDINATION_BRANCH}-near-match",
+            "TRUSTED_ROOT": str(tmp_path),
+            "PROPOSED_ROOT": str(tmp_path),
+        },
+        text=True,
+        capture_output=True,
+        check=False,
+        cwd=REPOSITORY_ROOT,
+    )
+
+    assert exact.returncode == 0
+    assert near_match.returncode == 1
 
 
 def test_check_branch_bootstrap_accepts_main_and_rejects_incomplete_authority(
@@ -1566,6 +1577,7 @@ def test_check_branch_bootstrap_accepts_main_and_rejects_incomplete_authority(
         "GH_TOKEN": "test-only",
         "REPOSITORY": "NTHU-Physics-SA-IT/PastExamWeb_PHY",
         "TRUSTED_ROOT": str(tmp_path),
+        "PROPOSED_ROOT": str(tmp_path),
     }
 
     bootstrap = subprocess.run(

@@ -110,7 +110,10 @@ def test_privileged_workflows_are_dormant_and_main_sourced() -> None:
     assert verifier["on"]["workflow_run"]["workflows"] == ["CI/CD Pipeline"]
     assert "pull_request_target" not in verifier["on"]
     job = verifier["jobs"]["trusted_governance_gate"]
-    assert job["if"] == "${{ vars.TRUSTED_GOVERNANCE_ENABLED == 'true' }}"
+    assert " ".join(job["if"].split()) == (
+        "${{ vars.TRUSTED_GOVERNANCE_ENABLED == 'true' && "
+        "vars.TRUSTED_GOVERNANCE_GATE_ENABLED != 'false' }}"
+    )
     assert job["environment"] == "trusted-governance-verifier"
     checkout = next(
         step for step in job["steps"] if step["name"] == "Checkout current protected main only"
@@ -160,7 +163,10 @@ def test_privileged_workflows_are_dormant_and_main_sourced() -> None:
 
     assert set(issuance["on"]) == {"workflow_dispatch"}
     issuance_job = issuance["jobs"]["trusted_ref_lifecycle"]
-    assert issuance_job["if"] == "${{ vars.TRUSTED_GOVERNANCE_ENABLED == 'true' }}"
+    assert " ".join(issuance_job["if"].split()) == (
+        "${{ vars.TRUSTED_GOVERNANCE_ENABLED == 'true' && "
+        "vars.LEGACY_TRUSTED_ACTIVATION_ENABLED != 'false' }}"
+    )
     assert issuance_job["environment"] == "trusted-coordination-issuance"
     assert "permission-contents: write" in issuance_text
     assert issuance_text.count("actions/create-github-app-token@") == 2

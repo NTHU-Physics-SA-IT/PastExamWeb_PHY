@@ -273,6 +273,7 @@ evidence.
 - [Domain contracts](docs/domain/README.md)
 - [Migration safety](docs/migration-safety.md)
 - [Production deployment](docs/production-deployment.md)
+- [Protected coordination](docs/runbooks/coordination.md)
 - [Repository workflow Skill](.agents/skills/pastexam-web/SKILL.md)
 
 The repository-local `.agents/skills/pastexam-web/SKILL.md` is the **Active**

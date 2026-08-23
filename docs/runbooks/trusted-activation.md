@@ -1,6 +1,8 @@
 # Trusted Activation operator runbook
 
-Status: Active
+Status: Historical — superseded by ADR-0013 and the
+[protected coordination runbook](coordination.md). Do not dispatch the legacy
+grant/issuance workflow or reuse any historical identity.
 
 Source of truth for: configuring and operating the temporary protected
 coordination trust root defined by ADR-0012

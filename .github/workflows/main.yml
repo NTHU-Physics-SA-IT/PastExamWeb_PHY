@@ -81,9 +81,6 @@ jobs:
             ${{ github.event.pull_request.head.repo.id || 0 }}
           COMPARISON_REF_READY: ${{ steps.fetch_main.outputs.ready }}
           API_URL: ${{ github.api_url }}
-          TRUSTED_VERIFIER_APP_ID: ${{ vars.TRUSTED_GOVERNANCE_APP_ID || 0 }}
-          TRUSTED_RULESET_ID: ${{ vars.TRUSTED_INTEGRATION_RULESET_ID || 0 }}
-          TRUSTED_RULESET_DIGEST: ${{ vars.TRUSTED_INTEGRATION_RULESET_DIGEST }}
         run: |
           python3 scripts/ci/classify_ci_mode.py \
             --event-name "$EVENT_NAME" \
@@ -104,9 +101,6 @@ jobs:
             --head-repository-id "$EVENT_HEAD_REPOSITORY_ID" \
             --comparison-ref-ready "$COMPARISON_REF_READY" \
             --api-url "$API_URL" \
-            --trusted-verifier-app-id "$TRUSTED_VERIFIER_APP_ID" \
-            --trusted-ruleset-id "$TRUSTED_RULESET_ID" \
-            --trusted-ruleset-digest "$TRUSTED_RULESET_DIGEST" \
             --github-output "$GITHUB_OUTPUT"
 
   lint:
@@ -180,9 +174,6 @@ jobs:
           EVENT_HEAD_REPOSITORY_ID: >-
             ${{ github.event.pull_request.head.repo.id || 0 }}
           API_URL: ${{ github.api_url }}
-          TRUSTED_VERIFIER_APP_ID: ${{ vars.TRUSTED_GOVERNANCE_APP_ID || 0 }}
-          TRUSTED_RULESET_ID: ${{ vars.TRUSTED_INTEGRATION_RULESET_ID || 0 }}
-          TRUSTED_RULESET_DIGEST: ${{ vars.TRUSTED_INTEGRATION_RULESET_DIGEST }}
         run: |
           python3 scripts/ci/classify_ci_mode.py \
             --event-name "$EVENT_NAME" \
@@ -202,9 +193,6 @@ jobs:
             --head-repository "$EVENT_HEAD_REPOSITORY" \
             --head-repository-id "$EVENT_HEAD_REPOSITORY_ID" \
             --api-url "$API_URL" \
-            --trusted-verifier-app-id "$TRUSTED_VERIFIER_APP_ID" \
-            --trusted-ruleset-id "$TRUSTED_RULESET_ID" \
-            --trusted-ruleset-digest "$TRUSTED_RULESET_DIGEST" \
             --expect-mode equivalent-merge
 
   docs_gate:
@@ -254,9 +242,6 @@ jobs:
             ${{ github.event.pull_request.head.repo.full_name }}
           EVENT_HEAD_REPOSITORY_ID: >-
             ${{ github.event.pull_request.head.repo.id || 0 }}
-          TRUSTED_VERIFIER_APP_ID: ${{ vars.TRUSTED_GOVERNANCE_APP_ID || 0 }}
-          TRUSTED_RULESET_ID: ${{ vars.TRUSTED_INTEGRATION_RULESET_ID || 0 }}
-          TRUSTED_RULESET_DIGEST: ${{ vars.TRUSTED_INTEGRATION_RULESET_DIGEST }}
         run: |
           python3 scripts/ci/classify_ci_mode.py \
             --event-name "$EVENT_NAME" \
@@ -276,9 +261,6 @@ jobs:
             --head-repository "$EVENT_HEAD_REPOSITORY" \
             --head-repository-id "$EVENT_HEAD_REPOSITORY_ID" \
             --api-url '${{ github.api_url }}' \
-            --trusted-verifier-app-id "$TRUSTED_VERIFIER_APP_ID" \
-            --trusted-ruleset-id "$TRUSTED_RULESET_ID" \
-            --trusted-ruleset-digest "$TRUSTED_RULESET_DIGEST" \
             --expect-mode docs-only
 
   full_attestation:

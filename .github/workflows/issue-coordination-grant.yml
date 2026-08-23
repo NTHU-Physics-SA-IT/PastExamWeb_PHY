@@ -1,7 +1,7 @@
-name: Trusted Coordination Ref Lifecycle
+name: Legacy Trusted Coordination Ref Lifecycle
 
 run-name: >-
-  trusted-coordination ${{ inputs.operation }}
+  legacy-trusted-coordination ${{ inputs.operation }}
   ${{ inputs.activation_id }} at ${{ inputs.expected_main_sha }}
 
 on:
@@ -30,7 +30,9 @@ permissions:
 jobs:
   trusted_ref_lifecycle:
     name: Operate ref through independent App
-    if: ${{ vars.TRUSTED_GOVERNANCE_ENABLED == 'true' }}
+    if: >-
+      ${{ vars.TRUSTED_GOVERNANCE_ENABLED == 'true' &&
+          vars.LEGACY_TRUSTED_ACTIVATION_ENABLED != 'false' }}
     runs-on: ubuntu-latest
     environment: trusted-coordination-issuance
     permissions:
