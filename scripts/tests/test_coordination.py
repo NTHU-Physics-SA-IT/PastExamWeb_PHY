@@ -512,3 +512,40 @@ def test_ref_client_has_no_generic_request_and_rejects_non_integration_writes() 
             client.update_ref(branch=branch, sha=MAIN_SHA)
         with pytest.raises(coordination.CoordinationError, match="generated integration"):
             client.delete_ref(branch)
+
+
+@pytest.mark.parametrize(
+    ("encoded", "expected"),
+    (("aGVs\nbG8=\n", b"hello"), ("aGVs bG8=", None)),
+)
+def test_contents_normalizes_only_github_line_wrapping(
+    monkeypatch: pytest.MonkeyPatch,
+    encoded: str,
+    expected: bytes | None,
+) -> None:
+    class Response:
+        def __enter__(self) -> Self:
+            return self
+
+        def __exit__(self, *arguments: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps({"encoding": "base64", "content": encoded}).encode()
+
+    monkeypatch.setattr(
+        coordination,
+        "urlopen",
+        lambda request, timeout: Response(),
+    )
+    client = coordination.RefLifecycleClient(
+        api_url="https://api.github.test",
+        repository=coordination.EXPECTED_REPOSITORY,
+        token="contents-write-test-token",
+    )
+
+    if expected is None:
+        with pytest.raises(coordination.CoordinationError, match="content is malformed"):
+            client.contents(coordination.PROJECT_GOVERNANCE_PATH, MAIN_SHA)
+    else:
+        assert client.contents(coordination.PROJECT_GOVERNANCE_PATH, MAIN_SHA) == expected
