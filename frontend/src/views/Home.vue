@@ -89,20 +89,25 @@
         </div>
       </section>
 
-      <section class="dashboard-strip">
+      <section
+        class="dashboard-strip"
+        :class="{ 'metrics-hover-ready': metricsHoverInteractionReady }"
+        :data-metrics-animation-complete="String(metricsAnimationComplete)"
+      >
         <article
           v-for="(stat, index) in statistics"
           :key="stat.key"
           class="stat-card"
           :class="{ 'animate-fade-in': statsLoaded }"
           :style="{ animationDelay: `${index * 0.08}s` }"
+          @pointerenter="enableMetricsHover"
         >
           <div class="stat-icon">
             <i :class="stat.icon"></i>
           </div>
           <div>
             <p>{{ stat.label }}</p>
-            <strong>{{ animatedValues[stat.key] }}</strong>
+            <StatisticAnimatedValue :source="animatedValueSource" :metric-key="stat.key" />
           </div>
         </article>
         <div id="desktop-catalog-action" class="desktop-catalog-target"></div>
@@ -116,7 +121,17 @@ defineOptions({
   name: 'HomeView',
 })
 
-import { ref, onBeforeUnmount, onMounted, computed, nextTick } from 'vue'
+import {
+  ref,
+  shallowRef,
+  triggerRef,
+  onBeforeUnmount,
+  onMounted,
+  computed,
+  nextTick,
+  defineComponent,
+  h,
+} from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useTheme } from '../utils/useTheme'
@@ -150,7 +165,7 @@ const statisticsData = ref({
   activeToday: 0,
 })
 
-const animatedValues = ref({
+const animatedValues = shallowRef({
   totalUsers: 0,
   totalDownloads: 0,
   onlineUsers: 0,
@@ -158,8 +173,21 @@ const animatedValues = ref({
   totalCourses: 0,
   activeToday: 0,
 })
+const animatedValueSource = Object.freeze({ values: animatedValues })
+const StatisticAnimatedValue = defineComponent({
+  name: 'StatisticAnimatedValue',
+  props: {
+    source: { type: Object, required: true },
+    metricKey: { type: String, required: true },
+  },
+  setup(props) {
+    return () => h('strong', props.source.values.value[props.metricKey])
+  },
+})
 
 const statsLoaded = ref(false)
+const metricsAnimationComplete = ref(false)
+const metricsHoverInteractionReady = ref(false)
 const COUNTER_ANIMATION_DURATION_MS = 1800
 const STATISTIC_KEYS = Object.freeze([
   'totalUsers',
@@ -169,6 +197,9 @@ const STATISTIC_KEYS = Object.freeze([
   'totalCourses',
   'activeToday',
 ])
+const COUNTER_VALUE_UNSET = Symbol('counter-value-unset')
+const lastAnimatedDisplayValues = Array(STATISTIC_KEYS.length).fill(COUNTER_VALUE_UNSET)
+const numberFormatter = computed(() => new Intl.NumberFormat(locale.value))
 let counterAnimationFrameId = 0
 
 const catalogActionLabel = computed(() => t('瀏覽公開課程目錄'))
@@ -493,21 +524,31 @@ async function fetchStatistics() {
       totalCourses: '--',
       activeToday: '--',
     }
+    completeMetricsAnimation()
     statsLoaded.value = true
   }
 }
 
 function animateCounters() {
   cancelCounterAnimation()
+  const targets = STATISTIC_KEYS.map((key) => {
+    const rawValue = statisticsData.value[key]
+    return { rawValue, numericValue: Number(rawValue) }
+  })
+  lastAnimatedDisplayValues.fill(COUNTER_VALUE_UNSET)
 
   if (prefersReducedMotion()) {
-    updateAnimatedValues(1)
+    updateAnimatedValues(1, targets)
+    completeMetricsAnimation()
     return
   }
 
-  updateAnimatedValues(0)
-  const hasAnimatedTarget = STATISTIC_KEYS.some((key) => Number(statisticsData.value[key]) > 0)
-  if (!hasAnimatedTarget) return
+  updateAnimatedValues(0, targets)
+  const hasAnimatedTarget = targets.some(({ numericValue }) => numericValue > 0)
+  if (!hasAnimatedTarget) {
+    completeMetricsAnimation()
+    return
+  }
 
   let startedAt = null
   const animateFrame = (timestamp) => {
@@ -515,35 +556,47 @@ function animateCounters() {
 
     const elapsed = Math.max(0, timestamp - startedAt)
     const progress = Math.min(elapsed / COUNTER_ANIMATION_DURATION_MS, 1)
-    updateAnimatedValues(progress)
+    updateAnimatedValues(progress, targets)
 
     if (progress < 1) {
       counterAnimationFrameId = window.requestAnimationFrame(animateFrame)
     } else {
       counterAnimationFrameId = 0
+      completeMetricsAnimation()
     }
   }
 
   counterAnimationFrameId = window.requestAnimationFrame(animateFrame)
 }
 
-function updateAnimatedValues(progress) {
+function updateAnimatedValues(progress, targets) {
   const easedProgress = 1 - Math.pow(1 - progress, 3)
-  const nextValues = {}
+  let valuesChanged = false
 
-  STATISTIC_KEYS.forEach((key) => {
-    const target = Number(statisticsData.value[key])
-    if (!Number.isFinite(target)) {
-      nextValues[key] = formatNumber(statisticsData.value[key])
-      return
-    }
+  STATISTIC_KEYS.forEach((key, index) => {
+    const { rawValue, numericValue } = targets[index]
+    const displayValue = Number.isFinite(numericValue)
+      ? progress >= 1
+        ? numericValue
+        : Math.floor(numericValue * easedProgress)
+      : rawValue
 
-    const displayValue = progress >= 1 ? target : Math.floor(target * easedProgress)
-    nextValues[key] = formatNumber(displayValue)
+    if (Object.is(lastAnimatedDisplayValues[index], displayValue)) return
+
+    lastAnimatedDisplayValues[index] = displayValue
+    animatedValues.value[key] = formatNumber(displayValue)
+    valuesChanged = true
   })
 
-  const valuesChanged = STATISTIC_KEYS.some((key) => animatedValues.value[key] !== nextValues[key])
-  if (valuesChanged) animatedValues.value = nextValues
+  if (valuesChanged) triggerRef(animatedValues)
+}
+
+function completeMetricsAnimation() {
+  if (!metricsAnimationComplete.value) metricsAnimationComplete.value = true
+}
+
+function enableMetricsHover() {
+  if (metricsAnimationComplete.value) metricsHoverInteractionReady.value = true
 }
 
 function prefersReducedMotion() {
@@ -564,7 +617,7 @@ function formatNumber(num) {
   if (Number.isNaN(num) || num === null || num === undefined) {
     return '--'
   }
-  return Number(num).toLocaleString(locale.value)
+  return numberFormatter.value.format(Number(num))
 }
 
 onBeforeUnmount(() => {
@@ -1738,6 +1791,7 @@ h1 {
 }
 
 .stat-card {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.8rem;
@@ -1750,8 +1804,39 @@ h1 {
     linear-gradient(90deg, rgba(202, 179, 111, 0.08), transparent 44%), rgba(7, 18, 17, 0.62);
   box-shadow: none;
   contain: layout style;
+  isolation: isolate;
   opacity: 0;
+  overflow: hidden;
   transform: translate3d(0, 12px, 0);
+}
+
+.stat-card::before {
+  position: absolute;
+  z-index: 2;
+  top: -35%;
+  left: -42%;
+  width: 30%;
+  height: 170%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.12) 28%,
+    rgba(255, 255, 255, 0.42) 50%,
+    rgba(255, 255, 255, 0.12) 72%,
+    transparent 100%
+  );
+  content: '';
+  pointer-events: none;
+  transform: translateX(0) skewX(-18deg);
+  transition: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .metrics-hover-ready .stat-card:hover::before {
+    transform: translateX(510%) skewX(-18deg);
+    transition: transform 1s cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform;
+  }
 }
 
 .physics-home:not(.physics-home-dark) .stat-card {
@@ -1977,6 +2062,10 @@ h1 {
   }
 
   .hero-actions :deep(.p-button)::before {
+    display: none;
+  }
+
+  .stat-card::before {
     display: none;
   }
 
@@ -2231,10 +2320,6 @@ h1 {
     text-indent: 0.34em;
     margin-inline: auto;
     margin-top: 0.45rem;
-  }
-
-  .subtitle {
-    display: none;
   }
 
   .hero-actions {

@@ -145,7 +145,7 @@ test.describe('Home page', () => {
     expect(actionStyles.every(({ borderRadius }) => borderRadius === actionStyles[0].borderRadius)).toBe(
       true
     )
-    await expect(page.getByText('書卷沒有，考古這有', { exact: true })).toBeHidden()
+    await expect(page.getByText('書卷沒有，考古這有', { exact: true })).toBeVisible()
 
     const titleLines = await page.locator('.title-line').evaluateAll((lines) =>
       lines.map((line) => {
