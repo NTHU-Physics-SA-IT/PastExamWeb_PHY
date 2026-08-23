@@ -135,7 +135,7 @@ describe('HomeView', () => {
     expect(homeSource).toMatch(
       /@media \(max-width: 560px\)[\s\S]*?\.title-line\s*\{[^}]*display:\s*block;/
     )
-    expect(homeSource).toMatch(
+    expect(homeSource).not.toMatch(
       /@media \(max-width: 560px\)[\s\S]*?\.subtitle\s*\{[^}]*display:\s*none;/
     )
     expect(homeSource).toMatch(
@@ -355,18 +355,23 @@ describe('HomeView', () => {
     wrapper.unmount()
   })
 
-  it('updates on consecutive animation frames while skipping unchanged display values', async () => {
+  it('updates all metrics on one preallocated reactive timeline', async () => {
     const wrapper = mount(HomeView)
     await flushPromises()
 
-    const initialValues = wrapper.vm.animatedValues
+    const animatedState = wrapper.vm.animatedValues
+    const initialValues = { ...animatedState }
     runAnimationFrame(100)
-    const firstFrameValues = wrapper.vm.animatedValues
+    const firstFrameValues = { ...wrapper.vm.animatedValues }
     runAnimationFrame(110)
     await wrapper.vm.$nextTick()
 
-    expect(firstFrameValues).toBe(initialValues)
-    expect(wrapper.vm.animatedValues).not.toBe(firstFrameValues)
+    expect(firstFrameValues).toEqual(initialValues)
+    expect(wrapper.vm.animatedValues).toBe(animatedState)
+    expect(Object.keys(statisticsPayload).every((key) => key in wrapper.vm.animatedValues)).toBe(
+      true
+    )
+    expect(requestAnimationFrameMock).toHaveBeenCalledTimes(3)
 
     runAnimationFrame(1900)
     await wrapper.vm.$nextTick()
@@ -376,10 +381,116 @@ describe('HomeView', () => {
     wrapper.unmount()
   })
 
+  it('keeps counter frame updates out of the Home component render effect', async () => {
+    let homeUpdateCount = 0
+    const wrapper = mount(HomeView, {
+      global: {
+        mixins: [
+          {
+            updated() {
+              if (this.$options.name === 'HomeView') homeUpdateCount += 1
+            },
+          },
+        ],
+      },
+    })
+    await flushPromises()
+    homeUpdateCount = 0
+
+    runAnimationFrame(100)
+    runAnimationFrame(400)
+    await wrapper.vm.$nextTick()
+
+    expect(homeUpdateCount).toBe(0)
+    expect(wrapper.vm.animatedValues.totalArchives).not.toBe('0')
+
+    runAnimationFrame(1900)
+    await wrapper.vm.$nextTick()
+    expect(homeUpdateCount).toBe(1)
+
+    wrapper.unmount()
+  })
+
+  it('enables metrics sheen only after completion and a fresh pointer entry', async () => {
+    const wrapper = mount(HomeView)
+    await flushPromises()
+
+    const dashboard = wrapper.get('.dashboard-strip')
+    const firstCard = wrapper.get('.stat-card')
+    expect(dashboard.attributes('data-metrics-animation-complete')).toBe('false')
+    expect(dashboard.classes()).not.toContain('metrics-hover-ready')
+
+    await firstCard.trigger('pointerenter')
+    expect(dashboard.classes()).not.toContain('metrics-hover-ready')
+
+    runAnimationFrame(100)
+    runAnimationFrame(1900)
+    await wrapper.vm.$nextTick()
+    expect(dashboard.attributes('data-metrics-animation-complete')).toBe('true')
+    expect(dashboard.classes()).not.toContain('metrics-hover-ready')
+
+    await firstCard.trigger('pointerleave')
+    await firstCard.trigger('pointerenter')
+    expect(dashboard.classes()).toContain('metrics-hover-ready')
+
+    wrapper.unmount()
+  })
+
+  it('completes metrics hover readiness immediately for reduced motion', async () => {
+    prefersReducedMotion = true
+    const wrapper = mount(HomeView)
+    await flushPromises()
+
+    const dashboard = wrapper.get('.dashboard-strip')
+    expect(dashboard.attributes('data-metrics-animation-complete')).toBe('true')
+    await wrapper.get('.stat-card').trigger('pointerenter')
+    expect(dashboard.classes()).toContain('metrics-hover-ready')
+
+    wrapper.unmount()
+  })
+
+  it('completes metrics hover readiness without RAF when all targets are zero', async () => {
+    statisticsServiceMock.getSystemStatistics.mockResolvedValueOnce({
+      data: {
+        data: Object.fromEntries(Object.keys(statisticsPayload).map((key) => [key, 0])),
+      },
+    })
+    const wrapper = mount(HomeView)
+    await flushPromises()
+
+    const dashboard = wrapper.get('.dashboard-strip')
+    expect(requestAnimationFrameMock).not.toHaveBeenCalled()
+    expect(dashboard.attributes('data-metrics-animation-complete')).toBe('true')
+    await wrapper.get('.stat-card').trigger('pointerenter')
+    expect(dashboard.classes()).toContain('metrics-hover-ready')
+
+    wrapper.unmount()
+  })
+
+  it('uses the login sheen motion only for ready cards on fine hover pointers', () => {
+    expect(homeSource).toMatch(
+      /@media \(hover: hover\) and \(pointer: fine\)[\s\S]*?\.metrics-hover-ready \.stat-card:hover::before\s*\{[\s\S]*?translateX\(510%\) skewX\(-18deg\);[\s\S]*?transition:\s*transform 1s cubic-bezier\(0\.22, 1, 0\.36, 1\);/
+    )
+    expect(homeSource).toMatch(
+      /\.stat-card::before\s*\{[\s\S]*?rgba\(255, 255, 255, 0\.42\) 50%,[\s\S]*?pointer-events:\s*none;/
+    )
+    expect(homeSource).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.stat-card::before\s*\{[^}]*display:\s*none;/
+    )
+  })
+
   it('keeps the animated statistics cards compositor-friendly', () => {
     const statCardRule = homeSource.match(/\.stat-card\s*\{([^}]*)\}/)?.[1] ?? ''
+    const updateFunction =
+      homeSource.match(
+        /function updateAnimatedValues[\s\S]*?\n}\n\nfunction prefersReducedMotion/
+      )?.[0] ?? ''
 
     expect(homeSource).not.toContain('COUNTER_RENDER_INTERVAL_MS')
+    expect(homeSource).toContain('const animatedValues = shallowRef({')
+    expect(homeSource).toContain('const numberFormatter = computed(')
+    expect(updateFunction).not.toContain('const nextValues = {}')
+    expect(updateFunction.match(/triggerRef\(animatedValues\)/g)).toHaveLength(1)
     expect(statCardRule).toContain('contain: layout style')
     expect(statCardRule).toContain('transform: translate3d(0, 12px, 0)')
     expect(statCardRule).not.toContain('backdrop-filter')

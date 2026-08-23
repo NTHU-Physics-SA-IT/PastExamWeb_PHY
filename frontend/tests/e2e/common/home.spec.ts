@@ -145,7 +145,7 @@ test.describe('Home page', () => {
     expect(actionStyles.every(({ borderRadius }) => borderRadius === actionStyles[0].borderRadius)).toBe(
       true
     )
-    await expect(page.getByText('書卷沒有，考古這有', { exact: true })).toBeHidden()
+    await expect(page.getByText('書卷沒有，考古這有', { exact: true })).toBeVisible()
 
     const titleLines = await page.locator('.title-line').evaluateAll((lines) =>
       lines.map((line) => {
@@ -405,7 +405,18 @@ test.describe('Home page', () => {
     expect(catalogBeforeHover.labelRevealWidth).toBeCloseTo(0, 3)
     expect(catalogBeforeHover.labelUnderlineWidth).toBeCloseTo(0, 3)
     await catalogAction.hover()
-    await page.waitForTimeout(350)
+    await expect
+      .poll(
+        async () => {
+          const state = await readButtonState(catalogAction)
+          return Math.max(
+            Math.abs(state.labelRevealWidth - state.labelWidth),
+            Math.abs(state.labelUnderlineWidth - state.labelWidth)
+          )
+        },
+        { timeout: 1500 }
+      )
+      .toBeCloseTo(0, 1)
     const catalogAfterHover = await readButtonState(catalogAction)
     expect(catalogAfterHover.sheenDisplay).toBe('none')
     expect(catalogAfterHover.backgroundColor).toBe(catalogBeforeHover.backgroundColor)
