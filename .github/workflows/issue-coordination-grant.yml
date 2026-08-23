@@ -49,12 +49,20 @@ jobs:
         with:
           client-id: ${{ vars.TRUSTED_GOVERNANCE_APP_CLIENT_ID }}
           private-key: ${{ secrets.TRUSTED_GOVERNANCE_APP_PRIVATE_KEY }}
-          permission-administration: read
           permission-contents: write
+
+      - name: Create isolated ruleset-auditor App token
+        id: ruleset-auditor-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          client-id: ${{ vars.TRUSTED_GOVERNANCE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TRUSTED_GOVERNANCE_APP_PRIVATE_KEY }}
+          permission-administration: write
 
       - name: Validate immutable authority and operate exact ref
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_RULESET_AUDITOR_TOKEN: ${{ steps.ruleset-auditor-token.outputs.token }}
           OPERATION: ${{ inputs.operation }}
           ACTIVATION_ID: ${{ inputs.activation_id }}
           EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}

@@ -2,7 +2,7 @@
 
 - ID: ADR-0011
 - Title: Trusted Activation for Protected Coordination
-- Status: Accepted
+- Status: Superseded
 - Date: 2026-08-23
 - Scope:
   - Paths: .github/trusted-activation/, .github/workflows/,
@@ -22,7 +22,7 @@
   - [ADR-0010](0010-retain-full-fallback-for-governance-sensitive-ordinary-product-postmerge.md)
 - Related PR / issue: Trusted Activation governance closure
 - Supersedes: None
-- Superseded by: None
+- Superseded by: [ADR-0012](0012-trusted-ruleset-visibility-permission-boundary.md)
 
 ## Context
 

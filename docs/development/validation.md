@@ -121,7 +121,7 @@ blocked. Equivalent eligibility additionally requires the protected-main
 grant, exact claim, live independent App/ruleset binding, current-main
 ancestry, and no revocation or retirement. A Green Trusted Governance Gate may
 validate a transition while explicitly reporting inactive authority. See
-[ADR-0011](../decisions/0011-trusted-activation-for-protected-coordination.md)
+[ADR-0012](../decisions/0012-trusted-ruleset-visibility-permission-boundary.md)
 and the [operator runbook](../runbooks/trusted-activation.md).
 
 The stable `integration/**` workflow family only starts workflow evaluation. It
