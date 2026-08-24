@@ -15,29 +15,56 @@
     </header>
     <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
     <ProgressSpinner v-if="loading" class="wish-spinner" />
-    <div v-else class="wish-cloud-stage">
-      <div
-        ref="cloudRef"
-        class="wish-cloud"
-        role="list"
-        :aria-label="$t('考古許願池')"
-        :style="cloudStyle"
-      >
-        <button
+    <div
+      v-else
+      ref="viewportRef"
+      class="wish-bubble-viewport"
+      :class="{ 'is-panning': panning }"
+      :aria-label="$t('考古許願池')"
+      @pointerdown="handlePointerDown"
+      @pointermove="handlePointerMove"
+      @pointerup="handlePointerEnd"
+      @pointercancel="handlePointerCancel"
+      @click.capture="handleViewportClick"
+      @dragstart.prevent
+    >
+      <div ref="worldRef" class="wish-bubble-world" role="list">
+        <article
           v-for="wish in wishes"
           :key="wish.id"
-          :ref="(element) => setWordRef(wish.id, element)"
-          type="button"
-          role="listitem"
-          class="wish-word"
+          :ref="(element) => setBubbleRef(wish.id, element)"
+          class="wish-bubble"
           :class="{ fulfilled: wish.fulfilled }"
-          :style="wordStyle(wish)"
-          @click="selected = wish"
+          :style="bubbleStyle(wish)"
+          role="listitem"
+          :data-wish-id="wish.id"
         >
-          <span class="wish-word__title">{{ wish.title }}</span>
-          <small>♥ {{ wish.heart_count }}</small>
-          <span v-if="wish.fulfilled" class="fulfilled-label">{{ $t('已實現') }}</span>
-        </button>
+          <button
+            type="button"
+            class="wish-bubble__open"
+            :aria-label="wish.title"
+            @click="openWishFromBubble(wish, $event)"
+          >
+            <span class="wish-bubble__message">{{ wish.title }}</span>
+          </button>
+          <button
+            type="button"
+            class="wish-bubble__heart"
+            :class="{ 'is-active': wish.hearted_by_me }"
+            :aria-label="$t('愛心 {count}', { count: wish.heart_count })"
+            :title="$t('愛心 {count}', { count: wish.heart_count })"
+            :aria-pressed="wish.hearted_by_me"
+            :disabled="heartLoadingId === wish.id"
+            @pointerdown.stop
+            @click.stop="toggleHeart(wish)"
+          >
+            <i
+              :class="wish.hearted_by_me ? 'pi pi-heart-fill' : 'pi pi-heart'"
+              aria-hidden="true"
+            />
+            <span>{{ wish.heart_count }}</span>
+          </button>
+        </article>
       </div>
     </div>
     <Button
@@ -73,7 +100,7 @@
               :aria-pressed="selected.hearted_by_me"
               class="discussion-action-button discussion-action-like-button"
               :class="{ 'is-active': selected.hearted_by_me }"
-              @click="toggleHeart"
+              @click="toggleHeart(selected)"
             />
             <Button
               icon="pi pi-flag"
@@ -137,6 +164,13 @@ import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { wishService } from '@/api'
 import { getCurrentUser } from '@/utils/auth'
+import {
+  beginRadiusTransition,
+  createInitialBubbleLayout,
+  getWishBubbleDiameter,
+  stepBubblePhysics,
+  updateBubbleRadius,
+} from '@/utils/wishBubblePhysics'
 import InlineCommentReport from '@/components/InlineCommentReport.vue'
 
 const emit = defineEmits(['add-wish', 'help-upload'])
@@ -151,19 +185,43 @@ const wishes = ref([]),
 const selected = ref(null)
 const reportVisible = ref(false)
 const reportSubmitting = ref(false),
-  deleting = ref(false),
-  heartLoading = ref(false)
+  deleting = ref(false)
+const heartLoadingId = ref(null)
+const panning = ref(false)
 const report = reactive({ reason: null, customMessage: '' })
 const poolRef = ref(null)
-const cloudRef = ref(null)
-const wordElements = new Map()
-const positions = ref({})
-const fittedFontSizes = ref({})
-const cloudDimensions = ref({ width: 0, height: 0 })
+const viewportRef = ref(null)
+const worldRef = ref(null)
+const bubbleElements = new Map()
+const camera = { x: 0, y: 0 }
+const pointerGesture = {
+  pointerId: null,
+  startX: 0,
+  startY: 0,
+  cameraX: 0,
+  cameraY: 0,
+  moved: false,
+}
+const PAN_THRESHOLD = 7
+let suppressNextBubbleClick = false
 let resizeObserver
-let layoutFrame
+let intersectionObserver
+let reducedMotionQuery
+let physicsFrame = null
+let previousTimestamp = null
+let physicsStates = []
+let physicsById = new Map()
+let layoutGeneration = 0
+let mounted = false
+let poolVisible = true
+let reducedMotion = false
+
+const heartLoading = computed(
+  () => Boolean(selected.value) && heartLoadingId.value === selected.value.id
+)
 const semesterLabel = (wish) =>
   wish?.academic_year == null ? t('不限學期') : formatSemester(wish.academic_year)
+
 function formatSemester(value) {
   const numericValue = Number(value)
   if (numericValue >= 1000 && numericValue < 2000) {
@@ -173,6 +231,7 @@ function formatSemester(value) {
   }
   return `${value}`
 }
+
 const reportTarget = computed(() => ({
   id: selected.value?.id,
   user_name: selected.value?.creator_name || t('許願者'),
@@ -182,131 +241,179 @@ const reportTarget = computed(() => ({
     : '',
   is_deleted: false,
 }))
-const densityFontBoost = computed(() => Math.max(0, (16 - wishes.value.length) / 16) * 0.22)
-const baseFontSize = (count) =>
-  Math.min(2.5, 1.05 + densityFontBoost.value + Math.log2(Number(count || 0) + 1) * 0.27)
-function stableHash(value) {
-  let hash = 2166136261
-  for (const character of String(value)) {
-    hash ^= character.charCodeAt(0)
-    hash = Math.imul(hash, 16777619)
-  }
-  return hash >>> 0
+
+function now() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now()
 }
-function setWordRef(id, element) {
-  if (element) wordElements.set(id, element)
-  else wordElements.delete(id)
+
+function setBubbleRef(id, element) {
+  if (element) bubbleElements.set(id, element)
+  else bubbleElements.delete(id)
 }
-function overlaps(candidate, placed) {
-  const gap = 12
-  return placed.some(
-    (box) =>
-      candidate.x < box.x + box.width + gap &&
-      candidate.x + candidate.width + gap > box.x &&
-      candidate.y < box.y + box.height + gap &&
-      candidate.y + candidate.height + gap > box.y
-  )
+
+function bubbleStyle(wish) {
+  return { '--bubble-diameter': `${getWishBubbleDiameter(wish.heart_count)}px` }
 }
-async function layoutCloud() {
-  if (!cloudRef.value || !poolRef.value || !wishes.value.length) {
-    positions.value = {}
-    fittedFontSizes.value = {}
-    cloudDimensions.value = { width: 0, height: 0 }
-    return
-  }
-  const maxWidth = Math.max(140, Math.min(1100, poolRef.value.clientWidth - 32))
-  cloudDimensions.value = { width: maxWidth, height: 1 }
-  positions.value = {}
-  await nextTick()
-  const placed = []
-  const nextPositions = {}
-  const goldenAngle = Math.PI * (3 - Math.sqrt(5))
-  const horizontalLayout = maxWidth >= 560
-  const horizontalScale = horizontalLayout ? 1.32 : 0.96
-  const verticalScale = horizontalLayout ? 0.62 : 0.82
-  const ordered = [...wishes.value].sort((left, right) => Number(left.id) - Number(right.id))
-  fittedFontSizes.value = Object.fromEntries(
-    ordered.map((wish) => [wish.id, baseFontSize(wish.heart_count)])
-  )
-  await nextTick()
-  const maxTokenWidth = maxWidth - 12
-  const nextFontSizes = { ...fittedFontSizes.value }
-  for (const wish of ordered) {
-    const element = wordElements.get(wish.id)
-    if (!element || element.offsetWidth <= maxTokenWidth) continue
-    nextFontSizes[wish.id] *= (maxTokenWidth / element.offsetWidth) * 0.98
-  }
-  fittedFontSizes.value = nextFontSizes
-  await nextTick()
-  for (const wish of ordered) {
-    const element = wordElements.get(wish.id)
+
+function applyCameraTransform() {
+  if (!worldRef.value) return
+  worldRef.value.style.transform = `translate3d(${camera.x}px, ${camera.y}px, 0)`
+}
+
+function applyBubbleTransforms() {
+  for (const bubble of physicsStates) {
+    const element = bubbleElements.get(bubble.id)
     if (!element) continue
-    const width = Math.min(element.offsetWidth, maxWidth - 12)
-    const height = element.offsetHeight
-    const hash = stableHash(wish.id)
-    const startAngle = ((hash % 360) * Math.PI) / 180
-    let candidate
-    for (let attempt = 0; attempt < 3000; attempt += 1) {
-      const radius = 8 * Math.sqrt(attempt)
-      const angle = startAngle + attempt * goldenAngle
-      const trial = {
-        x: Math.cos(angle) * radius * horizontalScale - width / 2,
-        y: Math.sin(angle) * radius * verticalScale - height / 2,
-        width,
-        height,
-      }
-      if (trial.x < -maxWidth / 2 || trial.x + width > maxWidth / 2) continue
-      if (!overlaps(trial, placed)) {
-        candidate = trial
-        break
-      }
-    }
-    candidate ||= {
-      x: -width / 2,
-      y: placed.reduce((bottom, box) => Math.max(bottom, box.y + box.height), 0) + 10,
-      width,
-      height,
-    }
-    placed.push(candidate)
-    nextPositions[wish.id] = { ...candidate, rotation: (hash % 3) - 1 }
-  }
-  const padding = 24
-  const minX = Math.min(...placed.map((box) => box.x))
-  const maxX = Math.max(...placed.map((box) => box.x + box.width))
-  const minY = Math.min(...placed.map((box) => box.y))
-  const maxY = Math.max(...placed.map((box) => box.y + box.height))
-  for (const position of Object.values(nextPositions)) {
-    position.left = position.x - minX + padding
-    position.top = position.y - minY + padding
-  }
-  positions.value = nextPositions
-  cloudDimensions.value = {
-    width: Math.min(maxWidth, Math.max(140, maxX - minX + padding * 2)),
-    height: Math.max(120, maxY - minY + padding * 2),
+    element.style.transform = `translate3d(${bubble.x - bubble.radius}px, ${bubble.y - bubble.radius}px, 0)`
   }
 }
-function scheduleLayout() {
-  if (typeof requestAnimationFrame === 'undefined') {
-    nextTick(layoutCloud)
+
+function canRunPhysics() {
+  return (
+    mounted &&
+    !reducedMotion &&
+    poolVisible &&
+    !document.hidden &&
+    physicsStates.length > 0 &&
+    typeof window.requestAnimationFrame === 'function'
+  )
+}
+
+function stopPhysics() {
+  if (physicsFrame !== null && typeof window.cancelAnimationFrame === 'function') {
+    window.cancelAnimationFrame(physicsFrame)
+  }
+  physicsFrame = null
+  previousTimestamp = null
+}
+
+function animatePhysics(timestamp) {
+  if (!canRunPhysics()) {
+    stopPhysics()
     return
   }
-  if (layoutFrame) cancelAnimationFrame(layoutFrame)
-  layoutFrame = requestAnimationFrame(() => layoutCloud())
+  const deltaSeconds = previousTimestamp === null ? 0 : (timestamp - previousTimestamp) / 1000
+  previousTimestamp = timestamp
+  for (const bubble of physicsStates) updateBubbleRadius(bubble, timestamp)
+  stepBubblePhysics(physicsStates, deltaSeconds)
+  applyBubbleTransforms()
+  physicsFrame = window.requestAnimationFrame(animatePhysics)
 }
-const cloudStyle = computed(() => ({
-  width: cloudDimensions.value.width ? `${cloudDimensions.value.width}px` : '100%',
-  height: cloudDimensions.value.height ? `${cloudDimensions.value.height}px` : 'auto',
-}))
-function wordStyle(wish) {
-  const position = positions.value[wish.id]
-  return {
-    fontSize: `${fittedFontSizes.value[wish.id] || baseFontSize(wish.heart_count)}rem`,
-    left: position ? `${position.left}px` : '50%',
-    top: position ? `${position.top}px` : '50%',
-    transform: position ? `rotate(${position.rotation}deg)` : 'translate(-50%, -50%)',
-    visibility: position ? 'visible' : 'hidden',
+
+function startPhysics() {
+  if (physicsFrame !== null || !canRunPhysics()) return
+  physicsFrame = window.requestAnimationFrame(animatePhysics)
+}
+
+async function rebuildBubbleLayout() {
+  const generation = ++layoutGeneration
+  await nextTick()
+  if (generation !== layoutGeneration || !viewportRef.value) return
+  const width = viewportRef.value.clientWidth || 960
+  const height = viewportRef.value.clientHeight || 620
+  physicsStates = createInitialBubbleLayout(wishes.value, { width, height })
+  physicsById = new Map(physicsStates.map((bubble) => [bubble.id, bubble]))
+  camera.x = 0
+  camera.y = 0
+  applyCameraTransform()
+  applyBubbleTransforms()
+  startPhysics()
+}
+
+function handlePoolResize() {
+  if (!physicsStates.length) {
+    void rebuildBubbleLayout()
+    return
   }
+  applyCameraTransform()
+  applyBubbleTransforms()
 }
+
+function syncBubbleRadii() {
+  const timestamp = now()
+  let transitionStarted = false
+  for (const wish of wishes.value) {
+    const bubble = physicsById.get(wish.id)
+    if (!bubble) continue
+    const nextRadius = getWishBubbleDiameter(wish.heart_count) / 2
+    if (reducedMotion) {
+      bubble.radius = nextRadius
+      bubble.targetRadius = nextRadius
+      bubble.mass = nextRadius * nextRadius
+      bubble.radiusTransition = null
+      continue
+    }
+    transitionStarted = beginRadiusTransition(bubble, nextRadius, timestamp) || transitionStarted
+  }
+  applyBubbleTransforms()
+  if (transitionStarted) startPhysics()
+}
+
+function handlePointerDown(event) {
+  if (!event.isPrimary || event.button > 0 || event.target.closest('.wish-bubble__heart')) return
+  suppressNextBubbleClick = false
+  pointerGesture.pointerId = event.pointerId
+  pointerGesture.startX = event.clientX
+  pointerGesture.startY = event.clientY
+  pointerGesture.cameraX = camera.x
+  pointerGesture.cameraY = camera.y
+  pointerGesture.moved = false
+}
+
+function handlePointerMove(event) {
+  if (event.pointerId !== pointerGesture.pointerId) return
+  const deltaX = event.clientX - pointerGesture.startX
+  const deltaY = event.clientY - pointerGesture.startY
+  if (!pointerGesture.moved && Math.hypot(deltaX, deltaY) < PAN_THRESHOLD) return
+  if (!pointerGesture.moved) {
+    pointerGesture.moved = true
+    viewportRef.value?.setPointerCapture?.(event.pointerId)
+  }
+  panning.value = true
+  camera.x = pointerGesture.cameraX + deltaX
+  camera.y = pointerGesture.cameraY + deltaY
+  applyCameraTransform()
+  event.preventDefault()
+}
+
+function releasePointerCapture(pointerId = pointerGesture.pointerId) {
+  if (pointerId === null || !viewportRef.value?.hasPointerCapture?.(pointerId)) return
+  viewportRef.value.releasePointerCapture(pointerId)
+}
+
+function endPointerGesture(event, cancelled = false) {
+  if (event.pointerId !== pointerGesture.pointerId) return
+  if (pointerGesture.moved && !cancelled) suppressNextBubbleClick = true
+  releasePointerCapture(event.pointerId)
+  pointerGesture.pointerId = null
+  pointerGesture.moved = false
+  panning.value = false
+}
+
+function handlePointerEnd(event) {
+  endPointerGesture(event)
+}
+
+function handlePointerCancel(event) {
+  endPointerGesture(event, true)
+}
+
+function handleViewportClick(event) {
+  if (!suppressNextBubbleClick) return
+  suppressNextBubbleClick = false
+  event.preventDefault()
+  event.stopPropagation()
+}
+
+function openWishFromBubble(wish, event) {
+  if (suppressNextBubbleClick) {
+    suppressNextBubbleClick = false
+    event.preventDefault()
+    return
+  }
+  selected.value = wish
+}
+
 async function load(reset = true) {
   loading.value = reset
   error.value = ''
@@ -320,34 +427,42 @@ async function load(reset = true) {
     loading.value = false
   }
 }
+
 const loadMore = () => load(false)
-async function toggleHeart() {
-  if (!selected.value || heartLoading.value) return
-  heartLoading.value = true
+
+async function toggleHeart(wish = selected.value) {
+  if (!wish || heartLoadingId.value !== null) return
+  heartLoadingId.value = wish.id
   try {
-    const { data } = await wishService.toggleHeart(selected.value.id)
-    Object.assign(selected.value, { hearted_by_me: data.hearted, heart_count: data.heart_count })
-    const item = wishes.value.find((wish) => wish.id === selected.value.id)
-    if (item) Object.assign(item, selected.value)
+    const { data } = await wishService.toggleHeart(wish.id)
+    Object.assign(wish, { hearted_by_me: data.hearted, heart_count: data.heart_count })
+    const item = wishes.value.find((candidate) => candidate.id === wish.id)
+    if (item && item !== wish) Object.assign(item, wish)
+    if (selected.value?.id === wish.id && selected.value !== wish)
+      Object.assign(selected.value, wish)
   } finally {
-    heartLoading.value = false
+    heartLoadingId.value = null
   }
 }
+
 function toggleReport() {
   if (reportVisible.value) return closeReport()
   report.reason = null
   report.customMessage = ''
   reportVisible.value = true
 }
+
 function closeReport() {
   reportVisible.value = false
   report.reason = null
   report.customMessage = ''
 }
+
 function closeWishDetail() {
   closeReport()
   selected.value = null
 }
+
 async function submitReport(payload) {
   if (!selected.value || reportSubmitting.value) return
   reportSubmitting.value = true
@@ -375,6 +490,7 @@ async function submitReport(payload) {
     reportSubmitting.value = false
   }
 }
+
 function requestRemoveWish() {
   if (!selected.value || deleting.value) return
   confirm.require({
@@ -388,6 +504,7 @@ function requestRemoveWish() {
     accept: removeWish,
   })
 }
+
 async function removeWish() {
   if (!selected.value || deleting.value) return
   const wishId = selected.value.id
@@ -415,27 +532,72 @@ async function removeWish() {
     deleting.value = false
   }
 }
-watch(
-  () => wishes.value.map((wish) => `${wish.id}:${wish.title}:${wish.heart_count}`).join('|'),
-  scheduleLayout
-)
+
+function handleReducedMotionChange(event) {
+  reducedMotion = event.matches
+  if (reducedMotion) {
+    stopPhysics()
+    for (const bubble of physicsStates) {
+      bubble.radius = bubble.targetRadius
+      bubble.mass = bubble.radius * bubble.radius
+      bubble.radiusTransition = null
+    }
+    applyBubbleTransforms()
+  } else {
+    startPhysics()
+  }
+}
+
+function handleVisibilityChange() {
+  if (document.hidden) stopPhysics()
+  else startPhysics()
+}
+
+watch(() => wishes.value.map((wish) => `${wish.id}:${wish.title}`).join('|'), rebuildBubbleLayout)
+watch(() => wishes.value.map((wish) => `${wish.id}:${wish.heart_count}`).join('|'), syncBubbleRadii)
+
 onMounted(() => {
+  mounted = true
+  if (typeof window.matchMedia === 'function') {
+    reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
+    reducedMotion = reducedMotionQuery.matches
+    reducedMotionQuery.addEventListener?.('change', handleReducedMotionChange)
+  }
   if (typeof ResizeObserver !== 'undefined') {
-    resizeObserver = new ResizeObserver(scheduleLayout)
+    resizeObserver = new ResizeObserver(handlePoolResize)
     if (poolRef.value) resizeObserver.observe(poolRef.value)
   }
+  if (typeof IntersectionObserver !== 'undefined') {
+    intersectionObserver = new IntersectionObserver(([entry]) => {
+      poolVisible = entry?.isIntersecting ?? true
+      if (poolVisible) startPhysics()
+      else stopPhysics()
+    })
+    if (poolRef.value) intersectionObserver.observe(poolRef.value)
+  }
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   load()
-  const fontLoad = document.fonts?.load?.('1rem Huninn')
-  if (fontLoad) void fontLoad.then(scheduleLayout).catch(scheduleLayout)
 })
+
 onBeforeUnmount(() => {
+  mounted = false
+  releasePointerCapture()
+  pointerGesture.pointerId = null
+  pointerGesture.moved = false
+  stopPhysics()
   resizeObserver?.disconnect()
-  if (layoutFrame && typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(layoutFrame)
+  intersectionObserver?.disconnect()
+  reducedMotionQuery?.removeEventListener?.('change', handleReducedMotionChange)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 
 <style scoped>
 .wish-pool {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
   box-sizing: border-box;
   width: 100%;
   padding: 1.5rem;
@@ -451,6 +613,7 @@ onBeforeUnmount(() => {
   gap: 1rem;
 }
 .wish-header {
+  flex: 0 0 auto;
   width: 100%;
   text-align: left;
 }
@@ -467,71 +630,247 @@ onBeforeUnmount(() => {
   min-height: 2.75rem;
   white-space: nowrap;
 }
-.wish-cloud {
+.wish-bubble-viewport {
   position: relative;
-  max-width: 1100px;
-  margin: 0 auto;
-  overflow: visible;
-}
-.wish-cloud-stage {
-  display: flex;
+  isolation: isolate;
+  flex: 1 1 auto;
   width: 100%;
-  min-height: clamp(26rem, 58vh, 42rem);
+  height: auto;
+  min-height: 16rem;
+  box-sizing: border-box;
+  margin-top: 1.25rem;
+  border: 1px solid color-mix(in srgb, var(--p-primary-color) 24%, var(--border-color));
+  border-radius: 0.5rem;
+  background:
+    radial-gradient(
+      ellipse at 48% 42%,
+      color-mix(in srgb, var(--bg-primary) 68%, transparent) 0,
+      transparent 58%
+    ),
+    radial-gradient(
+      circle at 18% 22%,
+      color-mix(in srgb, var(--p-primary-color) 11%, transparent) 0,
+      transparent 32%
+    ),
+    radial-gradient(
+      circle at 82% 76%,
+      color-mix(in srgb, var(--p-cyan-500) 10%, transparent) 0,
+      transparent 34%
+    ),
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--bg-primary) 94%, var(--p-primary-color) 6%),
+      color-mix(in srgb, var(--bg-secondary) 92%, var(--p-cyan-500) 8%)
+    );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--p-surface-0) 34%, transparent),
+    inset 0 0 5rem color-mix(in srgb, var(--p-primary-color) 8%, transparent);
+  cursor: grab;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+.wish-bubble-viewport::before,
+.wish-bubble-viewport::after {
+  position: absolute;
+  z-index: 0;
+  width: min(42rem, 84%);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: repeating-radial-gradient(
+    circle,
+    transparent 0 3.7rem,
+    color-mix(in srgb, var(--p-primary-color) 9%, transparent) 3.76rem 3.82rem,
+    transparent 3.88rem 7.5rem
+  );
+  content: '';
+  opacity: 0.76;
+  pointer-events: none;
+}
+.wish-bubble-viewport::before {
+  top: -34%;
+  left: -18%;
+}
+.wish-bubble-viewport::after {
+  right: -18%;
+  bottom: -38%;
+  width: min(36rem, 72%);
+  background: repeating-radial-gradient(
+    circle,
+    transparent 0 3.2rem,
+    color-mix(in srgb, var(--p-cyan-500) 8%, transparent) 3.26rem 3.32rem,
+    transparent 3.38rem 6.6rem
+  );
+}
+.wish-bubble-viewport.is-panning {
+  cursor: grabbing;
+}
+.wish-bubble-world {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  transform: translate3d(0, 0, 0);
+  transform-origin: center;
+  will-change: transform;
+}
+.wish-bubble {
+  --bubble-diameter: 116px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--bubble-diameter);
+  height: var(--bubble-diameter);
+  aspect-ratio: 1;
+  isolation: isolate;
+  border: 1px solid color-mix(in srgb, var(--p-primary-color) 42%, var(--border-color));
+  border-radius: 50%;
+  background:
+    radial-gradient(
+      ellipse at 30% 23%,
+      color-mix(in srgb, var(--p-surface-0) 72%, transparent) 0 7%,
+      transparent 29%
+    ),
+    radial-gradient(
+      circle at 70% 76%,
+      color-mix(in srgb, var(--p-cyan-500) 14%, transparent) 0,
+      transparent 60%
+    ),
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--bg-primary) 82%, var(--p-surface-0) 18%),
+      color-mix(in srgb, var(--bg-secondary) 82%, var(--p-primary-color) 18%)
+    );
+  box-shadow:
+    0 0.55rem 1.35rem color-mix(in srgb, var(--text-primary) 10%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--p-surface-0) 28%, transparent),
+    inset -0.55rem -0.7rem 1.3rem color-mix(in srgb, var(--p-primary-color) 10%, transparent);
+  color: var(--text-primary);
+  overflow: hidden;
+  transform: translate3d(-50%, -50%, 0);
+  transition:
+    width 320ms ease,
+    height 320ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+  will-change: transform;
+}
+.wish-bubble::before {
+  position: absolute;
+  z-index: 1;
+  top: 10%;
+  left: 17%;
+  width: 38%;
+  height: 22%;
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse,
+    color-mix(in srgb, var(--p-surface-0) 82%, transparent) 0,
+    color-mix(in srgb, var(--p-surface-0) 28%, transparent) 48%,
+    transparent 74%
+  );
+  content: '';
+  pointer-events: none;
+  transform: rotate(-24deg);
+}
+.wish-bubble.fulfilled {
+  border-color: color-mix(in srgb, var(--p-green-500) 42%, var(--border-color));
+  background:
+    radial-gradient(
+      ellipse at 30% 23%,
+      color-mix(in srgb, var(--p-surface-0) 72%, transparent) 0 7%,
+      transparent 29%
+    ),
+    radial-gradient(
+      circle at 70% 76%,
+      color-mix(in srgb, var(--p-green-500) 14%, transparent) 0,
+      transparent 60%
+    ),
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--bg-primary) 82%, var(--p-surface-0) 18%),
+      color-mix(in srgb, var(--bg-secondary) 82%, var(--p-green-500) 18%)
+    );
+}
+.wish-bubble__open {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  padding: 1.1rem 0.9rem 2.7rem;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: center;
+}
+.wish-bubble__message {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+  font-family: 'Huninn', 'Noto Sans TC', system-ui, sans-serif;
+  font-size: clamp(0.88rem, 1.5cqi, 1.05rem);
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+}
+.wish-bubble__heart {
+  position: absolute;
+  z-index: 3;
+  bottom: 0.8rem;
+  left: 50%;
+  display: inline-flex;
+  min-width: 2.8rem;
+  min-height: 2rem;
   align-items: center;
   justify-content: center;
-  box-sizing: border-box;
-  padding: clamp(5rem, 11vh, 8rem) 0 clamp(2.5rem, 6vh, 4.5rem);
-  overflow: visible;
-}
-.wish-word {
-  position: absolute;
-  display: inline-flex;
-  width: max-content;
-  max-width: none;
-  align-items: baseline;
-  flex: 0 0 auto;
-  gap: 0.3em;
+  gap: 0.35rem;
   border: 0;
-  background: transparent;
-  color: var(--text-color);
+  border-radius: 1rem;
+  padding: 0.2rem 0.55rem;
+  background: color-mix(in srgb, var(--bg-primary) 78%, transparent);
+  color: var(--text-secondary);
   cursor: pointer;
-  padding: 0.35em;
-  border-radius: 0.5em;
-  line-height: 1.25;
-  overflow-wrap: normal;
-  white-space: nowrap;
-  transform-origin: center;
-  font-family: 'Huninn', 'Noto Sans TC', system-ui, sans-serif;
+  font: inherit;
+  font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
+  transform: translateX(-50%);
+  transition:
+    color 160ms ease,
+    background-color 160ms ease;
 }
-.wish-word__title,
-.wish-word small,
-.fulfilled-label {
-  white-space: nowrap;
+.wish-bubble__heart:hover,
+.wish-bubble__heart.is-active {
+  background: color-mix(in srgb, var(--p-red-500) 11%, var(--bg-primary));
+  color: var(--p-red-500);
 }
-.wish-word small,
-.fulfilled-label {
-  flex: 0 0 auto;
+.wish-bubble__heart:disabled {
+  cursor: wait;
+  opacity: 0.62;
 }
-.wish-word:hover,
-.wish-word:focus-visible {
-  background: var(--surface-hover);
-  outline: 2px solid var(--primary-color);
+.wish-bubble:hover,
+.wish-bubble:focus-within {
+  border-color: color-mix(in srgb, var(--p-primary-color) 58%, var(--border-color));
+  box-shadow:
+    0 0.65rem 1.5rem color-mix(in srgb, var(--text-primary) 12%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, var(--p-surface-0) 34%, transparent),
+    inset -0.55rem -0.7rem 1.3rem color-mix(in srgb, var(--p-primary-color) 12%, transparent);
 }
-.wish-word small,
-.fulfilled-label {
-  font-size: 0.7em;
-  margin-left: 0;
-}
-.fulfilled-label {
-  font-weight: 700;
-}
-.wish-word.fulfilled {
-  color: var(--green-600);
-  font-weight: 600;
-}
-.wish-word.fulfilled:hover,
-.wish-word.fulfilled:focus-visible {
-  color: var(--green-500);
+.wish-bubble__open:focus-visible,
+.wish-bubble__heart:focus-visible {
+  outline: 2px solid var(--p-primary-color);
+  outline-offset: -3px;
 }
 .wish-spinner,
 .load-more {
@@ -568,7 +907,7 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   justify-content: flex-start;
 }
-@container (max-width:720px) {
+@container (max-width: 720px) {
   .wish-header {
     align-items: stretch;
     flex-direction: column;
@@ -577,9 +916,17 @@ onBeforeUnmount(() => {
     width: 100%;
     justify-content: center;
   }
-  .wish-cloud-stage {
-    min-height: clamp(20rem, 50vh, 30rem);
-    padding: clamp(3.5rem, 9vh, 5.5rem) 0 clamp(2rem, 5vh, 3rem);
+  .wish-bubble-viewport {
+    height: clamp(28rem, 58vh, 38rem);
+  }
+  .wish-bubble__message {
+    font-size: clamp(0.8rem, 3.4cqi, 0.98rem);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wish-bubble,
+  .wish-bubble__heart {
+    transition: none;
   }
 }
 </style>

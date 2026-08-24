@@ -249,4 +249,130 @@ test.describe('User › Archive browsing', () => {
 
     await expect(archiveCard).toContainText('4 次下載')
   })
+
+  test('opens Wish bubbles on click while preserving pan and heart isolation', async ({ page }) => {
+    const wishTitle = '量子資訊期末考'
+    let heartRequestCount = 0
+
+    await page.route('**/api/notifications/active', (route) =>
+      route.fulfill({ status: 200, headers: JSON_HEADERS, body: JSON.stringify([]) })
+    )
+    await page.route('**/api/notifications/unread-summary**', (route) =>
+      route.fulfill({
+        status: 200,
+        headers: JSON_HEADERS,
+        body: JSON.stringify({
+          announcements: [],
+          personal_notifications: [],
+          counts: { announcements: 0, personal_notifications: 0, total: 0 },
+        }),
+      })
+    )
+    await page.route('**/api/auth/heartbeat', (route) =>
+      route.fulfill({ status: 200, headers: JSON_HEADERS, body: JSON.stringify({}) })
+    )
+    await page.route('**/api/users/me', (route) =>
+      route.fulfill({
+        status: 200,
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ id: 2, name: '一般使用者', nickname: '' }),
+      })
+    )
+    await page.route('**/api/courses', (route) =>
+      route.fulfill({
+        status: 200,
+        headers: JSON_HEADERS,
+        body: JSON.stringify({
+          fundamental: [],
+          required: [],
+          experience: [],
+          optional: [],
+          graduate: [],
+          'math-department': [],
+        }),
+      })
+    )
+    await page.route('**/api/courses/categories', (route) =>
+      route.fulfill({ status: 200, headers: JSON_HEADERS, body: JSON.stringify([]) })
+    )
+    await page.route('**/api/wishes**', async (route) => {
+      const request = route.request()
+      const path = new URL(request.url()).pathname
+      if (request.method() === 'POST' && path === '/api/wishes/7/heart') {
+        heartRequestCount += 1
+        await route.fulfill({
+          status: 200,
+          headers: JSON_HEADERS,
+          body: JSON.stringify({ hearted: true, heart_count: 3 }),
+        })
+        return
+      }
+      if (request.method() === 'GET' && path === '/api/wishes') {
+        await route.fulfill({
+          status: 200,
+          headers: JSON_HEADERS,
+          body: JSON.stringify({
+            items: [
+              {
+                id: 7,
+                title: wishTitle,
+                subject: '量子資訊',
+                professor: 'Prof. Lin',
+                academic_year: 1141,
+                name: 'final',
+                creator_name: 'Alice',
+                created_at: '2026-08-18T00:00:00Z',
+                heart_count: 2,
+                hearted_by_me: false,
+                fulfilled: false,
+              },
+            ],
+            total: 1,
+          }),
+        })
+        return
+      }
+      await route.abort()
+    })
+
+    await page.goto('/archive')
+    await clickWhenVisible(page.getByRole('button', { name: '考古許願池' }))
+
+    const viewport = page.locator('.wish-bubble-viewport')
+    const world = page.locator('.wish-bubble-world')
+    const bubbleButton = page.getByRole('button', { name: wishTitle })
+    const dialog = page.getByRole('dialog').filter({ hasText: wishTitle })
+    await expect(viewport).toBeVisible()
+    await expect(bubbleButton).toBeVisible()
+
+    await bubbleButton.click()
+    await expect(dialog).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeHidden()
+
+    const bubbleBounds = await bubbleButton.boundingBox()
+    if (!bubbleBounds) throw new Error('Wish bubble was not measurable before pan')
+    const initialTransform = await world.evaluate((element) => element.style.transform)
+    const startX = bubbleBounds.x + bubbleBounds.width / 2
+    const startY = bubbleBounds.y + bubbleBounds.height / 2
+    await page.mouse.move(startX, startY)
+    await page.mouse.down()
+    await page.mouse.move(startX + 36, startY + 24, { steps: 3 })
+    await page.mouse.up()
+
+    await expect
+      .poll(() => world.evaluate((element) => element.style.transform))
+      .not.toBe(initialTransform)
+    await expect(dialog).toBeHidden()
+
+    await bubbleButton.click()
+    await expect(dialog).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(dialog).toBeHidden()
+
+    await page.getByRole('button', { name: '愛心 2' }).click()
+    await expect.poll(() => heartRequestCount).toBe(1)
+    await expect(page.getByRole('button', { name: '愛心 3' })).toBeVisible()
+    await expect(dialog).toBeHidden()
+  })
 })
