@@ -1,5 +1,5 @@
 <template>
-  <section ref="poolRef" class="wish-pool" aria-labelledby="wish-pool-title">
+  <section class="wish-pool" aria-labelledby="wish-pool-title">
     <header class="wish-header">
       <div>
         <h2 id="wish-pool-title">{{ $t('考古許願池') }}</h2>
@@ -15,29 +15,55 @@
     </header>
     <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
     <ProgressSpinner v-if="loading" class="wish-spinner" />
-    <div v-else class="wish-cloud-stage">
-      <div
-        ref="cloudRef"
-        class="wish-cloud"
-        role="list"
-        :aria-label="$t('考古許願池')"
-        :style="cloudStyle"
-      >
-        <button
+    <div
+      v-else
+      ref="viewportRef"
+      class="wish-pool-stage"
+      :class="{ 'is-panning': isPanning, 'is-mobile-layout': layoutMode === 'mobile' }"
+      @pointerdown="startPan"
+      @pointermove="movePan"
+      @pointerup="finishPan"
+      @pointercancel="finishPan"
+      @dragstart.prevent
+    >
+      <div class="wish-pool-world" role="list" :aria-label="$t('考古許願池')" :style="worldStyle">
+        <div
           v-for="wish in wishes"
           :key="wish.id"
-          :ref="(element) => setWordRef(wish.id, element)"
-          type="button"
           role="listitem"
-          class="wish-word"
-          :class="{ fulfilled: wish.fulfilled }"
-          :style="wordStyle(wish)"
-          @click="selected = wish"
+          class="wish-node"
+          :data-wish-id="wish.id"
+          :style="wishPositionStyle(wish)"
         >
-          <span class="wish-word__title">{{ wish.title }}</span>
-          <small>♥ {{ wish.heart_count }}</small>
-          <span v-if="wish.fulfilled" class="fulfilled-label">{{ $t('已實現') }}</span>
-        </button>
+          <div class="wish-item" :class="{ fulfilled: wish.fulfilled }">
+            <button
+              type="button"
+              class="wish-word"
+              :style="wishTextStyle(wish)"
+              @click="openWishDetail(wish, $event)"
+            >
+              <span class="wish-word__title">{{ wish.title }}</span>
+              <span v-if="wish.fulfilled" class="fulfilled-label">{{ $t('已實現') }}</span>
+            </button>
+            <Button
+              :label="String(wish.heart_count)"
+              :icon="wish.hearted_by_me ? 'pi pi-heart-fill' : 'pi pi-heart'"
+              :severity="wish.hearted_by_me ? 'danger' : 'secondary'"
+              text
+              rounded
+              size="small"
+              :loading="heartLoading"
+              :disabled="heartLoading"
+              :aria-label="$t('愛心 {count}', { count: wish.heart_count })"
+              :title="$t('愛心 {count}', { count: wish.heart_count })"
+              :aria-pressed="wish.hearted_by_me"
+              class="wish-inline-heart discussion-action-button discussion-action-like-button"
+              :class="{ 'is-active': wish.hearted_by_me }"
+              @pointerdown.stop
+              @click.stop="toggleHeart(wish)"
+            />
+          </div>
+        </div>
       </div>
     </div>
     <Button
@@ -73,7 +99,7 @@
               :aria-pressed="selected.hearted_by_me"
               class="discussion-action-button discussion-action-like-button"
               :class="{ 'is-active': selected.hearted_by_me }"
-              @click="toggleHeart"
+              @click="toggleHeart()"
             />
             <Button
               icon="pi pi-flag"
@@ -131,12 +157,21 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { wishService } from '@/api'
 import { getCurrentUser } from '@/utils/auth'
+import {
+  appendResponsiveWishPositions,
+  assignWishCentralityScores,
+  createSeededWishRng,
+  createResponsiveWishLayout,
+  createWishLayoutSeed,
+  selectMobileAnchorWishId,
+  wishFontSizeRem,
+} from '@/utils/wishHoneycombLayout'
 import InlineCommentReport from '@/components/InlineCommentReport.vue'
 
 const emit = defineEmits(['add-wish', 'help-upload'])
@@ -154,14 +189,22 @@ const reportSubmitting = ref(false),
   deleting = ref(false),
   heartLoading = ref(false)
 const report = reactive({ reason: null, customMessage: '' })
-const poolRef = ref(null)
-const cloudRef = ref(null)
-const wordElements = new Map()
+const viewportRef = ref(null)
+const viewportSize = ref({ width: 0, height: 0 })
 const positions = ref({})
-const fittedFontSizes = ref({})
-const cloudDimensions = ref({ width: 0, height: 0 })
+const sessionScores = ref({})
+const mobileAnchorWishId = ref(null)
+const layoutMode = ref('honeycomb')
+const camera = reactive({ x: 0, y: 0 })
+const isPanning = ref(false)
+const sessionLayoutSeed = createWishLayoutSeed(Math.random)
+const sessionScoreRng = createSeededWishRng(sessionLayoutSeed, 'centrality')
+const sessionAnchorRng = createSeededWishRng(sessionLayoutSeed, 'mobile-anchor')
+const PAN_THRESHOLD = 7
 let resizeObserver
-let layoutFrame
+let panStart = null
+let suppressNextClick = false
+let suppressClickTimer
 const semesterLabel = (wish) =>
   wish?.academic_year == null ? t('不限學期') : formatSemester(wish.academic_year)
 function formatSemester(value) {
@@ -182,137 +225,134 @@ const reportTarget = computed(() => ({
     : '',
   is_deleted: false,
 }))
-const densityFontBoost = computed(() => Math.max(0, (16 - wishes.value.length) / 16) * 0.22)
-const baseFontSize = (count) =>
-  Math.min(2.5, 1.05 + densityFontBoost.value + Math.log2(Number(count || 0) + 1) * 0.27)
-function stableHash(value) {
-  let hash = 2166136261
-  for (const character of String(value)) {
-    hash ^= character.charCodeAt(0)
-    hash = Math.imul(hash, 16777619)
-  }
-  return hash >>> 0
-}
-function setWordRef(id, element) {
-  if (element) wordElements.set(id, element)
-  else wordElements.delete(id)
-}
-function overlaps(candidate, placed) {
-  const gap = 12
-  return placed.some(
-    (box) =>
-      candidate.x < box.x + box.width + gap &&
-      candidate.x + candidate.width + gap > box.x &&
-      candidate.y < box.y + box.height + gap &&
-      candidate.y + candidate.height + gap > box.y
-  )
-}
-async function layoutCloud() {
-  if (!cloudRef.value || !poolRef.value || !wishes.value.length) {
-    positions.value = {}
-    fittedFontSizes.value = {}
-    cloudDimensions.value = { width: 0, height: 0 }
-    return
-  }
-  const maxWidth = Math.max(140, Math.min(1100, poolRef.value.clientWidth - 32))
-  cloudDimensions.value = { width: maxWidth, height: 1 }
-  positions.value = {}
-  await nextTick()
-  const placed = []
-  const nextPositions = {}
-  const goldenAngle = Math.PI * (3 - Math.sqrt(5))
-  const horizontalLayout = maxWidth >= 560
-  const horizontalScale = horizontalLayout ? 1.32 : 0.96
-  const verticalScale = horizontalLayout ? 0.62 : 0.82
-  const ordered = [...wishes.value].sort((left, right) => Number(left.id) - Number(right.id))
-  fittedFontSizes.value = Object.fromEntries(
-    ordered.map((wish) => [wish.id, baseFontSize(wish.heart_count)])
-  )
-  await nextTick()
-  const maxTokenWidth = maxWidth - 12
-  const nextFontSizes = { ...fittedFontSizes.value }
-  for (const wish of ordered) {
-    const element = wordElements.get(wish.id)
-    if (!element || element.offsetWidth <= maxTokenWidth) continue
-    nextFontSizes[wish.id] *= (maxTokenWidth / element.offsetWidth) * 0.98
-  }
-  fittedFontSizes.value = nextFontSizes
-  await nextTick()
-  for (const wish of ordered) {
-    const element = wordElements.get(wish.id)
-    if (!element) continue
-    const width = Math.min(element.offsetWidth, maxWidth - 12)
-    const height = element.offsetHeight
-    const hash = stableHash(wish.id)
-    const startAngle = ((hash % 360) * Math.PI) / 180
-    let candidate
-    for (let attempt = 0; attempt < 3000; attempt += 1) {
-      const radius = 8 * Math.sqrt(attempt)
-      const angle = startAngle + attempt * goldenAngle
-      const trial = {
-        x: Math.cos(angle) * radius * horizontalScale - width / 2,
-        y: Math.sin(angle) * radius * verticalScale - height / 2,
-        width,
-        height,
-      }
-      if (trial.x < -maxWidth / 2 || trial.x + width > maxWidth / 2) continue
-      if (!overlaps(trial, placed)) {
-        candidate = trial
-        break
-      }
-    }
-    candidate ||= {
-      x: -width / 2,
-      y: placed.reduce((bottom, box) => Math.max(bottom, box.y + box.height), 0) + 10,
-      width,
-      height,
-    }
-    placed.push(candidate)
-    nextPositions[wish.id] = { ...candidate, rotation: (hash % 3) - 1 }
-  }
-  const padding = 24
-  const minX = Math.min(...placed.map((box) => box.x))
-  const maxX = Math.max(...placed.map((box) => box.x + box.width))
-  const minY = Math.min(...placed.map((box) => box.y))
-  const maxY = Math.max(...placed.map((box) => box.y + box.height))
-  for (const position of Object.values(nextPositions)) {
-    position.left = position.x - minX + padding
-    position.top = position.y - minY + padding
-  }
-  positions.value = nextPositions
-  cloudDimensions.value = {
-    width: Math.min(maxWidth, Math.max(140, maxX - minX + padding * 2)),
-    height: Math.max(120, maxY - minY + padding * 2),
-  }
-}
-function scheduleLayout() {
-  if (typeof requestAnimationFrame === 'undefined') {
-    nextTick(layoutCloud)
-    return
-  }
-  if (layoutFrame) cancelAnimationFrame(layoutFrame)
-  layoutFrame = requestAnimationFrame(() => layoutCloud())
-}
-const cloudStyle = computed(() => ({
-  width: cloudDimensions.value.width ? `${cloudDimensions.value.width}px` : '100%',
-  height: cloudDimensions.value.height ? `${cloudDimensions.value.height}px` : 'auto',
+const worldStyle = computed(() => ({
+  transform: `translate3d(${layoutMode.value === 'mobile' ? 0 : camera.x}px, ${camera.y}px, 0)`,
 }))
-function wordStyle(wish) {
+function wishPositionStyle(wish) {
   const position = positions.value[wish.id]
+  if (!position) return { visibility: 'hidden' }
   return {
-    fontSize: `${fittedFontSizes.value[wish.id] || baseFontSize(wish.heart_count)}rem`,
-    left: position ? `${position.left}px` : '50%',
-    top: position ? `${position.top}px` : '50%',
-    transform: position ? `rotate(${position.rotation}deg)` : 'translate(-50%, -50%)',
-    visibility: position ? 'visible' : 'hidden',
+    '--wish-x': `${position.x}px`,
+    '--wish-y': `${position.y}px`,
   }
+}
+function wishTextStyle(wish) {
+  return { fontSize: `${wishFontSizeRem(wish.heart_count)}rem` }
+}
+function openWishDetail(wish, event) {
+  if (suppressNextClick) {
+    event.preventDefault()
+    return
+  }
+  selected.value = wish
+}
+function startPan(event) {
+  if (event.isPrimary === false || (event.pointerType === 'mouse' && event.button !== 0)) return
+  panStart = {
+    pointerId: event.pointerId,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    cameraX: camera.x,
+    cameraY: camera.y,
+    moved: false,
+  }
+}
+function movePan(event) {
+  if (!panStart || panStart.pointerId !== event.pointerId) return
+  const deltaX = event.clientX - panStart.clientX
+  const deltaY = event.clientY - panStart.clientY
+  if (!panStart.moved && Math.hypot(deltaX, deltaY) < PAN_THRESHOLD) return
+  if (!panStart.moved) {
+    panStart.moved = true
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+  }
+  isPanning.value = true
+  camera.x = layoutMode.value === 'mobile' ? 0 : panStart.cameraX + deltaX
+  camera.y = panStart.cameraY + deltaY
+  event.preventDefault()
+}
+function finishPan(event) {
+  if (!panStart || panStart.pointerId !== event.pointerId) return
+  if (panStart.moved) {
+    suppressNextClick = true
+    clearTimeout(suppressClickTimer)
+    suppressClickTimer = setTimeout(() => {
+      suppressNextClick = false
+    }, 0)
+  }
+  if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+    event.currentTarget.releasePointerCapture(event.pointerId)
+  }
+  panStart = null
+  isPanning.value = false
+}
+function rootFontSize() {
+  if (typeof getComputedStyle !== 'function') return 16
+  return Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
+}
+function applyResponsiveLayout() {
+  if (!wishes.value.length || !viewportSize.value.width || !viewportSize.value.height) return
+  const layout = createResponsiveWishLayout(
+    wishes.value,
+    sessionScores.value,
+    viewportSize.value,
+    mobileAnchorWishId.value,
+    rootFontSize(),
+    sessionLayoutSeed
+  )
+  positions.value = layout.positions
+  layoutMode.value = layout.mode
+  camera.x = layout.camera.x
+  camera.y = layout.camera.y
+}
+function measureViewport(entry) {
+  const target = entry?.target || viewportRef.value
+  if (!target) return
+  const width = Math.round(target.clientWidth || entry?.contentRect?.width || 0)
+  const height = Math.round(target.clientHeight || entry?.contentRect?.height || 0)
+  if (!width || !height) return
+  if (viewportSize.value.width === width && viewportSize.value.height === height) return
+  viewportSize.value = { width, height }
+  applyResponsiveLayout()
+}
+function observeViewport() {
+  if (!viewportRef.value) return
+  measureViewport({ target: viewportRef.value })
+  if (typeof ResizeObserver === 'undefined') return
+  resizeObserver = new ResizeObserver((entries) => {
+    const viewportEntry = entries.find((entry) => entry.target === viewportRef.value)
+    if (viewportEntry) measureViewport(viewportEntry)
+  })
+  resizeObserver.observe(viewportRef.value)
 }
 async function load(reset = true) {
   loading.value = reset
   error.value = ''
   try {
     const { data } = await wishService.list({ limit: 60, offset: reset ? 0 : wishes.value.length })
-    wishes.value = reset ? data.items : [...wishes.value, ...data.items]
+    const incomingWishes = data.items || []
+    if (reset) {
+      wishes.value = incomingWishes
+      sessionScores.value = assignWishCentralityScores(incomingWishes, sessionScoreRng)
+      mobileAnchorWishId.value = selectMobileAnchorWishId(incomingWishes, sessionAnchorRng)
+      applyResponsiveLayout()
+    } else {
+      sessionScores.value = assignWishCentralityScores(
+        incomingWishes,
+        sessionScoreRng,
+        sessionScores.value
+      )
+      wishes.value = [...wishes.value, ...incomingWishes]
+      positions.value = appendResponsiveWishPositions(
+        positions.value,
+        incomingWishes,
+        sessionScores.value,
+        viewportSize.value,
+        mobileAnchorWishId.value,
+        rootFontSize(),
+        sessionLayoutSeed
+      )
+    }
     total.value = data.total
   } catch {
     error.value = t('許願池載入失敗，請稍後再試。')
@@ -321,14 +361,18 @@ async function load(reset = true) {
   }
 }
 const loadMore = () => load(false)
-async function toggleHeart() {
-  if (!selected.value || heartLoading.value) return
+async function toggleHeart(wish = selected.value) {
+  if (!wish || heartLoading.value) return
   heartLoading.value = true
   try {
-    const { data } = await wishService.toggleHeart(selected.value.id)
-    Object.assign(selected.value, { hearted_by_me: data.hearted, heart_count: data.heart_count })
-    const item = wishes.value.find((wish) => wish.id === selected.value.id)
-    if (item) Object.assign(item, selected.value)
+    const { data } = await wishService.toggleHeart(wish.id)
+    const nextHeartState = { hearted_by_me: data.hearted, heart_count: data.heart_count }
+    Object.assign(wish, nextHeartState)
+    const item = wishes.value.find((itemWish) => itemWish.id === wish.id)
+    if (item && item !== wish) Object.assign(item, nextHeartState)
+    if (selected.value?.id === wish.id && selected.value !== wish) {
+      Object.assign(selected.value, nextHeartState)
+    }
   } finally {
     heartLoading.value = false
   }
@@ -395,6 +439,9 @@ async function removeWish() {
   try {
     await wishService.remove(wishId)
     wishes.value = wishes.value.filter((wish) => wish.id !== wishId)
+    const nextPositions = { ...positions.value }
+    delete nextPositions[wishId]
+    positions.value = nextPositions
     total.value = Math.max(0, total.value - 1)
     selected.value = null
     closeReport()
@@ -415,28 +462,24 @@ async function removeWish() {
     deleting.value = false
   }
 }
-watch(
-  () => wishes.value.map((wish) => `${wish.id}:${wish.title}:${wish.heart_count}`).join('|'),
-  scheduleLayout
-)
-onMounted(() => {
-  if (typeof ResizeObserver !== 'undefined') {
-    resizeObserver = new ResizeObserver(scheduleLayout)
-    if (poolRef.value) resizeObserver.observe(poolRef.value)
-  }
-  load()
-  const fontLoad = document.fonts?.load?.('1rem Huninn')
-  if (fontLoad) void fontLoad.then(scheduleLayout).catch(scheduleLayout)
+onMounted(async () => {
+  await load()
+  await nextTick()
+  observeViewport()
 })
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
-  if (layoutFrame && typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(layoutFrame)
+  clearTimeout(suppressClickTimer)
 })
 </script>
 
 <style scoped>
 .wish-pool {
+  display: flex;
+  height: 100%;
+  min-height: 0;
   box-sizing: border-box;
+  flex-direction: column;
   width: 100%;
   padding: 1.5rem;
   margin: 0;
@@ -467,71 +510,103 @@ onBeforeUnmount(() => {
   min-height: 2.75rem;
   white-space: nowrap;
 }
-.wish-cloud {
+.wish-pool-stage {
   position: relative;
-  max-width: 1100px;
-  margin: 0 auto;
-  overflow: visible;
-}
-.wish-cloud-stage {
-  display: flex;
   width: 100%;
-  min-height: clamp(26rem, 58vh, 42rem);
-  align-items: center;
-  justify-content: center;
+  min-height: 0;
   box-sizing: border-box;
-  padding: clamp(5rem, 11vh, 8rem) 0 clamp(2.5rem, 6vh, 4.5rem);
-  overflow: visible;
+  flex: 1 1 auto;
+  border-block: 1px solid var(--surface-border);
+  margin-top: 1.25rem;
+  background: var(--surface-ground);
+  cursor: grab;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+.wish-pool-stage.is-panning {
+  cursor: grabbing;
+}
+.wish-pool-world {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  will-change: transform;
+}
+.wish-node {
+  position: absolute;
+  left: var(--wish-x);
+  top: var(--wish-y);
+  transform: translate(-50%, -50%);
+}
+.wish-item {
+  display: flex;
+  width: max-content;
+  max-width: min(15rem, calc(100cqw - 2rem));
+  box-sizing: border-box;
+  align-items: center;
+  flex-direction: column;
+  gap: 0.15rem;
+  border: 1px solid var(--surface-border);
+  background: var(--surface-card);
+  color: var(--text-color);
+  padding: 0.55rem 0.75rem;
+  border-radius: 0.5rem;
+  font-family: 'Huninn', 'Noto Sans TC', system-ui, sans-serif;
+  text-align: center;
 }
 .wish-word {
-  position: absolute;
-  display: inline-flex;
-  width: max-content;
-  max-width: none;
-  align-items: baseline;
-  flex: 0 0 auto;
-  gap: 0.3em;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  flex-direction: column;
+  gap: 0.2rem;
   border: 0;
   background: transparent;
-  color: var(--text-color);
+  color: inherit;
   cursor: pointer;
-  padding: 0.35em;
-  border-radius: 0.5em;
-  line-height: 1.25;
-  overflow-wrap: normal;
-  white-space: nowrap;
-  transform-origin: center;
-  font-family: 'Huninn', 'Noto Sans TC', system-ui, sans-serif;
+  padding: 0;
+  line-height: 1.35;
+  font-family: inherit;
+  text-align: center;
 }
-.wish-word__title,
-.wish-word small,
-.fulfilled-label {
-  white-space: nowrap;
+.wish-word__title {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
 }
-.wish-word small,
 .fulfilled-label {
   flex: 0 0 auto;
+  font-size: 0.7em;
+  font-weight: 700;
+  margin-left: 0;
 }
 .wish-word:hover,
 .wish-word:focus-visible {
-  background: var(--surface-hover);
+  color: var(--primary-color);
   outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
 }
-.wish-word small,
-.fulfilled-label {
-  font-size: 0.7em;
-  margin-left: 0;
-}
-.fulfilled-label {
-  font-weight: 700;
-}
-.wish-word.fulfilled {
+.wish-item.fulfilled {
   color: var(--green-600);
   font-weight: 600;
 }
-.wish-word.fulfilled:hover,
-.wish-word.fulfilled:focus-visible {
+.wish-item.fulfilled .wish-word:hover,
+.wish-item.fulfilled .wish-word:focus-visible {
   color: var(--green-500);
+}
+:deep(.wish-inline-heart.p-button) {
+  min-width: 2.25rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.45rem;
+  font-size: var(--app-font-size-xs);
 }
 .wish-spinner,
 .load-more {
@@ -576,10 +651,6 @@ onBeforeUnmount(() => {
   .wish-header :deep(.p-button) {
     width: 100%;
     justify-content: center;
-  }
-  .wish-cloud-stage {
-    min-height: clamp(20rem, 50vh, 30rem);
-    padding: clamp(3.5rem, 9vh, 5.5rem) 0 clamp(2rem, 5vh, 3rem);
   }
 }
 </style>
