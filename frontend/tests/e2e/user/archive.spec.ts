@@ -1,8 +1,20 @@
+import type { Locator, Page } from '@playwright/test'
+
 import { userTest as test, expect } from '../support/userTest'
 import { JSON_HEADERS } from '../support/constants'
 import { fromBase64ToBinaryString } from '../support/jwt'
 import { clickWhenVisible } from '../support/ui'
 import { createConsoleErrorCollector } from '../support/consoleDiagnostics'
+
+async function clickMovingTargetWithPointer(page: Page, target: Locator, description: string) {
+  await expect(target).toBeVisible()
+  const bounds = await target.boundingBox()
+  if (!bounds) throw new Error(`${description} was not measurable before pointer input`)
+
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+  await page.mouse.down()
+  await page.mouse.up()
+}
 
 test.describe('User › Archive browsing', () => {
   test('restricts admin area and supports archive browsing', async ({ page }) => {
@@ -345,8 +357,9 @@ test.describe('User › Archive browsing', () => {
     await expect(viewport).toBeVisible()
     await expect(bubbleButton).toBeVisible()
 
-    await bubbleButton.click()
+    await clickMovingTargetWithPointer(page, bubbleButton, 'Wish bubble')
     await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText(wishTitle)
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden()
 
@@ -365,12 +378,17 @@ test.describe('User › Archive browsing', () => {
       .not.toBe(initialTransform)
     await expect(dialog).toBeHidden()
 
-    await bubbleButton.click()
+    await clickMovingTargetWithPointer(page, bubbleButton, 'Wish bubble after pan')
     await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText(wishTitle)
     await page.keyboard.press('Escape')
     await expect(dialog).toBeHidden()
 
-    await page.getByRole('button', { name: '愛心 2' }).click()
+    await clickMovingTargetWithPointer(
+      page,
+      page.getByRole('button', { name: '愛心 2' }),
+      'Wish heart control'
+    )
     await expect.poll(() => heartRequestCount).toBe(1)
     await expect(page.getByRole('button', { name: '愛心 3' })).toBeVisible()
     await expect(dialog).toBeHidden()
