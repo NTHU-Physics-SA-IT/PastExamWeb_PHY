@@ -79,6 +79,7 @@ from app.services.archive_lifecycle_locks import (
 )
 from app.services.archive_mutation import (
     ArchiveMutationLifecycleConflict,
+    ArchiveMutationTargetCourseLifecycleConflict,
     mutate_current_archive,
     resolve_archive_move_target,
 )
@@ -1899,6 +1900,9 @@ async def update_archive(
         await db.commit()
         await db.refresh(archive)
         return archive
+    except ArchiveMutationTargetCourseLifecycleConflict:
+        await db.rollback()
+        raise course_lifecycle_conflict_error()
     except ArchiveMutationLifecycleConflict:
         await db.rollback()
         raise archive_lifecycle_conflict_error()
@@ -1966,6 +1970,9 @@ async def update_archive_course(
             "old_course_id": course_id,
             "new_course_id": target.course_id,
         }
+    except ArchiveMutationTargetCourseLifecycleConflict:
+        await db.rollback()
+        raise course_lifecycle_conflict_error()
     except ArchiveMutationLifecycleConflict:
         await db.rollback()
         raise archive_lifecycle_conflict_error()

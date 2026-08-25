@@ -48,6 +48,12 @@ class ArchiveMutationLifecycleConflict(RuntimeError):
     """Archive membership did not stabilize within the bounded retry."""
 
 
+class ArchiveMutationTargetCourseLifecycleConflict(
+    ArchiveMutationLifecycleConflict
+):
+    """The resolved target Course identity changed during locked revalidation."""
+
+
 @dataclass(frozen=True)
 class ArchiveMoveTarget:
     course_id: int
@@ -282,7 +288,7 @@ async def mutate_current_archive(
                 category=target.category,
             )
             if revalidated_target.course_id != target.course_id:
-                raise ArchiveMutationLifecycleConflict(
+                raise ArchiveMutationTargetCourseLifecycleConflict(
                     "Archive move target changed during mutation"
                 )
 

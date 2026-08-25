@@ -171,9 +171,12 @@ duplicates exist, without touching those trashed rows. Zero active matches and
 one or more trashed matches use the trash conflict above. Multiple active
 matches are a static integrity anomaly: the operation selects no Course, logs
 sanitized aggregate context, and fails through the generic internal-error
-boundary. Metadata mutation and reparenting retain one caller-owned database
-transaction, so validation, lifecycle drift, or commit failure leaves both
-metadata and the Course relationship unchanged.
+boundary. If post-lock revalidation resolves the normalized target to a
+different active Course, the operation returns `409 course_lifecycle_conflict`;
+source Archive relationship drift retains the distinct
+`409 archive_lifecycle_conflict` contract. Metadata mutation and reparenting
+retain one caller-owned database transaction, so validation, lifecycle drift,
+or commit failure leaves both metadata and the Course relationship unchanged.
 
 The Archive edit endpoint may receive `target_course_id` together with exam
 metadata. Both edit-only and move-only routes call the same lock-aware mutation

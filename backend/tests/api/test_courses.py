@@ -51,6 +51,7 @@ from app.models.models import (
     SubmissionStatus,
     UserRoles,
 )
+from app.services import archive_mutation
 from app.services.archive_mutation import ArchiveMoveTargetInvariantError
 from app.utils.auth import get_current_user
 from app.utils.course_text import (
@@ -1388,6 +1389,88 @@ async def test_update_archive_course_name_uses_unique_active_with_trashed_duplic
                     Course.id.in_(
                         [original.id, active.id, *(item.id for item in trashed)]
                     )
+                )
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_update_archive_course_normalized_target_drift_is_course_conflict(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    monkeypatch,
+):
+    admin = await make_user(is_admin=True)
+    marker = uuid.uuid4().hex
+    original = await _create_course(session_maker, name=f"Original drift {marker}")
+    target = await _create_course(session_maker, name=f"Target drift ({marker})")
+    replacement = await _create_course(
+        session_maker,
+        name=f"Replacement drift {marker}",
+    )
+    archive = await _create_archive(
+        session_maker,
+        course_id=original.id,
+        uploader_id=admin.id,
+    )
+    original_archive = {
+        "course_id": archive.course_id,
+        "name": archive.name,
+        "professor": archive.professor,
+        "academic_year": archive.academic_year,
+        "archive_type": archive.archive_type,
+        "has_answers": archive.has_answers,
+    }
+
+    async def changed_normalized_target(*args, **kwargs):
+        return archive_mutation.ArchiveMoveTarget(
+            course_id=replacement.id,
+            normalized_name=normalize_course_search_text(target.name),
+            category=target.category,
+        )
+
+    monkeypatch.setattr(
+        archive_mutation,
+        "resolve_archive_move_target",
+        changed_normalized_target,
+    )
+    app.dependency_overrides[get_current_user] = _override_user(admin)
+
+    try:
+        response = await client.patch(
+            f"/courses/{original.id}/archives/{archive.id}/course",
+            json={
+                "course_name": target.name,
+                "course_category": target.category,
+            },
+        )
+        assert response.status_code == 409
+        assert response.json() == {
+            "detail": {
+                "code": "course_lifecycle_conflict",
+                "message": "Course lifecycle changed during this request. Please retry.",
+                "reload_required": True,
+            }
+        }
+
+        async with session_maker() as session:
+            stored = await session.get(Archive, archive.id)
+            assert {
+                "course_id": stored.course_id,
+                "name": stored.name,
+                "professor": stored.professor,
+                "academic_year": stored.academic_year,
+                "archive_type": stored.archive_type,
+                "has_answers": stored.has_answers,
+            } == original_archive
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(
+                delete(Course).where(
+                    Course.id.in_([original.id, target.id, replacement.id])
                 )
             )
             await session.commit()
