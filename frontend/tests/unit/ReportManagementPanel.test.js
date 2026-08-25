@@ -9,6 +9,12 @@ import reportManagementSource from '@/components/admin/ReportManagementPanel.vue
 import { ADMIN_PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 
 const adminStylesSource = readFileSync(resolve(process.cwd(), 'src/style.css'), 'utf8')
+const sharedReviewStyles = adminStylesSource.slice(
+  adminStylesSource.indexOf(
+    '/* Shared Admin review-dialog anatomy extracted from Report Management. */'
+  ),
+  adminStylesSource.indexOf('/* Shared management typography extracted from Report Management. */')
+)
 
 const mocks = vi.hoisted(() => ({
   listSystem: vi.fn(),
@@ -461,9 +467,9 @@ describe('ReportManagementPanel', () => {
     expect(fields[1].get('.report-review__content-block').text()).toContain(
       '第一行\n第二行很長的完整內容'
     )
-    expect(reportManagementSource).toContain('overflow-wrap: anywhere')
-    expect(reportManagementSource).toContain('word-break: break-word')
-    expect(reportManagementSource).toContain('white-space: pre-wrap')
+    expect(sharedReviewStyles).toContain('overflow-wrap: anywhere')
+    expect(sharedReviewStyles).toContain('word-break: break-word')
+    expect(sharedReviewStyles).toContain('white-space: pre-wrap')
     expect(mocks.getSystem).toHaveBeenCalledWith(report.id)
     expect(mocks.updateSystemReadState).not.toHaveBeenCalled()
   })
@@ -526,20 +532,20 @@ describe('ReportManagementPanel', () => {
     expect(blocks).toHaveLength(1)
     expect(fields[0].get('.report-review__content-label').text()).toBe('補充說明')
     expect(blocks[0].text()).toContain('未提供補充說明')
-    expect(reportManagementSource).toContain('border: 1px solid var(--border-color)')
-    expect(reportManagementSource).toMatch(
+    expect(adminStylesSource).toContain('border: 1px solid var(--border-color)')
+    expect(adminStylesSource).toMatch(
       /\.report-review__content-block\s*\{[^}]*background:\s*transparent;/
     )
-    expect(reportManagementSource).not.toContain('var(--surface-border)')
-    expect(reportManagementSource).not.toContain('var(--surface-50)')
+    expect(adminStylesSource).not.toContain('var(--surface-border)')
+    expect(adminStylesSource).not.toContain('var(--surface-50)')
     expect(reportManagementSource).toContain('var(--app-font-size-base)')
   })
 
   it('keeps metadata two-column on narrow dialogs and uses the shared Thread info pill', () => {
-    expect(reportManagementSource).toMatch(
-      /@media \(max-width: 760px\)[\s\S]*?\.report-review__meta\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/
+    expect(adminStylesSource).toMatch(
+      /\.report-review__meta\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/
     )
-    expect(reportManagementSource).toMatch(
+    expect(adminStylesSource).toMatch(
       /@media \(max-width: 760px\)[\s\S]*?\.report-review__meta dd\s*\{[^}]*overflow-wrap:\s*anywhere;[^}]*word-break:\s*break-word;/
     )
     expect(reportManagementSource).toContain(
@@ -1121,10 +1127,10 @@ describe('ReportManagementPanel', () => {
     expect(adminStylesSource).toMatch(
       /\.admin-management-typography \.p-tag\s*\{[\s\S]*?font-size:\s*var\(--app-badge-font-size\) !important;/
     )
-    expect(reportManagementSource).toContain(':global(.report-management-dialog .p-dialog-title)')
-    expect(reportManagementSource).toContain('font-size: var(--app-control-font-size) !important;')
-    expect(reportManagementSource).toContain('font-size: var(--app-font-size-xs) !important;')
-    expect(reportManagementSource).not.toMatch(/font-size:\s*(?:0\.\d+|1\.05|2)rem/)
+    expect(adminStylesSource).toContain('.report-management-dialog .p-dialog-title')
+    expect(adminStylesSource).toContain('font-size: var(--app-control-font-size) !important;')
+    expect(adminStylesSource).toContain('font-size: var(--app-font-size-xs) !important;')
+    expect(sharedReviewStyles).not.toMatch(/font-size:\s*(?:0\.\d+|1\.05|2)rem/)
   })
 
   it('keeps system report header actions inline until its section is narrow', () => {
@@ -1153,14 +1159,14 @@ describe('ReportManagementPanel', () => {
 
   it('scales source and finalized review messages through their PrimeVue text nodes', () => {
     expect(reportManagementSource.match(/class="report-review__message"/g)).toHaveLength(3)
-    expect(reportManagementSource).toMatch(
-      /:global\(\.report-management-dialog \.report-review__message \.p-message-text\)\s*\{[^}]*font-size:\s*var\(--app-font-size-sm\) !important;[^}]*line-height:\s*1\.4;/
+    expect(adminStylesSource).toMatch(
+      /\.report-management-dialog \.report-review__message \.p-message-text\s*\{[^}]*font-size:\s*var\(--app-font-size-sm\) !important;[^}]*line-height:\s*1\.4;/
     )
-    expect(reportManagementSource).not.toMatch(
-      /:global\(\.report-management-dialog \.report-review__message \.p-message-text\)\s*\{[^}]*font-size:\s*(?:\d+(?:\.\d+)?px|1rem)/
+    expect(adminStylesSource).not.toMatch(
+      /\.report-management-dialog \.report-review__message \.p-message-text\s*\{[^}]*font-size:\s*(?:\d+(?:\.\d+)?px|1rem)/
     )
-    expect(reportManagementSource).not.toMatch(
-      /:global\(\.report-management-dialog \.report-review__message \.p-message-text\)\s*\{[^}]*(?:^|[;{]\s*)(?:height|min-height):/
+    expect(adminStylesSource).not.toMatch(
+      /\.report-management-dialog \.report-review__message \.p-message-text\s*\{[^}]*(?:^|[;{]\s*)(?:height|min-height):/
     )
   })
 

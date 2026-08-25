@@ -118,37 +118,49 @@
       :sortField="page.sortField"
       :sortOrder="page.sortOrder"
       class="slogan-table admin-data-table"
-      tableStyle="table-layout: fixed; min-width: 68rem"
+      tableStyle="width: 100%; table-layout: fixed"
       @page="onPage"
       @sort="onSort"
     >
       <template #empty>{{ $t('目前沒有首頁 slogan 投稿。') }}</template>
-      <Column field="created_at" sortField="created_at" :header="$t('投稿')" sortable>
+      <Column
+        field="created_at"
+        sortField="created_at"
+        :header="$t('投稿')"
+        style="width: 14%"
+        sortable
+      >
         <template #body="{ data }">
           <PersonTime :name="data.submitter_name" :time="data.created_at" />
         </template>
       </Column>
-      <Column field="content" :header="$t('投稿內容')" sortable>
+      <Column field="content" :header="$t('投稿內容')" style="width: 30%" sortable>
         <template #body="{ data }"
           ><span class="slogan-content">{{ data.content }}</span></template
         >
       </Column>
-      <Column field="reviewed_at" sortField="reviewed_at" :header="$t('審核')" sortable>
+      <Column
+        field="reviewed_at"
+        sortField="reviewed_at"
+        :header="$t('審核')"
+        style="width: 14%"
+        sortable
+      >
         <template #body="{ data }">
           <PersonTime :name="data.reviewer_name" :time="data.reviewed_at" empty />
         </template>
       </Column>
-      <Column field="status" :header="$t('審核狀態')" sortable>
+      <Column field="status" :header="$t('審核狀態')" style="width: 10%" sortable>
         <template #body="{ data }">
           <Tag :severity="statusSeverity(data.status)">{{ statusLabel(data.status) }}</Tag>
         </template>
       </Column>
-      <Column field="occurrence_level" :header="$t('出現等級')" sortable>
+      <Column field="occurrence_level" :header="$t('出現等級')" style="width: 10%" sortable>
         <template #body="{ data }">
           <Tag severity="info" :value="levelLabel(data.occurrence_level)" />
         </template>
       </Column>
-      <Column :header="$t('操作')">
+      <Column :header="$t('操作')" style="width: 22%">
         <template #body="{ data }">
           <div class="report-row-actions">
             <Button
@@ -260,13 +272,21 @@
 
     <Dialog
       v-model:visible="reviewVisible"
+      class="report-management-dialog"
       modal
       :draggable="false"
       :header="$t('查看/審核首頁 slogan')"
-      :style="{ width: '520px', maxWidth: '94vw' }"
+      :style="{ width: '720px', maxWidth: '94vw' }"
     >
-      <div v-if="selected" class="slogan-review">
-        <dl>
+      <div v-if="selected" class="report-review">
+        <div class="report-review__title">
+          <div>
+            <strong>{{ $t('首頁 slogan 管理') }}</strong>
+            <small>{{ formatTime(selected.created_at) }}</small>
+          </div>
+          <Tag :severity="statusSeverity(selected.status)" :value="statusLabel(selected.status)" />
+        </div>
+        <dl class="report-review__meta">
           <div>
             <dt>{{ $t('投稿人') }}</dt>
             <dd>{{ selected.submitter_name }}</dd>
@@ -274,18 +294,6 @@
           <div>
             <dt>{{ $t('投稿時間') }}</dt>
             <dd>{{ formatTime(selected.created_at) }}</dd>
-          </div>
-          <div>
-            <dt>{{ $t('slogan 內容') }}</dt>
-            <dd class="slogan-content">{{ selected.content }}</dd>
-          </div>
-          <div>
-            <dt>{{ $t('目前狀態') }}</dt>
-            <dd>
-              <Tag :severity="statusSeverity(selected.status)">{{
-                statusLabel(selected.status)
-              }}</Tag>
-            </dd>
           </div>
           <div>
             <dt>{{ $t('審核人') }}</dt>
@@ -296,7 +304,13 @@
             <dd>{{ formatTime(selected.reviewed_at) }}</dd>
           </div>
         </dl>
-        <div class="slogan-review__field">
+        <section class="report-review__content-field">
+          <strong class="report-review__content-label">{{ $t('slogan 內容') }}</strong>
+          <div class="report-review__content-block">
+            <p>{{ selected.content }}</p>
+          </div>
+        </section>
+        <div class="report-review__field">
           <label for="slogan-review-status">{{ $t('審核狀態') }}</label>
           <Select
             v-model="reviewForm.status"
@@ -307,7 +321,7 @@
             class="w-full"
           />
         </div>
-        <div class="slogan-review__field">
+        <div class="report-review__field">
           <label for="slogan-review-level">{{ $t('出現等級') }}</label>
           <Select
             v-model="reviewForm.occurrence_level"
@@ -318,7 +332,7 @@
             class="w-full"
           />
         </div>
-        <div class="slogan-review__actions">
+        <div class="report-review__actions">
           <Button :label="$t('取消')" severity="secondary" text @click="reviewVisible = false" />
           <Button :label="$t('儲存')" icon="pi pi-save" :loading="saving" @click="saveReview" />
         </div>
@@ -651,37 +665,8 @@ onMounted(load)
 .slogan-mobile-list {
   display: none;
 }
-.slogan-review,
-.slogan-review dl {
-  display: grid;
-  gap: 0.75rem;
-}
-.slogan-review dl {
-  margin: 0;
-}
-.slogan-review dl > div {
-  display: grid;
-  grid-template-columns: 6rem minmax(0, 1fr);
-  gap: 0.75rem;
-}
-.slogan-review dt {
-  color: var(--text-color-secondary);
-}
-.slogan-review dd {
-  margin: 0;
-}
-.slogan-review__field {
-  display: grid;
-  gap: 0.4rem;
-}
-.slogan-review__field label {
-  font-weight: 600;
-}
-.slogan-review__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.75rem;
-  margin-top: 0.5rem;
+.slogan-table :deep(.report-row-actions) {
+  flex-wrap: wrap;
 }
 .slogan-empty {
   margin: 0;
@@ -703,11 +688,16 @@ onMounted(load)
     justify-content: flex-start;
   }
 }
-@media (max-width: 640px) {
-  .slogan-review dl > div {
-    grid-template-columns: 1fr;
-    gap: 0.2rem;
+@container report-section (max-width: 1080px) {
+  .slogan-table {
+    display: none;
   }
+  .slogan-mobile-list {
+    display: grid;
+    gap: 0.8rem;
+  }
+}
+@media (max-width: 640px) {
   .slogan-overview__header {
     display: none;
   }

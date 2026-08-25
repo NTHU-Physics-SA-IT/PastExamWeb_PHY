@@ -2497,8 +2497,7 @@ onBeforeUnmount(teardownCardLayout)
 .report-management__empty {
   font-size: var(--app-font-size-sm);
 }
-.report-section__header,
-.report-review__actions {
+.report-section__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2878,47 +2877,6 @@ onBeforeUnmount(teardownCardLayout)
 .report-management__empty i {
   font-size: calc(var(--app-icon-size) * 2);
 }
-.report-review {
-  display: grid;
-  gap: 1rem;
-}
-.report-review__title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-.report-review__title > div {
-  display: grid;
-  gap: 0.2rem;
-}
-.report-review__title small {
-  color: var(--text-color-secondary);
-}
-.report-review__meta {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.55rem;
-  margin: 0;
-}
-.report-review__meta div {
-  min-width: 0;
-}
-.report-review__meta dt {
-  color: var(--text-color-secondary);
-  font-size: var(--app-font-size-xs);
-}
-.report-review__meta dd {
-  display: grid;
-  gap: 0.18rem;
-  margin: 0.15rem 0 0;
-  overflow-wrap: anywhere;
-}
-.report-review__meta dd small {
-  color: var(--text-color-secondary);
-  font-size: var(--app-font-size-xs);
-  line-height: 1.35;
-}
 .report-review__thread-content {
   gap: 0.1rem;
 }
@@ -2940,46 +2898,6 @@ onBeforeUnmount(teardownCardLayout)
   min-width: 0;
   white-space: normal;
   overflow-wrap: anywhere;
-}
-.report-review__content-field {
-  display: grid;
-  min-width: 0;
-  max-width: 100%;
-  gap: 0.4rem;
-}
-.report-review__content-label {
-  line-height: 1.35;
-}
-.report-review__content-block {
-  width: 100%;
-  min-width: 0;
-  max-width: 100%;
-  box-sizing: border-box;
-  padding: 0.75rem;
-  overflow: hidden;
-  border: 1px solid var(--border-color);
-  border-radius: var(--content-border-radius);
-  background: transparent;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-.report-review__content-block p {
-  max-width: 100%;
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-.report-review__content-block small {
-  display: block;
-  margin-top: 0.45rem;
-  color: var(--text-color-secondary);
-  overflow-wrap: anywhere;
-}
-.report-review__field {
-  display: grid;
-  gap: 0.35rem;
 }
 .report-review__delete-option {
   display: flex;
@@ -3029,61 +2947,6 @@ onBeforeUnmount(teardownCardLayout)
 }
 .system-read-state-tag {
   white-space: nowrap;
-}
-:global(.report-management-dialog),
-:global(.report-management-dialog .p-component) {
-  font-size: var(--app-font-size-base) !important;
-}
-:global(.report-management-dialog .p-dialog-title) {
-  font-size: var(--app-font-size-lg) !important;
-  line-height: 1.3;
-}
-:global(.report-management-dialog .p-inputtext),
-:global(.report-management-dialog .p-inputtext::placeholder),
-:global(.report-management-dialog textarea),
-:global(.report-management-dialog .p-textarea),
-:global(.report-management-dialog .p-select),
-:global(.report-management-dialog .p-select-label) {
-  font-size: var(--app-control-font-size) !important;
-}
-:global(.report-management-dialog .report-review__field .p-select),
-:global(.report-management-dialog .report-review__field .p-select-label),
-:global(.report-management-dialog .report-review__field textarea),
-:global(.report-management-dialog .report-review__field .p-textarea) {
-  background: color-mix(
-    in srgb,
-    var(--p-form-field-background, var(--bg-primary)) 92%,
-    var(--p-surface-300, #cbd5e1) 8%
-  ) !important;
-}
-:global(.report-management-dialog .p-button) {
-  min-height: 2rem;
-  font-size: var(--app-font-size-sm) !important;
-  line-height: 1.25;
-}
-:global(.report-management-dialog .p-button-label),
-:global(.report-management-dialog .p-button-icon) {
-  font-size: inherit !important;
-}
-:global(.report-management-dialog .p-tag) {
-  font-size: var(--app-badge-font-size) !important;
-  line-height: 1.25 !important;
-}
-:global(.report-management-dialog .report-review__meta dt),
-:global(.report-management-dialog .report-review__meta dd small),
-:global(.report-management-dialog .system-report-detail__read-state small),
-:global(.report-management-dialog .report-review__field > small) {
-  font-size: var(--app-font-size-xs) !important;
-  line-height: 1.35;
-}
-:global(.report-management-dialog .system-report-detail__note p),
-:global(.report-management-dialog .report-review__content-block small) {
-  font-size: var(--app-font-size-sm) !important;
-  line-height: 1.35;
-}
-:global(.report-management-dialog .report-review__message .p-message-text) {
-  font-size: var(--app-font-size-sm) !important;
-  line-height: 1.4;
 }
 @media (max-width: 1399.98px) {
   .report-section__header:not(.report-section__header--system) {
@@ -3347,20 +3210,6 @@ onBeforeUnmount(teardownCardLayout)
   }
   .report-mobile-info-item--wide {
     grid-column: auto;
-  }
-}
-@media (max-width: 760px) {
-  .report-review__meta {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.45rem 0.6rem;
-  }
-  .report-review__meta dd {
-    min-width: 0;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-  }
-  .report-review__actions {
-    flex-wrap: wrap;
   }
 }
 </style>
