@@ -1413,14 +1413,12 @@ function getSubmissionStatusClass(status) {
 }
 
 function getArchiveSubmissionKind(item) {
-  if (item?.is_admin_upload) return t('管理員投稿')
   if (item?.requested_category_key) return t('新分類 + 新課程')
   if (item?.requested_course_name) return t('新課程申請')
   return t('既有課程投稿')
 }
 
 function getArchiveSubmissionKindClass(item) {
-  if (item?.is_admin_upload) return 'soft-badge--type'
   if (item?.requested_category_key) return 'soft-badge--new-course-category'
   if (item?.requested_course_name) return 'soft-badge--new-course'
   return 'soft-badge--type'

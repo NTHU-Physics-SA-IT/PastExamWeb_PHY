@@ -825,7 +825,7 @@ describe('ArchiveView', () => {
     expect(archiveViewSource).not.toContain('owner_self_delete_consumed')
   })
 
-  it('separates the administrator identity badge from upload source metadata', async () => {
+  it('keeps administrator identity separate from the ordinary submission-family contract', async () => {
     listMySubmissionsMock.mockResolvedValue({
       data: [
         {
@@ -839,14 +839,54 @@ describe('ArchiveView', () => {
         },
         {
           id: 72,
-          status: 'deleted',
+          status: 'approved',
           is_admin_upload: true,
-          requested_category_key: 'fundamental',
           requested_course_name: '普通物理(二)',
           course_name: '普通物理(二)',
           name: '期末考',
           academic_year: '20242',
           professor: '李教授',
+        },
+        {
+          id: 73,
+          status: 'approved',
+          is_admin_upload: true,
+          requested_category_key: 'fundamental',
+          requested_course_name: '普通物理(二)',
+          course_name: '普通物理(二)',
+          name: '小考',
+          academic_year: '20242',
+          professor: '陳教授',
+        },
+        {
+          id: 74,
+          status: 'approved',
+          is_admin_upload: false,
+          course_name: '普通物理(二)',
+          name: '期中考',
+          academic_year: '20242',
+          professor: '王教授',
+        },
+        {
+          id: 75,
+          status: 'approved',
+          is_admin_upload: false,
+          requested_course_name: '普通物理(二)',
+          course_name: '普通物理(二)',
+          name: '期末考',
+          academic_year: '20242',
+          professor: '李教授',
+        },
+        {
+          id: 76,
+          status: 'approved',
+          is_admin_upload: false,
+          requested_category_key: 'fundamental',
+          requested_course_name: '普通物理(二)',
+          course_name: '普通物理(二)',
+          name: '小考',
+          academic_year: '20242',
+          professor: '陳教授',
         },
       ],
     })
@@ -866,41 +906,55 @@ describe('ArchiveView', () => {
     await flushPromises()
 
     const identityBadges = wrapper.findAll('.submission-admin-badge')
-    const sourceBadges = wrapper.findAll('.my-submission-type-badge')
+    let familyBadges = wrapper.findAll('.my-submission-type-badge')
     const metadataBadges = wrapper.findAll('.my-submission-meta-chip')
-    expect(identityBadges).toHaveLength(2)
-    expect(sourceBadges).toHaveLength(2)
-    expect(metadataBadges).toHaveLength(4)
+    expect(identityBadges).toHaveLength(3)
+    expect(familyBadges).toHaveLength(6)
+    expect(metadataBadges).toHaveLength(12)
     for (const identityBadge of identityBadges) {
       expect(identityBadge.text()).toBe('Administrator')
       expect(identityBadge.classes()).toEqual(
         expect.arrayContaining(['soft-badge', 'soft-badge--admin', 'submission-admin-badge'])
       )
     }
-    for (const sourceBadge of sourceBadges) {
-      expect(sourceBadge.text()).toContain('Administrator Upload')
-      expect(sourceBadge.classes()).toEqual(
-        expect.arrayContaining([
-          'submission-meta-chip',
-          'my-submission-type-badge',
-          'soft-badge--type',
-        ])
+    const expectedEnglishFamilies = [
+      ['Existing Course Submission', 'soft-badge--type'],
+      ['New Course Request', 'soft-badge--new-course'],
+      ['New Category + New Course', 'soft-badge--new-course-category'],
+      ['Existing Course Submission', 'soft-badge--type'],
+      ['New Course Request', 'soft-badge--new-course'],
+      ['New Category + New Course', 'soft-badge--new-course-category'],
+    ]
+    for (const [index, familyBadge] of familyBadges.entries()) {
+      const [expectedText, expectedClass] = expectedEnglishFamilies[index]
+      expect(familyBadge.text()).toBe(expectedText)
+      expect(familyBadge.classes()).toEqual(
+        expect.arrayContaining(['submission-meta-chip', 'my-submission-type-badge', expectedClass])
       )
-      expect(sourceBadge.classes()).not.toContain('soft-badge--new-course')
-      expect(sourceBadge.classes()).not.toContain('soft-badge--new-course-category')
-      expect(sourceBadge.classes()).not.toContain('soft-badge--admin')
+      expect(familyBadge.classes()).not.toContain('soft-badge--admin')
     }
+    expect(familyBadges[0].classes()).toEqual(familyBadges[3].classes())
+    expect(familyBadges[1].classes()).toEqual(familyBadges[4].classes())
+    expect(familyBadges[2].classes()).toEqual(familyBadges[5].classes())
     expect(
       metadataBadges.filter((badge) => badge.classes().includes('soft-badge--type'))
-    ).toHaveLength(2)
+    ).toHaveLength(6)
     expect(
       metadataBadges.filter((badge) => badge.classes().includes('soft-badge--info'))
-    ).toHaveLength(2)
+    ).toHaveLength(6)
 
     setLocale('zh-TW')
     await nextTick()
     expect(identityBadges.every((badge) => badge.text() === '管理員投稿')).toBe(true)
-    expect(sourceBadges.every((badge) => badge.text().includes('管理員投稿'))).toBe(true)
+    familyBadges = wrapper.findAll('.my-submission-type-badge')
+    expect(familyBadges.map((badge) => badge.text())).toEqual([
+      '既有課程投稿',
+      '新課程申請',
+      '新分類 + 新課程',
+      '既有課程投稿',
+      '新課程申請',
+      '新分類 + 新課程',
+    ])
     wrapper.unmount()
   })
 
