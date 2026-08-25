@@ -8,13 +8,17 @@ const wishServiceMock = vi.hoisted(() => ({
   remove: vi.fn(),
   toggleHeart: vi.fn(),
 }))
+const homepageSloganServiceMock = vi.hoisted(() => ({ submit: vi.fn() }))
 const confirmRequireMock = vi.hoisted(() => vi.fn())
 const toastAddMock = vi.hoisted(() => vi.fn())
 let resizeObserverCallback
 let resizeObserverTarget
 let resizeObserverDisconnected
 
-vi.mock('@/api', () => ({ wishService: wishServiceMock }))
+vi.mock('@/api', () => ({
+  homepageSloganService: homepageSloganServiceMock,
+  wishService: wishServiceMock,
+}))
 vi.mock('@/utils/auth', () => ({ getCurrentUser: () => ({ id: 1, is_admin: true }) }))
 vi.mock('primevue/useconfirm', () => ({ useConfirm: () => ({ require: confirmRequireMock }) }))
 vi.mock('primevue/usetoast', () => ({ useToast: () => ({ add: toastAddMock }) }))
@@ -104,6 +108,7 @@ describe('Wish Pool focused interactions', () => {
     wishServiceMock.toggleHeart
       .mockReset()
       .mockResolvedValue({ data: { hearted: true, heart_count: 1 } })
+    homepageSloganServiceMock.submit.mockReset().mockResolvedValue({ data: { id: 12 } })
   })
 
   afterEach(() => {
@@ -210,6 +215,31 @@ describe('Wish Pool focused interactions', () => {
     expect(wishPoolSource).toContain('@click="toggleReport"')
   })
 
+  it('submits a plain homepage slogan from the secondary Wish Pool action', async () => {
+    expect(wishPoolSource).toContain("$t('投稿首頁 slogan')")
+    expect(wishPoolSource).toContain("$t('例如：書卷沒有，考古這有')")
+    expect(wishPoolSource).toContain('outlined')
+    const wrapper = await mountPool({ selectWish: false })
+    wrapper.vm.openSloganDialog()
+    wrapper.vm.sloganContent = '  新的標語  '
+    await wrapper.vm.submitSlogan()
+    expect(homepageSloganServiceMock.submit).toHaveBeenCalledWith('新的標語')
+    expect(toastAddMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        summary: '投稿成功',
+        detail: '期待有一天可以在首頁看到你的 slogan！',
+      })
+    )
+    expect(wrapper.vm.sloganDialogVisible).toBe(false)
+  })
+
+  it('shows the existing creator_name only inside the admin Wish detail metadata', async () => {
+    expect(wishPoolSource).toContain('v-if="isAdmin" class="wish-creator"')
+    expect(wishPoolSource).toContain("$t('許願者：{name}', { name: selected.creator_name })")
+    const wrapper = await mountPool()
+    expect(wrapper.get('.wish-creator').text()).toContain('Alice')
+  })
+
   it('uses the existing fulfilled state for a theme-safe success treatment', () => {
     expect(wishPoolSource).toMatch(/:class="\{[\s\S]*?fulfilled:\s*wish\.fulfilled,/)
     expect(wishPoolSource).toContain('v-if="wish.fulfilled" class="fulfilled-label"')
@@ -237,7 +267,13 @@ describe('Wish Pool focused interactions', () => {
     const WishPool = (await import('@/components/WishPool.vue')).default
     const wrapper = mount(WishPool, {
       props: { coursesList: {}, courseCategories: [] },
-      global: { stubs, mocks: { $t: (key) => key } },
+      global: {
+        stubs,
+        mocks: {
+          $t: (key, params = {}) =>
+            key.replace(/\{(\w+)\}/g, (placeholder, name) => params[name] ?? placeholder),
+        },
+      },
     })
     await flushPromises()
     expect(resizeObserverTarget).toBe(wrapper.get('.wish-pool-stage').element)

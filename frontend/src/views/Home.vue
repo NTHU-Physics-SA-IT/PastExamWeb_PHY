@@ -58,7 +58,7 @@
             </h1>
             <p class="title-campus"><span></span>NTHU PHYSICS<span></span></p>
           </div>
-          <p class="subtitle">書卷沒有，考古這有</p>
+          <p class="subtitle">{{ homepageSlogan }}</p>
           <div class="hero-actions">
             <Button
               icon="pi pi-building-columns"
@@ -135,7 +135,7 @@ import {
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useTheme } from '../utils/useTheme'
-import { statisticsService } from '../api'
+import { homepageSloganService, statisticsService } from '../api'
 import { renderToString } from 'katex'
 import { useFormulaPhysics } from '../composables/useFormulaPhysics'
 import { DEFAULT_DESCRIPTION, SITE_URL, setSeo } from '../utils/seo'
@@ -144,6 +144,8 @@ import 'katex/dist/katex.min.css'
 const { isDarkTheme } = useTheme()
 const { t, locale } = useI18n()
 const router = useRouter()
+const FALLBACK_HOMEPAGE_SLOGAN = '書卷沒有，考古這有'
+const homepageSlogan = ref(FALLBACK_HOMEPAGE_SLOGAN)
 const formulaCloud = ref(null)
 const titleLineLeading = ref(null)
 const titleLineTrailing = ref(null)
@@ -354,6 +356,7 @@ onMounted(async () => {
   desktopLayoutMediaQuery.addEventListener('change', syncDesktopHeroLayout)
   initializeMassCoreEntry(desktopLayoutMediaQuery)
   applyHomeSeo()
+  void fetchHomepageSlogan()
   await fetchStatistics()
 })
 
@@ -526,6 +529,16 @@ async function fetchStatistics() {
     }
     completeMetricsAnimation()
     statsLoaded.value = true
+  }
+}
+
+async function fetchHomepageSlogan() {
+  homepageSlogan.value = FALLBACK_HOMEPAGE_SLOGAN
+  try {
+    const content = (await homepageSloganService.getSelected()).data?.content?.trim()
+    if (content) homepageSlogan.value = content
+  } catch {
+    homepageSlogan.value = FALLBACK_HOMEPAGE_SLOGAN
   }
 }
 

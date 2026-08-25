@@ -85,6 +85,20 @@ class CommentReportStatus(str, PyEnum):
     DISMISSED = "dismissed"
 
 
+class HomepageSloganStatus(str, PyEnum):
+    PENDING = "pending"
+    ENABLED = "enabled"
+    DISABLED = "disabled"
+
+
+class HomepageSloganOccurrenceLevel(str, PyEnum):
+    SUPER_RARE = "super_rare"
+    RARE = "rare"
+    NORMAL = "normal"
+    FREQUENT = "frequent"
+    SUPER_FREQUENT = "super_frequent"
+
+
 class TrashEntityType(str, PyEnum):
     ARCHIVE = "archive"
     ARCHIVE_SUBMISSION = "archive_submission"
@@ -741,6 +755,88 @@ class AboutUsEntry(SQLModel, table=True):
             nullable=True,
             index=True,
         ),
+    )
+
+
+class HomepageSloganSubmission(SQLModel, table=True):
+    __tablename__ = "homepage_slogan_submissions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'enabled', 'disabled')",
+            name="ck_homepage_slogan_submissions_status",
+        ),
+        CheckConstraint(
+            "occurrence_level IN "
+            "('super_rare', 'rare', 'normal', 'frequent', 'super_frequent')",
+            name="ck_homepage_slogan_submissions_occurrence_level",
+        ),
+        Index(
+            "ix_homepage_slogan_submissions_status_created",
+            "status",
+            "created_at",
+        ),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    content: str = Field(sa_column=Column(String(80), nullable=False))
+    submitter_user_id: int | None = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    submitter_name_snapshot: str = Field(
+        sa_column=Column(String(100), nullable=False)
+    )
+    status: str = Field(
+        default=HomepageSloganStatus.PENDING.value,
+        sa_column=Column(
+            String(20),
+            nullable=False,
+            index=True,
+            server_default=text("'pending'"),
+        ),
+    )
+    occurrence_level: str = Field(
+        default=HomepageSloganOccurrenceLevel.NORMAL.value,
+        sa_column=Column(
+            String(24),
+            nullable=False,
+            server_default=text("'normal'"),
+        ),
+    )
+    reviewer_user_id: int | None = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    reviewed_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    created_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(UTC),
+            nullable=False,
+            index=True,
+            server_default=text("now()"),
+        )
+    )
+    updated_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(UTC),
+            nullable=False,
+            server_default=text("now()"),
+        )
     )
 
 
@@ -1707,9 +1803,14 @@ class AdminReportAttentionRead(BaseModel):
     total: int
 
 
+class AdminAnnouncementAttentionRead(BaseModel):
+    homepage_slogans: int
+
+
 class AdminAttentionSummaryRead(BaseModel):
     review_center: AdminReviewAttentionRead
     report_management: AdminReportAttentionRead
+    announcement_management: AdminAnnouncementAttentionRead
 
 
 class ArchiveWishCreate(BaseModel):
@@ -1778,6 +1879,67 @@ class ArchiveWishCreate(BaseModel):
         if self.requested_category_key and not self.requested_course_name:
             raise ValueError("A new category wish must also request a new course")
         return self
+
+
+class HomepageSloganCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=80)
+
+    @field_validator("content")
+    @classmethod
+    def normalize_content(cls, value: str) -> str:
+        content = value.strip()
+        if not content:
+            raise ValueError("Slogan must not be blank")
+        if any(separator in content for separator in ("\r", "\n", "\u2028", "\u2029")):
+            raise ValueError("Slogan must be a single line")
+        return content
+
+
+class HomepageSloganAdminUpdate(BaseModel):
+    status: HomepageSloganStatus
+    occurrence_level: HomepageSloganOccurrenceLevel
+
+    @field_validator("status")
+    @classmethod
+    def require_reviewed_status(
+        cls, value: HomepageSloganStatus
+    ) -> HomepageSloganStatus:
+        if value == HomepageSloganStatus.PENDING:
+            raise ValueError("A reviewed slogan status is required")
+        return value
+
+
+class HomepageSloganPublicRead(BaseModel):
+    id: int
+    content: str
+
+
+class HomepageSloganAdminRead(BaseModel):
+    id: int
+    content: str
+    submitter_user_id: int | None = None
+    submitter_name: str
+    status: HomepageSloganStatus
+    occurrence_level: HomepageSloganOccurrenceLevel
+    reviewer_user_id: int | None = None
+    reviewer_name: str | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class HomepageSloganStatusCounts(BaseModel):
+    pending: int = 0
+    enabled: int = 0
+    disabled: int = 0
+
+
+class HomepageSloganAdminListRead(BaseModel):
+    items: list[HomepageSloganAdminRead] = Field(default_factory=list)
+    total: int
+    limit: int
+    offset: int
+    status_counts: HomepageSloganStatusCounts
 
 
 class ArchiveWishRead(BaseModel):

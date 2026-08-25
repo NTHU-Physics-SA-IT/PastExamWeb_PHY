@@ -35,6 +35,11 @@ MinIO. Help Upload deliberately reuses the ordinary Archive upload and review
 pipeline, so its storage and later review side effects remain those of an
 ordinary upload.
 
+Homepage slogan submission, review, occurrence-level changes, and permanent
+deletion likewise produce only API/UI feedback. They do not create a
+`PersonalNotification`, announcement/read receipt, WebSocket event, Redis
+mutation, or MinIO operation.
+
 ## Current notification inventory
 
 | Event | Durable notification | Recipient/source | Current transaction evidence |
@@ -411,6 +416,7 @@ integration.
 | WebSocket discussion update | Database commit precedes broadcast | Durable write succeeds even if live delivery fails |
 | Redis | Used primarily for authentication token blacklist/state | Not part of archive lifecycle atomicity |
 | About Us create/update | Route-authorized single PostgreSQL commit | No notification, receipt, storage, Redis, or WebSocket side effect |
+| Homepage slogan submit/review/delete | Route-authorized single PostgreSQL commit; review locks the exact row and updates latest decision provenance only when status changes | Silent and database-only; direct permanent deletion is terminal and bypasses Trash |
 | Administrator archive backup export | Read-only effective-public query plus MinIO reads into one spooled response | No persistent mutation; any selected object-read failure aborts the response |
 
 ## NTHU OAuth and login handoff

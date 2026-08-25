@@ -12,6 +12,8 @@ from app.models.models import (
     ArchiveType,
     ArchiveWishReport,
     CommentReport,
+    HomepageSloganStatus,
+    HomepageSloganSubmission,
     SubmissionStatus,
     SystemIssueReport,
     UserRoles,
@@ -178,6 +180,23 @@ async def test_admin_attention_summary_uses_canonical_outstanding_states(
                     description="Deleted unread issue",
                     deleted_at=now,
                 ),
+                HomepageSloganSubmission(
+                    content=f"Pending {unique}",
+                    submitter_user_id=user.id,
+                    submitter_name_snapshot="Submitter",
+                ),
+                HomepageSloganSubmission(
+                    content=f"Enabled {unique}",
+                    submitter_user_id=user.id,
+                    submitter_name_snapshot="Submitter",
+                    status=HomepageSloganStatus.ENABLED.value,
+                ),
+                HomepageSloganSubmission(
+                    content=f"Disabled {unique}",
+                    submitter_user_id=user.id,
+                    submitter_name_snapshot="Submitter",
+                    status=HomepageSloganStatus.DISABLED.value,
+                ),
             ]
             session.add_all(rows)
             await session.commit()
@@ -200,6 +219,12 @@ async def test_admin_attention_summary_uses_canonical_outstanding_states(
             "wish_reports": baseline["report_management"]["wish_reports"] + 1,
             "system_issues": baseline["report_management"]["system_issues"] + 1,
             "total": baseline["report_management"]["total"] + 4,
+        }
+        assert summary["announcement_management"] == {
+            "homepage_slogans": baseline["announcement_management"][
+                "homepage_slogans"
+            ]
+            + 1,
         }
 
         app.dependency_overrides[get_current_user] = _override_user(

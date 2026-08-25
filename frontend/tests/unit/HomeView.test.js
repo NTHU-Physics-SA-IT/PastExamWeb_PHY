@@ -16,10 +16,14 @@ const statisticsPayload = vi.hoisted(() => ({
 const statisticsServiceMock = vi.hoisted(() => ({
   getSystemStatistics: vi.fn(),
 }))
+const homepageSloganServiceMock = vi.hoisted(() => ({
+  getSelected: vi.fn(),
+}))
 
 const routerPushMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/api', () => ({
+  homepageSloganService: homepageSloganServiceMock,
   statisticsService: statisticsServiceMock,
 }))
 
@@ -85,10 +89,27 @@ describe('HomeView', () => {
     globalThis.ResizeObserver = ResizeObserverMock
     SVGElement.prototype.getScreenCTM = vi.fn(() => null)
     statisticsServiceMock.getSystemStatistics.mockReset()
+    homepageSloganServiceMock.getSelected.mockReset().mockResolvedValue({ data: null })
     routerPushMock.mockReset()
     statisticsServiceMock.getSystemStatistics.mockResolvedValue({
       data: { data: statisticsPayload },
     })
+  })
+
+  it('uses the selected slogan and keeps the safe fallback when loading fails', async () => {
+    homepageSloganServiceMock.getSelected.mockResolvedValueOnce({
+      data: { id: 9, content: '新的首頁標語' },
+    })
+    const selectedWrapper = mount(HomeView)
+    await flushPromises()
+    expect(selectedWrapper.get('.subtitle').text()).toBe('新的首頁標語')
+    selectedWrapper.unmount()
+
+    homepageSloganServiceMock.getSelected.mockRejectedValueOnce(new Error('unavailable'))
+    const fallbackWrapper = mount(HomeView)
+    await flushPromises()
+    expect(fallbackWrapper.get('.subtitle').text()).toBe('書卷沒有，考古這有')
+    fallbackWrapper.unmount()
   })
 
   afterEach(() => {
