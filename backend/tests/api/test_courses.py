@@ -1450,7 +1450,6 @@ async def test_update_archive_course_normalized_target_drift_is_course_conflict(
             "detail": {
                 "code": "course_lifecycle_conflict",
                 "message": "Course lifecycle changed during this request. Please retry.",
-                "reload_required": True,
             }
         }
 
