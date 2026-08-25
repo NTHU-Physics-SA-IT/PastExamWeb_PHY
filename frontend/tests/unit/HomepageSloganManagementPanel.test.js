@@ -88,6 +88,52 @@ describe('HomepageSloganManagementPanel', () => {
     expect(source).toContain("acceptLabel: t('永久刪除')")
   })
 
+  it('keeps the desktop table fluid while retaining the existing responsive card surface', async () => {
+    const wrapper = shallowMount(HomepageSloganManagementPanel)
+    await flushPromises()
+
+    const table = wrapper.findComponent({ name: 'DataTable' })
+    expect(table.exists()).toBe(true)
+    expect(table.attributes('tablestyle')).toBe('width: 100%; table-layout: fixed')
+    expect(table.attributes('tablestyle')).not.toContain('min-width')
+    expect(wrapper.find('.slogan-mobile-list').exists()).toBe(true)
+    expect(wrapper.find('.admin-responsive-card-surface').exists()).toBe(true)
+  })
+
+  it('uses the shared report-review anatomy with one top-right status and boxed slogan content', async () => {
+    const wrapper = shallowMount(HomepageSloganManagementPanel, {
+      global: {
+        stubs: {
+          Dialog: { template: '<div><slot /></div>' },
+        },
+      },
+    })
+    await flushPromises()
+    wrapper.vm.openReview(item)
+    await wrapper.vm.$nextTick()
+
+    const review = wrapper.get('.report-review')
+    const title = review.get('.report-review__title')
+    expect(title.findComponent({ name: 'Tag' }).exists()).toBe(true)
+    expect(review.findAllComponents({ name: 'Tag' })).toHaveLength(1)
+    expect(review.findAll('.report-review__meta dt').map((label) => label.text())).toEqual([
+      '投稿人',
+      '投稿時間',
+      '審核人',
+      '審核時間',
+    ])
+    expect(review.text()).not.toContain('目前狀態')
+    expect(review.get('.report-review__content-label').text()).toBe('slogan 內容')
+    expect(review.get('.report-review__content-block').text()).toBe(item.content)
+    expect(review.findAll('.report-review__field')).toHaveLength(2)
+    expect(
+      review
+        .get('.report-review__actions')
+        .findAllComponents({ name: 'Button' })
+        .map((button) => button.attributes('label'))
+    ).toEqual(['取消', '儲存'])
+  })
+
   it('loads lazily and saves a reviewed state with a canonical occurrence level', async () => {
     const wrapper = shallowMount(HomepageSloganManagementPanel)
     await flushPromises()
