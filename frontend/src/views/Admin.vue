@@ -15,7 +15,21 @@
             </span>
           </Tab>
           <Tab value="0">{{ $t('課程管理') }}</Tab>
-          <Tab value="2">{{ $t('公告管理') }}</Tab>
+          <Tab value="2">
+            <span class="admin-tab-label">
+              <span>{{ $t('公告管理') }}</span>
+              <Badge
+                class="admin-attention-badge"
+                v-if="
+                  formatAttentionBadge(attentionSummary.announcement_management.homepage_slogans)
+                "
+                :value="
+                  formatAttentionBadge(attentionSummary.announcement_management.homepage_slogans)
+                "
+                severity="danger"
+              />
+            </span>
+          </Tab>
           <Tab value="1">{{ $t('使用者管理') }}</Tab>
           <Tab value="5">
             <span class="admin-tab-label">
@@ -1387,276 +1401,322 @@
           </TabPanel>
 
           <TabPanel value="2">
-            <div class="p-2 md:p-4">
-              <div class="admin-toolbar admin-toolbar--announcement mb-4">
-                <div class="admin-toolbar__filters">
-                  <div class="admin-toolbar__search relative w-full md:w-auto">
-                    <i class="pi pi-search search-icon"></i>
-                    <InputText
-                      id="admin-notification-search"
-                      name="admin-notification-search"
-                      v-model="notificationSearchQuery"
-                      :placeholder="$t('搜尋公告')"
-                      class="w-full pl-6"
+            <Tabs v-model:value="announcementManagementTab" class="announcement-management-tabs">
+              <TabList>
+                <Tab value="announcements">{{ $t('公告管理') }}</Tab>
+                <Tab value="homepage-slogans">
+                  <span class="admin-tab-label">
+                    <span>{{ $t('首頁 slogan 管理') }}</span>
+                    <Badge
+                      class="admin-attention-badge admin-attention-badge--child"
+                      v-if="
+                        formatAttentionBadge(
+                          attentionSummary.announcement_management.homepage_slogans
+                        )
+                      "
+                      :value="
+                        formatAttentionBadge(
+                          attentionSummary.announcement_management.homepage_slogans
+                        )
+                      "
+                      severity="danger"
+                    />
+                  </span>
+                </Tab>
+              </TabList>
+              <TabPanels>
+                <TabPanel value="announcements">
+                  <div class="p-2 md:p-4">
+                    <div class="admin-toolbar admin-toolbar--announcement mb-4">
+                      <div class="admin-toolbar__filters">
+                        <div class="admin-toolbar__search relative w-full md:w-auto">
+                          <i class="pi pi-search search-icon"></i>
+                          <InputText
+                            id="admin-notification-search"
+                            name="admin-notification-search"
+                            v-model="notificationSearchQuery"
+                            :placeholder="$t('搜尋公告')"
+                            class="w-full pl-6"
+                          />
+                        </div>
+                        <Select
+                          inputId="admin-notification-severity-filter"
+                          name="admin-notification-severity-filter"
+                          v-model="notificationSeverityFilter"
+                          :options="notificationSeverityFilterOptions"
+                          optionLabel="label"
+                          optionValue="value"
+                          :placeholder="$t('篩選重要程度')"
+                          showClear
+                          class="admin-toolbar__select w-full md:w-14rem"
+                        />
+                      </div>
+                      <div class="admin-toolbar__actions">
+                        <Button
+                          :label="$t('新增公告')"
+                          icon="pi pi-plus"
+                          severity="success"
+                          @click="openNotificationCreateDialog"
+                          class="admin-toolbar__button w-full md:w-auto"
+                        />
+                      </div>
+                    </div>
+
+                    <ProgressSpinner
+                      v-if="notificationsLoading"
+                      class="w-full flex justify-content-center mt-4"
+                      strokeWidth="4"
+                    />
+                    <DataTable
+                      v-else
+                      :value="sortedNotifications"
+                      class="admin-data-table admin-desktop-data-table notification-management-table"
+                      paginator
+                      :first="notificationFirst"
+                      :rows="notificationRows"
+                      :rowsPerPageOptions="ADMIN_PAGE_SIZE_OPTIONS"
+                      paginatorTemplate="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown CurrentPageReport"
+                      :currentPageReportTemplate="paginationReportTemplate"
+                      tableStyle="min-width: 50rem"
+                      scrollable
+                      scrollHeight="65vh"
+                      responsiveLayout="stack"
+                      breakpoint="1023px"
+                      sortMode="multiple"
+                      :multiSortMeta="notificationSortMeta"
+                      removableSort
+                      @page="handleNotificationPage"
+                      @sort="handleNotificationSort"
+                    >
+                      <Column field="title" :header="$t('標題')" sortable style="width: 26%">
+                        <template #body="{ data }">
+                          <span class="mobile-primary-text admin-desktop-cell">{{
+                            data.title
+                          }}</span>
+                          <div class="admin-mobile-card admin-announcement-mobile-card">
+                            <div class="admin-card-primary">
+                              <strong class="admin-card-title">{{ data.title }}</strong>
+                            </div>
+                            <div class="admin-card-meta">
+                              <Tag :severity="getNotificationSeverity(data.severity)">
+                                {{ getNotificationSeverityLabel(data.severity) }}
+                              </Tag>
+                              <Tag :severity="data.is_active ? 'success' : 'secondary'">
+                                {{ data.is_active ? $t('啟用中') : $t('已停用') }}
+                              </Tag>
+                              <Tag
+                                :severity="isNotificationEffective(data) ? 'success' : 'secondary'"
+                              >
+                                {{ isNotificationEffective(data) ? $t('生效中') : $t('未生效') }}
+                              </Tag>
+                              <div class="notification-mobile-update">
+                                <span class="notification-mobile-update__label">{{
+                                  $t('最近更新')
+                                }}</span>
+                                <span
+                                  class="notification-mobile-update__actor"
+                                  :title="getNotificationUpdaterLabel(data)"
+                                  >{{ getNotificationUpdaterLabel(data) }}・</span
+                                >
+                                <time
+                                  class="notification-mobile-update__time"
+                                  :datetime="data.updated_at || data.created_at"
+                                >
+                                  {{ formatAdminActorTime(data.updated_at || data.created_at) }}
+                                </time>
+                              </div>
+                            </div>
+                          </div>
+                        </template>
+                      </Column>
+                      <Column field="severity" :header="$t('重要程度')" sortable style="width: 12%">
+                        <template #body="{ data }">
+                          <Tag :severity="getNotificationSeverity(data.severity)">
+                            {{ getNotificationSeverityLabel(data.severity) }}
+                          </Tag>
+                        </template>
+                      </Column>
+                      <Column
+                        field="is_active"
+                        sortField="is_active"
+                        :header="$t('啟用中')"
+                        sortable
+                        style="width: 12%"
+                      >
+                        <template #body="{ data }">
+                          <Tag :severity="data.is_active ? 'success' : 'secondary'">
+                            {{ data.is_active ? $t('啟用中') : $t('已停用') }}
+                          </Tag>
+                        </template>
+                      </Column>
+                      <Column
+                        :header="$t('生效中')"
+                        sortField="effectiveOrder"
+                        sortable
+                        style="width: 12%"
+                      >
+                        <template #body="{ data }">
+                          <Tag :severity="isNotificationEffective(data) ? 'success' : 'secondary'">
+                            {{ isNotificationEffective(data) ? $t('生效中') : $t('未生效') }}
+                          </Tag>
+                        </template>
+                      </Column>
+                      <Column
+                        field="updated_at"
+                        sortField="updated_at"
+                        :header="$t('最近更新')"
+                        sortable
+                        style="width: 11rem; min-width: 11rem"
+                      >
+                        <template #body="{ data }">
+                          <div class="admin-actor-time admin-actor-time--notification">
+                            <span
+                              class="admin-actor-time__name"
+                              :title="getNotificationUpdaterLabel(data)"
+                            >
+                              {{ getNotificationUpdaterLabel(data) }}
+                            </span>
+                            <time
+                              class="admin-actor-time__time"
+                              :datetime="data.updated_at || data.created_at"
+                            >
+                              {{ formatAdminActorTime(data.updated_at || data.created_at) }}
+                            </time>
+                          </div>
+                        </template>
+                      </Column>
+                      <Column :header="$t('操作')" style="width: 20%">
+                        <template #body="{ data }">
+                          <div class="admin-card-actions">
+                            <Button
+                              icon="pi pi-pencil"
+                              severity="warning"
+                              size="small"
+                              @click="openNotificationEditDialog(data)"
+                              :label="$t('編輯')"
+                              :aria-label="$t('編輯公告')"
+                              :title="$t('編輯公告')"
+                            />
+                            <Button
+                              class="admin-danger-solid-button"
+                              icon="pi pi-trash"
+                              severity="danger"
+                              size="small"
+                              @click="confirmDeleteNotification(data)"
+                              :label="$t('刪除')"
+                              :aria-label="$t('刪除公告')"
+                              :title="$t('刪除公告')"
+                            />
+                          </div>
+                        </template>
+                      </Column>
+                    </DataTable>
+                    <div
+                      v-if="!notificationsLoading"
+                      class="admin-mobile-list admin-mobile-list--notifications"
+                    >
+                      <article
+                        v-for="notification in paginatedNotifications"
+                        :key="notification.id"
+                        class="admin-mobile-card admin-announcement-card admin-tablet-card"
+                      >
+                        <header class="admin-tablet-card-header">
+                          <div class="admin-tablet-title-group announcement-card-title-group">
+                            <strong class="admin-card-title admin-tablet-card-title">{{
+                              notification.title
+                            }}</strong>
+                            <div class="admin-tablet-tag-group announcement-type-tag-group">
+                              <Tag :severity="getNotificationSeverity(notification.severity)">
+                                {{ getNotificationSeverityLabel(notification.severity) }}
+                              </Tag>
+                            </div>
+                          </div>
+                          <div class="admin-tablet-status-group">
+                            <Tag :severity="notification.is_active ? 'success' : 'secondary'">
+                              {{ notification.is_active ? $t('啟用中') : $t('已停用') }}
+                            </Tag>
+                            <Tag
+                              :severity="
+                                isNotificationEffective(notification) ? 'success' : 'secondary'
+                              "
+                            >
+                              {{
+                                isNotificationEffective(notification) ? $t('生效中') : $t('未生效')
+                              }}
+                            </Tag>
+                          </div>
+                        </header>
+                        <section class="admin-tablet-metadata">
+                          <div class="admin-tablet-metadata-item admin-tablet-metadata-item--wide">
+                            <span class="admin-tablet-metadata-label">{{ $t('最近更新') }}</span>
+                            <div class="notification-mobile-update__value">
+                              <span
+                                class="notification-mobile-update__actor"
+                                :title="getNotificationUpdaterLabel(notification)"
+                                >{{ getNotificationUpdaterLabel(notification) }}・</span
+                              >
+                              <time
+                                class="notification-mobile-update__time"
+                                :datetime="notification.updated_at || notification.created_at"
+                              >
+                                {{
+                                  formatAdminActorTime(
+                                    notification.updated_at || notification.created_at
+                                  )
+                                }}
+                              </time>
+                            </div>
+                          </div>
+                        </section>
+                        <section
+                          class="admin-card-actions admin-mobile-card-actions announcement-mobile-actions admin-tablet-actions"
+                        >
+                          <Button
+                            icon="pi pi-pencil"
+                            severity="warning"
+                            size="small"
+                            @click="openNotificationEditDialog(notification)"
+                            :label="$t('編輯')"
+                            :aria-label="$t('編輯公告')"
+                            :title="$t('編輯公告')"
+                          />
+                          <Button
+                            class="admin-danger-solid-button"
+                            icon="pi pi-trash"
+                            severity="danger"
+                            size="small"
+                            @click="confirmDeleteNotification(notification)"
+                            :label="$t('刪除')"
+                            :aria-label="$t('刪除公告')"
+                            :title="$t('刪除公告')"
+                          />
+                        </section>
+                      </article>
+                      <Paginator
+                        :first="notificationFirst"
+                        :rows="notificationRows"
+                        :totalRecords="sortedNotifications.length"
+                        :rowsPerPageOptions="ADMIN_PAGE_SIZE_OPTIONS"
+                        :pageLinkSize="1"
+                        template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown CurrentPageReport"
+                        :currentPageReportTemplate="paginationReportTemplate"
+                        :aria-label="$t('公告管理分頁')"
+                        class="admin-mobile-paginator"
+                        @page="handleNotificationPage"
+                      />
+                    </div>
+                  </div>
+                </TabPanel>
+                <TabPanel value="homepage-slogans">
+                  <div class="p-2 md:p-4">
+                    <HomepageSloganManagementPanel
+                      v-if="announcementManagementTab === 'homepage-slogans'"
+                      @attention-change="loadAdminAttentionSummary"
                     />
                   </div>
-                  <Select
-                    inputId="admin-notification-severity-filter"
-                    name="admin-notification-severity-filter"
-                    v-model="notificationSeverityFilter"
-                    :options="notificationSeverityFilterOptions"
-                    optionLabel="label"
-                    optionValue="value"
-                    :placeholder="$t('篩選重要程度')"
-                    showClear
-                    class="admin-toolbar__select w-full md:w-14rem"
-                  />
-                </div>
-                <div class="admin-toolbar__actions">
-                  <Button
-                    :label="$t('新增公告')"
-                    icon="pi pi-plus"
-                    severity="success"
-                    @click="openNotificationCreateDialog"
-                    class="admin-toolbar__button w-full md:w-auto"
-                  />
-                </div>
-              </div>
-
-              <ProgressSpinner
-                v-if="notificationsLoading"
-                class="w-full flex justify-content-center mt-4"
-                strokeWidth="4"
-              />
-              <DataTable
-                v-else
-                :value="sortedNotifications"
-                class="admin-data-table admin-desktop-data-table notification-management-table"
-                paginator
-                :first="notificationFirst"
-                :rows="notificationRows"
-                :rowsPerPageOptions="ADMIN_PAGE_SIZE_OPTIONS"
-                paginatorTemplate="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown CurrentPageReport"
-                :currentPageReportTemplate="paginationReportTemplate"
-                tableStyle="min-width: 50rem"
-                scrollable
-                scrollHeight="65vh"
-                responsiveLayout="stack"
-                breakpoint="1023px"
-                sortMode="multiple"
-                :multiSortMeta="notificationSortMeta"
-                removableSort
-                @page="handleNotificationPage"
-                @sort="handleNotificationSort"
-              >
-                <Column field="title" :header="$t('標題')" sortable style="width: 26%">
-                  <template #body="{ data }">
-                    <span class="mobile-primary-text admin-desktop-cell">{{ data.title }}</span>
-                    <div class="admin-mobile-card admin-announcement-mobile-card">
-                      <div class="admin-card-primary">
-                        <strong class="admin-card-title">{{ data.title }}</strong>
-                      </div>
-                      <div class="admin-card-meta">
-                        <Tag :severity="getNotificationSeverity(data.severity)">
-                          {{ getNotificationSeverityLabel(data.severity) }}
-                        </Tag>
-                        <Tag :severity="data.is_active ? 'success' : 'secondary'">
-                          {{ data.is_active ? $t('啟用中') : $t('已停用') }}
-                        </Tag>
-                        <Tag :severity="isNotificationEffective(data) ? 'success' : 'secondary'">
-                          {{ isNotificationEffective(data) ? $t('生效中') : $t('未生效') }}
-                        </Tag>
-                        <div class="notification-mobile-update">
-                          <span class="notification-mobile-update__label">{{
-                            $t('最近更新')
-                          }}</span>
-                          <span
-                            class="notification-mobile-update__actor"
-                            :title="getNotificationUpdaterLabel(data)"
-                            >{{ getNotificationUpdaterLabel(data) }}・</span
-                          >
-                          <time
-                            class="notification-mobile-update__time"
-                            :datetime="data.updated_at || data.created_at"
-                          >
-                            {{ formatAdminActorTime(data.updated_at || data.created_at) }}
-                          </time>
-                        </div>
-                      </div>
-                    </div>
-                  </template>
-                </Column>
-                <Column field="severity" :header="$t('重要程度')" sortable style="width: 12%">
-                  <template #body="{ data }">
-                    <Tag :severity="getNotificationSeverity(data.severity)">
-                      {{ getNotificationSeverityLabel(data.severity) }}
-                    </Tag>
-                  </template>
-                </Column>
-                <Column
-                  field="is_active"
-                  sortField="is_active"
-                  :header="$t('啟用中')"
-                  sortable
-                  style="width: 12%"
-                >
-                  <template #body="{ data }">
-                    <Tag :severity="data.is_active ? 'success' : 'secondary'">
-                      {{ data.is_active ? $t('啟用中') : $t('已停用') }}
-                    </Tag>
-                  </template>
-                </Column>
-                <Column
-                  :header="$t('生效中')"
-                  sortField="effectiveOrder"
-                  sortable
-                  style="width: 12%"
-                >
-                  <template #body="{ data }">
-                    <Tag :severity="isNotificationEffective(data) ? 'success' : 'secondary'">
-                      {{ isNotificationEffective(data) ? $t('生效中') : $t('未生效') }}
-                    </Tag>
-                  </template>
-                </Column>
-                <Column
-                  field="updated_at"
-                  sortField="updated_at"
-                  :header="$t('最近更新')"
-                  sortable
-                  style="width: 11rem; min-width: 11rem"
-                >
-                  <template #body="{ data }">
-                    <div class="admin-actor-time admin-actor-time--notification">
-                      <span
-                        class="admin-actor-time__name"
-                        :title="getNotificationUpdaterLabel(data)"
-                      >
-                        {{ getNotificationUpdaterLabel(data) }}
-                      </span>
-                      <time
-                        class="admin-actor-time__time"
-                        :datetime="data.updated_at || data.created_at"
-                      >
-                        {{ formatAdminActorTime(data.updated_at || data.created_at) }}
-                      </time>
-                    </div>
-                  </template>
-                </Column>
-                <Column :header="$t('操作')" style="width: 20%">
-                  <template #body="{ data }">
-                    <div class="admin-card-actions">
-                      <Button
-                        icon="pi pi-pencil"
-                        severity="warning"
-                        size="small"
-                        @click="openNotificationEditDialog(data)"
-                        :label="$t('編輯')"
-                        :aria-label="$t('編輯公告')"
-                        :title="$t('編輯公告')"
-                      />
-                      <Button
-                        class="admin-danger-solid-button"
-                        icon="pi pi-trash"
-                        severity="danger"
-                        size="small"
-                        @click="confirmDeleteNotification(data)"
-                        :label="$t('刪除')"
-                        :aria-label="$t('刪除公告')"
-                        :title="$t('刪除公告')"
-                      />
-                    </div>
-                  </template>
-                </Column>
-              </DataTable>
-              <div
-                v-if="!notificationsLoading"
-                class="admin-mobile-list admin-mobile-list--notifications"
-              >
-                <article
-                  v-for="notification in paginatedNotifications"
-                  :key="notification.id"
-                  class="admin-mobile-card admin-announcement-card admin-tablet-card"
-                >
-                  <header class="admin-tablet-card-header">
-                    <div class="admin-tablet-title-group announcement-card-title-group">
-                      <strong class="admin-card-title admin-tablet-card-title">{{
-                        notification.title
-                      }}</strong>
-                      <div class="admin-tablet-tag-group announcement-type-tag-group">
-                        <Tag :severity="getNotificationSeverity(notification.severity)">
-                          {{ getNotificationSeverityLabel(notification.severity) }}
-                        </Tag>
-                      </div>
-                    </div>
-                    <div class="admin-tablet-status-group">
-                      <Tag :severity="notification.is_active ? 'success' : 'secondary'">
-                        {{ notification.is_active ? $t('啟用中') : $t('已停用') }}
-                      </Tag>
-                      <Tag
-                        :severity="isNotificationEffective(notification) ? 'success' : 'secondary'"
-                      >
-                        {{ isNotificationEffective(notification) ? $t('生效中') : $t('未生效') }}
-                      </Tag>
-                    </div>
-                  </header>
-                  <section class="admin-tablet-metadata">
-                    <div class="admin-tablet-metadata-item admin-tablet-metadata-item--wide">
-                      <span class="admin-tablet-metadata-label">{{ $t('最近更新') }}</span>
-                      <div class="notification-mobile-update__value">
-                        <span
-                          class="notification-mobile-update__actor"
-                          :title="getNotificationUpdaterLabel(notification)"
-                          >{{ getNotificationUpdaterLabel(notification) }}・</span
-                        >
-                        <time
-                          class="notification-mobile-update__time"
-                          :datetime="notification.updated_at || notification.created_at"
-                        >
-                          {{
-                            formatAdminActorTime(notification.updated_at || notification.created_at)
-                          }}
-                        </time>
-                      </div>
-                    </div>
-                  </section>
-                  <section
-                    class="admin-card-actions admin-mobile-card-actions announcement-mobile-actions admin-tablet-actions"
-                  >
-                    <Button
-                      icon="pi pi-pencil"
-                      severity="warning"
-                      size="small"
-                      @click="openNotificationEditDialog(notification)"
-                      :label="$t('編輯')"
-                      :aria-label="$t('編輯公告')"
-                      :title="$t('編輯公告')"
-                    />
-                    <Button
-                      class="admin-danger-solid-button"
-                      icon="pi pi-trash"
-                      severity="danger"
-                      size="small"
-                      @click="confirmDeleteNotification(notification)"
-                      :label="$t('刪除')"
-                      :aria-label="$t('刪除公告')"
-                      :title="$t('刪除公告')"
-                    />
-                  </section>
-                </article>
-                <Paginator
-                  :first="notificationFirst"
-                  :rows="notificationRows"
-                  :totalRecords="sortedNotifications.length"
-                  :rowsPerPageOptions="ADMIN_PAGE_SIZE_OPTIONS"
-                  :pageLinkSize="1"
-                  template="FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown CurrentPageReport"
-                  :currentPageReportTemplate="paginationReportTemplate"
-                  :aria-label="$t('公告管理分頁')"
-                  class="admin-mobile-paginator"
-                  @page="handleNotificationPage"
-                />
-              </div>
-            </div>
+                </TabPanel>
+              </TabPanels>
+            </Tabs>
           </TabPanel>
 
           <TabPanel value="3">
@@ -4951,6 +5011,7 @@ import PdfPreviewModal from '../components/PdfPreviewModal.vue'
 import ContributorLevelBadge from '../components/ContributorLevelBadge.vue'
 import UserOnlineDurationChart from '../components/UserOnlineDurationChart.vue'
 import ReportManagementPanel from '../components/admin/ReportManagementPanel.vue'
+import HomepageSloganManagementPanel from '../components/admin/HomepageSloganManagementPanel.vue'
 import {
   SUBMISSION_LEVELS,
   getContributorLevelPalette,
@@ -4964,6 +5025,7 @@ import {
 
 const confirm = useConfirm()
 const toast = useToast()
+const announcementManagementTab = ref('announcements')
 const { t, locale } = useI18n()
 const paginationReportTemplate = computed(() =>
   getMessageTemplate('第 {currentPage} / {totalPages} 頁，共 {totalRecords} 筆')
@@ -5263,6 +5325,7 @@ const attentionSummary = ref({
     system_issues: 0,
     total: 0,
   },
+  announcement_management: { homepage_slogans: 0 },
 })
 const reviewSubmissionView = ref('time')
 const isReviewSubmissionChartExpanded = ref(false)
@@ -7553,7 +7616,7 @@ const formatAttentionBadge = (value) => {
 const loadAdminAttentionSummary = async () => {
   try {
     const { data } = await getAdminAttentionSummary()
-    if (data?.review_center && data?.report_management) {
+    if (data?.review_center && data?.report_management && data?.announcement_management) {
       attentionSummary.value = data
     }
   } catch (error) {

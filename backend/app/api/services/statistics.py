@@ -8,6 +8,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.api.services.presence import distinct_online_user_ids, load_presence_sessions
 from app.db.session import get_session
 from app.models.models import (
+    AdminAnnouncementAttentionRead,
     AdminAttentionSummaryRead,
     AdminReportAttentionRead,
     AdminReviewAttentionRead,
@@ -18,6 +19,8 @@ from app.models.models import (
     CommentReport,
     CommentReportStatus,
     Course,
+    HomepageSloganStatus,
+    HomepageSloganSubmission,
     SubmissionStatus,
     SystemIssueReport,
     User,
@@ -87,6 +90,11 @@ async def get_admin_attention_summary(
         SystemIssueReport.read_at.is_(None),
         SystemIssueReport.deleted_at.is_(None),
     )
+    homepage_slogan_count = await _count(
+        db,
+        HomepageSloganSubmission,
+        HomepageSloganSubmission.status == HomepageSloganStatus.PENDING.value,
+    )
 
     return AdminAttentionSummaryRead(
         review_center=AdminReviewAttentionRead(
@@ -105,6 +113,9 @@ async def get_admin_attention_summary(
                 + wish_report_count
                 + system_issue_count
             ),
+        ),
+        announcement_management=AdminAnnouncementAttentionRead(
+            homepage_slogans=homepage_slogan_count,
         ),
     )
 

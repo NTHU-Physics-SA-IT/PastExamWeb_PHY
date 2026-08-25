@@ -8,6 +8,7 @@ import { statisticsService } from '@/api/services/statistics.js'
 import { discussionService } from '@/api/services/discussion.js'
 import { userService } from '@/api/services/users.js'
 import * as adminService from '@/api/services/admin.js'
+import { homepageSloganService } from '@/api/services/homepageSlogans.js'
 
 const getMock = vi.hoisted(() => vi.fn())
 const postMock = vi.hoisted(() => vi.fn())
@@ -193,6 +194,27 @@ describe('API service wrappers', () => {
 
     notificationService.deleteAllPersonal()
     expect(deleteMock).toHaveBeenCalledWith('/notifications/personal')
+  })
+
+  it('homepage slogan service keeps public, user, and admin routes distinct', () => {
+    homepageSloganService.getSelected()
+    expect(getMock).toHaveBeenCalledWith('/homepage-slogans/selected')
+    homepageSloganService.submit('A slogan')
+    expect(postMock).toHaveBeenCalledWith('/homepage-slogans', { content: 'A slogan' })
+    homepageSloganService.listAdmin({ status: 'pending' })
+    expect(getMock).toHaveBeenCalledWith('/homepage-slogans/admin', {
+      params: { status: 'pending' },
+    })
+    homepageSloganService.updateAdmin(4, {
+      status: 'enabled',
+      occurrence_level: 'normal',
+    })
+    expect(patchMock).toHaveBeenCalledWith('/homepage-slogans/admin/4', {
+      status: 'enabled',
+      occurrence_level: 'normal',
+    })
+    homepageSloganService.removeAdmin(4)
+    expect(deleteMock).toHaveBeenCalledWith('/homepage-slogans/admin/4')
   })
 
   it('auth service proxies', async () => {

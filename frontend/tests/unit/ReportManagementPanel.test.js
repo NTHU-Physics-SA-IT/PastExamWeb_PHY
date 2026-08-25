@@ -1,9 +1,14 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import process from 'node:process'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { Fragment, h } from 'vue'
 import ReportManagementPanel from '@/components/admin/ReportManagementPanel.vue'
 import reportManagementSource from '@/components/admin/ReportManagementPanel.vue?raw'
 import { ADMIN_PAGE_SIZE_OPTIONS } from '@/constants/pagination'
+
+const adminStylesSource = readFileSync(resolve(process.cwd(), 'src/style.css'), 'utf8')
 
 const mocks = vi.hoisted(() => ({
   listSystem: vi.fn(),
@@ -685,11 +690,11 @@ describe('ReportManagementPanel', () => {
     )
     expect(reportManagementSource).toContain('style="width: 12rem; min-width: 12rem"')
     expect(reportManagementSource).toContain('style="width: 17rem; min-width: 17rem"')
-    expect(reportManagementSource).toMatch(
+    expect(adminStylesSource).toMatch(
       /\.report-row-actions\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?align-items:\s*center;[\s\S]*?justify-content:\s*flex-start;[\s\S]*?flex-wrap:\s*nowrap;/
     )
-    expect(reportManagementSource).toMatch(
-      /\.report-row-actions :deep\(\.p-button\)\s*\{[\s\S]*?white-space:\s*nowrap;/
+    expect(adminStylesSource).toMatch(
+      /\.report-row-actions \.p-button\s*\{[\s\S]*?white-space:\s*nowrap;/
     )
     expect(reportManagementSource).not.toContain(
       ':deep(.report-management__table .p-datatable-tbody > tr > td:last-child)'
@@ -1107,14 +1112,14 @@ describe('ReportManagementPanel', () => {
 
   it('scopes personalized font tokens across report lists, controls, and dialogs', () => {
     expect(reportManagementSource.match(/class="report-management-dialog"/g)).toHaveLength(4)
-    expect(reportManagementSource).toMatch(
-      /\.report-management :deep\(\.p-inputtext\)[\s\S]*?font-size:\s*var\(--app-font-size-sm\) !important;/
+    expect(adminStylesSource).toMatch(
+      /\.admin-management-typography \.p-inputtext[\s\S]*?font-size:\s*var\(--app-font-size-sm\) !important;/
     )
-    expect(reportManagementSource).toMatch(
-      /\.report-management :deep\(\.p-button\)[\s\S]*?font-size:\s*var\(--app-font-size-sm\) !important;/
+    expect(adminStylesSource).toMatch(
+      /\.admin-management-typography \.p-button\s*\{[\s\S]*?font-size:\s*var\(--app-font-size-sm\) !important;/
     )
-    expect(reportManagementSource).toMatch(
-      /\.report-management :deep\(\.p-tag\)[\s\S]*?font-size:\s*var\(--app-badge-font-size\) !important;/
+    expect(adminStylesSource).toMatch(
+      /\.admin-management-typography \.p-tag\s*\{[\s\S]*?font-size:\s*var\(--app-badge-font-size\) !important;/
     )
     expect(reportManagementSource).toContain(':global(.report-management-dialog .p-dialog-title)')
     expect(reportManagementSource).toContain('font-size: var(--app-control-font-size) !important;')
@@ -1255,7 +1260,7 @@ describe('ReportManagementPanel', () => {
     expect(reportManagementSource.match(/<dt>\{\{ \$t\('審核人'\) \}\}<\/dt>/g)).toHaveLength(4)
     expect(reportManagementSource).toContain("<dt>{{ $t('審核時間') }}</dt>")
     expect(reportManagementSource).not.toMatch(/\.report-mobile-card__footer\s*\{[^}]*background:/)
-    expect(reportManagementSource).toMatch(
+    expect(adminStylesSource).toMatch(
       /\.report-row-actions\s*\{[\s\S]*?justify-content:\s*flex-end;/
     )
     expect(reportManagementSource).not.toContain('GitHub Issue</')

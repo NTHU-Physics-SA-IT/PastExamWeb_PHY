@@ -5,13 +5,24 @@
         <h2 id="wish-pool-title">{{ $t('考古許願池') }}</h2>
         <p>{{ $t('點選許願可按愛心、回報問題或協助上傳。') }}</p>
       </div>
-      <Button
-        :label="$t('新增許願')"
-        icon="pi pi-plus"
-        severity="success"
-        size="small"
-        @click="emit('add-wish')"
-      />
+      <div class="wish-header__actions">
+        <Button
+          :label="$t('新增許願')"
+          icon="pi pi-plus"
+          severity="success"
+          size="small"
+          @click="emit('add-wish')"
+        />
+        <Button
+          :label="$t('投稿首頁 slogan')"
+          icon="pi pi-send"
+          severity="secondary"
+          outlined
+          size="small"
+          class="wish-slogan-submit-button"
+          @click="openSloganDialog"
+        />
+      </div>
     </header>
     <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
     <ProgressSpinner v-if="loading" class="wish-spinner" />
@@ -166,6 +177,9 @@
           {{ selected.subject }} · {{ selected.professor }} · {{ semesterLabel(selected) }} ·
           {{ selected.name }}
         </p>
+        <p v-if="isAdmin" class="wish-creator">
+          {{ $t('許願者：{name}', { name: selected.creator_name }) }}
+        </p>
         <Tag v-if="selected.fulfilled" severity="success">{{ $t('已實現') }}</Tag>
         <div class="dialog-actions wrap">
           <Button
@@ -199,6 +213,44 @@
         />
       </div>
     </Dialog>
+
+    <Dialog
+      v-model:visible="sloganDialogVisible"
+      modal
+      :draggable="false"
+      :header="$t('投稿首頁 slogan')"
+      :style="{ width: '440px', maxWidth: '94vw' }"
+      @hide="resetSloganDialog"
+    >
+      <form class="slogan-submission-form" @submit.prevent="submitSlogan">
+        <label for="homepage-slogan-content">{{ $t('slogan 內容') }}</label>
+        <InputText
+          id="homepage-slogan-content"
+          v-model="sloganContent"
+          maxlength="80"
+          :placeholder="$t('例如：書卷沒有，考古這有')"
+          autocomplete="off"
+          class="w-full"
+        />
+        <small>{{ $t('限單行純文字，最多 80 個字元。') }}</small>
+        <div class="dialog-actions">
+          <Button
+            type="button"
+            :label="$t('取消')"
+            severity="secondary"
+            text
+            @click="sloganDialogVisible = false"
+          />
+          <Button
+            type="submit"
+            :label="$t('投稿')"
+            icon="pi pi-send"
+            :loading="sloganSubmitting"
+            :disabled="!sloganContent.trim() || sloganSubmitting"
+          />
+        </div>
+      </form>
+    </Dialog>
   </section>
 </template>
 
@@ -207,7 +259,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import { useI18n } from 'vue-i18n'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
-import { wishService } from '@/api'
+import { homepageSloganService, wishService } from '@/api'
 import { getCurrentUser } from '@/utils/auth'
 import {
   appendResponsiveWishPositions,
@@ -237,6 +289,9 @@ const reportSubmitting = ref(false),
   deleting = ref(false),
   heartLoading = ref(false)
 const report = reactive({ reason: null, customMessage: '' })
+const sloganDialogVisible = ref(false)
+const sloganContent = ref('')
+const sloganSubmitting = ref(false)
 const viewportRef = ref(null)
 const viewportSize = ref({ width: 0, height: 0 })
 const positions = ref({})
@@ -306,6 +361,41 @@ const returnControlVisible = computed(
 const returnControlAtOrigin = computed(
   () => navigationMode.value !== 'mobile' && !showReturnControl.value
 )
+
+function openSloganDialog() {
+  sloganContent.value = ''
+  sloganDialogVisible.value = true
+}
+
+function resetSloganDialog() {
+  if (!sloganSubmitting.value) sloganContent.value = ''
+}
+
+async function submitSlogan() {
+  const content = sloganContent.value.trim()
+  if (!content || sloganSubmitting.value) return
+  sloganSubmitting.value = true
+  try {
+    await homepageSloganService.submit(content)
+    sloganDialogVisible.value = false
+    sloganContent.value = ''
+    toast.add({
+      severity: 'success',
+      summary: t('投稿成功'),
+      detail: t('期待有一天可以在首頁看到你的 slogan！'),
+      life: 4000,
+    })
+  } catch (submissionError) {
+    toast.add({
+      severity: 'error',
+      summary: t('投稿失敗'),
+      detail: submissionError?.response?.data?.detail || t('請確認內容後再試一次。'),
+      life: 4000,
+    })
+  } finally {
+    sloganSubmitting.value = false
+  }
+}
 const mobileContentBottom = computed(() => {
   const yValues = Object.values(positions.value)
     .map(({ y }) => y)
@@ -779,6 +869,23 @@ onBeforeUnmount(() => {
 .wish-header > div {
   min-width: 0;
 }
+.wish-header__actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+.wish-header__actions :deep(.wish-slogan-submit-button.p-button) {
+  border-color: var(--border-color);
+  background: var(--p-surface-0);
+  color: var(--p-surface-700);
+}
+.wish-header__actions :deep(.wish-slogan-submit-button.p-button:not(:disabled):hover) {
+  border-color: var(--border-color);
+  background: var(--p-surface-100);
+  color: var(--p-surface-800);
+}
 .wish-header h2,
 .wish-header p {
   margin: 0.2rem 0;
@@ -1010,6 +1117,21 @@ onBeforeUnmount(() => {
   display: grid;
   gap: 0.8rem;
 }
+.wish-creator {
+  margin: 0;
+  color: var(--text-color-secondary);
+  font-size: var(--app-font-size-sm);
+}
+.slogan-submission-form {
+  display: grid;
+  gap: 0.75rem;
+}
+.slogan-submission-form > label {
+  font-weight: 600;
+}
+.slogan-submission-form > small {
+  color: var(--text-color-secondary);
+}
 .wish-dialog-header {
   display: flex;
   min-width: 0;
@@ -1044,6 +1166,9 @@ onBeforeUnmount(() => {
   .wish-header :deep(.p-button) {
     width: 100%;
     justify-content: center;
+  }
+  .wish-header__actions {
+    width: 100%;
   }
 }
 </style>

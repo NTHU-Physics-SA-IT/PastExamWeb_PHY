@@ -327,6 +327,10 @@ def _remove_archive_wish_report_trash_metadata(metadata: MetaData) -> None:
     report_table._columns.remove(report_table.c.deleted_at)
 
 
+def _remove_homepage_slogan_submissions(metadata: MetaData) -> None:
+    metadata.remove(metadata.tables["homepage_slogan_submissions"])
+
+
 def _remove_about_us_ordering(metadata: MetaData) -> None:
     table = metadata.tables["about_us_entries"]
     for index in list(table.indexes):
@@ -338,6 +342,10 @@ def _remove_about_us_ordering(metadata: MetaData) -> None:
 def _metadata_for_variant(variant: str) -> MetaData:
     metadata = head_metadata()
     if variant == "head":
+        return metadata
+
+    _remove_homepage_slogan_submissions(metadata)
+    if variant == "pre_homepage_slogan_submissions":
         return metadata
     if variant not in {
         "pre_archive_wish_report_trash_metadata",

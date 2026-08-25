@@ -29,6 +29,7 @@ SIBLING_MERGE_REVISION = "b4d6f8a2c1e3"
 WISH_OPTIONAL_SEMESTER_REVISION = "f3a7c1e9d5b2"
 ARCHIVE_REPORT_UNIQUENESS_REVISION = "c8e4a1f7b2d9"
 WISH_REPORT_TRASH_REVISION = "d1f5a9c3e7b2"
+HOMEPAGE_SLOGAN_REVISION = "e2c6a8f4b1d9"
 ABOUT_US_ORDERING_REVISION = "c7e4a9b2d6f1"
 
 
@@ -820,6 +821,7 @@ _ELIGIBILITY_V4 = AuditAdapter(
             ABOUT_US_ORDERING_REVISION,
             ARCHIVE_REPORT_UNIQUENESS_REVISION,
             WISH_REPORT_TRASH_REVISION,
+            HOMEPAGE_SLOGAN_REVISION,
         }
     ),
     approved_aggregate_labels=tuple(OneToOneAggregateCounts.model_fields),
@@ -934,6 +936,7 @@ index_contract AS (
               WHEN 'c7e4a9b2d6f1' THEN 'status=''pending'''
               WHEN 'c8e4a1f7b2d9' THEN 'status=''pending''anddeleted_atisnull'
               WHEN 'd1f5a9c3e7b2' THEN 'status=''pending''anddeleted_atisnull'
+              WHEN 'e2c6a8f4b1d9' THEN 'status=''pending''anddeleted_atisnull'
               ELSE ''
           END
     ) AS matches
@@ -990,6 +993,7 @@ _ARCHIVE_REPORT_UNIQUENESS_V1 = AuditAdapter(
             ABOUT_US_ORDERING_REVISION,
             ARCHIVE_REPORT_UNIQUENESS_REVISION,
             WISH_REPORT_TRASH_REVISION,
+            HOMEPAGE_SLOGAN_REVISION,
         }
     ),
     approved_aggregate_labels=tuple(

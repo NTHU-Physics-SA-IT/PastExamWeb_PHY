@@ -30,6 +30,7 @@ from app.db.audit.registry import (
     BILINGUAL_SUBMISSION_SNAPSHOT_REVISION,
     CATEGORY_STATE_PRESERVATION_REVISION,
     COURSE_SUBMISSION_LIFECYCLE_REVISION,
+    HOMEPAGE_SLOGAN_REVISION,
     SIBLING_MERGE_REVISION,
     WISH_OPTIONAL_SEMESTER_REVISION,
     WISH_POOL_REVISION,
@@ -139,6 +140,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         ABOUT_US_ORDERING_REVISION,
         ARCHIVE_REPORT_UNIQUENESS_REVISION,
         WISH_REPORT_TRASH_REVISION,
+        HOMEPAGE_SLOGAN_REVISION,
     }
     owner_delete_column_condition = (
         """
@@ -181,6 +183,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         ABOUT_US_ORDERING_REVISION,
         ARCHIVE_REPORT_UNIQUENESS_REVISION,
         WISH_REPORT_TRASH_REVISION,
+        HOMEPAGE_SLOGAN_REVISION,
     }
     previous_status_column_condition = (
         """
@@ -217,6 +220,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         ABOUT_US_ORDERING_REVISION,
         ARCHIVE_REPORT_UNIQUENESS_REVISION,
         WISH_REPORT_TRASH_REVISION,
+        HOMEPAGE_SLOGAN_REVISION,
     }
     bilingual_catalog_condition = (
         """
@@ -262,6 +266,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         ABOUT_US_ORDERING_REVISION,
         ARCHIVE_REPORT_UNIQUENESS_REVISION,
         WISH_REPORT_TRASH_REVISION,
+        HOMEPAGE_SLOGAN_REVISION,
     }
     bilingual_snapshot_condition = (
         """
@@ -302,6 +307,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         ABOUT_US_ORDERING_REVISION,
         ARCHIVE_REPORT_UNIQUENESS_REVISION,
         WISH_REPORT_TRASH_REVISION,
+        HOMEPAGE_SLOGAN_REVISION,
     }
     category_state_snapshot_condition = (
         """
@@ -333,6 +339,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         ABOUT_US_ORDERING_REVISION,
         ARCHIVE_REPORT_UNIQUENESS_REVISION,
         WISH_REPORT_TRASH_REVISION,
+        HOMEPAGE_SLOGAN_REVISION,
     }
     course_submission_lifecycle_condition = (
         """
@@ -375,6 +382,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         ABOUT_US_ORDERING_REVISION,
         ARCHIVE_REPORT_UNIQUENESS_REVISION,
         WISH_REPORT_TRASH_REVISION,
+        HOMEPAGE_SLOGAN_REVISION,
     }
     wish_year_nullability = (
         "YES"
@@ -384,6 +392,7 @@ def _continuity_cte(request: AuditRequest) -> str:
             ABOUT_US_ORDERING_REVISION,
             ARCHIVE_REPORT_UNIQUENESS_REVISION,
             WISH_REPORT_TRASH_REVISION,
+            HOMEPAGE_SLOGAN_REVISION,
         }
         else "NO"
     )
@@ -442,6 +451,7 @@ def _continuity_cte(request: AuditRequest) -> str:
             ABOUT_US_ORDERING_REVISION,
             ARCHIVE_REPORT_UNIQUENESS_REVISION,
             WISH_REPORT_TRASH_REVISION,
+            HOMEPAGE_SLOGAN_REVISION,
         }
         else """
         NOT EXISTS (
@@ -474,7 +484,8 @@ def _continuity_cte(request: AuditRequest) -> str:
               )
         )
         """
-        if request.expected_ledger == WISH_REPORT_TRASH_REVISION
+        if request.expected_ledger
+        in {WISH_REPORT_TRASH_REVISION, HOMEPAGE_SLOGAN_REVISION}
         else """
         NOT EXISTS (
             SELECT 1
@@ -483,6 +494,25 @@ def _continuity_cte(request: AuditRequest) -> str:
               AND table_name = 'archive_wish_reports'
               AND column_name IN ('deleted_at', 'deleted_by_id')
         )
+        """
+    )
+    homepage_slogan_condition = (
+        """
+        (
+            SELECT count(*) = 10
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'homepage_slogan_submissions'
+              AND column_name IN (
+                  'id', 'content', 'submitter_user_id',
+                  'submitter_name_snapshot', 'status', 'occurrence_level',
+                  'reviewer_user_id', 'reviewed_at', 'created_at', 'updated_at'
+              )
+        )
+        """
+        if request.expected_ledger == HOMEPAGE_SLOGAN_REVISION
+        else """
+        to_regclass('public.homepage_slogan_submissions') IS NULL
         """
     )
     return f"""
@@ -531,7 +561,8 @@ schema_state AS (
         AND ({course_submission_lifecycle_condition})
         AND ({wish_pool_condition})
         AND ({about_us_ordering_condition})
-        AND ({wish_report_trash_condition}) AS schema_ok
+        AND ({wish_report_trash_condition})
+        AND ({homepage_slogan_condition}) AS schema_ok
     FROM required_columns
 ),
 enum_state AS (

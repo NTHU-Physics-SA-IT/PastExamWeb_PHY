@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ARCHIVE_REPORT_PREVIOUS_SCHEMA_REVISION = "c7e4a9b2d6f1"
-PREVIOUS_HEAD_SCHEMA_REVISION = "c8e4a1f7b2d9"
-HEAD_SCHEMA_REVISION = "d1f5a9c3e7b2"
+WISH_REPORT_PREVIOUS_SCHEMA_REVISION = "c8e4a1f7b2d9"
+PREVIOUS_HEAD_SCHEMA_REVISION = "d1f5a9c3e7b2"
+HEAD_SCHEMA_REVISION = "e2c6a8f4b1d9"
 
 
 @dataclass(frozen=True)
@@ -139,10 +140,15 @@ MANIFESTS = {
         description="schema before active-pending ArchiveReport uniqueness",
         metadata_variant="pre_archive_report_active_pending_uniqueness",
     ),
-    PREVIOUS_HEAD_SCHEMA_REVISION: ManifestSpec(
-        revision=PREVIOUS_HEAD_SCHEMA_REVISION,
+    WISH_REPORT_PREVIOUS_SCHEMA_REVISION: ManifestSpec(
+        revision=WISH_REPORT_PREVIOUS_SCHEMA_REVISION,
         description="schema before ArchiveWishReport trash metadata",
         metadata_variant="pre_archive_wish_report_trash_metadata",
+    ),
+    PREVIOUS_HEAD_SCHEMA_REVISION: ManifestSpec(
+        revision=PREVIOUS_HEAD_SCHEMA_REVISION,
+        description="schema before homepage slogan submissions",
+        metadata_variant="pre_homepage_slogan_submissions",
     ),
     HEAD_SCHEMA_REVISION: ManifestSpec(
         revision=HEAD_SCHEMA_REVISION,

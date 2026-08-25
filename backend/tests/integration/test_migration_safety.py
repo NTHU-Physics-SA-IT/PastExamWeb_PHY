@@ -36,6 +36,7 @@ from app.db.test_database_guard import (
 MERGED_HEAD = "b4d6f8a2c1e3"
 PRE_ABOUT_US_ORDERING_HEAD = "f3a7c1e9d5b2"
 PRE_ARCHIVE_REPORT_UNIQUENESS_HEAD = "c7e4a9b2d6f1"
+PRE_ARCHIVE_WISH_REPORT_TRASH_HEAD = "c8e4a1f7b2d9"
 CURRENT_HEAD = HEAD_SCHEMA_REVISION
 E6_REVISION = "e6a1b3c5d7f9"
 E8_REVISION = "e8a4c1d7b2f6"
@@ -717,6 +718,10 @@ def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
     )
     assert (
         script.get_revision(PREVIOUS_HEAD_SCHEMA_REVISION).down_revision
+        == PRE_ARCHIVE_WISH_REPORT_TRASH_HEAD
+    )
+    assert (
+        script.get_revision(PRE_ARCHIVE_WISH_REPORT_TRASH_HEAD).down_revision
         == PRE_ARCHIVE_REPORT_UNIQUENESS_HEAD
     )
     assert (

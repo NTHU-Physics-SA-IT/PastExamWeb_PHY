@@ -6,6 +6,7 @@ from app.api.services import (
     auth,
     backups,
     courses,
+    homepage_slogans,
     meme,
     notifications,
     reports,
@@ -23,6 +24,11 @@ api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(backups.router, prefix="/backups", tags=["backups"])
 api_router.include_router(about_us.router, prefix="/about-us", tags=["about-us"])
 api_router.include_router(courses.router, prefix="/courses", tags=["courses"])
+api_router.include_router(
+    homepage_slogans.router,
+    prefix="/homepage-slogans",
+    tags=["homepage-slogans"],
+)
 api_router.include_router(archives.router, prefix="/archives", tags=["archives"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(meme.router, tags=["meme"])

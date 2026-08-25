@@ -295,6 +295,14 @@ function createBackupWrapper() {
 let consoleErrorSpy
 
 describe('AdminView', () => {
+  it('keeps 公告管理 top-level and adds the two requested nested management sections', () => {
+    expect(adminTemplateSource).toContain('<Tab value="2">')
+    expect(adminTemplateSource).toContain('<Tab value="announcements">{{ $t(\'公告管理\') }}</Tab>')
+    expect(adminTemplateSource).toContain('<Tab value="homepage-slogans">')
+    expect(adminTemplateSource).toContain(
+      'v-if="announcementManagementTab === \'homepage-slogans\'"'
+    )
+  })
   beforeEach(() => {
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.useFakeTimers()
@@ -310,6 +318,7 @@ describe('AdminView', () => {
           system_issues: 0,
           total: 0,
         },
+        announcement_management: { homepage_slogans: 0 },
       },
     })
     listAdminCategoriesMock.mockResolvedValue({
@@ -980,6 +989,16 @@ describe('AdminView', () => {
     expect(adminTemplateSource).toContain(
       'class="admin-attention-badge admin-attention-badge--child"'
     )
+    expect(
+      adminTemplateSource.match(
+        /formatAttentionBadge\(\s*attentionSummary\.announcement_management\.homepage_slogans\s*\)/g
+      )
+    ).toHaveLength(4)
+    const announcementsTab = adminTemplateSource.match(
+      /<Tab value="announcements">[\s\S]*?<\/Tab>/
+    )?.[0]
+    expect(announcementsTab).toBeDefined()
+    expect(announcementsTab).not.toContain('announcement_management.homepage_slogans')
   })
 
   it('uses each review row status as the direct review precondition', async () => {

@@ -1,5 +1,5 @@
 <template>
-  <section class="report-management" :aria-label="$t('回報管理')">
+  <section class="report-management admin-management-typography" :aria-label="$t('回報管理')">
     <Tabs v-model:value="activeReportTab" class="mb-4">
       <TabList>
         <Tab value="archive">
@@ -2486,43 +2486,12 @@ onBeforeUnmount(teardownCardLayout)
 <style scoped>
 .report-management {
   min-width: 0;
-  font-size: var(--app-font-size-base);
 }
 
 .report-tab-label {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-}
-.report-management :deep(.p-component) {
-  font-size: var(--app-font-size-base) !important;
-}
-.report-management :deep(.p-inputtext),
-.report-management :deep(.p-inputtext::placeholder),
-.report-management :deep(.p-select),
-.report-management :deep(.p-select-label),
-.report-management :deep(.p-datatable),
-.report-management :deep(.p-datatable-thead > tr > th),
-.report-management :deep(.p-datatable-tbody > tr > td),
-.report-management :deep(.p-paginator),
-.report-management :deep(.p-paginator-page),
-.report-management :deep(.p-paginator-current),
-.report-management :deep(.p-paginator-rpp-dropdown) {
-  font-size: var(--app-font-size-sm) !important;
-  line-height: 1.35;
-}
-.report-management :deep(.p-button) {
-  min-height: 2rem;
-  font-size: var(--app-font-size-sm) !important;
-  line-height: 1.25;
-}
-.report-management :deep(.p-button-label),
-.report-management :deep(.p-button-icon) {
-  font-size: inherit !important;
-}
-.report-management :deep(.p-tag) {
-  font-size: var(--app-badge-font-size) !important;
-  line-height: 1.25 !important;
 }
 .report-management > .report-section > .p-message,
 .report-management__empty {
@@ -2585,18 +2554,6 @@ onBeforeUnmount(teardownCardLayout)
   flex: 0 0 auto;
   width: auto;
   min-width: 0;
-}
-.report-row-actions {
-  display: inline-flex;
-  width: 100%;
-  align-items: center;
-  justify-content: flex-start;
-  flex-wrap: nowrap;
-  gap: 0.5rem;
-}
-.report-row-actions :deep(.p-button) {
-  flex: 0 0 auto;
-  white-space: nowrap;
 }
 .report-management__filters {
   display: grid;
@@ -3359,11 +3316,6 @@ onBeforeUnmount(teardownCardLayout)
   .report-mobile-card__footer {
     margin-top: 0.75rem;
     padding-top: 0.75rem;
-  }
-  .report-row-actions {
-    justify-content: flex-end;
-    width: 100%;
-    gap: 0.45rem;
   }
 }
 @container report-card (min-width: 42rem) {

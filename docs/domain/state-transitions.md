@@ -509,6 +509,26 @@ For a NTHU OAuth User, provider-synchronized `name` and `email` remain provider-
   or read-receipt state. Deletion is outside the current contract.
 - Invalid content is rejected without persisting a partial mutation.
 
+### Homepage slogan submissions
+
+- An authenticated user, including an administrator acting as a user, may
+  submit one trimmed, nonblank, single-line plain-text candidate of at most 80
+  characters. New candidates start as `pending` with occurrence level
+  `normal`; anonymous submission is denied.
+- Administrators alone may review `pending` into `enabled` or `disabled`, and
+  may later transition `enabled <-> disabled`. A status decision records the
+  latest reviewer and review time. Changing only the occurrence level does not
+  rewrite that review provenance.
+- The only occurrence levels are `super_rare`, `rare`, `normal`, `frequent`,
+  and `super_frequent`, with relative weights `1`, `2`, `4`, `8`, and `16`.
+- Only `enabled` rows are eligible for the anonymous homepage selection. The
+  backend selects one candidate using those relative weights and the public
+  response contains only its ID and plain-text content. `pending`, `disabled`,
+  and permanently deleted rows are never eligible.
+- Administrator permanent deletion is terminal, removes only the slogan row,
+  cannot be restored, and does not enter Trash. Submission, moderation,
+  occurrence changes, and deletion create no durable notification.
+
 ### Intended invariant
 
 - Full public-Archive data is public only to an authenticated user who may use
@@ -913,6 +933,9 @@ empty custom fields remains valid.
 | View public effective archive | Denied | Allowed | Allowed | Allowed | Allowed |
 | View About Us entries | Denied | Allowed | Allowed | Allowed | Denied unless authenticated |
 | Create or update About Us entries | Denied | Denied | Denied unless also admin | Allowed | Denied |
+| Submit homepage slogan candidate | Denied | Allowed | Allowed | Allowed | Denied |
+| Review/list/permanently delete homepage slogan candidates | Denied | Denied | Denied unless also admin | Allowed | Denied |
+| View selected homepage slogan | Allowed | Allowed | Allowed | Allowed | Allowed |
 | Create archive/comment report | Denied | Allowed | Allowed | Allowed | Allowed when explicitly designed |
 | Submit archive | Denied | Allowed | Allowed | Allowed | Explicit system imports only |
 | Review submission/report | Denied | Denied | Denied unless also admin | Allowed | Explicit automation only |
