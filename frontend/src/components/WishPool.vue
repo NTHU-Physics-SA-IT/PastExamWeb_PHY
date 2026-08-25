@@ -15,55 +15,101 @@
     </header>
     <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
     <ProgressSpinner v-if="loading" class="wish-spinner" />
-    <div
-      v-else
-      ref="viewportRef"
-      class="wish-pool-stage"
-      :class="{ 'is-panning': isPanning, 'is-mobile-layout': layoutMode === 'mobile' }"
-      @pointerdown="startPan"
-      @pointermove="movePan"
-      @pointerup="finishPan"
-      @pointercancel="finishPan"
-      @dragstart.prevent
-    >
-      <div class="wish-pool-world" role="list" :aria-label="$t('考古許願池')" :style="worldStyle">
+    <div v-else class="wish-pool-stage-shell">
+      <div
+        ref="viewportRef"
+        class="wish-pool-stage"
+        :class="{
+          'is-panning': isPanning,
+          'is-mobile-layout': layoutMode === 'mobile',
+          'is-native-scroll': navigationMode !== 'desktop',
+          'is-tablet-scroll': navigationMode === 'tablet',
+          'is-mobile-scroll': navigationMode === 'mobile',
+        }"
+        @scroll.passive="handleNativeScroll"
+        @wheel.passive="markNavigationInteraction"
+        @pointerdown="startPan"
+        @pointermove="movePan"
+        @pointerup="finishPan"
+        @pointercancel="finishPan"
+        @dragstart.prevent
+      >
         <div
-          v-for="wish in wishes"
-          :key="wish.id"
-          role="listitem"
-          class="wish-node"
-          :data-wish-id="wish.id"
-          :style="wishPositionStyle(wish)"
+          class="wish-pool-world"
+          :class="{ 'is-returning': isReturningToOrigin }"
+          role="list"
+          :aria-label="$t('考古許願池')"
+          :style="worldStyle"
         >
-          <div class="wish-item" :class="{ fulfilled: wish.fulfilled }">
-            <button
-              type="button"
-              class="wish-word"
-              :style="wishTextStyle(wish)"
-              @click="openWishDetail(wish, $event)"
+          <div
+            v-for="wish in wishes"
+            :key="wish.id"
+            role="listitem"
+            class="wish-node"
+            :data-wish-id="wish.id"
+            :style="wishPositionStyle(wish)"
+          >
+            <div
+              class="wish-item"
+              :class="{
+                fulfilled: wish.fulfilled,
+                'is-heart-left':
+                  layoutMode === 'mobile' && positions[wish.id]?.heartSide === 'left',
+                'is-heart-right':
+                  layoutMode === 'mobile' && positions[wish.id]?.heartSide === 'right',
+              }"
             >
-              <span class="wish-word__title">{{ wish.title }}</span>
-              <span v-if="wish.fulfilled" class="fulfilled-label">{{ $t('已實現') }}</span>
-            </button>
-            <Button
-              :label="String(wish.heart_count)"
-              :icon="wish.hearted_by_me ? 'pi pi-heart-fill' : 'pi pi-heart'"
-              :severity="wish.hearted_by_me ? 'danger' : 'secondary'"
-              text
-              rounded
-              size="small"
-              :loading="heartLoading"
-              :disabled="heartLoading"
-              :aria-label="$t('愛心 {count}', { count: wish.heart_count })"
-              :title="$t('愛心 {count}', { count: wish.heart_count })"
-              :aria-pressed="wish.hearted_by_me"
-              class="wish-inline-heart discussion-action-button discussion-action-like-button"
-              :class="{ 'is-active': wish.hearted_by_me }"
-              @pointerdown.stop
-              @click.stop="toggleHeart(wish)"
-            />
+              <button
+                type="button"
+                class="wish-word"
+                :style="wishTextStyle(wish)"
+                @click="openWishDetail(wish, $event)"
+              >
+                <span class="wish-word__title">{{ wish.title }}</span>
+                <span v-if="wish.fulfilled" class="fulfilled-label">{{ $t('已實現') }}</span>
+              </button>
+              <Button
+                :label="String(wish.heart_count)"
+                :icon="wish.hearted_by_me ? 'pi pi-heart-fill' : 'pi pi-heart'"
+                :severity="wish.hearted_by_me ? 'danger' : 'secondary'"
+                text
+                rounded
+                size="small"
+                :loading="heartLoading"
+                :disabled="heartLoading"
+                :aria-label="$t('愛心 {count}', { count: wish.heart_count })"
+                :title="$t('愛心 {count}', { count: wish.heart_count })"
+                :aria-pressed="wish.hearted_by_me"
+                class="wish-inline-heart discussion-action-button discussion-action-like-button"
+                :class="{ 'is-active': wish.hearted_by_me }"
+                @pointerdown.stop
+                @click.stop="toggleHeart(wish)"
+              />
+            </div>
           </div>
         </div>
+      </div>
+      <div class="wish-overlay-controls">
+        <div v-if="showMoreHint" class="wish-navigation-hint" aria-hidden="true">
+          <i :class="navigationMode === 'mobile' ? 'pi pi-arrow-down' : 'pi pi-arrows-alt'" />
+          <span>{{ $t(navigationHintText) }}</span>
+        </div>
+        <Button
+          v-show="returnControlVisible"
+          class="wish-return-button"
+          :class="{
+            'is-mobile-return': navigationMode === 'mobile',
+            'is-at-origin': returnControlAtOrigin,
+          }"
+          :icon="navigationMode === 'mobile' ? 'pi pi-arrow-up' : 'pi pi-arrows-alt'"
+          severity="secondary"
+          text
+          rounded
+          :aria-label="$t(returnControlText)"
+          :title="$t(returnControlText)"
+          @pointerdown.stop
+          @click.stop="returnToExplorationOrigin"
+        />
       </div>
     </div>
     <Button
@@ -169,7 +215,9 @@ import {
   createSeededWishRng,
   createResponsiveWishLayout,
   createWishLayoutSeed,
+  createWishWorldGeometry,
   selectMobileAnchorWishId,
+  WISH_MOBILE_ITEM_MAX_HEIGHT_REM,
   wishFontSizeRem,
 } from '@/utils/wishHoneycombLayout'
 import InlineCommentReport from '@/components/InlineCommentReport.vue'
@@ -195,8 +243,15 @@ const positions = ref({})
 const sessionScores = ref({})
 const mobileAnchorWishId = ref(null)
 const layoutMode = ref('honeycomb')
+const navigationMode = ref('desktop')
+const worldGeometry = ref({ width: 0, height: 0, offsetX: 0, offsetY: 0 })
 const camera = reactive({ x: 0, y: 0 })
+const explorationOrigin = reactive({ x: 0, y: 0 })
 const isPanning = ref(false)
+const isReturningToOrigin = ref(false)
+const navigationInteracted = ref(false)
+const showMoreHint = ref(false)
+const showReturnControl = ref(false)
 const sessionLayoutSeed = createWishLayoutSeed(Math.random)
 const sessionScoreRng = createSeededWishRng(sessionLayoutSeed, 'centrality')
 const sessionAnchorRng = createSeededWishRng(sessionLayoutSeed, 'mobile-anchor')
@@ -205,6 +260,10 @@ let resizeObserver
 let panStart = null
 let suppressNextClick = false
 let suppressClickTimer
+let nativeScrollSyncToken = 0
+let returnTransitionTimer
+let nativeNavigationIntent = false
+let nativeNavigationIntentTimer
 const semesterLabel = (wish) =>
   wish?.academic_year == null ? t('不限學期') : formatSemester(wish.academic_year)
 function formatSemester(value) {
@@ -225,15 +284,47 @@ const reportTarget = computed(() => ({
     : '',
   is_deleted: false,
 }))
-const worldStyle = computed(() => ({
-  transform: `translate3d(${layoutMode.value === 'mobile' ? 0 : camera.x}px, ${camera.y}px, 0)`,
-}))
+const worldStyle = computed(() => {
+  if (navigationMode.value === 'desktop') {
+    return { transform: `translate3d(${camera.x}px, ${camera.y}px, 0)` }
+  }
+  return {
+    width: `${worldGeometry.value.width}px`,
+    height: `${worldGeometry.value.height}px`,
+    transform: 'none',
+  }
+})
+const navigationHintText = computed(() =>
+  navigationMode.value === 'mobile' ? '向下滑動以查看更多' : '拖曳以查看更多'
+)
+const returnControlText = computed(() =>
+  navigationMode.value === 'mobile' ? '回到頂部' : '回到中央'
+)
+const returnControlVisible = computed(
+  () => navigationMode.value !== 'mobile' || showReturnControl.value
+)
+const returnControlAtOrigin = computed(
+  () => navigationMode.value !== 'mobile' && !showReturnControl.value
+)
+const mobileContentBottom = computed(() => {
+  const yValues = Object.values(positions.value)
+    .map(({ y }) => y)
+    .filter(Number.isFinite)
+  if (!yValues.length) return 0
+  return (
+    Math.max(...yValues) +
+    worldGeometry.value.offsetY +
+    (WISH_MOBILE_ITEM_MAX_HEIGHT_REM * rootFontSize()) / 2
+  )
+})
 function wishPositionStyle(wish) {
   const position = positions.value[wish.id]
   if (!position) return { visibility: 'hidden' }
+  const offsetX = navigationMode.value === 'desktop' ? 0 : worldGeometry.value.offsetX
+  const offsetY = navigationMode.value === 'desktop' ? 0 : worldGeometry.value.offsetY
   return {
-    '--wish-x': `${position.x}px`,
-    '--wish-y': `${position.y}px`,
+    '--wish-x': `${position.x + offsetX}px`,
+    '--wish-y': `${position.y + offsetY}px`,
   }
 }
 function wishTextStyle(wish) {
@@ -247,6 +338,10 @@ function openWishDetail(wish, event) {
   selected.value = wish
 }
 function startPan(event) {
+  if (navigationMode.value !== 'desktop') {
+    markNavigationInteraction()
+    return
+  }
   if (event.isPrimary === false || (event.pointerType === 'mouse' && event.button !== 0)) return
   panStart = {
     pointerId: event.pointerId,
@@ -267,11 +362,14 @@ function movePan(event) {
     event.currentTarget.setPointerCapture?.(event.pointerId)
   }
   isPanning.value = true
-  camera.x = layoutMode.value === 'mobile' ? 0 : panStart.cameraX + deltaX
+  navigationInteracted.value = true
+  camera.x = panStart.cameraX + deltaX
   camera.y = panStart.cameraY + deltaY
+  updateNavigationAffordances()
   event.preventDefault()
 }
 function finishPan(event) {
+  if (navigationMode.value !== 'desktop') return
   if (!panStart || panStart.pointerId !== event.pointerId) return
   if (panStart.moved) {
     suppressNextClick = true
@@ -290,8 +388,153 @@ function rootFontSize() {
   if (typeof getComputedStyle !== 'function') return 16
   return Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
 }
-function applyResponsiveLayout() {
+function navigationDistanceThreshold() {
+  const shortestSide = Math.min(viewportSize.value.width, viewportSize.value.height)
+  return Math.max(32, Math.min(64, shortestSide * 0.08))
+}
+function hasWishesOutsideInitialViewport() {
+  return Object.values(positions.value).some(({ inInitialViewport }) => !inInitialViewport)
+}
+function updateNavigationAffordances() {
+  if (!wishes.value.length || !viewportRef.value) {
+    showMoreHint.value = false
+    showReturnControl.value = false
+    return
+  }
+  const threshold = navigationDistanceThreshold()
+  if (navigationMode.value === 'mobile') {
+    const currentTop = viewportRef.value.scrollTop
+    showMoreHint.value =
+      mobileContentBottom.value - (currentTop + viewportSize.value.height) > threshold
+    showReturnControl.value = navigationInteracted.value && currentTop > threshold
+    return
+  }
+  showMoreHint.value = hasWishesOutsideInitialViewport()
+  const currentPosition =
+    navigationMode.value === 'tablet'
+      ? { x: viewportRef.value.scrollLeft, y: viewportRef.value.scrollTop }
+      : camera
+  showReturnControl.value =
+    navigationInteracted.value &&
+    Math.hypot(currentPosition.x - explorationOrigin.x, currentPosition.y - explorationOrigin.y) >
+      threshold
+}
+function markNavigationInteraction() {
+  nativeNavigationIntent = true
+  clearTimeout(nativeNavigationIntentTimer)
+  nativeNavigationIntentTimer = setTimeout(() => {
+    nativeNavigationIntent = false
+  }, 160)
+}
+function handleNativeScroll() {
+  if (navigationMode.value === 'desktop') return
+  if (nativeNavigationIntent) navigationInteracted.value = true
+  updateNavigationAffordances()
+}
+function prefersReducedMotion() {
+  return Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
+}
+function returnToExplorationOrigin() {
+  nativeNavigationIntent = false
+  navigationInteracted.value = false
+  showReturnControl.value = false
+  if (navigationMode.value !== 'desktop') {
+    const target =
+      navigationMode.value === 'mobile'
+        ? { left: 0, top: 0 }
+        : { left: explorationOrigin.x, top: explorationOrigin.y }
+    const options = {
+      ...target,
+      behavior: prefersReducedMotion() ? 'auto' : 'smooth',
+    }
+    if (typeof viewportRef.value?.scrollTo === 'function') {
+      viewportRef.value.scrollTo(options)
+    } else if (viewportRef.value) {
+      viewportRef.value.scrollLeft = target.left
+      viewportRef.value.scrollTop = target.top
+    }
+    updateNavigationAffordances()
+    return
+  }
+  clearTimeout(returnTransitionTimer)
+  isReturningToOrigin.value = !prefersReducedMotion()
+  camera.x = explorationOrigin.x
+  camera.y = explorationOrigin.y
+  updateNavigationAffordances()
+  if (isReturningToOrigin.value) {
+    returnTransitionTimer = setTimeout(() => {
+      isReturningToOrigin.value = false
+    }, 320)
+  }
+}
+function captureNativeScroll() {
+  if (navigationMode.value === 'desktop' || !viewportRef.value) return null
+  const horizontalRange = Math.max(0, worldGeometry.value.width - viewportSize.value.width)
+  const verticalRange = Math.max(0, worldGeometry.value.height - viewportSize.value.height)
+  return {
+    left: viewportRef.value.scrollLeft,
+    top: viewportRef.value.scrollTop,
+    leftRatio: horizontalRange ? viewportRef.value.scrollLeft / horizontalRange : 0,
+    topRatio: verticalRange ? viewportRef.value.scrollTop / verticalRange : 0,
+  }
+}
+function initialNativeScroll() {
+  const horizontalRange = Math.max(0, worldGeometry.value.width - viewportSize.value.width)
+  const verticalRange = Math.max(0, worldGeometry.value.height - viewportSize.value.height)
+  if (navigationMode.value === 'mobile') {
+    const anchor = positions.value[mobileAnchorWishId.value]
+    const anchorY = (anchor?.y || 0) + worldGeometry.value.offsetY
+    return {
+      left: 0,
+      top: Math.min(
+        verticalRange,
+        Math.max(0, anchorY - viewportSize.value.height * (anchor?.anchorRatio ?? 0.25))
+      ),
+    }
+  }
+  return { left: horizontalRange / 2, top: verticalRange / 2 }
+}
+function scheduleNativeScroll(snapshot = null, preserveAbsolute = false) {
+  const token = ++nativeScrollSyncToken
+  nextTick(() => {
+    if (
+      token !== nativeScrollSyncToken ||
+      navigationMode.value === 'desktop' ||
+      !viewportRef.value
+    ) {
+      return
+    }
+    const horizontalRange = Math.max(0, worldGeometry.value.width - viewportSize.value.width)
+    const verticalRange = Math.max(0, worldGeometry.value.height - viewportSize.value.height)
+    const target = snapshot
+      ? {
+          left: preserveAbsolute ? snapshot.left : snapshot.leftRatio * horizontalRange,
+          top: preserveAbsolute ? snapshot.top : snapshot.topRatio * verticalRange,
+        }
+      : initialNativeScroll()
+    viewportRef.value.scrollLeft = Math.min(horizontalRange, Math.max(0, target.left))
+    viewportRef.value.scrollTop = Math.min(verticalRange, Math.max(0, target.top))
+    updateNavigationAffordances()
+  })
+}
+function updateWorldGeometry() {
+  if (navigationMode.value === 'desktop') {
+    worldGeometry.value = { width: 0, height: 0, offsetX: 0, offsetY: 0 }
+    return
+  }
+  worldGeometry.value = createWishWorldGeometry(
+    positions.value,
+    viewportSize.value,
+    rootFontSize(),
+    {
+      mobile: layoutMode.value === 'mobile',
+      native2DOverflow: navigationMode.value === 'tablet',
+    }
+  )
+}
+function applyResponsiveLayout(scrollSnapshot = captureNativeScroll()) {
   if (!wishes.value.length || !viewportSize.value.width || !viewportSize.value.height) return
+  const previousNavigationMode = navigationMode.value
   const layout = createResponsiveWishLayout(
     wishes.value,
     sessionScores.value,
@@ -302,8 +545,26 @@ function applyResponsiveLayout() {
   )
   positions.value = layout.positions
   layoutMode.value = layout.mode
+  navigationMode.value = layout.interactionMode
   camera.x = layout.camera.x
   camera.y = layout.camera.y
+  updateWorldGeometry()
+  const initialOrigin =
+    navigationMode.value === 'tablet'
+      ? initialNativeScroll()
+      : navigationMode.value === 'desktop'
+        ? layout.camera
+        : { left: 0, top: 0 }
+  explorationOrigin.x = initialOrigin.x ?? initialOrigin.left
+  explorationOrigin.y = initialOrigin.y ?? initialOrigin.top
+  if (previousNavigationMode !== navigationMode.value) navigationInteracted.value = false
+  if (previousNavigationMode !== navigationMode.value) nativeNavigationIntent = false
+  if (navigationMode.value === 'desktop') {
+    nativeScrollSyncToken += 1
+    updateNavigationAffordances()
+  } else {
+    scheduleNativeScroll(previousNavigationMode === navigationMode.value ? scrollSnapshot : null)
+  }
 }
 function measureViewport(entry) {
   const target = entry?.target || viewportRef.value
@@ -312,8 +573,9 @@ function measureViewport(entry) {
   const height = Math.round(target.clientHeight || entry?.contentRect?.height || 0)
   if (!width || !height) return
   if (viewportSize.value.width === width && viewportSize.value.height === height) return
+  const scrollSnapshot = captureNativeScroll()
   viewportSize.value = { width, height }
-  applyResponsiveLayout()
+  applyResponsiveLayout(scrollSnapshot)
 }
 function observeViewport() {
   if (!viewportRef.value) return
@@ -337,6 +599,7 @@ async function load(reset = true) {
       mobileAnchorWishId.value = selectMobileAnchorWishId(incomingWishes, sessionAnchorRng)
       applyResponsiveLayout()
     } else {
+      const scrollSnapshot = captureNativeScroll()
       sessionScores.value = assignWishCentralityScores(
         incomingWishes,
         sessionScoreRng,
@@ -352,6 +615,12 @@ async function load(reset = true) {
         rootFontSize(),
         sessionLayoutSeed
       )
+      updateWorldGeometry()
+      if (navigationMode.value !== 'desktop') {
+        scheduleNativeScroll(scrollSnapshot, true)
+      } else {
+        updateNavigationAffordances()
+      }
     }
     total.value = data.total
   } catch {
@@ -438,10 +707,17 @@ async function removeWish() {
   deleting.value = true
   try {
     await wishService.remove(wishId)
+    const scrollSnapshot = captureNativeScroll()
     wishes.value = wishes.value.filter((wish) => wish.id !== wishId)
     const nextPositions = { ...positions.value }
     delete nextPositions[wishId]
     positions.value = nextPositions
+    updateWorldGeometry()
+    if (navigationMode.value !== 'desktop') {
+      scheduleNativeScroll(scrollSnapshot, true)
+    } else {
+      updateNavigationAffordances()
+    }
     total.value = Math.max(0, total.value - 1)
     selected.value = null
     closeReport()
@@ -469,7 +745,10 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
+  nativeScrollSyncToken += 1
   clearTimeout(suppressClickTimer)
+  clearTimeout(returnTransitionTimer)
+  clearTimeout(nativeNavigationIntentTimer)
 })
 </script>
 
@@ -510,14 +789,20 @@ onBeforeUnmount(() => {
   min-height: 2.75rem;
   white-space: nowrap;
 }
+.wish-pool-stage-shell {
+  position: relative;
+  isolation: isolate;
+  min-height: 0;
+  flex: 1 1 auto;
+  margin-top: 1.25rem;
+}
 .wish-pool-stage {
   position: relative;
   width: 100%;
+  height: 100%;
   min-height: 0;
   box-sizing: border-box;
-  flex: 1 1 auto;
   border-block: 1px solid var(--surface-border);
-  margin-top: 1.25rem;
   background: var(--surface-ground);
   cursor: grab;
   overflow: hidden;
@@ -527,6 +812,27 @@ onBeforeUnmount(() => {
 .wish-pool-stage.is-panning {
   cursor: grabbing;
 }
+.wish-pool-stage.is-native-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+.wish-pool-stage.is-native-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.wish-pool-stage.is-tablet-scroll {
+  cursor: default;
+  overflow: auto;
+  touch-action: auto;
+}
+.wish-pool-stage.is-mobile-scroll {
+  cursor: default;
+  overflow-x: hidden;
+  overflow-y: auto;
+  touch-action: pan-y;
+}
 .wish-pool-world {
   position: absolute;
   left: 50%;
@@ -534,6 +840,70 @@ onBeforeUnmount(() => {
   width: 0;
   height: 0;
   will-change: transform;
+}
+.wish-pool-stage.is-native-scroll .wish-pool-world {
+  position: relative;
+  left: 0;
+  top: 0;
+  will-change: auto;
+}
+.wish-pool-world.is-returning {
+  transition: transform 300ms ease-out;
+}
+.wish-overlay-controls {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  pointer-events: none;
+}
+.wish-navigation-hint {
+  position: absolute;
+  bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  display: inline-flex;
+  max-width: calc(100% - 7rem);
+  align-items: center;
+  gap: 0.4rem;
+  transform: translateX(-50%);
+  color: var(--text-color-secondary);
+  font-size: var(--app-font-size-xs);
+  line-height: 1.3;
+  pointer-events: none;
+  text-align: center;
+  white-space: nowrap;
+}
+:deep(.wish-return-button.p-button) {
+  position: absolute;
+  z-index: 1;
+  right: 1rem;
+  bottom: calc(3.25rem + env(safe-area-inset-bottom, 0px));
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid color-mix(in srgb, var(--p-primary-color) 38%, var(--border-color)) !important;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
+  color: var(--text-secondary);
+  padding: 0;
+  pointer-events: auto;
+}
+:deep(.wish-return-button.p-button:hover),
+:deep(.wish-return-button.p-button:focus-visible),
+:deep(.wish-return-button.p-button:active) {
+  border-color: color-mix(in srgb, var(--p-primary-color) 68%, var(--border-color)) !important;
+  background: color-mix(in srgb, var(--p-primary-color) 10%, var(--bg-primary));
+  color: var(--p-primary-color);
+}
+:deep(.wish-return-button.is-at-origin.p-button:not(:hover):not(:focus-visible):not(:active)) {
+  opacity: 0.58;
+}
+:deep(.wish-return-button.is-mobile-return.p-button) {
+  right: 0.75rem;
+  bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+}
+@media (prefers-reduced-motion: reduce) {
+  .wish-pool-world.is-returning {
+    transition: none;
+  }
 }
 .wish-node {
   position: absolute;
@@ -601,6 +971,29 @@ onBeforeUnmount(() => {
 .wish-item.fulfilled .wish-word:hover,
 .wish-item.fulfilled .wish-word:focus-visible {
   color: var(--green-500);
+}
+.wish-pool-stage.is-mobile-layout .wish-item {
+  display: grid;
+  width: min(15rem, calc(100cqw - 2rem));
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 0.5rem;
+}
+.wish-pool-stage.is-mobile-layout .wish-word {
+  grid-column: 1;
+  grid-row: 1;
+}
+.wish-pool-stage.is-mobile-layout :deep(.wish-inline-heart.p-button) {
+  grid-column: 2;
+  grid-row: 1;
+}
+.wish-pool-stage.is-mobile-layout .wish-item.is-heart-left {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+.wish-pool-stage.is-mobile-layout .wish-item.is-heart-left .wish-word {
+  grid-column: 2;
+}
+.wish-pool-stage.is-mobile-layout .wish-item.is-heart-left :deep(.wish-inline-heart.p-button) {
+  grid-column: 1;
 }
 :deep(.wish-inline-heart.p-button) {
   min-width: 2.25rem;

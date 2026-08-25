@@ -6,14 +6,20 @@ import {
   WISH_ITEM_MAX_HEIGHT_REM,
   WISH_ITEM_MAX_WIDTH_REM,
   WISH_MOBILE_BREAKPOINT_PX,
+  WISH_MOBILE_ITEM_MAX_HEIGHT_REM,
+  WISH_MOBILE_ROW_GAP_REM,
+  WISH_TABLET_MAX_WIDTH_PX,
   assignDesktopWishPositions,
   assignMobileWishPositions,
   assignWishCentralityScores,
   createWishLayoutSeed,
+  createWishWorldGeometry,
   createResponsiveWishLayout,
   generateDesktopHoneycombCells,
   generateMobileRowSlots,
   selectMobileAnchorWishId,
+  wishHeartSide,
+  wishInteractionMode,
   wishCentralityScore,
   wishFontSizeRem,
 } from '@/utils/wishHoneycombLayout'
@@ -120,7 +126,7 @@ describe('Wish Pool honeycomb geometry', () => {
     ).toBeGreaterThan(shortViewport.filter(({ inInitialViewport }) => inInitialViewport).length)
   })
 
-  it('switches modes at the canonical Archive mobile boundary', () => {
+  it('uses vertical rows only below the canonical mobile breakpoint', () => {
     const scores = { 1: 1 }
     const anchorWishId = wishes[0].id
 
@@ -137,7 +143,7 @@ describe('Wish Pool honeycomb geometry', () => {
       createResponsiveWishLayout(
         wishes.slice(0, 1),
         scores,
-        { width: 768, height: 700 },
+        { width: 768, height: 1024 },
         anchorWishId,
         16
       ).mode
@@ -146,11 +152,68 @@ describe('Wish Pool honeycomb geometry', () => {
       createResponsiveWishLayout(
         wishes.slice(0, 1),
         scores,
-        { width: 769, height: 700 },
+        { width: 900, height: 1200 },
         anchorWishId,
         16
       ).mode
     ).toBe('honeycomb')
+    expect(
+      createResponsiveWishLayout(
+        wishes.slice(0, 1),
+        scores,
+        { width: 900, height: 700 },
+        anchorWishId,
+        16
+      ).mode
+    ).toBe('honeycomb')
+    expect(
+      createResponsiveWishLayout(
+        wishes.slice(0, 1),
+        scores,
+        { width: 769, height: 1366 },
+        anchorWishId,
+        16
+      ).mode
+    ).toBe('honeycomb')
+  })
+
+  it('separates mobile, tablet-native, and desktop interaction by container width', () => {
+    expect(wishInteractionMode({ width: 767, height: 600 })).toBe('mobile')
+    expect(wishInteractionMode({ width: 768, height: 1200 })).toBe('tablet')
+    expect(wishInteractionMode({ width: WISH_TABLET_MAX_WIDTH_PX, height: 700 })).toBe('tablet')
+    expect(wishInteractionMode({ width: WISH_TABLET_MAX_WIDTH_PX + 1, height: 1366 })).toBe(
+      'desktop'
+    )
+  })
+
+  it('builds real scroll dimensions around Honeycomb positions without changing cells', () => {
+    const viewport = { width: 820, height: 1180 }
+    const cells = generateDesktopHoneycombCells(60, viewport, 16, 404)
+    const positions = Object.fromEntries(cells.map((cell, index) => [index + 1, cell]))
+    const geometry = createWishWorldGeometry(positions, viewport, 16, {
+      native2DOverflow: true,
+    })
+
+    expect(geometry.width).toBeGreaterThan(viewport.width)
+    expect(geometry.height).toBeGreaterThan(viewport.height)
+    for (const position of Object.values(positions)) {
+      const centerX = position.x + geometry.offsetX
+      const centerY = position.y + geometry.offsetY
+      expect(centerX).toBeGreaterThanOrEqual((WISH_ITEM_MAX_WIDTH_REM * 16) / 2)
+      expect(centerX).toBeLessThanOrEqual(geometry.width - (WISH_ITEM_MAX_WIDTH_REM * 16) / 2)
+      expect(centerY).toBeGreaterThanOrEqual((WISH_ITEM_MAX_HEIGHT_REM * 16) / 2)
+      expect(centerY).toBeLessThanOrEqual(geometry.height - (WISH_ITEM_MAX_HEIGHT_REM * 16) / 2)
+    }
+  })
+
+  it('keeps real two-axis tablet scroll range even for a small Wish set', () => {
+    const viewport = { width: 834, height: 1210 }
+    const geometry = createWishWorldGeometry({ 1: { x: 0, y: 0 } }, viewport, 16, {
+      native2DOverflow: true,
+    })
+
+    expect(geometry.width).toBeGreaterThan(viewport.width)
+    expect(geometry.height).toBeGreaterThan(viewport.height)
   })
 })
 
@@ -264,8 +327,45 @@ describe('Wish Pool mobile row layout', () => {
 
     for (let index = 1; index < orderedY.length; index += 1) {
       expect(orderedY[index] - orderedY[index - 1]).toBeGreaterThanOrEqual(
-        WISH_ITEM_MAX_HEIGHT_REM * 16
+        WISH_MOBILE_ITEM_MAX_HEIGHT_REM * 16
       )
+    }
+  })
+
+  it('assigns stable session-seeded heart sides without tying them to reactive updates', () => {
+    const ids = Array.from({ length: 24 }, (_, index) => index + 1)
+    const firstSession = ids.map((id) => wishHeartSide(id, 1729))
+    const repeatedSession = ids.map((id) => wishHeartSide(id, 1729))
+    const nextSession = ids.map((id) => wishHeartSide(id, 2718))
+
+    expect(repeatedSession).toEqual(firstSession)
+    expect(new Set(firstSession)).toEqual(new Set(['left', 'right']))
+    expect(nextSession).not.toEqual(firstSession)
+  })
+
+  it('keeps heart sides stable through mobile geometry reflow and heart updates', () => {
+    const scores = assignWishCentralityScores(wishes, () => 0.5)
+    const first = createResponsiveWishLayout(
+      wishes,
+      scores,
+      { width: 390, height: 800 },
+      wishes[3].id,
+      16,
+      90210
+    )
+    const reflowed = createResponsiveWishLayout(
+      wishes.map((wish) => ({ ...wish, heart_count: wish.heart_count + 1 })),
+      scores,
+      { width: 640, height: 960 },
+      wishes[3].id,
+      16,
+      90210
+    )
+
+    expect(first.mode).toBe('mobile')
+    expect(reflowed.mode).toBe('mobile')
+    for (const wish of wishes) {
+      expect(reflowed.positions[wish.id].heartSide).toBe(first.positions[wish.id].heartSide)
     }
   })
 })
@@ -299,8 +399,16 @@ describe('Wish Pool typography and dense geometry', () => {
   })
 
   it('keeps neighboring Honeycomb footprints separated at maximum content size', () => {
+    expect(WISH_CELL_HORIZONTAL_SPACING_REM).toBeLessThan(16)
+    expect(WISH_CELL_VERTICAL_SPACING_REM).toBeLessThan(12)
     expect(WISH_CELL_HORIZONTAL_SPACING_REM).toBeGreaterThan(WISH_ITEM_MAX_WIDTH_REM)
     expect(WISH_CELL_VERTICAL_SPACING_REM).toBeGreaterThan(WISH_ITEM_MAX_HEIGHT_REM)
+    expect(WISH_MOBILE_ROW_GAP_REM).toBeGreaterThan(0)
+    expect(WISH_MOBILE_ROW_GAP_REM).toBeLessThan(1)
+    expect(WISH_MOBILE_ITEM_MAX_HEIGHT_REM + WISH_MOBILE_ROW_GAP_REM).toBeGreaterThanOrEqual(
+      WISH_MOBILE_ITEM_MAX_HEIGHT_REM
+    )
+    expect(WISH_MOBILE_ITEM_MAX_HEIGHT_REM + WISH_MOBILE_ROW_GAP_REM).toBeLessThanOrEqual(9.5)
 
     const center = { x: 0, y: 0 }
     const neighbors = [
