@@ -11690,6 +11690,7 @@ onBeforeUnmount(() => {
 :deep(.admin-desktop-status-column) {
   width: 7rem;
   min-width: 7rem;
+  padding-inline: 0.25rem !important;
   text-align: center;
 }
 
@@ -11705,11 +11706,13 @@ onBeforeUnmount(() => {
 
 :deep(.admin-desktop-status-cell .admin-desktop-status-tag.soft-badge) {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   inline-size: fit-content;
   min-inline-size: 0;
-  max-width: 100%;
+  max-inline-size: none;
+  max-width: none;
   min-height: 1.9rem !important;
   padding: 0.32rem 0.74rem !important;
   text-align: center;
