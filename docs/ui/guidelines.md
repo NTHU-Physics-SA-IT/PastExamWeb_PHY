@@ -66,6 +66,16 @@ already been normalized.
 Other labels, severities, and action availability must follow the Domain
 contract rather than a local mapping copied into a new screen.
 
+Review Center course presentation distinguishes the nullable current linked
+Archive placement from submitted/proposed history. When `current_archive` is
+present, its localized Course name is primary and a differing submitted Course
+is labeled as history. When it is absent, the UI labels the submission value as
+submitted data rather than implying a current placement. Both submission-family
+tabs use the same rule, status-pill classes, and non-wrapping administrator
+badge contract. Backend catalog ordering is canonical; selectors preserve API
+Category/Course order instead of applying their own locale-sensitive or local
+index sort.
+
 ## Responsive principles
 
 - A mobile fix must not change the desktop contract unintentionally.

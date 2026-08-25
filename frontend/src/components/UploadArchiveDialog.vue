@@ -689,26 +689,15 @@ const uploadPreviewError = ref(false)
 const availableProfessors = ref([])
 
 const categoryOptions = computed(() =>
-  [...props.courseCategories]
-    .sort((a, b) => {
-      const orderDiff = (a.order_index ?? 0) - (b.order_index ?? 0)
-      if (orderDiff !== 0) return orderDiff
-      return (a.id ?? 0) - (b.id ?? 0)
-    })
-    .map((category) => ({
-      name: localizedCategoryName(category),
-      value: category.key,
-    }))
+  props.courseCategories.map((category) => ({
+    name: localizedCategoryName(category),
+    value: category.key,
+  }))
 )
 
 const subjectOptions = computed(() =>
   (props.coursesList[form.value.category] || [])
     .filter((course) => !course.deleted_at)
-    .sort((a, b) => {
-      const orderDiff = (a.order_index ?? 0) - (b.order_index ?? 0)
-      if (orderDiff !== 0) return orderDiff
-      return (a.id ?? 0) - (b.id ?? 0)
-    })
     .map((course) => ({
       name: localizedCourseName(course),
       canonicalName: course.name,

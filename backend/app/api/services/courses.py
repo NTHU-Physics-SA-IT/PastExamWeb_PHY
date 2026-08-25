@@ -79,9 +79,8 @@ from app.services.archive_lifecycle_locks import (
 )
 from app.services.archive_mutation import (
     ArchiveMutationLifecycleConflict,
-    acquire_stable_archive_mutation_locks,
-    archive_move_target_not_found_error,
-    archive_move_target_trashed_error,
+    ArchiveMutationTargetCourseLifecycleConflict,
+    mutate_current_archive,
     resolve_archive_move_target,
 )
 from app.services.archive_submission_links import (
@@ -132,6 +131,12 @@ CATEGORY_BADGE_COLOR_TOKENS = {
     "slate",
     "indigo",
 }
+
+
+def _unwrap_form_default(value, default=None):
+    if hasattr(value, "default"):
+        return default if value.default is Ellipsis else value.default
+    return value
 CATEGORY_BADGE_COLOR_ALIASES = {
     "blue": "navy",
     "green": "forest",
@@ -1853,6 +1858,7 @@ async def update_archive(
     archive_type: ArchiveType = Form(None),
     has_answers: bool = Form(None),
     academic_year: int = Form(None),
+    target_course_id: int = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
@@ -1865,40 +1871,44 @@ async def update_archive(
             detail="Only admins can update archives",
         )
 
+    target_course_id = _unwrap_form_default(target_course_id)
     try:
-        locked = await acquire_stable_archive_mutation_locks(
+        target = (
+            await resolve_archive_move_target(
+                db,
+                course_id=target_course_id,
+                normalized_name=None,
+                category=None,
+            )
+            if target_course_id is not None
+            else None
+        )
+        archive, _ = await mutate_current_archive(
             db,
             archive_id=archive_id,
-            target_course_id=None,
-            operation="archive_edit",
+            source_course_id=course_id,
+            target=target,
+            metadata={
+                "name": name,
+                "professor": professor,
+                "archive_type": archive_type,
+                "has_answers": has_answers,
+                "academic_year": academic_year,
+            },
+            operation="archive_edit_move" if target is not None else "archive_edit",
         )
-    except ArchiveMutationLifecycleConflict:
-        raise archive_lifecycle_conflict_error()
-    archive = locked.archive(archive_id) if locked is not None else None
-
-    if not archive or archive.course_id != course_id or archive.deleted_at is not None:
+        await db.commit()
+        await db.refresh(archive)
+        return archive
+    except ArchiveMutationTargetCourseLifecycleConflict:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Archive not found"
-        )
-
-    if name is not None:
-        archive.name = name
-    if professor is not None:
-        archive.professor = professor
-    if archive_type is not None:
-        archive.archive_type = archive_type
-    if has_answers is not None:
-        archive.has_answers = has_answers
-    if academic_year is not None:
-        archive.academic_year = academic_year
-
-    archive.updated_at = datetime.now(UTC)
-
-    await db.commit()
-    await db.refresh(archive)
-
-    return archive
+        raise course_lifecycle_conflict_error()
+    except ArchiveMutationLifecycleConflict:
+        await db.rollback()
+        raise archive_lifecycle_conflict_error()
+    except Exception:
+        await db.rollback()
+        raise
 
 
 @router.patch("/{course_id}/archives/{archive_id}/course")
@@ -1944,64 +1954,31 @@ async def update_archive_course(
         )
 
     try:
-        locked = await acquire_stable_archive_mutation_locks(
+        archive, new_course = await mutate_current_archive(
             db,
             archive_id=archive_id,
-            target_course_id=target.course_id,
+            source_course_id=course_id,
+            target=target,
+            metadata={},
             operation="archive_move",
         )
+        await db.commit()
+        await db.refresh(archive)
+        return {
+            "message": f"Archive moved to course '{new_course.name}'",
+            "archive_id": archive.id,
+            "old_course_id": course_id,
+            "new_course_id": target.course_id,
+        }
+    except ArchiveMutationTargetCourseLifecycleConflict:
+        await db.rollback()
+        raise course_lifecycle_conflict_error()
     except ArchiveMutationLifecycleConflict:
+        await db.rollback()
         raise archive_lifecycle_conflict_error()
-    archive = locked.archive(archive_id) if locked is not None else None
-    if (
-        archive is None
-        or archive.course_id != course_id
-        or archive.deleted_at is not None
-    ):
+    except Exception:
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Archive not found",
-        )
-
-    if target.course_id == course_id:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot transfer archive to the same course",
-        )
-
-    new_course = locked.course(target.course_id)
-    if new_course is None:
-        await db.rollback()
-        raise archive_move_target_not_found_error()
-    if new_course.deleted_at is not None:
-        await db.rollback()
-        raise archive_move_target_trashed_error()
-
-    if target.normalized_name is not None:
-        revalidated_target = await resolve_archive_move_target(
-            db,
-            course_id=None,
-            normalized_name=target.normalized_name,
-            category=target.category,
-        )
-        if revalidated_target.course_id != target.course_id:
-            await db.rollback()
-            raise course_lifecycle_conflict_error()
-
-    archive.course_id = target.course_id
-    archive.updated_at = datetime.now(UTC)
-
-    await db.commit()
-    await db.refresh(archive)
-
-    return {
-        "message": f"Archive moved to course '{new_course.name}'",
-        "archive_id": archive.id,
-        "old_course_id": course_id,
-        "new_course_id": target.course_id,
-    }
+        raise
 
 
 @router.delete("/{course_id}/archives/{archive_id}")

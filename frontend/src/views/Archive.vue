@@ -579,7 +579,7 @@
                         class="soft-badge soft-badge--admin submission-admin-badge"
                         severity="secondary"
                       >
-                        {{ $t('管理員投稿') }}
+                        {{ $t('管理員投稿（身分標籤）') }}
                       </Tag>
                     </div>
                     <div class="submission-status-title">
@@ -1413,7 +1413,6 @@ function getSubmissionStatusClass(status) {
 }
 
 function getArchiveSubmissionKind(item) {
-  if (item?.is_admin_upload) return t('管理員投稿')
   if (item?.requested_category_key) return t('新分類 + 新課程')
   if (item?.requested_course_name) return t('新課程申請')
   return t('既有課程投稿')
@@ -1824,25 +1823,11 @@ function getCategoryName(code) {
 const availableEditProfessors = ref([])
 
 const categoryOptions = computed(() =>
-  [...courseCategories.value]
-    .sort((a, b) => {
-      const orderDiff = (a.order_index ?? 0) - (b.order_index ?? 0)
-      if (orderDiff !== 0) return orderDiff
-      return (a.id ?? 0) - (b.id ?? 0)
-    })
-    .map((category) => ({
-      name: localizedCategoryName(category),
-      value: category.key,
-    }))
+  courseCategories.value.map((category) => ({
+    name: localizedCategoryName(category),
+    value: category.key,
+  }))
 )
-
-const sortCourseOptionsByManagementOrder = (courseList) => {
-  return [...courseList].sort((a, b) => {
-    const orderDiff = (a.order_index ?? 0) - (b.order_index ?? 0)
-    if (orderDiff !== 0) return orderDiff
-    return (a.id ?? 0) - (b.id ?? 0)
-  })
-}
 
 watch(
   () => groupedArchives.value,
@@ -1896,7 +1881,7 @@ const allAvailableCoursesForTransfer = computed(() => {
     return []
   }
 
-  return sortCourseOptionsByManagementOrder(categoryData)
+  return categoryData
     .filter((course) => course.id !== selectedCourse.value)
     .map((course) => ({
       id: course.id,
@@ -2017,6 +2002,15 @@ const openEditDialog = async (archive) => {
 }
 
 const handleEdit = async () => {
+  if (editForm.value.shouldTransfer && !editForm.value.targetCourseId) {
+    toast.add({
+      severity: 'error',
+      summary: t('轉移失敗'),
+      detail: t('請從現有課程清單選擇目標課程。'),
+      life: 4000,
+    })
+    return
+  }
   try {
     editLoading.value = true
 
@@ -2026,26 +2020,8 @@ const handleEdit = async () => {
       archive_type: editForm.value.type,
       has_answers: editForm.value.hasAnswers,
       academic_year: editForm.value.academicYear ? editForm.value.academicYear.getFullYear() : null,
+      ...(editForm.value.shouldTransfer ? { target_course_id: editForm.value.targetCourseId } : {}),
     })
-
-    if (editForm.value.shouldTransfer && editForm.value.targetCategory) {
-      if (editForm.value.targetCourseId) {
-        // Transfer to existing course
-        await archiveService.updateArchiveCourse(
-          selectedCourse.value,
-          editForm.value.id,
-          editForm.value.targetCourseId
-        )
-      } else if (editForm.value.targetCourse) {
-        // Transfer to new course (create if not exists)
-        await archiveService.updateArchiveCourseByCategoryAndName(
-          selectedCourse.value,
-          editForm.value.id,
-          editForm.value.targetCourse,
-          editForm.value.targetCategory
-        )
-      }
-    }
 
     trackEvent(EVENTS.EDIT_ARCHIVE, {
       action: 'submit',
@@ -2332,9 +2308,9 @@ const closeEditDialog = () => {
 
 const searchTargetCourse = (event) => {
   const query = normalizeCourseSearchText(event?.query || '')
-  const filteredCourses = allAvailableCoursesForTransfer.value
-    .filter((course) => courseMatchesSearch(course.searchCourse, query))
-    .sort((a, b) => a.label.localeCompare(b.label))
+  const filteredCourses = allAvailableCoursesForTransfer.value.filter((course) =>
+    courseMatchesSearch(course.searchCourse, query)
+  )
 
   availableCoursesForTransfer.value = filteredCourses
 }

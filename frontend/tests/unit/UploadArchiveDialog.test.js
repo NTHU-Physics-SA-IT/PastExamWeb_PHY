@@ -143,6 +143,29 @@ function mountDialog(props = {}) {
 }
 
 describe('UploadArchiveDialog', () => {
+  it('preserves the backend category and course ordering contract', async () => {
+    const wrapper = mountDialog({
+      courseCategories: [
+        { id: 2, key: 'second', name: 'Backend first category', order_index: 99 },
+        { id: 1, key: 'first', name: 'Backend second category', order_index: -1 },
+      ],
+      coursesList: {
+        second: [
+          { id: 'later-index', name: 'Backend first course', order_index: 99 },
+          { id: 'earlier-index', name: 'Backend second course', order_index: -1 },
+        ],
+      },
+    })
+    wrapper.vm.form.category = 'second'
+    await flushPromises()
+
+    expect(wrapper.vm.categoryOptions.map(({ value }) => value)).toEqual(['second', 'first'])
+    expect(wrapper.vm.subjectOptions.map(({ code }) => code)).toEqual([
+      'later-index',
+      'earlier-index',
+    ])
+  })
+
   beforeAll(async () => {
     ensureDomMatrix()
     UploadArchiveDialog = (await import('@/components/UploadArchiveDialog.vue')).default

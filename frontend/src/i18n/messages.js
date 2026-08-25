@@ -597,7 +597,7 @@ const en = {
   考古題投稿紀錄: 'Exam Submission History',
   目前沒有考古題投稿: 'No exam submissions yet',
   管理員投稿: 'Administrator Upload',
-  '管理員投稿（審核中心）': 'Administrator',
+  '管理員投稿（身分標籤）': 'Administrator',
   新分類: 'New Category',
   '投稿時間：{time}': 'Submitted: {time}',
   '審核時間：{time}': 'Reviewed: {time}',
@@ -619,6 +619,13 @@ const en = {
   選擇課程類別: 'Select a course category',
   目標課程名稱: 'Destination Course',
   搜尋或輸入目標課程名稱: 'Search or enter a destination course name',
+  '請從現有課程清單選擇目標課程。': 'Select a destination from the existing course list.',
+  '目前課程：{course}': 'Current course: {course}',
+  '投稿時課程：{course}': 'Submitted course: {course}',
+  '此投稿尚未建立關聯考古題；以下為投稿時的課程資料。':
+    'This submission is not linked to an archive yet; the course below is the submitted value.',
+  '此投稿已通過，投稿資料已鎖定。若要移動目前的考古題，請使用「轉移到其他課程」；若要修改投稿資料，請先將狀態改為「已下架」或「未通過」。':
+    'This submission is approved and its submitted metadata is locked. Use “Transfer to another course” to move the current archive, or change the lifecycle to Taken Down or Rejected before editing submitted metadata.',
   儲存並轉移: 'Save and Move',
   投稿等級最高: 'Submission level Lv. {level} {name}; {exp} EXP; maximum level reached',
   投稿等級進度:
@@ -1613,7 +1620,7 @@ const zhTW = {
     "圖片：\n![替代文字](圖片網址)\n\n調整大小與位置：\n![替代文字](圖片網址){'{'}width=50% align=center{'}'}\n\n文字環繞：\n![替代文字](圖片網址){'{'}width=33% align=right wrap=true{'}'}\n\n可用寬度：\n1%–100%，例如 20%、42%、58.5%、90%\n\n位置：\nleft / center / right\n\nwrap=true 在所有螢幕寬度皆適用於 left / right；所選百分比會決定文字的剩餘寬度。",
   '投稿等級（使用者管理欄位）': '投稿等級',
   '管理員權限（使用者管理欄位）': '管理員權限',
-  '管理員投稿（審核中心）': '管理員投稿',
+  '管理員投稿（身分標籤）': '管理員投稿',
 }
 
 export const messages = {

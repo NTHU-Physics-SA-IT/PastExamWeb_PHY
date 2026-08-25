@@ -153,9 +153,23 @@ The only exact approval result link remains the optional one-to-one
 `source_submission_ids` remains `[]` or `[submission_id]`; parent resolution
 does not expand that compatibility shape.
 
+The linked entities have deliberately different field roles. `Archive.course_id`
+and the Archive exam fields are the current public placement and metadata.
+`ArchiveSubmission.subject`, requested parent fields, and exam fields remain the
+submitted/proposed snapshot, including later corrections made while the
+submission is editable. Moving an Archive never rewrites that snapshot. Admin
+submission responses therefore expose a nullable nested `current_archive`
+projection from the exact link in addition to the historical flat submission
+fields. A null projection means there is no exact current Archive to report; it
+must not be filled by guessing from names or metadata.
+
 ### Current implementation and test evidence
 
-`archives.py::approve_archive_submission` owns the transaction. Its approval
+`archives.py::approve_archive_submission` owns the transaction. First approval
+uses the requested parent metadata to resolve or create missing parents. A later
+approval of an already linked rejected submission reuses its exact Archive,
+preserves that Archive's current `course_id`, and copies only corrected
+non-placement exam metadata from the submission snapshot. Its approval
 Category helper flushes without committing; Course and Archive work, the exact
 link, review transition, and notification enqueue are committed together.
 The approval namespace mutex serializes the normalized Category/Course

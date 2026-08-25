@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref, nextTick } from 'vue'
 import ArchiveView from '@/views/Archive.vue'
+import { setLocale } from '@/i18n'
 
 const trackEventMock = vi.hoisted(() => vi.fn())
 const isUnauthorizedErrorMock = vi.hoisted(() => vi.fn())
@@ -24,6 +25,7 @@ const deleteArchiveMock = vi.hoisted(() => vi.fn())
 const updateArchiveMock = vi.hoisted(() => vi.fn())
 const updateArchiveCourseMock = vi.hoisted(() => vi.fn())
 const updateArchiveCourseByCategoryAndNameMock = vi.hoisted(() => vi.fn())
+const listMySubmissionsMock = vi.hoisted(() => vi.fn())
 
 const toastAddMock = vi.hoisted(() => vi.fn())
 const confirmRequireMock = vi.hoisted(() => vi.fn())
@@ -96,6 +98,7 @@ vi.mock('@/api', () => ({
     updateArchive: updateArchiveMock,
     updateArchiveCourse: updateArchiveCourseMock,
     updateArchiveCourseByCategoryAndName: updateArchiveCourseByCategoryAndNameMock,
+    listMySubmissions: listMySubmissionsMock,
   },
 }))
 
@@ -198,6 +201,7 @@ describe('ArchiveView', () => {
     updateArchiveMock.mockResolvedValue()
     updateArchiveCourseMock.mockResolvedValue()
     updateArchiveCourseByCategoryAndNameMock.mockResolvedValue()
+    listMySubmissionsMock.mockResolvedValue({ data: [] })
     toastAddMock.mockReset()
     confirmRequireMock.mockReset()
     confirmRequireMock.mockImplementation(({ accept }) => accept && accept())
@@ -216,6 +220,7 @@ describe('ArchiveView', () => {
   })
 
   afterEach(() => {
+    setLocale('zh-TW')
     consoleErrorSpy?.mockRestore()
     vi.useRealTimers()
     vi.clearAllMocks()
@@ -609,17 +614,28 @@ describe('ArchiveView', () => {
     vm.selectedCourse = 'c1'
     await nextTick()
 
-    vm.searchTargetCourse({ query: 'linear' })
-    expect(vm.availableCoursesForTransfer[0].label.toLowerCase()).toContain('linear')
+    vm.coursesList.freshman = [
+      { id: 'c1', name: 'Current course', order_index: 0 },
+      { id: 'c2', name: 'Backend first', order_index: 99 },
+      { id: 'c4', name: 'Backend second', order_index: -1 },
+    ]
+    await nextTick()
+    expect(vm.allAvailableCoursesForTransfer.map(({ id }) => id)).toEqual(['c2', 'c4'])
 
-    vm.onTargetCourseSelect({ value: { label: 'Linear Algebra', id: 'c2' } })
+    vm.searchTargetCourse({ query: 'linear' })
+    expect(vm.availableCoursesForTransfer).toEqual([])
+
+    vm.searchTargetCourse({ query: 'backend' })
+    expect(vm.availableCoursesForTransfer.map(({ id }) => id)).toEqual(['c2', 'c4'])
+
+    vm.onTargetCourseSelect({ value: { label: 'Backend first', id: 'c2' } })
     expect(vm.editForm.targetCourseId).toBe('c2')
 
     vm.onTargetCourseSelect({ value: 'New Course' })
     expect(vm.editForm.targetCourse).toBe('New Course')
     expect(vm.editForm.targetCourseId).toBeNull()
 
-    vm.editForm.targetCourse = 'Linear Algebra'
+    vm.editForm.targetCourse = 'Backend first'
     await nextTick()
     expect(vm.editForm.targetCourseId).toBe('c2')
 
@@ -641,115 +657,163 @@ describe('ArchiveView', () => {
     wrapper.unmount()
   })
 
-  it.each([
-    {
-      path: 'course id',
-      code: 'archive_move_target_course_not_found',
-      message: '目標課程不存在，請先建立課程。',
-      configure(vm) {
-        vm.editForm.targetCourseId = 'missing-course'
-      },
-      rejectMove() {
-        updateArchiveCourseMock.mockRejectedValueOnce({
-          response: {
-            status: 404,
-            data: {
-              detail: {
-                code: 'archive_move_target_course_not_found',
-                message: '目標課程不存在，請先建立課程。',
-                reload_required: false,
-              },
-            },
-          },
-        })
-      },
-    },
-    {
-      path: 'course name and category',
-      code: 'course_lifecycle_conflict',
-      message: '目標課程已在垃圾桶，請先恢復課程。',
-      configure(vm) {
-        vm.editForm.targetCourse = '已刪除課程'
-        vm.editForm.targetCourseId = null
-      },
-      rejectMove() {
-        updateArchiveCourseByCategoryAndNameMock.mockRejectedValueOnce({
-          response: {
-            status: 409,
-            data: {
-              detail: {
-                code: 'course_lifecycle_conflict',
-                message: '目標課程已在垃圾桶，請先恢復課程。',
-                reload_required: false,
-              },
-            },
-          },
-        })
-      },
-    },
-  ])(
-    'preserves the edit dialog for the structured $path move error',
-    async ({ message, configure, rejectMove }) => {
-      const wrapper = mount(ArchiveView, {
-        global: {
-          provide: {
-            toast: { add: toastAddMock },
-            confirm: { require: confirmRequireMock },
-            sidebarVisible: ref(true),
-          },
-          stubs: componentStubs,
+  it('keeps transfer suggestions in management order across locales', async () => {
+    const wrapper = mount(ArchiveView, {
+      global: {
+        provide: {
+          toast: { add: toastAddMock },
+          confirm: { require: confirmRequireMock },
+          sidebarVisible: ref(true),
         },
-      })
-      await flushPromises()
+        stubs: componentStubs,
+      },
+    })
+    await flushPromises()
 
-      const vm = wrapper.vm
-      const initialCourseLoads = listCoursesMock.mock.calls.length
-      vm.selectedCourse = 'c1'
-      vm.showEditDialog = true
-      vm.editForm = {
-        id: 'a1',
-        name: '保留名稱',
-        professor: '保留教授',
-        type: 'midterm',
-        hasAnswers: true,
-        academicYear: new Date('2023-01-01T00:00:00Z'),
-        shouldTransfer: true,
-        targetCategory: 'freshman',
-        targetCourse: '',
-        targetCourseId: null,
-      }
-      await nextTick()
-      configure(vm)
-      const preservedForm = {
-        name: vm.editForm.name,
-        professor: vm.editForm.professor,
-        targetCategory: vm.editForm.targetCategory,
-        targetCourse: vm.editForm.targetCourse,
-        targetCourseId: vm.editForm.targetCourseId,
-      }
-      rejectMove()
+    const vm = wrapper.vm
+    vm.selectedCourse = 40
+    vm.editForm.targetCategory = 'fundamental'
+    vm.coursesList.fundamental = [
+      { id: 40, order_index: 0, name: '目前課程', name_en: 'Current Course' },
+      { id: 30, order_index: 1, name: '書卷獎必修課', name_en: 'Zeta Course' },
+      { id: 20, order_index: 2, name: '普通化學(一)', name_en: 'Alpha Course' },
+      { id: 10, order_index: 3, name: '微積分(一)', name_en: 'Beta Course' },
+    ]
+    await nextTick()
 
-      await vm.handleEdit()
-      await flushPromises()
+    setLocale('zh-TW')
+    vm.searchTargetCourse({ query: '' })
+    const zhIds = vm.availableCoursesForTransfer.map(({ id }) => id)
+    const zhLabels = vm.availableCoursesForTransfer.map(({ label }) => label)
 
-      expect(vm.showEditDialog).toBe(true)
-      expect(vm.editForm).toMatchObject(preservedForm)
-      expect(listCoursesMock).toHaveBeenCalledTimes(initialCourseLoads)
-      expect(toastAddMock).toHaveBeenCalledTimes(1)
-      expect(toastAddMock).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          severity: 'error',
-          summary: '更新失敗',
-          detail: message,
-        })
-      )
-      expect(toastAddMock).not.toHaveBeenCalledWith(
-        expect.objectContaining({ severity: 'success' })
-      )
+    setLocale('en')
+    await nextTick()
+    vm.searchTargetCourse({ query: '' })
+    const enIds = vm.availableCoursesForTransfer.map(({ id }) => id)
+    const enLabels = vm.availableCoursesForTransfer.map(({ label }) => label)
 
-      wrapper.unmount()
+    expect(zhIds).toEqual([30, 20, 10])
+    expect(enIds).toEqual([30, 20, 10])
+    expect(enIds).toEqual(zhIds)
+    expect(zhLabels).toEqual(['書卷獎必修課', '普通化學(一)', '微積分(一)'])
+    expect(enLabels).toEqual(['Zeta Course', 'Alpha Course', 'Beta Course'])
+    expect(zhIds).not.toContain(40)
+    expect(enIds).not.toContain(40)
+
+    wrapper.unmount()
+  })
+
+  it('submits edit and transfer atomically and preserves the dialog on failure', async () => {
+    const wrapper = mount(ArchiveView, {
+      global: {
+        provide: {
+          toast: { add: toastAddMock },
+          confirm: { require: confirmRequireMock },
+          sidebarVisible: ref(true),
+        },
+        stubs: componentStubs,
+      },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm
+    const initialCourseLoads = listCoursesMock.mock.calls.length
+    vm.selectedCourse = 'c1'
+    vm.showEditDialog = true
+    vm.editForm = {
+      id: 'a1',
+      name: '保留名稱',
+      professor: '保留教授',
+      type: 'midterm',
+      hasAnswers: true,
+      academicYear: new Date('2023-01-01T00:00:00Z'),
+      shouldTransfer: true,
+      targetCategory: 'freshman',
+      targetCourse: '',
+      targetCourseId: null,
     }
-  )
+    await nextTick()
+    vm.editForm.targetCourseId = 'missing-course'
+    const preservedForm = {
+      name: vm.editForm.name,
+      professor: vm.editForm.professor,
+      targetCategory: vm.editForm.targetCategory,
+      targetCourse: vm.editForm.targetCourse,
+      targetCourseId: vm.editForm.targetCourseId,
+    }
+    updateArchiveMock.mockRejectedValueOnce({
+      response: {
+        status: 404,
+        data: {
+          detail: {
+            code: 'archive_move_target_course_not_found',
+            message: '目標課程不存在，請先建立課程。',
+            reload_required: false,
+          },
+        },
+      },
+    })
+
+    await vm.handleEdit()
+    await flushPromises()
+
+    expect(vm.showEditDialog).toBe(true)
+    expect(vm.editForm).toMatchObject(preservedForm)
+    expect(listCoursesMock).toHaveBeenCalledTimes(initialCourseLoads)
+    expect(toastAddMock).toHaveBeenCalledTimes(1)
+    expect(toastAddMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        severity: 'error',
+        summary: '更新失敗',
+        detail: '目標課程不存在，請先建立課程。',
+      })
+    )
+    expect(toastAddMock).not.toHaveBeenCalledWith(expect.objectContaining({ severity: 'success' }))
+    expect(updateArchiveMock).toHaveBeenCalledWith(
+      'c1',
+      'a1',
+      expect.objectContaining({ target_course_id: 'missing-course' })
+    )
+    expect(updateArchiveCourseMock).not.toHaveBeenCalled()
+    expect(updateArchiveCourseByCategoryAndNameMock).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('rejects free-text transfer targets before changing archive metadata', async () => {
+    const wrapper = mount(ArchiveView, {
+      global: {
+        provide: {
+          toast: { add: toastAddMock },
+          confirm: { require: confirmRequireMock },
+          sidebarVisible: ref(true),
+        },
+        stubs: componentStubs,
+      },
+    })
+    await flushPromises()
+    updateArchiveMock.mockClear()
+    wrapper.vm.editForm = {
+      id: 'a1',
+      name: '不可部分更新',
+      professor: '教授',
+      type: 'final',
+      hasAnswers: false,
+      academicYear: new Date('2026-01-01T00:00:00Z'),
+      shouldTransfer: true,
+      targetCategory: 'freshman',
+      targetCourse: '不存在的新課程',
+      targetCourseId: null,
+    }
+
+    await wrapper.vm.handleEdit()
+
+    expect(updateArchiveMock).not.toHaveBeenCalled()
+    expect(toastAddMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ detail: '請從現有課程清單選擇目標課程。' })
+    )
+    wrapper.unmount()
+  })
 
   it('keeps owner submission status informational without a delete action', () => {
     const archiveViewSource = readFileSync(
@@ -759,6 +823,139 @@ describe('ArchiveView', () => {
 
     expect(archiveViewSource).not.toContain('deleteMySubmission')
     expect(archiveViewSource).not.toContain('owner_self_delete_consumed')
+  })
+
+  it('keeps administrator identity separate from the ordinary submission-family contract', async () => {
+    listMySubmissionsMock.mockResolvedValue({
+      data: [
+        {
+          id: 71,
+          status: 'approved',
+          is_admin_upload: true,
+          course_name: '普通物理(二)',
+          name: '期中考',
+          academic_year: '20242',
+          professor: '王教授',
+        },
+        {
+          id: 72,
+          status: 'approved',
+          is_admin_upload: true,
+          requested_course_name: '普通物理(二)',
+          course_name: '普通物理(二)',
+          name: '期末考',
+          academic_year: '20242',
+          professor: '李教授',
+        },
+        {
+          id: 73,
+          status: 'approved',
+          is_admin_upload: true,
+          requested_category_key: 'fundamental',
+          requested_course_name: '普通物理(二)',
+          course_name: '普通物理(二)',
+          name: '小考',
+          academic_year: '20242',
+          professor: '陳教授',
+        },
+        {
+          id: 74,
+          status: 'approved',
+          is_admin_upload: false,
+          course_name: '普通物理(二)',
+          name: '期中考',
+          academic_year: '20242',
+          professor: '王教授',
+        },
+        {
+          id: 75,
+          status: 'approved',
+          is_admin_upload: false,
+          requested_course_name: '普通物理(二)',
+          course_name: '普通物理(二)',
+          name: '期末考',
+          academic_year: '20242',
+          professor: '李教授',
+        },
+        {
+          id: 76,
+          status: 'approved',
+          is_admin_upload: false,
+          requested_category_key: 'fundamental',
+          requested_course_name: '普通物理(二)',
+          course_name: '普通物理(二)',
+          name: '小考',
+          academic_year: '20242',
+          professor: '陳教授',
+        },
+      ],
+    })
+    setLocale('en')
+    const wrapper = mount(ArchiveView, {
+      global: {
+        provide: {
+          toast: { add: toastAddMock },
+          confirm: { require: confirmRequireMock },
+          sidebarVisible: ref(true),
+        },
+        stubs: componentStubs,
+      },
+    })
+    await flushPromises()
+    await wrapper.vm.openSubmissionStatus()
+    await flushPromises()
+
+    const identityBadges = wrapper.findAll('.submission-admin-badge')
+    let familyBadges = wrapper.findAll('.my-submission-type-badge')
+    const metadataBadges = wrapper.findAll('.my-submission-meta-chip')
+    expect(identityBadges).toHaveLength(3)
+    expect(familyBadges).toHaveLength(6)
+    expect(metadataBadges).toHaveLength(12)
+    for (const identityBadge of identityBadges) {
+      expect(identityBadge.text()).toBe('Administrator')
+      expect(identityBadge.classes()).toEqual(
+        expect.arrayContaining(['soft-badge', 'soft-badge--admin', 'submission-admin-badge'])
+      )
+    }
+    const expectedEnglishFamilies = [
+      ['Existing Course Submission', 'soft-badge--type'],
+      ['New Course Request', 'soft-badge--new-course'],
+      ['New Category + New Course', 'soft-badge--new-course-category'],
+      ['Existing Course Submission', 'soft-badge--type'],
+      ['New Course Request', 'soft-badge--new-course'],
+      ['New Category + New Course', 'soft-badge--new-course-category'],
+    ]
+    for (const [index, familyBadge] of familyBadges.entries()) {
+      const [expectedText, expectedClass] = expectedEnglishFamilies[index]
+      expect(familyBadge.text()).toBe(expectedText)
+      expect(familyBadge.classes()).toEqual(
+        expect.arrayContaining(['submission-meta-chip', 'my-submission-type-badge', expectedClass])
+      )
+      expect(familyBadge.classes()).not.toContain('soft-badge--admin')
+    }
+    expect(familyBadges[0].classes()).toEqual(familyBadges[3].classes())
+    expect(familyBadges[1].classes()).toEqual(familyBadges[4].classes())
+    expect(familyBadges[2].classes()).toEqual(familyBadges[5].classes())
+    expect(
+      metadataBadges.filter((badge) => badge.classes().includes('soft-badge--type'))
+    ).toHaveLength(6)
+    expect(
+      metadataBadges.filter((badge) => badge.classes().includes('soft-badge--info'))
+    ).toHaveLength(6)
+
+    setLocale('zh-TW')
+    await nextTick()
+    expect(identityBadges.every((badge) => badge.text() === '管理員投稿')).toBe(true)
+    familyBadges = wrapper.findAll('.my-submission-type-badge')
+    expect(familyBadges.map((badge) => badge.text())).toEqual([
+      '既有課程投稿',
+      '新課程申請',
+      '新分類 + 新課程',
+      '既有課程投稿',
+      '新課程申請',
+      '新分類 + 新課程',
+    ])
+    wrapper.unmount()
   })
 
   it('covers remaining utility branches', async () => {

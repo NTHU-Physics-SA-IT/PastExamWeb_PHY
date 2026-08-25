@@ -155,10 +155,46 @@ def _resolve_submission_actual_status(raw_status, *, deleted_at):
     return normalized_status
 
 
-def _serialize_archive_submission_admin(
+async def _load_current_archive_projection(db: AsyncSession, submission) -> dict | None:
+    created_archive_id = (
+        submission.get("created_archive_id")
+        if isinstance(submission, dict)
+        else getattr(submission, "created_archive_id", None)
+    )
+    if created_archive_id is None:
+        return None
+    row = (
+        await db.execute(
+            select(Archive, Course)
+            .join(Course, Course.id == Archive.course_id)
+            .where(Archive.id == created_archive_id)
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    archive, course = row
+    return {
+        "id": archive.id,
+        "course_id": course.id,
+        "course_name": format_course_display_name(course.name),
+        "course_name_en": course.name_en,
+        "course_category": course.category,
+        "name": archive.name,
+        "academic_year": archive.academic_year,
+        "archive_type": archive.archive_type,
+        "professor": archive.professor,
+        "has_answers": archive.has_answers,
+        "is_deleted": archive.deleted_at is not None,
+        "course_is_deleted": course.deleted_at is not None,
+    }
+
+
+async def _serialize_archive_submission_admin(
+    db: AsyncSession,
     submission,
 ) -> ArchiveSubmissionAdminRead:
-    base = ArchiveSubmissionRead.model_validate(submission)
+    raw_payload = dict(submission) if isinstance(submission, dict) else submission
+    base = ArchiveSubmissionRead.model_validate(raw_payload)
     deleted_at = (
         submission.get("deleted_at")
         if isinstance(submission, dict)
@@ -172,6 +208,12 @@ def _serialize_archive_submission_admin(
         raise ValueError(f"Unsupported submission status: {base.status}")
 
     payload = base.model_dump()
+    if isinstance(raw_payload, dict) and "current_archive" in raw_payload:
+        payload["current_archive"] = raw_payload["current_archive"]
+    else:
+        payload["current_archive"] = await _load_current_archive_projection(
+            db, submission
+        )
     payload["status"] = actual_status
     payload["available_actions"] = available_archive_submission_admin_actions(
         actual_status
@@ -179,12 +221,13 @@ def _serialize_archive_submission_admin(
     return ArchiveSubmissionAdminRead.model_validate(payload)
 
 
-def _serialize_archive_submission_action(
+async def _serialize_archive_submission_action(
+    db: AsyncSession,
     submission,
     *,
     changed: bool,
 ) -> ArchiveSubmissionActionRead:
-    payload = _serialize_archive_submission_admin(submission).model_dump()
+    payload = (await _serialize_archive_submission_admin(db, submission)).model_dump()
     payload["changed"] = changed
     return ArchiveSubmissionActionRead.model_validate(payload)
 
@@ -313,7 +356,8 @@ async def _prepare_direct_archive_submission_review(
             },
         )
     if policy.classification == ArchiveSubmissionTransitionClassification.NO_OP:
-        response = _serialize_archive_submission_action(
+        response = await _serialize_archive_submission_action(
+            db,
             submission,
             changed=False,
         )
@@ -352,7 +396,7 @@ async def _discover_direct_review_lock_context(
     *,
     submission_id: int,
     action: ArchiveSubmissionReviewAction,
-) -> tuple[ArchiveLifecycleLockPlan, dict[str, int | str | None]] | None:
+) -> tuple[ArchiveLifecycleLockPlan, dict[str, int | str | bool | None]] | None:
     submission = (
         await db.execute(
             select(ArchiveSubmission)
@@ -369,14 +413,6 @@ async def _discover_direct_review_lock_context(
         )
     )
     category_key = submission.requested_category_key or submission.category
-    approval_scope: str | None = None
-    if action == ArchiveSubmissionReviewAction.APPROVE:
-        approval_scope = await archive_lifecycle_locks.acquire_approval_namespace_mutex(
-            db,
-            category_key=category_key,
-            course_name=course_name,
-        )
-
     archive = (
         (
             await db.execute(
@@ -388,6 +424,16 @@ async def _discover_direct_review_lock_context(
         if submission.created_archive_id is not None
         else None
     )
+    uses_submission_parent = (
+        action == ArchiveSubmissionReviewAction.APPROVE and archive is None
+    )
+    approval_scope: str | None = None
+    if uses_submission_parent:
+        approval_scope = await archive_lifecycle_locks.acquire_approval_namespace_mutex(
+            db,
+            category_key=category_key,
+            course_name=course_name,
+        )
     sibling_ids: tuple[int, ...] | None = None
     submission_ids = (submission.id,)
     if archive is not None:
@@ -415,7 +461,7 @@ async def _discover_direct_review_lock_context(
     category = None
     active_course = None
     deleted_course = None
-    if action == ArchiveSubmissionReviewAction.APPROVE:
+    if uses_submission_parent:
         category_lookup_key = canonicalize_course_category_key(
             (category_key or "").strip().lower()
         )
@@ -471,6 +517,7 @@ async def _discover_direct_review_lock_context(
     return plan, {
         "course_name": course_name,
         "category_key": category_key,
+        "uses_submission_parent": uses_submission_parent,
     }
 
 
@@ -501,7 +548,11 @@ async def _lock_direct_review_context(
         )
         submission = locked.submission(submission_id)
         approval_identity_changed = False
-        if action == ArchiveSubmissionReviewAction.APPROVE and submission is not None:
+        if (
+            action == ArchiveSubmissionReviewAction.APPROVE
+            and metadata["uses_submission_parent"]
+            and submission is not None
+        ):
             locked_course_name = _normalize_course_name(
                 format_course_display_name(
                     submission.requested_course_name or submission.subject
@@ -1208,6 +1259,18 @@ async def list_archive_submissions_for_admin(
                 archive_submissions.deleted_at,
                 (archives.deleted_at IS NOT NULL) AS linked_archive_deleted,
                 (courses.deleted_at IS NOT NULL) AS linked_course_deleted,
+                archives.id AS current_archive_id,
+                archives.course_id AS current_archive_course_id,
+                courses.name AS current_archive_course_name,
+                courses.name_en AS current_archive_course_name_en,
+                courses.category AS current_archive_course_category,
+                archives.name AS current_archive_name,
+                archives.academic_year AS current_archive_academic_year,
+                LOWER(CAST(archives.archive_type AS TEXT)) AS current_archive_type,
+                archives.professor AS current_archive_professor,
+                archives.has_answers AS current_archive_has_answers,
+                (archives.deleted_at IS NOT NULL) AS current_archive_is_deleted,
+                (courses.deleted_at IS NOT NULL) AS current_archive_course_is_deleted,
                 archive_submissions.created_at,
                 archive_submissions.reviewed_at,
                 requesters.name AS requester_name,
@@ -1256,9 +1319,47 @@ async def list_archive_submissions_for_admin(
             row_dict["requested_category_name"] = format_course_display_name(
                 row_dict["requested_category_name"]
             )
+        current_archive_id = row_dict.pop("current_archive_id", None)
+        if current_archive_id is None:
+            row_dict["current_archive"] = None
+        else:
+            row_dict["current_archive"] = {
+                "id": current_archive_id,
+                "course_id": row_dict.pop("current_archive_course_id"),
+                "course_name": format_course_display_name(
+                    row_dict.pop("current_archive_course_name")
+                ),
+                "course_name_en": row_dict.pop("current_archive_course_name_en"),
+                "course_category": row_dict.pop("current_archive_course_category"),
+                "name": row_dict.pop("current_archive_name"),
+                "academic_year": row_dict.pop("current_archive_academic_year"),
+                "archive_type": row_dict.pop("current_archive_type"),
+                "professor": row_dict.pop("current_archive_professor"),
+                "has_answers": row_dict.pop("current_archive_has_answers"),
+                "is_deleted": bool(row_dict.pop("current_archive_is_deleted")),
+                "course_is_deleted": bool(
+                    row_dict.pop("current_archive_course_is_deleted")
+                ),
+            }
+        for projection_field in (
+            "current_archive_course_id",
+            "current_archive_course_name",
+            "current_archive_course_name_en",
+            "current_archive_course_category",
+            "current_archive_name",
+            "current_archive_academic_year",
+            "current_archive_type",
+            "current_archive_professor",
+            "current_archive_has_answers",
+            "current_archive_is_deleted",
+            "current_archive_course_is_deleted",
+        ):
+            row_dict.pop(projection_field, None)
         try:
             row_dict["is_admin_upload"] = bool(row_dict.get("is_admin_upload"))
-            archive_submissions.append(_serialize_archive_submission_admin(row_dict))
+            archive_submissions.append(
+                await _serialize_archive_submission_admin(db, row_dict)
+            )
         except Exception as exc:
             skipped_submission_count += 1
             logger.warning(
@@ -1566,7 +1667,7 @@ async def update_archive_submission_for_admin(
 
         await db.commit()
         await db.refresh(submission)
-        return _serialize_archive_submission_admin(submission)
+        return await _serialize_archive_submission_admin(db, submission)
     except Exception:
         await db.rollback()
         raise
@@ -1602,75 +1703,12 @@ async def approve_archive_submission(
         if no_op_response is not None:
             return no_op_response
 
-        formatted_course_name = format_course_display_name(
-            submission.requested_course_name or submission.subject
-        )
-        course_name = _normalize_course_name(formatted_course_name)
-        category_key = submission.requested_category_key or submission.category
-
-        if not course_name:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid course name",
-            )
-
-        if submission.requested_category_key:
-            await _ensure_or_create_requested_category_for_approval(
-                db,
-                submission.requested_category_key,
-                submission.requested_category_name,
-                submission.requested_category_name_en,
-                submission.requested_category_label,
-                submission.requested_category_label_en,
-                submission.requested_category_icon,
-            )
-        else:
-            await _ensure_category(db, category_key)
-
-        course = (
-            await db.execute(
-                select(Course).where(
-                    normalized_course_text_expr(Course.name) == course_name,
-                    Course.category == category_key,
-                    Course.deleted_at.is_(None),
-                )
-            )
-        ).scalar_one_or_none()
-
-        if not course:
-            deleted_course = (
-                await db.execute(
-                    select(Course).where(
-                        normalized_course_text_expr(Course.name) == course_name,
-                        Course.category == category_key,
-                        Course.deleted_at.is_not(None),
-                    )
-                )
-            ).scalar_one_or_none()
-            if deleted_course:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="已有同名課程在垃圾桶，請先復原或永久刪除後再通過。",
-                )
-
-            order_index = await _next_course_order_index(db, category_key)
-            course = Course(
-                name=formatted_course_name,
-                name_en=(submission.requested_course_name_en or "").strip() or None,
-                category=category_key,
-                order_index=order_index,
-            )
-            db.add(course)
-            await db.flush()
-            await db.refresh(course)
-
         archive = (
             await db.get(Archive, submission.created_archive_id)
             if submission.created_archive_id
             else None
         )
         if archive:
-            archive.course_id = course.id
             archive.name = submission.name
             archive.academic_year = submission.academic_year
             archive.archive_type = submission.archive_type
@@ -1681,6 +1719,63 @@ async def approve_archive_submission(
             archive.deleted_at = None
             archive.updated_at = datetime.now(UTC)
         else:
+            formatted_course_name = format_course_display_name(
+                submission.requested_course_name or submission.subject
+            )
+            course_name = _normalize_course_name(formatted_course_name)
+            category_key = submission.requested_category_key or submission.category
+            if not course_name:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid course name",
+                )
+            if submission.requested_category_key:
+                await _ensure_or_create_requested_category_for_approval(
+                    db,
+                    submission.requested_category_key,
+                    submission.requested_category_name,
+                    submission.requested_category_name_en,
+                    submission.requested_category_label,
+                    submission.requested_category_label_en,
+                    submission.requested_category_icon,
+                )
+            else:
+                await _ensure_category(db, category_key)
+            course = (
+                await db.execute(
+                    select(Course).where(
+                        normalized_course_text_expr(Course.name) == course_name,
+                        Course.category == category_key,
+                        Course.deleted_at.is_(None),
+                    )
+                )
+            ).scalar_one_or_none()
+            if not course:
+                deleted_course = (
+                    await db.execute(
+                        select(Course).where(
+                            normalized_course_text_expr(Course.name) == course_name,
+                            Course.category == category_key,
+                            Course.deleted_at.is_not(None),
+                        )
+                    )
+                ).scalar_one_or_none()
+                if deleted_course:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="已有同名課程在垃圾桶，請先復原或永久刪除後再通過。",
+                    )
+                order_index = await _next_course_order_index(db, category_key)
+                course = Course(
+                    name=formatted_course_name,
+                    name_en=(submission.requested_course_name_en or "").strip()
+                    or None,
+                    category=category_key,
+                    order_index=order_index,
+                )
+                db.add(course)
+                await db.flush()
+                await db.refresh(course)
             archive = Archive(
                 course_id=course.id,
                 name=submission.name,
@@ -1726,7 +1821,7 @@ async def approve_archive_submission(
         )
         await db.commit()
         await db.refresh(submission)
-        return _serialize_archive_submission_action(submission, changed=True)
+        return await _serialize_archive_submission_action(db, submission, changed=True)
     except IntegrityError as error:
         await db.rollback()
         if is_archive_submission_link_unique_violation(error):
@@ -1782,7 +1877,7 @@ async def reject_archive_submission(
             )
         await db.commit()
         await db.refresh(submission)
-        return _serialize_archive_submission_action(submission, changed=True)
+        return await _serialize_archive_submission_action(db, submission, changed=True)
     except Exception:
         await db.rollback()
         raise
@@ -1826,7 +1921,7 @@ async def takedown_archive_submission(
         )
         await db.commit()
         await db.refresh(submission)
-        return _serialize_archive_submission_action(submission, changed=True)
+        return await _serialize_archive_submission_action(db, submission, changed=True)
     except Exception:
         await db.rollback()
         raise
@@ -1916,7 +2011,7 @@ async def republish_archive_submission_endpoint(
         )
         await db.commit()
         await db.refresh(submission)
-        return _serialize_archive_submission_action(submission, changed=True)
+        return await _serialize_archive_submission_action(db, submission, changed=True)
     except Exception:
         await db.rollback()
         raise

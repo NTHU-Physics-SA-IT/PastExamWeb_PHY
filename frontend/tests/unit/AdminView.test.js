@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { shallowMount, flushPromises } from '@vue/test-utils'
 import AdminView from '@/views/Admin.vue'
+import { setLocale } from '@/i18n'
 import { applyFontSizePreference } from '@/utils/fontSizePreference'
 
 const adminViewSource = readFileSync(
@@ -10,11 +11,6 @@ const adminViewSource = readFileSync(
   'utf8'
 )
 const adminTemplateSource = adminViewSource.split('<script setup>')[0]
-const existingCourseStatusPillCss =
-  adminViewSource.match(
-    /\.p-tag\.existing-course-status-pill\.soft-badge\.admin-desktop-status-tag[\s\S]*?\)\s*\{[\s\S]*?\}/
-  )?.[0] ?? ''
-
 const sampleCourses = [
   { id: 1, name: '普通物理', category: 'junior' },
   { id: 2, name: '電磁學', category: 'freshman' },
@@ -387,6 +383,7 @@ describe('AdminView', () => {
   })
 
   afterEach(() => {
+    setLocale('zh-TW')
     consoleErrorSpy?.mockRestore()
     vi.useRealTimers()
     vi.resetModules()
@@ -888,6 +885,89 @@ describe('AdminView', () => {
     })
   })
 
+  it('separates current Archive placement from submitted course history', async () => {
+    const request = {
+      id: 7051,
+      status: 'approved',
+      subject: '投稿時課程',
+      requested_course_name: '投稿時申請課程',
+      current_archive: {
+        id: 901,
+        course_id: 92,
+        course_name: '目前轉移課程',
+        course_category: 'freshman',
+        name: '目前考古題',
+        academic_year: 2026,
+        archive_type: 'final',
+        professor: '目前教授',
+        has_answers: false,
+        is_deleted: false,
+        course_is_deleted: false,
+      },
+    }
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    expect(wrapper.vm.getReviewDisplayCourseName(request)).toBe('目前轉移課程')
+    expect(wrapper.vm.getReviewHistoricalCourseName(request)).toBe('投稿時申請課程')
+    expect(wrapper.vm.getReviewCourseHistoryLabel(request)).toBe('投稿時課程：投稿時申請課程')
+    expect(wrapper.vm.getReviewDisplayCourseName({ subject: '尚未關聯課程' })).toBe('尚未關聯課程')
+    await wrapper.vm.openArchiveRequestDialog(request)
+    expect(wrapper.vm.archiveRequestReadonlyMessage).toContain('投稿資料已鎖定')
+    expect(wrapper.vm.archiveRequestReadonlyMessage).toContain('轉移到其他課程')
+    expect(wrapper.vm.canEditSelectedArchiveMetadata).toBe(false)
+    expect(wrapper.vm.canEditSelectedArchiveReviewNote).toBe(true)
+  })
+
+  it('decides submitted-course history from locale-neutral Course identity', async () => {
+    const sameLegacyCourse = {
+      requested_course_name: '普通物理(二)',
+      requested_course_name_en: null,
+      current_archive: {
+        course_name: '普通物理（二）',
+        course_name_en: 'General Physics (II)',
+      },
+    }
+    const sameModernCourse = {
+      requested_course_name: '普通物理(二)',
+      requested_course_name_en: 'General Physics (II)',
+      current_archive: {
+        course_name: '普通物理（二）',
+        course_name_en: 'General Physics (II)',
+      },
+    }
+    const transferredCourse = {
+      requested_course_name: '普通物理(一)',
+      requested_course_name_en: null,
+      current_archive: {
+        course_name: '愛情必修課',
+        course_name_en: 'Love Required Course',
+      },
+    }
+    const unlinkedCourse = {
+      subject: '尚未關聯課程',
+      current_archive: null,
+    }
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    setLocale('zh-TW')
+    expect(wrapper.vm.getReviewDisplayCourseName(sameLegacyCourse)).toBe('普通物理（二）')
+    expect(wrapper.vm.getReviewCourseHistoryLabel(sameLegacyCourse)).toBe('')
+
+    setLocale('en')
+    expect(wrapper.vm.getReviewDisplayCourseName(sameLegacyCourse)).toBe('General Physics (II)')
+    expect(wrapper.vm.getReviewCourseHistoryLabel(sameLegacyCourse)).toBe('')
+    expect(wrapper.vm.getReviewCourseHistoryLabel(sameModernCourse)).toBe('')
+    expect(wrapper.vm.getReviewDisplayCourseName(transferredCourse)).toBe('Love Required Course')
+    expect(wrapper.vm.getReviewCourseHistoryLabel(transferredCourse)).toBe(
+      'Submitted course: 普通物理(一)'
+    )
+    expect(wrapper.vm.getReviewCurrentCourseName(unlinkedCourse)).toBe('')
+    expect(wrapper.vm.getReviewDisplayCourseName(unlinkedCourse)).toBe('尚未關聯課程')
+    expect(wrapper.vm.getReviewCourseHistoryLabel(unlinkedCourse)).toBe('')
+  })
+
   it('caps attention badges, hides zero, and assigns child presentation classes', async () => {
     const wrapper = createWrapper()
     await flushPromises()
@@ -1126,7 +1206,9 @@ describe('AdminView', () => {
   })
 
   it('uses compact Admin-context labels without changing fields or sorting', () => {
-    expect(adminTemplateSource.match(/\$t\('管理員投稿（審核中心）'\)/g)).toHaveLength(4)
+    expect(adminTemplateSource.match(/\$t\('管理員投稿（身分標籤）'\)/g)).toHaveLength(4)
+    expect(adminTemplateSource).not.toContain('管理員投稿（審核中心）')
+    expect(adminTemplateSource).not.toMatch(/\$t\('管理員投稿'\)/)
     expect(adminTemplateSource).toContain(
       `field="contributor_level"\n                  :header="$t('投稿等級（使用者管理欄位）')"\n                  sortable`
     )
@@ -1203,10 +1285,7 @@ describe('AdminView', () => {
     expect(adminViewSource.match(/admin-desktop-status-tag/g).length).toBeGreaterThanOrEqual(3)
     expect(adminTemplateSource.match(/class="admin-desktop-status-label"/g)).toHaveLength(3)
     expect(adminTemplateSource.match(/'admin-desktop-status-tag'/g)).toHaveLength(3)
-    expect(adminTemplateSource.match(/'existing-course-status-pill'/g)).toHaveLength(1)
-    expect(adminTemplateSource).toMatch(
-      /toggleReviewSort\('existing', 'status'\)[\s\S]*?'existing-course-status-pill'[\s\S]*?getSubmissionStatusClass\(data\.status\)/
-    )
+    expect(adminTemplateSource).not.toContain('existing-course-status-pill')
     expect(adminViewSource).toContain('Array.from(')
     expect(adminViewSource).not.toContain('writing-mode: vertical-rl')
     expect(adminViewSource).not.toContain('min-inline-size: 4.75rem')
@@ -1216,12 +1295,8 @@ describe('AdminView', () => {
       /admin-desktop-status-tag\.soft-badge[\s\S]*?min-height:\s*1\.9rem[\s\S]*?padding:\s*0\.32rem 0\.74rem/
     )
     expect(adminViewSource).toMatch(
-      /\.p-tag\.existing-course-status-pill\.soft-badge\.admin-desktop-status-tag[\s\S]*?flex:\s*0 0 auto[\s\S]*?max-inline-size:\s*none[\s\S]*?max-width:\s*none[\s\S]*?block-size:\s*1\.9rem[\s\S]*?padding-block:\s*0\.32rem[\s\S]*?padding-inline:\s*0\.74rem[\s\S]*?border-radius:\s*999px[\s\S]*?font-size:\s*var\(--app-badge-font-size\)[\s\S]*?font-weight:\s*650[\s\S]*?line-height:\s*1\.25[\s\S]*?vertical-align:\s*middle/
+      /review-admin-upload-chip\.soft-badge[\s\S]*?overflow-wrap:\s*normal[\s\S]*?white-space:\s*nowrap/
     )
-    expect(existingCourseStatusPillCss).not.toContain('max-inline-size: 100%')
-    expect(existingCourseStatusPillCss).not.toContain('max-width: 100%')
-    expect(existingCourseStatusPillCss).not.toMatch(/review-status-(?:pending|approved|takedown)/)
-    expect(existingCourseStatusPillCss).not.toMatch(/(?:^|\s)width:\s*\d/)
     expect(adminTemplateSource.match(/class="review-submission-type-cell"/g)).toHaveLength(1)
     expect(adminTemplateSource.match(/'review-desktop-submission-type-tag'/g)).toHaveLength(1)
     expect(adminTemplateSource.match(/class="submission-type-combined-label"/g)).toHaveLength(1)

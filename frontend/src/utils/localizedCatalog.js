@@ -33,6 +33,25 @@ export const localizedSubmissionCourseName = (submission) => {
   return englishValue(submission.requested_course_name_en || submission.course_name_en) || chinese
 }
 
+export const localizedSubmissionCurrentCourseName = (submission) => {
+  const current = submission?.current_archive
+  if (!current) return ''
+  if (i18n.global.locale.value !== 'en') return current.course_name || ''
+  return englishValue(current.course_name_en) || current.course_name || ''
+}
+
+export const submissionCourseHistoryDiffers = (submission) => {
+  const current = submission?.current_archive?.course_name
+  const historical =
+    submission?.requested_course_name ||
+    submission?.course_name ||
+    submission?.subject ||
+    submission?.requestedCourseName ||
+    ''
+  if (!current || !historical) return false
+  return normalizeCourseSearchText(current) !== normalizeCourseSearchText(historical)
+}
+
 export const localizedCourseSnapshotName = (record) => {
   if (!record) return ''
   const chinese = record.course_name || ''
