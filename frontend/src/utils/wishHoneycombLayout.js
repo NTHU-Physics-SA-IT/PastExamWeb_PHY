@@ -1,15 +1,17 @@
 export const WISH_CENTRALITY_GAMMA = 0.6
 export const WISH_ITEM_MAX_WIDTH_REM = 15
 export const WISH_ITEM_MAX_HEIGHT_REM = 9.5
-export const WISH_CELL_HORIZONTAL_SPACING_REM = 16
-export const WISH_CELL_VERTICAL_SPACING_REM = 12
+export const WISH_CELL_HORIZONTAL_SPACING_REM = 15.6
+export const WISH_CELL_VERTICAL_SPACING_REM = 11.25
 export const WISH_MOBILE_BREAKPOINT_PX = 768
+export const WISH_TABLET_MAX_WIDTH_PX = 1024
+export const WISH_MOBILE_ITEM_MAX_HEIGHT_REM = 8.5
+export const WISH_MOBILE_ROW_GAP_REM = 0.5
 
 const WISH_FONT_SIZE_BASE_REM = 1.15
 const WISH_FONT_SIZE_GROWTH_REM = 0.11
 const WISH_FONT_SIZE_MAX_REM = 1.6
 const WISH_LAYOUT_SAFE_MARGIN_REM = 1
-const WISH_MOBILE_ROW_GAP_REM = 1
 const RNG_EPSILON = 1e-7
 const UINT32_RANGE = 0x100000000
 
@@ -174,7 +176,58 @@ function desktopCell(row, q, viewport, rootFontSize) {
 }
 
 function mobileRowSpacing(rootFontSize) {
-  return (WISH_ITEM_MAX_HEIGHT_REM + WISH_MOBILE_ROW_GAP_REM) * rootFontSize
+  return (WISH_MOBILE_ITEM_MAX_HEIGHT_REM + WISH_MOBILE_ROW_GAP_REM) * rootFontSize
+}
+
+function usesVerticalWishLayout(viewport) {
+  return viewport.width < WISH_MOBILE_BREAKPOINT_PX
+}
+
+export function wishInteractionMode(viewport) {
+  const { width } = normalizedViewport(viewport)
+  if (width < WISH_MOBILE_BREAKPOINT_PX) return 'mobile'
+  if (width <= WISH_TABLET_MAX_WIDTH_PX) return 'tablet'
+  return 'desktop'
+}
+
+export function createWishWorldGeometry(
+  positions,
+  viewport,
+  rootFontSize = 16,
+  { mobile = false, native2DOverflow = false } = {}
+) {
+  const normalizedSize = normalizedViewport(viewport)
+  const rootSize = normalizedRootFontSize(rootFontSize)
+  const itemWidth = WISH_ITEM_MAX_WIDTH_REM * rootSize
+  const itemHeight =
+    (mobile ? WISH_MOBILE_ITEM_MAX_HEIGHT_REM : WISH_ITEM_MAX_HEIGHT_REM) * rootSize
+  const margin = WISH_LAYOUT_SAFE_MARGIN_REM * rootSize
+  const positionList = Object.values(positions || {}).filter(
+    ({ x, y }) => Number.isFinite(x) && Number.isFinite(y)
+  )
+
+  if (!positionList.length) {
+    return {
+      width: normalizedSize.width,
+      height: normalizedSize.height,
+      offsetX: normalizedSize.width / 2,
+      offsetY: normalizedSize.height / 2,
+    }
+  }
+
+  const xValues = positionList.map(({ x }) => x)
+  const yValues = positionList.map(({ y }) => y)
+  const minimumWidth = normalizedSize.width + (native2DOverflow ? itemWidth : 0)
+  const contentWidth = Math.max(...xValues) - Math.min(...xValues) + itemWidth + margin * 2
+  const contentHeight = Math.max(...yValues) - Math.min(...yValues) + itemHeight + margin * 2
+  const width = Math.max(minimumWidth, contentWidth)
+  const minimumHeight =
+    normalizedSize.height * (mobile ? 1.5 : 1) + (native2DOverflow ? itemHeight : 0)
+  const height = Math.max(minimumHeight, contentHeight)
+  const offsetX = (width - contentWidth) / 2 + margin + itemWidth / 2 - Math.min(...xValues)
+  const offsetY = (height - contentHeight) / 2 + margin + itemHeight / 2 - Math.min(...yValues)
+
+  return { width, height, offsetX, offsetY }
 }
 
 export function wishCentralityScore(heartCount, rng) {
@@ -191,6 +244,10 @@ export function createWishLayoutSeed(rng = Math.random) {
 export function createSeededWishRng(seed, scope = 'default') {
   let index = 0
   return () => seededUnit(seed, `${scope}:${index++}`)
+}
+
+export function wishHeartSide(wishId, sessionSeed = 0) {
+  return seededUnit(sessionSeed, `heart-side:${wishId}`) < 0.5 ? 'left' : 'right'
 }
 
 export function assignWishCentralityScores(wishes, rng = Math.random, existingScores = {}) {
@@ -355,20 +412,29 @@ export function assignMobileWishPositions(
   scores,
   viewport,
   anchorWishId,
-  rootFontSize = 16
+  rootFontSize = 16,
+  sessionSeed = 0
 ) {
   const slots = generateMobileRowSlots(wishes.length, viewport, rootFontSize)
   const positions = {}
   const anchorWish = wishes.find((wish) => wish.id === anchorWishId) || wishes[0]
   if (!anchorWish || !slots.length) return positions
 
-  positions[anchorWish.id] = { ...slots[0], anchor: true }
+  positions[anchorWish.id] = {
+    ...slots[0],
+    anchor: true,
+    heartSide: wishHeartSide(anchorWish.id, sessionSeed),
+  }
   const remainingWishes = rankWishesBySessionScore(
     wishes.filter((wish) => wish.id !== anchorWish.id),
     scores
   )
   remainingWishes.forEach((wish, index) => {
-    positions[wish.id] = { ...slots[index + 1], anchor: false }
+    positions[wish.id] = {
+      ...slots[index + 1],
+      anchor: false,
+      heartSide: wishHeartSide(wish.id, sessionSeed),
+    }
   })
   return positions
 }
@@ -382,20 +448,22 @@ export function createResponsiveWishLayout(
   sessionSeed = 0
 ) {
   const normalizedSize = normalizedViewport(viewport)
-  const mobile = normalizedSize.width < WISH_MOBILE_BREAKPOINT_PX
+  const mobile = usesVerticalWishLayout(normalizedSize)
   const positions = mobile
-    ? assignMobileWishPositions(wishes, scores, normalizedSize, anchorWishId, rootFontSize)
+    ? assignMobileWishPositions(
+        wishes,
+        scores,
+        normalizedSize,
+        anchorWishId,
+        rootFontSize,
+        sessionSeed
+      )
     : assignDesktopWishPositions(wishes, scores, normalizedSize, rootFontSize, sessionSeed)
-  const anchorPosition = mobile ? positions[anchorWishId] : null
   return {
     mode: mobile ? 'mobile' : 'honeycomb',
+    interactionMode: wishInteractionMode(normalizedSize),
     positions,
-    camera: {
-      x: 0,
-      y: mobile
-        ? (anchorPosition?.anchorRatio ?? 0.25) * normalizedSize.height - normalizedSize.height / 2
-        : 0,
-    },
+    camera: { x: 0, y: 0 },
   }
 }
 
@@ -411,7 +479,7 @@ export function appendResponsiveWishPositions(
   if (!newWishes.length) return { ...existingPositions }
   const rootSize = normalizedRootFontSize(rootFontSize)
   const normalizedSize = normalizedViewport(viewport)
-  const mobile = normalizedSize.width < WISH_MOBILE_BREAKPOINT_PX
+  const mobile = usesVerticalWishLayout(normalizedSize)
   const nextPositions = { ...existingPositions }
   const orderedWishes = rankWishesBySessionScore(newWishes, scores)
 
@@ -429,6 +497,7 @@ export function appendResponsiveWishPositions(
         y: lowestY + mobileRowSpacing(rootSize) * (index + 1),
         anchor: false,
         anchorRatio: nextPositions[anchorWishId]?.anchorRatio ?? 0.25,
+        heartSide: wishHeartSide(wish.id, sessionSeed),
         inInitialViewport: false,
       }
     })
