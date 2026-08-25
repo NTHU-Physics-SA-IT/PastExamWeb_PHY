@@ -232,6 +232,9 @@ transaction.
 Soft trash and restore use the same ordering and remain notification-free. The
 route/session continues to own commit and rollback; the planner performs no
 mutation, notification insert, or commit.
+CommentReport and ArchiveWishReport soft trash, restore, and permanent deletion
+are likewise notification-free and do not delete their durable submitted/result
+notification history. Their route or Trash dispatcher owns the database commit.
 ArchiveReport create, soft trash, and restore first serialize the non-null
 reporter/Archive uniqueness scope with a transaction advisory mutex. A restore
 blocked by another active pending report rolls back and returns the stable
@@ -401,6 +404,7 @@ integration.
 | Linked ArchiveSubmission reapproval | The approval route preserves the exact Archive `course_id`, copies corrected non-placement snapshot fields, transitions status, and enqueues notification in one caller-owned transaction | It does not resolve/create proposed parents or emit a separate transfer event; rollback retains prior Archive placement/metadata and submission state |
 | Course soft trash/restore | The route owns discovery, canonical Category/Course/Archive/Submission locks, one bounded membership rebuild, lifecycle mutation, and commit | Existing Course results and counts remain unchanged; both operations remain silent |
 | Report create/review | Report mutation and durable personal notification share a commit; ArchiveReport create also holds its reporter/Archive uniqueness mutex, while review uses canonical Course/Archive/optional Submission/Report locks and includes optional linked-Submission takedown or exact legacy-Archive soft trash | Database-atomic; one active pending ArchiveReport per non-null reporter/Archive scope; legacy takedown fabricates no Submission and performs no storage operation |
+| Comment/Wish report soft trash/restore | The active report route or Trash dispatcher mutates only deletion metadata and commits once | Silent and database-only; moderation/review state, snapshots, source records, and durable notification history remain unchanged |
 | ArchiveReport soft trash/restore | Route-owned uniqueness mutex, canonical parent-first lock plan, Report metadata mutation, then commit | Silent; trash releases active uniqueness on commit, and conflicting restore returns stable 409 while preserving both rows |
 | Republish | Transition and notification share the caller transaction | Comparatively complete |
 | Permanent delete | MinIO call and DB delete cannot be atomic; helper may downgrade storage failure to warning | Retry and truthful result gap |

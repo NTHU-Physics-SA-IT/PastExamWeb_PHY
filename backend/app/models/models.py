@@ -94,6 +94,7 @@ class TrashEntityType(str, PyEnum):
     SYSTEM_ISSUE_REPORT = "system_issue_report"
     COMMENT_REPORT = "comment_report"
     ARCHIVE_REPORT = "archive_report"
+    ARCHIVE_WISH_REPORT = "archive_wish_report"
     NOTIFICATION = "notification"
     USER = "user"
 
@@ -924,6 +925,19 @@ class ArchiveWishReport(SQLModel, table=True):
             nullable=False,
             server_default=text("now()"),
         )
+    )
+    deleted_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    deleted_by_id: int | None = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
     )
 
 

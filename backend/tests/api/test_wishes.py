@@ -25,7 +25,7 @@ def _override_user(user_id: int, *, is_admin: bool = False):
 
 
 @pytest.mark.asyncio
-async def test_wish_report_notifications_are_transactional_and_deduplicated(
+async def test_wish_report_notifications_and_trash_lifecycle_are_transactional(
     client: AsyncClient,
     session_maker,
     make_user,
@@ -101,6 +101,70 @@ async def test_wish_report_notifications_are_transactional_and_deduplicated(
             assert notifications[0].dedupe_key == f"wish_report_submitted:{report_id}"
             assert notifications[1].dedupe_key == f"wish_report_result:{report_id}"
             assert notifications[1].metadata_json["admin_response"] == "Confirmed"
+
+        app.dependency_overrides[get_current_user] = _override_user(reporter.id)
+        assert (
+            await client.delete(f"/wishes/admin/reports/{report_id}")
+        ).status_code == 403
+
+        app.dependency_overrides[get_current_user] = _override_user(admin.id, is_admin=True)
+        deleted = await client.delete(f"/wishes/admin/reports/{report_id}")
+        assert deleted.status_code == 200
+        assert deleted.json() == {"success": True}
+        assert (await client.get(f"/wishes/admin/reports/{report_id}")).status_code == 404
+        assert (
+            await client.patch(
+                f"/wishes/admin/reports/{report_id}",
+                json={"status": "dismissed", "admin_response": "changed"},
+            )
+        ).status_code == 404
+        assert (
+            await client.delete(f"/wishes/admin/reports/{report_id}")
+        ).status_code == 404
+        active_reports = await client.get("/wishes/admin/reports")
+        assert all(item["id"] != report_id for item in active_reports.json()["items"])
+
+        trash = await client.get(
+            "/trash", params={"item_type": "archive_wish_report"}
+        )
+        assert trash.status_code == 200
+        trashed = next(item for item in trash.json() if item["id"] == report_id)
+        assert trashed["display_name"] == "Wish report notification target"
+        assert trashed["comment_snapshot"] == (
+            f"{course.name} · Professor Report · term:any · final"
+        )
+        assert trashed["deleted_by_id"] == admin.id
+        assert trashed["status"] == "upheld"
+        assert trashed["canRestore"] is True
+        assert trashed["canPermanentDelete"] is True
+
+        restored = await client.post(
+            "/trash/restore",
+            json={"item_type": "archive_wish_report", "item_id": report_id},
+        )
+        assert restored.status_code == 200
+        restored_report = await client.get(f"/wishes/admin/reports/{report_id}")
+        assert restored_report.status_code == 200
+        assert restored_report.json()["status"] == "upheld"
+        assert restored_report.json()["admin_response"] == "Confirmed"
+        assert restored_report.json()["reviewed_by"] == admin.id
+
+        assert (
+            await client.delete(f"/wishes/admin/reports/{report_id}")
+        ).status_code == 200
+        assert (
+            await client.delete(f"/trash/archive_wish_report/{report_id}")
+        ).status_code == 200
+        async with session_maker() as session:
+            assert await session.get(ArchiveWishReport, report_id) is None
+            assert int(
+                await session.scalar(
+                    select(func.count(PersonalNotification.id)).where(
+                        PersonalNotification.user_id == reporter.id
+                    )
+                )
+                or 0
+            ) == 2
 
         async def fail_notification(*args, **kwargs):
             raise RuntimeError("notification unavailable")

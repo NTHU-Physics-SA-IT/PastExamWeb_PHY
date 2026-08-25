@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import wishPoolSource from '@/components/WishPool.vue?raw'
 
@@ -10,6 +10,9 @@ const wishServiceMock = vi.hoisted(() => ({
 }))
 const confirmRequireMock = vi.hoisted(() => vi.fn())
 const toastAddMock = vi.hoisted(() => vi.fn())
+let resizeObserverCallback
+let resizeObserverTarget
+let resizeObserverDisconnected
 
 vi.mock('@/api', () => ({ wishService: wishServiceMock }))
 vi.mock('@/utils/auth', () => ({ getCurrentUser: () => ({ id: 1, is_admin: true }) }))
@@ -46,13 +49,55 @@ const stubs = {
   },
 }
 
+function dispatchPointer(element, type, options) {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    button: options.button ?? 0,
+    clientX: options.clientX,
+    clientY: options.clientY,
+  })
+  Object.defineProperties(event, {
+    pointerId: { value: options.pointerId ?? 1 },
+    pointerType: { value: options.pointerType ?? 'mouse' },
+    isPrimary: { value: true },
+  })
+  element.dispatchEvent(event)
+}
+
 describe('Wish Pool focused interactions', () => {
   beforeEach(() => {
+    resizeObserverCallback = null
+    resizeObserverTarget = null
+    resizeObserverDisconnected = false
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback) {
+          resizeObserverCallback = callback
+        }
+        observe(element) {
+          resizeObserverTarget = element
+        }
+        disconnect() {
+          resizeObserverDisconnected = true
+        }
+      }
+    )
     confirmRequireMock.mockReset()
     toastAddMock.mockReset()
-    wishServiceMock.list.mockReset().mockResolvedValue({ data: { items: [sampleWish], total: 1 } })
+    wishServiceMock.list
+      .mockReset()
+      .mockResolvedValue({ data: { items: [{ ...sampleWish }], total: 1 } })
     wishServiceMock.report.mockReset().mockResolvedValue({ data: {} })
     wishServiceMock.remove.mockReset().mockResolvedValue({ data: {} })
+    wishServiceMock.toggleHeart
+      .mockReset()
+      .mockResolvedValue({ data: { hearted: true, heart_count: 1 } })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('reflows the header before the add-wish button reaches the cramped middle state', () => {
@@ -66,30 +111,40 @@ describe('Wish Pool focused interactions', () => {
     )
   })
 
-  it('centers the naturally sized cloud in a responsive breathing-space stage', () => {
-    expect(wishPoolSource).toContain('class="wish-cloud-stage"')
+  it('measures the exact pool viewport and remains free of continuous layout work', () => {
+    expect(wishPoolSource).toContain('ref="viewportRef"')
+    expect(wishPoolSource).toContain('class="wish-pool-stage"')
+    expect(wishPoolSource).toContain('class="wish-pool-world"')
+    expect(wishPoolSource).toContain('createResponsiveWishLayout')
+    expect(wishPoolSource).toContain('appendResponsiveWishPositions')
+    expect(wishPoolSource).toContain('@pointermove="movePan"')
+    expect(wishPoolSource).not.toContain('requestAnimationFrame')
+    expect(wishPoolSource).toContain('new ResizeObserver')
+    expect(wishPoolSource).not.toContain('window.innerWidth')
+    expect(wishPoolSource).not.toContain('window.innerHeight')
+    expect(wishPoolSource).not.toContain('navigator.userAgent')
+    expect(wishPoolSource).toContain("layoutMode.value === 'mobile' ? 0 : camera.x")
+    expect(wishPoolSource).toContain("camera.x = layoutMode.value === 'mobile' ? 0")
     expect(wishPoolSource).toMatch(
-      /\.wish-cloud-stage\s*\{[^}]*display:\s*flex;[^}]*min-height:\s*clamp\([^)]*\);[^}]*align-items:\s*center;[^}]*justify-content:\s*center;/
+      /\.wish-pool-stage\s*\{[^}]*position:\s*relative;[^}]*flex:\s*1 1 auto;[^}]*overflow:\s*hidden;[^}]*touch-action:\s*none;/
     )
-    expect(wishPoolSource).toMatch(
-      /@container \(max-width:\s*720px\)[\s\S]*?\.wish-cloud-stage\s*\{[^}]*min-height:\s*clamp\(/
-    )
-    expect(wishPoolSource).toContain('densityFontBoost')
-    expect(wishPoolSource).toContain('Math.min(2.5')
+    expect(wishPoolSource).toContain("'--wish-x':")
+    expect(wishPoolSource).toContain("'--wish-y':")
+    expect(wishPoolSource).not.toContain("'--wish-y-compact':")
+    expect(wishPoolSource).not.toMatch(/calc\([^)]*\*\s*var\(--wish-cell-/)
   })
 
-  it('keeps each title and heart together and fits oversized tokens before packing', () => {
+  it('uses heart-scaled typography and clamps naturally wrapped titles to two lines', () => {
     expect(wishPoolSource).toContain('class="wish-word__title"')
+    expect(wishPoolSource).toContain('wishFontSizeRem(wish.heart_count)')
+    expect(wishPoolSource).toMatch(/\.wish-item\s*\{[^}]*max-width:\s*min\(15rem,[^;]*;/)
     expect(wishPoolSource).toMatch(
-      /\.wish-word\s*\{[^}]*display:\s*inline-flex;[^}]*width:\s*max-content;[^}]*align-items:\s*baseline;[^}]*white-space:\s*nowrap;/
+      /\.wish-word__title\s*\{[^}]*display:\s*-webkit-box;[^}]*overflow:\s*hidden;[^}]*overflow-wrap:\s*anywhere;[^}]*-webkit-line-clamp:\s*2;[^}]*white-space:\s*normal;/
     )
-    expect(wishPoolSource).toMatch(
-      /\.wish-word small,[\s\S]*?\.fulfilled-label\s*\{[^}]*flex:\s*0 0 auto;/
-    )
-    expect(wishPoolSource).toContain('element.offsetWidth <= maxTokenWidth')
-    expect(wishPoolSource).toContain('(maxTokenWidth / element.offsetWidth) * 0.98')
     expect(wishPoolSource).toContain("font-family: 'Huninn', 'Noto Sans TC', system-ui, sans-serif")
-    expect(wishPoolSource).not.toMatch(/\.wish-cloud(?:-stage)?\s*\{[^}]*font-family:/)
+    expect(wishPoolSource).not.toContain('densityFontBoost')
+    expect(wishPoolSource).not.toContain('baseFontSize')
+    expect(wishPoolSource).not.toContain('offsetWidth')
   })
 
   it('reuses discussion icon actions in the Wish detail header', () => {
@@ -99,7 +154,7 @@ describe('Wish Pool focused interactions', () => {
     expect(wishPoolSource).toContain('class="discussion-action-button"')
     expect(wishPoolSource).toContain(':class="{ \'is-active\': selected.hearted_by_me }"')
     expect(wishPoolSource).toContain(':aria-pressed="selected.hearted_by_me"')
-    expect(wishPoolSource).toContain('@click="toggleHeart"')
+    expect(wishPoolSource).toContain('@click="toggleHeart()"')
     expect(wishPoolSource).toContain('@click="toggleReport"')
   })
 
@@ -107,23 +162,38 @@ describe('Wish Pool focused interactions', () => {
     expect(wishPoolSource).toContain(':class="{ fulfilled: wish.fulfilled }"')
     expect(wishPoolSource).toContain('v-if="wish.fulfilled" class="fulfilled-label"')
     expect(wishPoolSource).toMatch(
-      /\.wish-word\.fulfilled\s*\{[^}]*color:\s*var\(--green-600\);[^}]*font-weight:\s*600/
+      /\.wish-item\.fulfilled\s*\{[^}]*color:\s*var\(--green-600\);[^}]*font-weight:\s*600/
     )
     expect(wishPoolSource).not.toMatch(
-      /\.wish-word\.fulfilled\s*\{[^}]*(?:background|box-shadow|border):/
+      /\.wish-item\.fulfilled\s*\{[^}]*(?:background|box-shadow|border):/
     )
     expect(wishPoolSource).toMatch(/\.fulfilled-label\s*\{[^}]*font-weight:\s*700/)
   })
 
-  async function mountPool() {
+  async function resizePool(wrapper, viewport) {
+    resizeObserverCallback([
+      {
+        target: resizeObserverTarget,
+        contentRect: { width: viewport.width, height: viewport.height },
+      },
+    ])
+    await flushPromises()
+    return wrapper
+  }
+
+  async function mountPool({ selectWish = true, viewport = { width: 1200, height: 720 } } = {}) {
     const WishPool = (await import('@/components/WishPool.vue')).default
     const wrapper = mount(WishPool, {
       props: { coursesList: {}, courseCategories: [] },
       global: { stubs, mocks: { $t: (key) => key } },
     })
     await flushPromises()
-    wrapper.vm.selected = sampleWish
-    await flushPromises()
+    expect(resizeObserverTarget).toBe(wrapper.get('.wish-pool-stage').element)
+    await resizePool(wrapper, viewport)
+    if (selectWish) {
+      wrapper.vm.selected = wrapper.vm.wishes[0]
+      await flushPromises()
+    }
     return wrapper
   }
 
@@ -170,5 +240,207 @@ describe('Wish Pool focused interactions', () => {
     await wrapper.vm.loadMore()
     expect(wishServiceMock.list).toHaveBeenNthCalledWith(2, { limit: 60, offset: 1 })
     expect(wrapper.vm.wishes.map((wish) => wish.id)).toEqual([7, 8])
+  })
+
+  it('keeps session scores stable while only geometry reflows across viewport modes', async () => {
+    const wrapper = await mountPool()
+    const initialLayout = wrapper.vm.positions
+    const initialScores = wrapper.vm.sessionScores
+
+    wrapper.vm.$forceUpdate()
+    await flushPromises()
+    expect(wrapper.vm.positions).toBe(initialLayout)
+    expect(wrapper.vm.sessionScores).toBe(initialScores)
+
+    await wrapper.get('.wish-word').trigger('click')
+    expect(wrapper.vm.selected.id).toBe(7)
+    expect(wrapper.vm.positions).toBe(initialLayout)
+
+    await wrapper.vm.toggleHeart()
+    expect(wishServiceMock.toggleHeart).toHaveBeenCalledWith(7)
+    expect(wrapper.vm.wishes[0].heart_count).toBe(1)
+    expect(wrapper.vm.positions).toBe(initialLayout)
+    expect(wrapper.vm.sessionScores).toBe(initialScores)
+
+    wrapper.vm.closeWishDetail()
+    await flushPromises()
+    expect(wrapper.vm.selected).toBeNull()
+    expect(wrapper.vm.positions).toBe(initialLayout)
+
+    await resizePool(wrapper, { width: 767, height: 840 })
+    expect(wrapper.vm.positions).not.toBe(initialLayout)
+    expect(wrapper.vm.sessionScores).toBe(initialScores)
+    expect(wrapper.vm.layoutMode).toBe('mobile')
+    expect(wrapper.vm.viewportSize).toEqual({ width: 767, height: 840 })
+    expect(wrapper.get('.wish-pool-stage').classes()).toContain('is-mobile-layout')
+  })
+
+  it('uses the Archive mobile breakpoint and actual viewport height for the anchor', async () => {
+    const wrapper = await mountPool({
+      selectWish: false,
+      viewport: { width: 390, height: 812 },
+    })
+    const position = wrapper.vm.positions['7']
+
+    expect(wrapper.vm.layoutMode).toBe('mobile')
+    expect(position.mode).toBe('mobile')
+    expect(position.anchor).toBe(true)
+    expect(position.anchorRatio).toBeCloseTo(0.25, 1)
+    expect(wrapper.vm.camera.y + 812 / 2).toBeCloseTo(812 * position.anchorRatio)
+  })
+
+  it('votes from the inline heart without opening the Dialog or moving the camera or cell', async () => {
+    const wrapper = await mountPool({ selectWish: false })
+    const initialPosition = { ...wrapper.vm.positions['7'] }
+    const inlineHeart = wrapper.get('.wish-inline-heart')
+
+    dispatchPointer(inlineHeart.element, 'pointerdown', {
+      pointerId: 3,
+      pointerType: 'mouse',
+      button: 0,
+      clientX: 25,
+      clientY: 25,
+    })
+    await inlineHeart.trigger('click')
+    await flushPromises()
+
+    expect(wishServiceMock.toggleHeart).toHaveBeenCalledWith(7)
+    expect(wrapper.vm.selected).toBeNull()
+    expect(wrapper.vm.camera).toEqual({ x: 0, y: 0 })
+    expect(wrapper.vm.positions['7']).toEqual(initialPosition)
+    expect(wrapper.vm.wishes[0]).toMatchObject({ heart_count: 1, hearted_by_me: true })
+  })
+
+  it('keeps inline and Dialog hearts synchronized through the shared toggle handler', async () => {
+    wishServiceMock.toggleHeart
+      .mockResolvedValueOnce({ data: { hearted: true, heart_count: 1 } })
+      .mockResolvedValueOnce({ data: { hearted: false, heart_count: 0 } })
+    const wrapper = await mountPool({ selectWish: false })
+
+    await wrapper.get('.wish-inline-heart').trigger('click')
+    await flushPromises()
+    await wrapper.get('.wish-word').trigger('click')
+    expect(wrapper.vm.selected).toMatchObject({ heart_count: 1, hearted_by_me: true })
+
+    await wrapper.vm.toggleHeart()
+    expect(wishServiceMock.toggleHeart).toHaveBeenNthCalledWith(2, 7)
+    expect(wrapper.vm.selected).toMatchObject({ heart_count: 0, hearted_by_me: false })
+    expect(wrapper.vm.wishes[0]).toMatchObject({ heart_count: 0, hearted_by_me: false })
+  })
+
+  it('adds load-more wishes without moving existing axial assignments', async () => {
+    const nextWish = { ...sampleWish, id: 8, title: '電磁學考古題', heart_count: 18 }
+    wishServiceMock.list
+      .mockReset()
+      .mockResolvedValueOnce({ data: { items: [{ ...sampleWish }], total: 2 } })
+      .mockResolvedValueOnce({ data: { items: [nextWish], total: 2 } })
+
+    const wrapper = await mountPool()
+    const originalPosition = { ...wrapper.vm.positions['7'] }
+    await wrapper.vm.loadMore()
+
+    expect(wrapper.vm.positions['7']).toEqual(originalPosition)
+    expect(wrapper.vm.positions['8']).toBeDefined()
+    expect(wrapper.vm.positions['8']).not.toEqual(originalPosition)
+  })
+
+  it('opens a Wish on click but suppresses the click produced by an intentional pan', async () => {
+    const wrapper = await mountPool()
+    const stage = wrapper.get('.wish-pool-stage')
+    const wish = wrapper.get('.wish-word')
+
+    await wish.trigger('click')
+    expect(wrapper.vm.selected.id).toBe(7)
+    wrapper.vm.closeWishDetail()
+
+    dispatchPointer(stage.element, 'pointerdown', {
+      pointerId: 1,
+      pointerType: 'mouse',
+      button: 0,
+      clientX: 20,
+      clientY: 20,
+    })
+    dispatchPointer(stage.element, 'pointermove', {
+      pointerId: 1,
+      pointerType: 'mouse',
+      clientX: 60,
+      clientY: 45,
+    })
+    dispatchPointer(stage.element, 'pointerup', {
+      pointerId: 1,
+      pointerType: 'mouse',
+      clientX: 60,
+      clientY: 45,
+    })
+    await wish.trigger('click')
+
+    expect(wrapper.vm.selected).toBeNull()
+    expect(wrapper.vm.camera).toEqual({ x: 40, y: 25 })
+  })
+
+  it('locks mobile camera X while diagonal dragging updates only Y', async () => {
+    const wrapper = await mountPool({
+      selectWish: false,
+      viewport: { width: 390, height: 812 },
+    })
+    const stage = wrapper.get('.wish-pool-stage')
+    const initialY = wrapper.vm.camera.y
+
+    dispatchPointer(stage.element, 'pointerdown', {
+      pointerId: 4,
+      pointerType: 'touch',
+      clientX: 40,
+      clientY: 100,
+    })
+    dispatchPointer(stage.element, 'pointermove', {
+      pointerId: 4,
+      pointerType: 'touch',
+      clientX: 90,
+      clientY: 35,
+    })
+
+    expect(wrapper.vm.camera.x).toBe(0)
+    expect(wrapper.vm.camera.y).toBe(initialY - 65)
+  })
+
+  it('treats a mobile horizontal swipe as movement without translating or opening a Wish', async () => {
+    const wrapper = await mountPool({
+      selectWish: false,
+      viewport: { width: 390, height: 812 },
+    })
+    const stage = wrapper.get('.wish-pool-stage')
+    const wish = wrapper.get('.wish-word')
+    const initialCamera = { ...wrapper.vm.camera }
+
+    dispatchPointer(stage.element, 'pointerdown', {
+      pointerId: 5,
+      pointerType: 'touch',
+      clientX: 25,
+      clientY: 100,
+    })
+    dispatchPointer(stage.element, 'pointermove', {
+      pointerId: 5,
+      pointerType: 'touch',
+      clientX: 75,
+      clientY: 100,
+    })
+    dispatchPointer(stage.element, 'pointerup', {
+      pointerId: 5,
+      pointerType: 'touch',
+      clientX: 75,
+      clientY: 100,
+    })
+    await wish.trigger('click')
+
+    expect(wrapper.vm.camera).toEqual(initialCamera)
+    expect(wrapper.vm.selected).toBeNull()
+  })
+
+  it('disconnects viewport observation when the Wish Pool unmounts', async () => {
+    const wrapper = await mountPool({ selectWish: false })
+
+    wrapper.unmount()
+
+    expect(resizeObserverDisconnected).toBe(true)
   })
 })

@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import case, delete, func, or_
+from sqlalchemy import case, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
 from sqlmodel import select
@@ -366,6 +366,7 @@ def _wish_report_select():
         .outerjoin(reviewer, reviewer.id == ArchiveWishReport.reviewed_by)
         .outerjoin(ArchiveWish, ArchiveWish.id == ArchiveWishReport.wish_id)
         .outerjoin(wisher, wisher.id == ArchiveWish.creator_id)
+        .where(ArchiveWishReport.deleted_at.is_(None))
     )
     return statement, reporter, reviewer, wisher
 
@@ -416,7 +417,7 @@ async def list_wish_reports(
 ):
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Admin access required")
-    conditions = []
+    conditions = [ArchiveWishReport.deleted_at.is_(None)]
     if report_status is not None:
         conditions.append(ArchiveWishReport.status == report_status.value)
     if search and search.strip():
@@ -498,7 +499,10 @@ async def review_wish_report(
     report = (
         await db.execute(
             select(ArchiveWishReport)
-            .where(ArchiveWishReport.id == report_id)
+            .where(
+                ArchiveWishReport.id == report_id,
+                ArchiveWishReport.deleted_at.is_(None),
+            )
             .with_for_update()
         )
     ).scalar_one_or_none()
@@ -545,9 +549,7 @@ async def review_wish_report(
     return await _read_wish_report(db, report.id)
 
 
-@admin_router.delete(
-    "/admin/reports/{report_id}", status_code=status.HTTP_204_NO_CONTENT
-)
+@admin_router.delete("/admin/reports/{report_id}")
 async def delete_wish_report(
     report_id: int,
     db: AsyncSession = Depends(get_session),
@@ -555,11 +557,20 @@ async def delete_wish_report(
 ):
     if not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Admin access required")
-    deleted_id = await db.scalar(
-        delete(ArchiveWishReport)
-        .where(ArchiveWishReport.id == report_id)
-        .returning(ArchiveWishReport.id)
-    )
-    if deleted_id is None:
+    report = (
+        await db.execute(
+            select(ArchiveWishReport)
+            .where(
+                ArchiveWishReport.id == report_id,
+                ArchiveWishReport.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if report is None:
         raise HTTPException(status_code=404, detail="Wish report not found")
+    report.deleted_at = datetime.now(UTC)
+    report.deleted_by_id = current_user.user_id
+    db.add(report)
     await db.commit()
+    return {"success": True}

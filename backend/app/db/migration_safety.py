@@ -306,6 +306,27 @@ def _restore_pre_archive_report_active_pending_uniqueness(
     )
 
 
+def _remove_archive_wish_report_trash_metadata(metadata: MetaData) -> None:
+    report_table = metadata.tables["archive_wish_reports"]
+    for index in list(report_table.indexes):
+        if index.name in {
+            "ix_archive_wish_reports_deleted_at",
+            "ix_archive_wish_reports_deleted_by_id",
+        }:
+            report_table.indexes.remove(index)
+    for constraint in list(report_table.constraints):
+        if isinstance(constraint, ForeignKeyConstraint) and tuple(
+            constraint.columns.keys()
+        ) == ("deleted_by_id",):
+            report_table.constraints.remove(constraint)
+    for foreign_key in list(report_table.foreign_keys):
+        if foreign_key.parent.name == "deleted_by_id":
+            report_table.foreign_keys.discard(foreign_key)
+            foreign_key.parent.foreign_keys.discard(foreign_key)
+    report_table._columns.remove(report_table.c.deleted_by_id)
+    report_table._columns.remove(report_table.c.deleted_at)
+
+
 def _remove_about_us_ordering(metadata: MetaData) -> None:
     table = metadata.tables["about_us_entries"]
     for index in list(table.indexes):
@@ -319,6 +340,7 @@ def _metadata_for_variant(variant: str) -> MetaData:
     if variant == "head":
         return metadata
     if variant not in {
+        "pre_archive_wish_report_trash_metadata",
         "pre_archive_report_active_pending_uniqueness",
         "pre_wish_optional_semester",
         "pre_about_us_ordering",
@@ -339,6 +361,10 @@ def _metadata_for_variant(variant: str) -> MetaData:
         "pre_category_canonicalization",
     }:
         raise ValueError(f"Unknown schema metadata variant: {variant}")
+
+    _remove_archive_wish_report_trash_metadata(metadata)
+    if variant == "pre_archive_wish_report_trash_metadata":
+        return metadata
 
     _restore_pre_archive_report_active_pending_uniqueness(metadata)
     if variant == "pre_archive_report_active_pending_uniqueness":

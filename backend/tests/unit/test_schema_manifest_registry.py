@@ -16,7 +16,7 @@ from app.models.models import ArchiveSubmission, User
 
 
 def test_reviewed_manifest_registry_has_required_revisions() -> None:
-    assert HEAD_SCHEMA_REVISION == "c8e4a1f7b2d9"
+    assert HEAD_SCHEMA_REVISION == "d1f5a9c3e7b2"
     assert reviewed_manifest_revisions() == (
         "c4d8e2f1a6b9",
         "a4c7e9d2f6b1",
@@ -38,6 +38,7 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
         "f3a7c1e9d5b2",
         "c7e4a9b2d6f1",
         "c8e4a1f7b2d9",
+        "d1f5a9c3e7b2",
     )
     assert get_manifest_spec("d4b7e2a9c6f1").metadata_variant == (
         "pre_about_us_entries"
@@ -59,7 +60,10 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
     assert get_manifest_spec("c7e4a9b2d6f1").metadata_variant == (
         "pre_archive_report_active_pending_uniqueness"
     )
-    assert get_manifest_spec("c8e4a1f7b2d9").metadata_variant == "head"
+    assert get_manifest_spec("c8e4a1f7b2d9").metadata_variant == (
+        "pre_archive_wish_report_trash_metadata"
+    )
+    assert get_manifest_spec("d1f5a9c3e7b2").metadata_variant == "head"
 
 
 def test_compound_partial_index_predicate_normalizes_postgresql_parentheses() -> None:
@@ -84,7 +88,8 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     column_name = "owner_self_delete_consumed"
     previous_status_column = "previous_status"
     constraint_name = "uq_archive_submissions_created_archive_id"
-    head = metadata_for_revision("c8e4a1f7b2d9")
+    head = metadata_for_revision("d1f5a9c3e7b2")
+    previous_wish_report_head = metadata_for_revision("c8e4a1f7b2d9")
     previous_archive_report_head = metadata_for_revision("c7e4a9b2d6f1")
     pre_about_us_ordering = metadata_for_revision("f3a7c1e9d5b2")
     previous_wish_head = metadata_for_revision("b4d6f8a2c1e3")
@@ -105,6 +110,7 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     a4 = metadata_for_revision("a4c7e9d2f6b1")
 
     assert head is not None
+    assert previous_wish_report_head is not None
     assert previous_archive_report_head is not None
     assert pre_about_us_ordering is not None
     assert "order_index" in head.tables["about_us_entries"].c
@@ -125,6 +131,12 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     assert "source_wish_id" in main_head.tables["archive_submissions"].c
     assert "source_wish_id" not in coordination_head.tables["archive_submissions"].c
     assert "source_wish_id" not in pre_sibling_branches.tables["archive_submissions"].c
+    for lifecycle_column in ("deleted_at", "deleted_by_id"):
+        assert lifecycle_column in head.tables["archive_wish_reports"].c
+        assert (
+            lifecycle_column
+            not in previous_wish_report_head.tables["archive_wish_reports"].c
+        )
     assert pre_about_us is not None
     assert "about_us_entries" in head.tables
     assert "about_us_entries" in pre_sibling_branches.tables
@@ -296,7 +308,7 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     )
 
     # Building older variants must never mutate current SQLModel metadata.
-    rebuilt_head = metadata_for_revision("c8e4a1f7b2d9")
+    rebuilt_head = metadata_for_revision("d1f5a9c3e7b2")
     assert rebuilt_head is not None
     assert column_name in rebuilt_head.tables["archive_submissions"].c
     assert previous_status_column in rebuilt_head.tables["archive_submissions"].c

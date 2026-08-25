@@ -33,6 +33,7 @@ from app.db.audit.registry import (
     SIBLING_MERGE_REVISION,
     WISH_OPTIONAL_SEMESTER_REVISION,
     WISH_POOL_REVISION,
+    WISH_REPORT_TRASH_REVISION,
     AuditAdapter,
     get_audit_adapter,
 )
@@ -137,6 +138,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_OPTIONAL_SEMESTER_REVISION,
         ABOUT_US_ORDERING_REVISION,
         ARCHIVE_REPORT_UNIQUENESS_REVISION,
+        WISH_REPORT_TRASH_REVISION,
     }
     owner_delete_column_condition = (
         """
@@ -178,6 +180,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_OPTIONAL_SEMESTER_REVISION,
         ABOUT_US_ORDERING_REVISION,
         ARCHIVE_REPORT_UNIQUENESS_REVISION,
+        WISH_REPORT_TRASH_REVISION,
     }
     previous_status_column_condition = (
         """
@@ -213,6 +216,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_OPTIONAL_SEMESTER_REVISION,
         ABOUT_US_ORDERING_REVISION,
         ARCHIVE_REPORT_UNIQUENESS_REVISION,
+        WISH_REPORT_TRASH_REVISION,
     }
     bilingual_catalog_condition = (
         """
@@ -257,6 +261,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_OPTIONAL_SEMESTER_REVISION,
         ABOUT_US_ORDERING_REVISION,
         ARCHIVE_REPORT_UNIQUENESS_REVISION,
+        WISH_REPORT_TRASH_REVISION,
     }
     bilingual_snapshot_condition = (
         """
@@ -296,6 +301,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_OPTIONAL_SEMESTER_REVISION,
         ABOUT_US_ORDERING_REVISION,
         ARCHIVE_REPORT_UNIQUENESS_REVISION,
+        WISH_REPORT_TRASH_REVISION,
     }
     category_state_snapshot_condition = (
         """
@@ -326,6 +332,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_OPTIONAL_SEMESTER_REVISION,
         ABOUT_US_ORDERING_REVISION,
         ARCHIVE_REPORT_UNIQUENESS_REVISION,
+        WISH_REPORT_TRASH_REVISION,
     }
     course_submission_lifecycle_condition = (
         """
@@ -367,6 +374,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_OPTIONAL_SEMESTER_REVISION,
         ABOUT_US_ORDERING_REVISION,
         ARCHIVE_REPORT_UNIQUENESS_REVISION,
+        WISH_REPORT_TRASH_REVISION,
     }
     wish_year_nullability = (
         "YES"
@@ -375,6 +383,7 @@ def _continuity_cte(request: AuditRequest) -> str:
             WISH_OPTIONAL_SEMESTER_REVISION,
             ABOUT_US_ORDERING_REVISION,
             ARCHIVE_REPORT_UNIQUENESS_REVISION,
+            WISH_REPORT_TRASH_REVISION,
         }
         else "NO"
     )
@@ -429,7 +438,11 @@ def _continuity_cte(request: AuditRequest) -> str:
         )
         """
         if request.expected_ledger
-        in {ABOUT_US_ORDERING_REVISION, ARCHIVE_REPORT_UNIQUENESS_REVISION}
+        in {
+            ABOUT_US_ORDERING_REVISION,
+            ARCHIVE_REPORT_UNIQUENESS_REVISION,
+            WISH_REPORT_TRASH_REVISION,
+        }
         else """
         NOT EXISTS (
             SELECT 1
@@ -437,6 +450,38 @@ def _continuity_cte(request: AuditRequest) -> str:
             WHERE table_schema = 'public'
               AND table_name = 'about_us_entries'
               AND column_name = 'order_index'
+        )
+        """
+    )
+    wish_report_trash_condition = (
+        """
+        (
+            SELECT count(*) = 2
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'archive_wish_reports'
+              AND (
+                  (
+                      column_name = 'deleted_at'
+                      AND data_type = 'timestamp with time zone'
+                      AND is_nullable = 'YES'
+                  )
+                  OR (
+                      column_name = 'deleted_by_id'
+                      AND data_type = 'integer'
+                      AND is_nullable = 'YES'
+                  )
+              )
+        )
+        """
+        if request.expected_ledger == WISH_REPORT_TRASH_REVISION
+        else """
+        NOT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'archive_wish_reports'
+              AND column_name IN ('deleted_at', 'deleted_by_id')
         )
         """
     )
@@ -485,7 +530,8 @@ schema_state AS (
         AND ({category_state_snapshot_condition})
         AND ({course_submission_lifecycle_condition})
         AND ({wish_pool_condition})
-        AND ({about_us_ordering_condition}) AS schema_ok
+        AND ({about_us_ordering_condition})
+        AND ({wish_report_trash_condition}) AS schema_ok
     FROM required_columns
 ),
 enum_state AS (

@@ -17,6 +17,7 @@ HARD_DELETE_CASES = (
     (TrashEntityType.NOTIFICATION, None),
     (TrashEntityType.SYSTEM_ISSUE_REPORT, None),
     (TrashEntityType.COMMENT_REPORT, None),
+    (TrashEntityType.ARCHIVE_WISH_REPORT, None),
 )
 
 
@@ -32,6 +33,7 @@ async def test_every_materialized_trash_type_dispatches_to_hard_delete(
         title="測試項目",
         subject="測試科目",
         reason="other",
+        wish_title_snapshot="測試許願回報",
     )
     db = SimpleNamespace(get=AsyncMock(return_value=entity), delete=AsyncMock())
 

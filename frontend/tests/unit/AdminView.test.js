@@ -1274,7 +1274,23 @@ describe('AdminView', () => {
     expect(adminViewSource).not.toContain('max-width: min(18rem, 100%)')
     expect(adminViewSource.match(/'review-mobile-card-status-badge'/g)).toHaveLength(2)
     expect(adminTemplateSource.match(/trash-name-column/g)).toHaveLength(2)
-    expect(adminViewSource).toContain('width: clamp(14rem, 18vw, 18rem)')
+    expect(adminViewSource).toContain('table-layout: fixed')
+    expect(adminViewSource).toContain('@media (max-width: 1399.98px)')
+    expect(adminViewSource).toContain('headerClass="trash-deleted-column"')
+    expect(adminViewSource).toContain('headerClass="trash-type-column"')
+    expect(adminViewSource).toContain(
+      'headerClass="admin-desktop-status-column trash-status-column"'
+    )
+    expect(adminViewSource).toContain('headerClass="trash-actions-column"')
+    expect(adminViewSource).toMatch(
+      /trash-deleted-column[\s\S]*?width:\s*13%[\s\S]*?trash-type-column[\s\S]*?width:\s*11%[\s\S]*?trash-name-column[\s\S]*?width:\s*25%[\s\S]*?trash-status-column[\s\S]*?width:\s*9%[\s\S]*?trash-dependencies-column[\s\S]*?width:\s*25%[\s\S]*?trash-actions-column[\s\S]*?width:\s*17%/
+    )
+    expect(adminViewSource).toMatch(
+      /\.trash-name-cell small[\s\S]*?min-width:\s*0[\s\S]*?max-width:\s*100%[\s\S]*?white-space:\s*normal[\s\S]*?overflow-wrap:\s*anywhere[\s\S]*?word-break:\s*break-word/
+    )
+    expect(adminViewSource).toMatch(
+      /trash-status-column \.admin-desktop-status-cell[\s\S]*?justify-content:\s*flex-start/
+    )
     expect(adminViewSource).toContain('overflow-wrap: anywhere')
     expect(adminTemplateSource).toContain("'trash-name-title__text'")
     expect(adminTemplateSource.match(/class="trash-user-email"/g)).toHaveLength(2)
@@ -1293,9 +1309,9 @@ describe('AdminView', () => {
     expect(adminTemplateSource.match(/class="trash-tree-prefix"/g)).toHaveLength(2)
     expect(adminTemplateSource).toContain('getTrashNameIndent(data)')
     expect(adminViewSource).toContain('headerClass="trash-dependencies-column"')
-    expect(adminViewSource).toContain('width: clamp(17rem, 22vw, 23rem)')
     expect(adminViewSource).toContain("{ label: t('系統問題回報'), value: 'system_issue_report' }")
     expect(adminViewSource).toContain("{ label: t('留言回報'), value: 'comment_report' }")
+    expect(adminViewSource).toContain("{ label: t('許願回報'), value: 'archive_wish_report' }")
     expect(adminViewSource).toContain("{ label: t('考古題回報'), value: 'archive_report' }")
     expect(wrapper.vm.trashFilterOptions.map((option) => option.value)).toEqual([
       'archive',
@@ -1305,9 +1321,10 @@ describe('AdminView', () => {
       'course_submission',
       'notification',
       'user',
-      'system_issue_report',
-      'comment_report',
       'archive_report',
+      'comment_report',
+      'archive_wish_report',
+      'system_issue_report',
     ])
     expect(adminTemplateSource).toContain(
       '操作按鈕以後端回傳的可用操作為準；依賴與阻擋文字只用來說明原因。'
@@ -1341,6 +1358,7 @@ describe('AdminView', () => {
     expect(wrapper.vm.getTrashStatusLabel('dismissed', 'comment_report')).toBe('已刪除')
     expect(wrapper.vm.getTrashStatusLabel('unread', 'system_issue_report')).toBe('已刪除')
     expect(wrapper.vm.getTrashStatusLabel(null, 'archive_report')).toBe('已刪除')
+    expect(wrapper.vm.getTrashStatusLabel('upheld', 'archive_wish_report')).toBe('已刪除')
     expect(wrapper.vm.getTrashStatusSeverity('pending', 'comment_report')).toBe('danger')
     expect(wrapper.vm.getTrashStatusSeverity('upheld', 'comment_report')).toBe('danger')
     expect(wrapper.vm.getTrashStatusSeverity('dismissed', 'comment_report')).toBe('danger')
@@ -1348,6 +1366,7 @@ describe('AdminView', () => {
     expect(wrapper.vm.getTrashStatusClass('pending', 'comment_report')).toBe(
       'review-status-deleted'
     )
+    expect(wrapper.vm.getTrashStatusSeverity('dismissed', 'archive_wish_report')).toBe('danger')
     expect(
       wrapper.vm.getTrashReportDetails({
         item_type: 'comment_report',
@@ -1369,6 +1388,18 @@ describe('AdminView', () => {
         .getTrashReportDetails({ item_type: 'comment_report', comment_snapshot: '留言摘要' })
         .some((detail) => detail.label === '留言摘要' || detail.value === '留言摘要')
     ).toBe(false)
+    expect(
+      wrapper.vm.getTrashReportDetails({
+        item_type: 'archive_wish_report',
+        reporter_name: '回報者',
+        comment_snapshot: '普通物理 · 王老師 · 114上學期 · 期中考',
+      })
+    ).toEqual(
+      expect.arrayContaining([
+        { label: '回報者', value: '回報者' },
+        { label: '許願目標', value: '普通物理 · 王老師 · 114上學期 · 期中考' },
+      ])
+    )
     expect(adminTemplateSource.match(/class="trash-mobile-card-footer"/g)).toHaveLength(1)
     expect(adminTemplateSource).toMatch(
       /trash-mobile-card-footer[\s\S]*?trash-mobile-dependencies[\s\S]*?trash-mobile-card-actions/
