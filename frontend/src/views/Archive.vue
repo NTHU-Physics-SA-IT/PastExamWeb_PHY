@@ -1420,6 +1420,7 @@ function getArchiveSubmissionKind(item) {
 }
 
 function getArchiveSubmissionKindClass(item) {
+  if (item?.is_admin_upload) return 'soft-badge--type'
   if (item?.requested_category_key) return 'soft-badge--new-course-category'
   if (item?.requested_course_name) return 'soft-badge--new-course'
   return 'soft-badge--type'
@@ -2309,9 +2310,9 @@ const closeEditDialog = () => {
 
 const searchTargetCourse = (event) => {
   const query = normalizeCourseSearchText(event?.query || '')
-  const filteredCourses = allAvailableCoursesForTransfer.value
-    .filter((course) => courseMatchesSearch(course.searchCourse, query))
-    .sort((a, b) => a.label.localeCompare(b.label))
+  const filteredCourses = allAvailableCoursesForTransfer.value.filter((course) =>
+    courseMatchesSearch(course.searchCourse, query)
+  )
 
   availableCoursesForTransfer.value = filteredCourses
 }

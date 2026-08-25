@@ -657,6 +657,52 @@ describe('ArchiveView', () => {
     wrapper.unmount()
   })
 
+  it('keeps transfer suggestions in management order across locales', async () => {
+    const wrapper = mount(ArchiveView, {
+      global: {
+        provide: {
+          toast: { add: toastAddMock },
+          confirm: { require: confirmRequireMock },
+          sidebarVisible: ref(true),
+        },
+        stubs: componentStubs,
+      },
+    })
+    await flushPromises()
+
+    const vm = wrapper.vm
+    vm.selectedCourse = 40
+    vm.editForm.targetCategory = 'fundamental'
+    vm.coursesList.fundamental = [
+      { id: 40, order_index: 0, name: '目前課程', name_en: 'Current Course' },
+      { id: 30, order_index: 1, name: '書卷獎必修課', name_en: 'Zeta Course' },
+      { id: 20, order_index: 2, name: '普通化學(一)', name_en: 'Alpha Course' },
+      { id: 10, order_index: 3, name: '微積分(一)', name_en: 'Beta Course' },
+    ]
+    await nextTick()
+
+    setLocale('zh-TW')
+    vm.searchTargetCourse({ query: '' })
+    const zhIds = vm.availableCoursesForTransfer.map(({ id }) => id)
+    const zhLabels = vm.availableCoursesForTransfer.map(({ label }) => label)
+
+    setLocale('en')
+    await nextTick()
+    vm.searchTargetCourse({ query: '' })
+    const enIds = vm.availableCoursesForTransfer.map(({ id }) => id)
+    const enLabels = vm.availableCoursesForTransfer.map(({ label }) => label)
+
+    expect(zhIds).toEqual([30, 20, 10])
+    expect(enIds).toEqual([30, 20, 10])
+    expect(enIds).toEqual(zhIds)
+    expect(zhLabels).toEqual(['書卷獎必修課', '普通化學(一)', '微積分(一)'])
+    expect(enLabels).toEqual(['Zeta Course', 'Alpha Course', 'Beta Course'])
+    expect(zhIds).not.toContain(40)
+    expect(enIds).not.toContain(40)
+
+    wrapper.unmount()
+  })
+
   it('submits edit and transfer atomically and preserves the dialog on failure', async () => {
     const wrapper = mount(ArchiveView, {
       global: {
@@ -791,6 +837,17 @@ describe('ArchiveView', () => {
           academic_year: '20242',
           professor: '王教授',
         },
+        {
+          id: 72,
+          status: 'deleted',
+          is_admin_upload: true,
+          requested_category_key: 'fundamental',
+          requested_course_name: '普通物理(二)',
+          course_name: '普通物理(二)',
+          name: '期末考',
+          academic_year: '20242',
+          professor: '李教授',
+        },
       ],
     })
     setLocale('en')
@@ -808,21 +865,42 @@ describe('ArchiveView', () => {
     await wrapper.vm.openSubmissionStatus()
     await flushPromises()
 
-    const identityBadge = wrapper.get('.submission-admin-badge')
-    const sourceBadge = wrapper.get('.my-submission-type-badge')
-    expect(identityBadge.text()).toBe('Administrator')
-    expect(identityBadge.classes()).toEqual(
-      expect.arrayContaining(['soft-badge', 'soft-badge--admin', 'submission-admin-badge'])
-    )
-    expect(sourceBadge.text()).toContain('Administrator Upload')
-    expect(sourceBadge.classes()).toEqual(
-      expect.arrayContaining(['submission-meta-chip', 'my-submission-type-badge'])
-    )
+    const identityBadges = wrapper.findAll('.submission-admin-badge')
+    const sourceBadges = wrapper.findAll('.my-submission-type-badge')
+    const metadataBadges = wrapper.findAll('.my-submission-meta-chip')
+    expect(identityBadges).toHaveLength(2)
+    expect(sourceBadges).toHaveLength(2)
+    expect(metadataBadges).toHaveLength(4)
+    for (const identityBadge of identityBadges) {
+      expect(identityBadge.text()).toBe('Administrator')
+      expect(identityBadge.classes()).toEqual(
+        expect.arrayContaining(['soft-badge', 'soft-badge--admin', 'submission-admin-badge'])
+      )
+    }
+    for (const sourceBadge of sourceBadges) {
+      expect(sourceBadge.text()).toContain('Administrator Upload')
+      expect(sourceBadge.classes()).toEqual(
+        expect.arrayContaining([
+          'submission-meta-chip',
+          'my-submission-type-badge',
+          'soft-badge--type',
+        ])
+      )
+      expect(sourceBadge.classes()).not.toContain('soft-badge--new-course')
+      expect(sourceBadge.classes()).not.toContain('soft-badge--new-course-category')
+      expect(sourceBadge.classes()).not.toContain('soft-badge--admin')
+    }
+    expect(
+      metadataBadges.filter((badge) => badge.classes().includes('soft-badge--type'))
+    ).toHaveLength(2)
+    expect(
+      metadataBadges.filter((badge) => badge.classes().includes('soft-badge--info'))
+    ).toHaveLength(2)
 
     setLocale('zh-TW')
     await nextTick()
-    expect(identityBadge.text()).toBe('管理員投稿')
-    expect(sourceBadge.text()).toContain('管理員投稿')
+    expect(identityBadges.every((badge) => badge.text() === '管理員投稿')).toBe(true)
+    expect(sourceBadges.every((badge) => badge.text().includes('管理員投稿'))).toBe(true)
     wrapper.unmount()
   })
 
