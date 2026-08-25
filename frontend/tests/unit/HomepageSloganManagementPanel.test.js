@@ -68,6 +68,7 @@ describe('HomepageSloganManagementPanel', () => {
     expect(source).toContain('class="slogan-filters report-management__filters"')
     expect(source).toContain('@media (max-width: 1399.98px)')
     expect(source.match(/class="report-row-actions"/g)).toHaveLength(2)
+    expect(source.match(/\$t\('首頁 slogan 永久刪除按鈕'\)/g)).toHaveLength(2)
     expect(
       source.match(
         /:label="\$t\('查看\/審核'\)"[\s\S]{0,220}?icon="pi pi-search"[\s\S]{0,220}?outlined/g
@@ -84,6 +85,7 @@ describe('HomepageSloganManagementPanel', () => {
     expect(source).toContain("{ label: t('超級常'), value: 'super_frequent' }")
     expect(source).toContain("$t('查看/審核首頁 slogan')")
     expect(source).toContain('無法復原，也不會進入垃圾桶')
+    expect(source).toContain("acceptLabel: t('永久刪除')")
   })
 
   it('loads lazily and saves a reviewed state with a canonical occurrence level', async () => {

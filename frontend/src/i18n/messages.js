@@ -520,7 +520,8 @@ const en = {
   '期待有一天可以在首頁看到你的 slogan！': 'We hope to see your slogan on the homepage one day!',
   投稿失敗: 'Submission failed',
   '請確認內容後再試一次。': 'Check the content and try again.',
-  '首頁 slogan 管理': 'Homepage Slogan Management',
+  '首頁 slogan 管理': 'Homepage Slogan',
+  '首頁 slogan 永久刪除按鈕': 'Delete',
   '目前啟用的首頁 slogan': 'Enabled Homepage Slogans',
   '目前共 {count} 則啟用': '{count} enabled',
   未啟用: 'Disabled',
@@ -1653,6 +1654,7 @@ const zhTW = {
   '投稿等級（使用者管理欄位）': '投稿等級',
   '管理員權限（使用者管理欄位）': '管理員權限',
   '管理員投稿（身分標籤）': '管理員投稿',
+  '首頁 slogan 永久刪除按鈕': '永久刪除',
 }
 
 export const messages = {

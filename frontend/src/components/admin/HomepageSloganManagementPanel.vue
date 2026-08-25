@@ -161,7 +161,7 @@
               @click="openReview(data)"
             />
             <Button
-              :label="$t('永久刪除')"
+              :label="$t('首頁 slogan 永久刪除按鈕')"
               icon="pi pi-trash"
               severity="danger"
               outlined
@@ -236,7 +236,7 @@
               @click="openReview(item)"
             />
             <Button
-              :label="$t('永久刪除')"
+              :label="$t('首頁 slogan 永久刪除按鈕')"
               icon="pi pi-trash"
               severity="danger"
               outlined
