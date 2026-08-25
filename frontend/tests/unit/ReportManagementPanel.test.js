@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import process from 'node:process'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { Fragment, h } from 'vue'
@@ -6,7 +8,7 @@ import ReportManagementPanel from '@/components/admin/ReportManagementPanel.vue'
 import reportManagementSource from '@/components/admin/ReportManagementPanel.vue?raw'
 import { ADMIN_PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 
-const adminStylesSource = readFileSync(new URL('../../src/style.css', import.meta.url), 'utf8')
+const adminStylesSource = readFileSync(resolve(process.cwd(), 'src/style.css'), 'utf8')
 
 const mocks = vi.hoisted(() => ({
   listSystem: vi.fn(),
