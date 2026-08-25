@@ -2052,7 +2052,7 @@
                             class="soft-badge soft-badge--admin review-admin-upload-chip review-course-cell__admin-tag"
                             severity="info"
                           >
-                            {{ $t('管理員投稿（審核中心）') }}
+                            {{ $t('管理員投稿（身分標籤）') }}
                           </Tag>
                         </div>
                       </div>
@@ -2078,7 +2078,7 @@
                               class="soft-badge soft-badge--admin review-admin-upload-chip"
                               severity="info"
                             >
-                              {{ $t('管理員投稿（審核中心）') }}
+                              {{ $t('管理員投稿（身分標籤）') }}
                             </Tag>
                           </div>
                         </div>
@@ -2424,7 +2424,7 @@
                             class="soft-badge soft-badge--admin review-admin-upload-chip review-course-cell__admin-tag"
                             severity="info"
                           >
-                            {{ $t('管理員投稿（審核中心）') }}
+                            {{ $t('管理員投稿（身分標籤）') }}
                           </Tag>
                         </div>
                       </div>
@@ -2438,7 +2438,7 @@
                               class="soft-badge soft-badge--admin review-admin-upload-chip"
                               severity="info"
                             >
-                              {{ $t('管理員投稿（審核中心）') }}
+                              {{ $t('管理員投稿（身分標籤）') }}
                             </Tag>
                           </div>
                         </div>

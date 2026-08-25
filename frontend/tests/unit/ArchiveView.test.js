@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref, nextTick } from 'vue'
 import ArchiveView from '@/views/Archive.vue'
+import { setLocale } from '@/i18n'
 
 const trackEventMock = vi.hoisted(() => vi.fn())
 const isUnauthorizedErrorMock = vi.hoisted(() => vi.fn())
@@ -24,6 +25,7 @@ const deleteArchiveMock = vi.hoisted(() => vi.fn())
 const updateArchiveMock = vi.hoisted(() => vi.fn())
 const updateArchiveCourseMock = vi.hoisted(() => vi.fn())
 const updateArchiveCourseByCategoryAndNameMock = vi.hoisted(() => vi.fn())
+const listMySubmissionsMock = vi.hoisted(() => vi.fn())
 
 const toastAddMock = vi.hoisted(() => vi.fn())
 const confirmRequireMock = vi.hoisted(() => vi.fn())
@@ -96,6 +98,7 @@ vi.mock('@/api', () => ({
     updateArchive: updateArchiveMock,
     updateArchiveCourse: updateArchiveCourseMock,
     updateArchiveCourseByCategoryAndName: updateArchiveCourseByCategoryAndNameMock,
+    listMySubmissions: listMySubmissionsMock,
   },
 }))
 
@@ -198,6 +201,7 @@ describe('ArchiveView', () => {
     updateArchiveMock.mockResolvedValue()
     updateArchiveCourseMock.mockResolvedValue()
     updateArchiveCourseByCategoryAndNameMock.mockResolvedValue()
+    listMySubmissionsMock.mockResolvedValue({ data: [] })
     toastAddMock.mockReset()
     confirmRequireMock.mockReset()
     confirmRequireMock.mockImplementation(({ accept }) => accept && accept())
@@ -216,6 +220,7 @@ describe('ArchiveView', () => {
   })
 
   afterEach(() => {
+    setLocale('zh-TW')
     consoleErrorSpy?.mockRestore()
     vi.useRealTimers()
     vi.clearAllMocks()
@@ -772,6 +777,53 @@ describe('ArchiveView', () => {
 
     expect(archiveViewSource).not.toContain('deleteMySubmission')
     expect(archiveViewSource).not.toContain('owner_self_delete_consumed')
+  })
+
+  it('separates the administrator identity badge from upload source metadata', async () => {
+    listMySubmissionsMock.mockResolvedValue({
+      data: [
+        {
+          id: 71,
+          status: 'approved',
+          is_admin_upload: true,
+          course_name: '普通物理(二)',
+          name: '期中考',
+          academic_year: '20242',
+          professor: '王教授',
+        },
+      ],
+    })
+    setLocale('en')
+    const wrapper = mount(ArchiveView, {
+      global: {
+        provide: {
+          toast: { add: toastAddMock },
+          confirm: { require: confirmRequireMock },
+          sidebarVisible: ref(true),
+        },
+        stubs: componentStubs,
+      },
+    })
+    await flushPromises()
+    await wrapper.vm.openSubmissionStatus()
+    await flushPromises()
+
+    const identityBadge = wrapper.get('.submission-admin-badge')
+    const sourceBadge = wrapper.get('.my-submission-type-badge')
+    expect(identityBadge.text()).toBe('Administrator')
+    expect(identityBadge.classes()).toEqual(
+      expect.arrayContaining(['soft-badge', 'soft-badge--admin', 'submission-admin-badge'])
+    )
+    expect(sourceBadge.text()).toContain('Administrator Upload')
+    expect(sourceBadge.classes()).toEqual(
+      expect.arrayContaining(['submission-meta-chip', 'my-submission-type-badge'])
+    )
+
+    setLocale('zh-TW')
+    await nextTick()
+    expect(identityBadge.text()).toBe('管理員投稿')
+    expect(sourceBadge.text()).toContain('管理員投稿')
+    wrapper.unmount()
   })
 
   it('covers remaining utility branches', async () => {

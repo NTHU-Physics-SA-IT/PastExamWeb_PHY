@@ -579,7 +579,7 @@
                         class="soft-badge soft-badge--admin submission-admin-badge"
                         severity="secondary"
                       >
-                        {{ $t('管理員投稿') }}
+                        {{ $t('管理員投稿（身分標籤）') }}
                       </Tag>
                     </div>
                     <div class="submission-status-title">

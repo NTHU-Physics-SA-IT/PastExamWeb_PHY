@@ -597,7 +597,7 @@ const en = {
   考古題投稿紀錄: 'Exam Submission History',
   目前沒有考古題投稿: 'No exam submissions yet',
   管理員投稿: 'Administrator Upload',
-  '管理員投稿（審核中心）': 'Administrator',
+  '管理員投稿（身分標籤）': 'Administrator',
   新分類: 'New Category',
   '投稿時間：{time}': 'Submitted: {time}',
   '審核時間：{time}': 'Reviewed: {time}',
@@ -1620,7 +1620,7 @@ const zhTW = {
     "圖片：\n![替代文字](圖片網址)\n\n調整大小與位置：\n![替代文字](圖片網址){'{'}width=50% align=center{'}'}\n\n文字環繞：\n![替代文字](圖片網址){'{'}width=33% align=right wrap=true{'}'}\n\n可用寬度：\n1%–100%，例如 20%、42%、58.5%、90%\n\n位置：\nleft / center / right\n\nwrap=true 在所有螢幕寬度皆適用於 left / right；所選百分比會決定文字的剩餘寬度。",
   '投稿等級（使用者管理欄位）': '投稿等級',
   '管理員權限（使用者管理欄位）': '管理員權限',
-  '管理員投稿（審核中心）': '管理員投稿',
+  '管理員投稿（身分標籤）': '管理員投稿',
 }
 
 export const messages = {

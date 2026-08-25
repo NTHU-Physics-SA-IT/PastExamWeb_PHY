@@ -1206,7 +1206,8 @@ describe('AdminView', () => {
   })
 
   it('uses compact Admin-context labels without changing fields or sorting', () => {
-    expect(adminTemplateSource.match(/\$t\('管理員投稿（審核中心）'\)/g)).toHaveLength(4)
+    expect(adminTemplateSource.match(/\$t\('管理員投稿（身分標籤）'\)/g)).toHaveLength(4)
+    expect(adminTemplateSource).not.toContain('管理員投稿（審核中心）')
     expect(adminTemplateSource).not.toMatch(/\$t\('管理員投稿'\)/)
     expect(adminTemplateSource).toContain(
       `field="contributor_level"\n                  :header="$t('投稿等級（使用者管理欄位）')"\n                  sortable`

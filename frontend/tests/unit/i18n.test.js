@@ -52,14 +52,14 @@ describe('locale authority', () => {
 
   it('uses compact Admin presentation labels without changing zh-TW wording', () => {
     i18n.global.locale.value = 'en'
-    expect(i18n.global.t('管理員投稿（審核中心）')).toBe('Administrator')
+    expect(i18n.global.t('管理員投稿（身分標籤）')).toBe('Administrator')
     expect(i18n.global.t('投稿等級（使用者管理欄位）')).toBe('Level')
     expect(i18n.global.t('管理員權限（使用者管理欄位）')).toBe('Admin')
     expect(i18n.global.t('管理員投稿')).toBe('Administrator Upload')
     expect(i18n.global.t('管理員權限')).toBe('Administrator Access')
 
     i18n.global.locale.value = 'zh-TW'
-    expect(i18n.global.t('管理員投稿（審核中心）')).toBe('管理員投稿')
+    expect(i18n.global.t('管理員投稿（身分標籤）')).toBe('管理員投稿')
     expect(i18n.global.t('投稿等級（使用者管理欄位）')).toBe('投稿等級')
     expect(i18n.global.t('管理員權限（使用者管理欄位）')).toBe('管理員權限')
   })
