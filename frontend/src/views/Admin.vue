@@ -1709,7 +1709,10 @@
                 </TabPanel>
                 <TabPanel value="homepage-slogans">
                   <div class="p-2 md:p-4">
-                    <HomepageSloganManagementPanel @attention-change="loadAdminAttentionSummary" />
+                    <HomepageSloganManagementPanel
+                      v-if="announcementManagementTab === 'homepage-slogans'"
+                      @attention-change="loadAdminAttentionSummary"
+                    />
                   </div>
                 </TabPanel>
               </TabPanels>

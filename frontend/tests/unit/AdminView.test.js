@@ -299,7 +299,9 @@ describe('AdminView', () => {
     expect(adminTemplateSource).toContain('<Tab value="2">')
     expect(adminTemplateSource).toContain('<Tab value="announcements">{{ $t(\'公告管理\') }}</Tab>')
     expect(adminTemplateSource).toContain('<Tab value="homepage-slogans">')
-    expect(adminTemplateSource).toContain('<HomepageSloganManagementPanel')
+    expect(adminTemplateSource).toContain(
+      'v-if="announcementManagementTab === \'homepage-slogans\'"'
+    )
   })
   beforeEach(() => {
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
