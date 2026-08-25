@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { shallowMount, flushPromises } from '@vue/test-utils'
 import AdminView from '@/views/Admin.vue'
+import { setLocale } from '@/i18n'
 import { applyFontSizePreference } from '@/utils/fontSizePreference'
 
 const adminViewSource = readFileSync(
@@ -382,6 +383,7 @@ describe('AdminView', () => {
   })
 
   afterEach(() => {
+    setLocale('zh-TW')
     consoleErrorSpy?.mockRestore()
     vi.useRealTimers()
     vi.resetModules()
@@ -917,6 +919,55 @@ describe('AdminView', () => {
     expect(wrapper.vm.canEditSelectedArchiveReviewNote).toBe(true)
   })
 
+  it('decides submitted-course history from locale-neutral Course identity', async () => {
+    const sameLegacyCourse = {
+      requested_course_name: '普通物理(二)',
+      requested_course_name_en: null,
+      current_archive: {
+        course_name: '普通物理（二）',
+        course_name_en: 'General Physics (II)',
+      },
+    }
+    const sameModernCourse = {
+      requested_course_name: '普通物理(二)',
+      requested_course_name_en: 'General Physics (II)',
+      current_archive: {
+        course_name: '普通物理（二）',
+        course_name_en: 'General Physics (II)',
+      },
+    }
+    const transferredCourse = {
+      requested_course_name: '普通物理(一)',
+      requested_course_name_en: null,
+      current_archive: {
+        course_name: '愛情必修課',
+        course_name_en: 'Love Required Course',
+      },
+    }
+    const unlinkedCourse = {
+      subject: '尚未關聯課程',
+      current_archive: null,
+    }
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    setLocale('zh-TW')
+    expect(wrapper.vm.getReviewDisplayCourseName(sameLegacyCourse)).toBe('普通物理（二）')
+    expect(wrapper.vm.getReviewCourseHistoryLabel(sameLegacyCourse)).toBe('')
+
+    setLocale('en')
+    expect(wrapper.vm.getReviewDisplayCourseName(sameLegacyCourse)).toBe('General Physics (II)')
+    expect(wrapper.vm.getReviewCourseHistoryLabel(sameLegacyCourse)).toBe('')
+    expect(wrapper.vm.getReviewCourseHistoryLabel(sameModernCourse)).toBe('')
+    expect(wrapper.vm.getReviewDisplayCourseName(transferredCourse)).toBe('Love Required Course')
+    expect(wrapper.vm.getReviewCourseHistoryLabel(transferredCourse)).toBe(
+      'Submitted course: 普通物理(一)'
+    )
+    expect(wrapper.vm.getReviewCurrentCourseName(unlinkedCourse)).toBe('')
+    expect(wrapper.vm.getReviewDisplayCourseName(unlinkedCourse)).toBe('尚未關聯課程')
+    expect(wrapper.vm.getReviewCourseHistoryLabel(unlinkedCourse)).toBe('')
+  })
+
   it('caps attention badges, hides zero, and assigns child presentation classes', async () => {
     const wrapper = createWrapper()
     await flushPromises()
@@ -1155,8 +1206,8 @@ describe('AdminView', () => {
   })
 
   it('uses compact Admin-context labels without changing fields or sorting', () => {
-    expect(adminTemplateSource.match(/\$t\('管理員投稿'\)/g)).toHaveLength(4)
-    expect(adminTemplateSource).not.toContain("$t('管理員投稿（審核中心）')")
+    expect(adminTemplateSource.match(/\$t\('管理員投稿（審核中心）'\)/g)).toHaveLength(4)
+    expect(adminTemplateSource).not.toMatch(/\$t\('管理員投稿'\)/)
     expect(adminTemplateSource).toContain(
       `field="contributor_level"\n                  :header="$t('投稿等級（使用者管理欄位）')"\n                  sortable`
     )

@@ -2052,7 +2052,7 @@
                             class="soft-badge soft-badge--admin review-admin-upload-chip review-course-cell__admin-tag"
                             severity="info"
                           >
-                            {{ $t('管理員投稿') }}
+                            {{ $t('管理員投稿（審核中心）') }}
                           </Tag>
                         </div>
                       </div>
@@ -2078,7 +2078,7 @@
                               class="soft-badge soft-badge--admin review-admin-upload-chip"
                               severity="info"
                             >
-                              {{ $t('管理員投稿') }}
+                              {{ $t('管理員投稿（審核中心）') }}
                             </Tag>
                           </div>
                         </div>
@@ -2424,7 +2424,7 @@
                             class="soft-badge soft-badge--admin review-admin-upload-chip review-course-cell__admin-tag"
                             severity="info"
                           >
-                            {{ $t('管理員投稿') }}
+                            {{ $t('管理員投稿（審核中心）') }}
                           </Tag>
                         </div>
                       </div>
@@ -2438,7 +2438,7 @@
                               class="soft-badge soft-badge--admin review-admin-upload-chip"
                               severity="info"
                             >
-                              {{ $t('管理員投稿') }}
+                              {{ $t('管理員投稿（審核中心）') }}
                             </Tag>
                           </div>
                         </div>
@@ -4941,6 +4941,7 @@ import {
   localizedCourseName,
   localizedSubmissionCurrentCourseName,
   localizedSubmissionCourseName,
+  submissionCourseHistoryDiffers,
   localizedTrashCourseName,
   localizedTrashDisplayName,
   localizedTrashParentName,
@@ -5531,9 +5532,8 @@ const getReviewHistoricalCourseName = (item) =>
 const getReviewDisplayCourseName = (item) =>
   getReviewCurrentCourseName(item) || getReviewHistoricalCourseName(item) || '—'
 const getReviewCourseHistoryLabel = (item) => {
-  const current = getReviewCurrentCourseName(item)
   const historical = getReviewHistoricalCourseName(item)
-  if (!current || !historical || current === historical) return ''
+  if (!historical || !submissionCourseHistoryDiffers(item)) return ''
   return t('投稿時課程：{course}', { course: historical })
 }
 const getReviewMobileCourseName = (item) => getReviewDisplayCourseName(item)

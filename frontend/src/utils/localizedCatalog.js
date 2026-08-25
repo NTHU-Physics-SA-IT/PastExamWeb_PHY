@@ -40,6 +40,18 @@ export const localizedSubmissionCurrentCourseName = (submission) => {
   return englishValue(current.course_name_en) || current.course_name || ''
 }
 
+export const submissionCourseHistoryDiffers = (submission) => {
+  const current = submission?.current_archive?.course_name
+  const historical =
+    submission?.requested_course_name ||
+    submission?.course_name ||
+    submission?.subject ||
+    submission?.requestedCourseName ||
+    ''
+  if (!current || !historical) return false
+  return normalizeCourseSearchText(current) !== normalizeCourseSearchText(historical)
+}
+
 export const localizedCourseSnapshotName = (record) => {
   if (!record) return ''
   const chinese = record.course_name || ''
