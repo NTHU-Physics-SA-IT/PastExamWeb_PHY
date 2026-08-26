@@ -1499,66 +1499,98 @@ def _require_pr_full_job_log_binding(
             raise ClassificationFailure("Full CI Attestation job log line is malformed")
         messages.append(match.group(1))
 
-    def require_exact(message: str, label: str) -> None:
-        if messages.count(message) != 1:
+    authority_patterns = {
+        "event_environment": re.compile(r"  EVENT_NAME: (.*)"),
+        "pr_number_environment": re.compile(r"  EVENT_PR_NUMBER: (.*)"),
+        "head_environment": re.compile(r"  EXECUTION_HEAD_SHA: (.*)"),
+        "attested_sha_environment": re.compile(r"  ATTESTED_SHA: (.*)"),
+        "base_ref_environment": re.compile(r"  EVENT_BASE_REF: (.*)"),
+        "base_sha_environment": re.compile(r"  EVENT_BASE_SHA: (.*)"),
+        "event_output": re.compile(r"event_name=(.*)"),
+        "attested_sha_output": re.compile(r"sha=(.*)"),
+        "head_output": re.compile(r"execution_head_sha=(.*)"),
+        "base_ref_output": re.compile(r"pull_request_base_ref=(.*)"),
+        "base_sha_output": re.compile(r"pull_request_base_sha=(.*)"),
+        "tree_output": re.compile(r"tree_sha=(.*)"),
+        "workflow_revision_output": re.compile(r"workflow_revision=(.*)"),
+    }
+    authority_values: dict[str, list[str]] = {key: [] for key in authority_patterns}
+    for message in messages:
+        for key, pattern in authority_patterns.items():
+            if (match := pattern.fullmatch(message)) is not None:
+                authority_values[key].append(match.group(1))
+
+    def require_single_value(key: str, expected: str, label: str) -> str:
+        values = authority_values[key]
+        if len(values) != 1:
             raise ClassificationFailure(
                 f"Full CI Attestation job log {label} is missing or ambiguous"
             )
-
-    def require_capture(pattern: str, expected: str, label: str) -> None:
-        values = [
-            match.group(1)
-            for message in messages
-            if (match := re.fullmatch(pattern, message)) is not None
-        ]
-        if values != [expected]:
+        if values[0] != expected:
             raise ClassificationFailure(
                 f"Full CI Attestation job log {label} does not match"
             )
+        return values[0]
 
-    require_exact("  EVENT_NAME: pull_request", "event")
-    require_exact(
-        f"  EVENT_PR_NUMBER: {pull_request_number}",
+    require_single_value("event_environment", "pull_request", "event")
+    require_single_value(
+        "pr_number_environment",
+        str(pull_request_number),
         "pull request number",
     )
-    require_exact(f"  EXECUTION_HEAD_SHA: {source_sha}", "head SHA")
-    require_exact("event_name=pull_request", "attested event")
-    require_exact(f"execution_head_sha={source_sha}", "attested head SHA")
-    require_exact(f"tree_sha={expected_tree}", "attested tree")
-    require_exact(
-        f"workflow_revision={workflow_revision}",
+    require_single_value("head_environment", source_sha, "head SHA")
+    require_single_value("event_output", "pull_request", "attested event")
+    require_single_value("head_output", source_sha, "attested head SHA")
+    require_single_value("tree_output", expected_tree, "attested tree")
+    require_single_value(
+        "workflow_revision_output",
+        workflow_revision,
         "workflow revision",
     )
 
-    attested_sha_pattern = rf"  ATTESTED_SHA: ({SHA_PATTERN.pattern[1:-1]})"
-    attested_sha_values = [
-        match.group(1)
-        for message in messages
-        if (match := re.fullmatch(attested_sha_pattern, message)) is not None
-    ]
-    if len(attested_sha_values) != 1:
+    attested_sha_values = authority_values["attested_sha_environment"]
+    if (
+        len(attested_sha_values) != 1
+        or SHA_PATTERN.fullmatch(attested_sha_values[0]) is None
+    ):
         raise ClassificationFailure(
             "Full CI Attestation job log attested SHA is missing or ambiguous"
         )
-    require_capture(
-        rf"sha=({SHA_PATTERN.pattern[1:-1]})",
+    require_single_value(
+        "attested_sha_output",
         attested_sha_values[0],
         "attested SHA output",
     )
 
-    ref_messages = (
-        f"  EVENT_BASE_REF: {pull_request_base_ref}",
-        f"pull_request_base_ref={pull_request_base_ref}",
-    )
-    sha_messages = (
-        f"  EVENT_BASE_SHA: {pull_request_base_sha}",
-        f"pull_request_base_sha={pull_request_base_sha}",
-    )
-    ref_binding = all(messages.count(message) == 1 for message in ref_messages)
-    sha_binding = all(messages.count(message) == 1 for message in sha_messages)
-    if ref_binding == sha_binding:
+    ref_keys = ("base_ref_environment", "base_ref_output")
+    sha_keys = ("base_sha_environment", "base_sha_output")
+    ref_present = any(authority_values[key] for key in ref_keys)
+    sha_present = any(authority_values[key] for key in sha_keys)
+    if ref_present == sha_present:
         raise ClassificationFailure(
             "Full CI Attestation job log base identity is missing or ambiguous"
+        )
+    if ref_present:
+        require_single_value(
+            "base_ref_environment",
+            pull_request_base_ref,
+            "base ref environment",
+        )
+        require_single_value(
+            "base_ref_output",
+            pull_request_base_ref,
+            "base ref output",
+        )
+    else:
+        require_single_value(
+            "base_sha_environment",
+            pull_request_base_sha,
+            "base SHA environment",
+        )
+        require_single_value(
+            "base_sha_output",
+            pull_request_base_sha,
+            "base SHA output",
         )
 
 

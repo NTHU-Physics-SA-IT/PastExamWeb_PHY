@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-from datetime import UTC, datetime, timedelta
 import hashlib
 import importlib
-from pathlib import Path
 import sys
+from copy import deepcopy
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
-
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
 CI_SCRIPTS = REPOSITORY_ROOT / "scripts" / "ci"
@@ -140,6 +139,10 @@ def _attestation_log(
     return "".join(
         f"2026-08-14T10:00:00.0000000Z {message}\n" for message in messages
     ).encode()
+
+
+def _attestation_log_line(message: str) -> bytes:
+    return f"2026-08-14T10:00:00.0000000Z {message}\n".encode()
 
 
 class CaseBGit:
@@ -378,6 +381,80 @@ def test_historical_empty_pr_association_uses_exact_base_sha_log_binding() -> No
     )
 
     assert _classify(api=api).ci_mode == "equivalent-merge"
+
+
+@pytest.mark.parametrize(
+    "conflicting_message",
+    (
+        f"  EVENT_PR_NUMBER: {PR_NUMBER}",
+        "  EVENT_PR_NUMBER: 96",
+        f"  EXECUTION_HEAD_SHA: {OTHER}",
+        "event_name=push",
+        f"tree_sha={OTHER}",
+    ),
+)
+def test_duplicate_authoritative_job_log_key_fails_closed(
+    conflicting_message: str,
+) -> None:
+    api = DualFullAPI()
+    log_id = _job_id(PR_RUN_ID, "Full CI Attestation")
+    api.job_logs[log_id] += _attestation_log_line(conflicting_message)
+
+    assert _classify(api=api).ci_mode == "full"
+
+
+@pytest.mark.parametrize(
+    "case",
+    (
+        "both-correct",
+        "correct-ref-wrong-sha",
+        "wrong-ref-correct-sha",
+        "correct-sha-wrong-ref",
+        "partial-ref",
+        "partial-sha",
+        "neither",
+        "duplicate-ref-key",
+        "duplicate-sha-key",
+    ),
+)
+def test_job_log_base_family_ambiguity_fails_closed(case: str) -> None:
+    api = DualFullAPI()
+    log_id = _job_id(PR_RUN_ID, "Full CI Attestation")
+
+    if case == "both-correct":
+        log = _attestation_log(base_ref=COORDINATION_BRANCH, base_sha=C)
+    elif case == "correct-ref-wrong-sha":
+        log = _attestation_log(base_ref=COORDINATION_BRANCH, base_sha=OTHER)
+    elif case == "wrong-ref-correct-sha":
+        log = _attestation_log(base_ref="integration/other", base_sha=C)
+    elif case == "correct-sha-wrong-ref":
+        log = _attestation_log(base_ref=None, base_sha=C)
+        log += _attestation_log_line("  EVENT_BASE_REF: integration/other")
+        log += _attestation_log_line("pull_request_base_ref=integration/other")
+    elif case == "partial-ref":
+        log = _attestation_log()
+        log = log.replace(
+            _attestation_log_line(f"pull_request_base_ref={COORDINATION_BRANCH}"),
+            b"",
+        )
+    elif case == "partial-sha":
+        log = _attestation_log(base_ref=None, base_sha=C)
+        log = log.replace(
+            _attestation_log_line(f"pull_request_base_sha={C}"),
+            b"",
+        )
+    elif case == "neither":
+        log = _attestation_log(base_ref=None, base_sha=None)
+    elif case == "duplicate-ref-key":
+        log = _attestation_log()
+        log += _attestation_log_line(f"  EVENT_BASE_REF: {COORDINATION_BRANCH}")
+    else:
+        log = _attestation_log(base_ref=None, base_sha=C)
+        log += _attestation_log_line(f"pull_request_base_sha={C}")
+
+    api.job_logs[log_id] = log
+
+    assert _classify(api=api).ci_mode == "full"
 
 
 def test_later_pr_that_only_contains_historical_commits_is_not_ambiguous() -> None:
@@ -660,9 +737,9 @@ def test_pr_full_evidence_or_identity_mismatch_fails_closed(case: str) -> None:
     elif case == "run-log-malformed":
         api.job_logs[_job_id(PR_RUN_ID, "Full CI Attestation")] = b"malformed\n"
     elif case == "run-log-ambiguous":
-        api.job_logs[
-            _job_id(PR_RUN_ID, "Full CI Attestation")
-        ] += b"2026-08-14T10:00:00.0000000Z   EVENT_PR_NUMBER: 95\n"
+        api.job_logs[_job_id(PR_RUN_ID, "Full CI Attestation")] += (
+            b"2026-08-14T10:00:00.0000000Z   EVENT_PR_NUMBER: 95\n"
+        )
     elif case == "run-log-wrong-pr":
         api.job_logs[_job_id(PR_RUN_ID, "Full CI Attestation")] = _attestation_log(
             pr_number=96
