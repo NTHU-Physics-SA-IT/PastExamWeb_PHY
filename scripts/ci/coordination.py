@@ -37,6 +37,27 @@ EXPECTED_CHECKS = {
     ("check-branch", 15368),
     ("CI Gate", 15368),
 }
+EXPECTED_MERGE_METHODS = frozenset({"merge", "squash", "rebase"})
+EXPECTED_PULL_REQUEST_PARAMETER_KEYS = frozenset(
+    {
+        "allowed_merge_methods",
+        "dismiss_stale_reviews_on_push",
+        "dismissal_restriction",
+        "require_code_owner_review",
+        "require_extra_approval_for_unattributed_changes",
+        "require_last_push_approval",
+        "required_approving_review_count",
+        "required_review_thread_resolution",
+        "required_reviewers",
+    }
+)
+EXPECTED_STATUS_PARAMETER_KEYS = frozenset(
+    {
+        "do_not_enforce_on_create",
+        "required_status_checks",
+        "strict_required_status_checks_policy",
+    }
+)
 START_ATTESTATION_SCHEMA_VERSION = 1
 
 
@@ -152,9 +173,11 @@ def validate_ruleset(payload: dict[str, Any], *, expected_app_id: int) -> None:
     if payload.get("target") != "branch" or payload.get("enforcement") != "active":
         raise CoordinationError("integration ruleset must be active for branches")
     conditions = payload.get("conditions")
-    if not isinstance(conditions, dict) or conditions.get("ref_name") != {
-        "exclude": [],
-        "include": [INTEGRATION_REF_PREFIX + "*"],
+    if conditions != {
+        "ref_name": {
+            "exclude": [],
+            "include": [INTEGRATION_REF_PREFIX + "*"],
+        }
     }:
         raise CoordinationError("integration ruleset ref scope is unexpected")
     bypass = payload.get("bypass_actors")
@@ -189,33 +212,67 @@ def validate_ruleset(payload: dict[str, Any], *, expected_app_id: int) -> None:
     ):
         raise CoordinationError("integration ruleset is not the exact minimal contract")
     by_type = {rule["type"]: rule for rule in rules}
-    pull_request = by_type["pull_request"].get("parameters")
-    if not isinstance(pull_request, dict):
-        raise CoordinationError("pull-request protection is malformed")
-    if pull_request.get("required_approving_review_count") != 0:
-        raise CoordinationError("routine coordination must not require a reviewer")
-    if pull_request.get("require_code_owner_review") is not False:
-        raise CoordinationError("routine coordination must not require CODEOWNER review")
-    if pull_request.get("require_last_push_approval") is not False:
-        raise CoordinationError("routine coordination must not require another actor")
-    if pull_request.get("required_review_thread_resolution") is not True:
-        raise CoordinationError("review-thread resolution must remain required")
+    for rule_type in ("creation", "deletion", "non_fast_forward"):
+        if by_type[rule_type] != {"type": rule_type}:
+            raise CoordinationError(
+                f"integration {rule_type} rule has unexpected parameters"
+            )
 
-    status_rule = by_type.get("required_status_checks")
-    if not isinstance(status_rule, dict):
-        raise CoordinationError("integration ruleset lacks required status checks")
+    pull_request_rule = by_type["pull_request"]
+    if set(pull_request_rule) != {"type", "parameters"}:
+        raise CoordinationError("pull-request rule shape is unexpected")
+    pull_request = pull_request_rule.get("parameters")
+    if (
+        not isinstance(pull_request, dict)
+        or set(pull_request) != EXPECTED_PULL_REQUEST_PARAMETER_KEYS
+    ):
+        raise CoordinationError("pull-request protection is malformed")
+    merge_methods = pull_request["allowed_merge_methods"]
+    if (
+        not isinstance(merge_methods, list)
+        or len(merge_methods) != len(EXPECTED_MERGE_METHODS)
+        or not all(isinstance(method, str) for method in merge_methods)
+        or frozenset(merge_methods) != EXPECTED_MERGE_METHODS
+    ):
+        raise CoordinationError("integration merge methods are unexpected")
+    expected_pull_request = {
+        "dismiss_stale_reviews_on_push": True,
+        "dismissal_restriction": {"allowed_actors": [], "enabled": False},
+        "require_code_owner_review": False,
+        "require_extra_approval_for_unattributed_changes": False,
+        "require_last_push_approval": False,
+        "required_approving_review_count": 0,
+        "required_review_thread_resolution": True,
+        "required_reviewers": [],
+    }
+    observed_pull_request = {
+        key: value
+        for key, value in pull_request.items()
+        if key != "allowed_merge_methods"
+    }
+    if observed_pull_request != expected_pull_request:
+        raise CoordinationError("pull-request protection is not the minimal contract")
+
+    status_rule = by_type["required_status_checks"]
+    if set(status_rule) != {"type", "parameters"}:
+        raise CoordinationError("required-status-check rule shape is unexpected")
     status_parameters = status_rule.get("parameters")
-    if not isinstance(status_parameters, dict):
+    if (
+        not isinstance(status_parameters, dict)
+        or set(status_parameters) != EXPECTED_STATUS_PARAMETER_KEYS
+    ):
         raise CoordinationError("required status checks are malformed")
     if status_parameters.get("strict_required_status_checks_policy") is not True:
         raise CoordinationError("integration status checks must remain strict")
+    if status_parameters.get("do_not_enforce_on_create") is not False:
+        raise CoordinationError("integration status checks must apply on creation")
     checks = status_parameters.get("required_status_checks")
     if not isinstance(checks, list):
         raise CoordinationError("integration required checks are unavailable")
     observed = [
         (check.get("context"), check.get("integration_id"))
         for check in checks
-        if isinstance(check, dict)
+        if isinstance(check, dict) and set(check) == {"context", "integration_id"}
     ]
     if len(observed) != len(checks) or len(observed) != 2 or set(observed) != EXPECTED_CHECKS:
         raise CoordinationError("integration required checks are not the minimal baseline")

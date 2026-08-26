@@ -96,8 +96,16 @@ def _ruleset() -> dict[str, Any]:
             {
                 "type": "pull_request",
                 "parameters": {
+                    "allowed_merge_methods": ["merge", "squash", "rebase"],
+                    "dismiss_stale_reviews_on_push": True,
+                    "dismissal_restriction": {
+                        "allowed_actors": [],
+                        "enabled": False,
+                    },
                     "required_approving_review_count": 0,
+                    "required_reviewers": [],
                     "require_code_owner_review": False,
+                    "require_extra_approval_for_unattributed_changes": False,
                     "require_last_push_approval": False,
                     "required_review_thread_resolution": True,
                 },
@@ -105,6 +113,7 @@ def _ruleset() -> dict[str, Any]:
             {
                 "type": "required_status_checks",
                 "parameters": {
+                    "do_not_enforce_on_create": False,
                     "strict_required_status_checks_policy": True,
                     "required_status_checks": [
                         {"context": "check-branch", "integration_id": 15368},
@@ -445,6 +454,7 @@ def test_artifact_redirect_never_forwards_github_token(
         "workflow-revision",
         "ruleset-unavailable",
         "ruleset-weakened",
+        "ruleset-preexisting-semantic-drift",
     ),
 )
 def test_start_uncertainty_falls_back_to_full(tmp_path: Path, mutation: str) -> None:
@@ -519,6 +529,9 @@ def test_start_uncertainty_falls_back_to_full(tmp_path: Path, mutation: str) -> 
         )
     elif mutation == "ruleset-weakened":
         api.rules["rules"] = api.rules["rules"][:-1]
+    elif mutation == "ruleset-preexisting-semantic-drift":
+        api.rules["rules"][3]["parameters"]["unexpected_approval_policy"] = False
+        api.archive, api.digest = _artifact(api.attestation)
 
     result = _classify(fixture, api=api, git=git)
 

@@ -52,8 +52,16 @@ def _ruleset() -> dict[str, Any]:
             {
                 "type": "pull_request",
                 "parameters": {
+                    "allowed_merge_methods": ["merge", "squash", "rebase"],
+                    "dismiss_stale_reviews_on_push": True,
+                    "dismissal_restriction": {
+                        "allowed_actors": [],
+                        "enabled": False,
+                    },
                     "required_approving_review_count": 0,
+                    "required_reviewers": [],
                     "require_code_owner_review": False,
+                    "require_extra_approval_for_unattributed_changes": False,
                     "require_last_push_approval": False,
                     "required_review_thread_resolution": True,
                 },
@@ -61,6 +69,7 @@ def _ruleset() -> dict[str, Any]:
             {
                 "type": "required_status_checks",
                 "parameters": {
+                    "do_not_enforce_on_create": False,
                     "strict_required_status_checks_policy": True,
                     "required_status_checks": [
                         {"context": "check-branch", "integration_id": 15368},
@@ -357,6 +366,10 @@ def test_close_recovers_verified_null_governance_closeout() -> None:
     assert client.refs == []
 
 
+def test_ruleset_validation_accepts_exact_minimal_contract() -> None:
+    coordination.validate_ruleset(_ruleset(), expected_app_id=APP_ID)
+
+
 @pytest.mark.parametrize(
     "mutation",
     (
@@ -372,6 +385,40 @@ def test_close_recovers_verified_null_governance_closeout() -> None:
         lambda rules: rules["rules"][-1]["parameters"][
             "required_status_checks"
         ].append({"unexpected": "malformed"}),
+        lambda rules: rules["rules"][3]["parameters"].update(
+            required_reviewers=[
+                {
+                    "file_patterns": ["**"],
+                    "minimum_approvals": 1,
+                    "reviewer": {"id": 1, "type": "Team"},
+                }
+            ]
+        ),
+        lambda rules: rules["rules"][3]["parameters"].update(
+            require_extra_approval_for_unattributed_changes=True
+        ),
+        lambda rules: rules["rules"][4]["parameters"].update(
+            do_not_enforce_on_create=True
+        ),
+        lambda rules: rules["rules"][3]["parameters"].update(
+            unexpected_approval_policy=False
+        ),
+        lambda rules: rules["rules"][4]["parameters"].update(
+            unexpected_status_policy=False
+        ),
+        lambda rules: rules["rules"][3]["parameters"].pop(
+            "dismiss_stale_reviews_on_push"
+        ),
+        lambda rules: rules["rules"][3]["parameters"].update(
+            dismissal_restriction={"allowed_actors": []}
+        ),
+        lambda rules: rules["rules"][3]["parameters"][
+            "allowed_merge_methods"
+        ].append("fast-forward"),
+        lambda rules: rules["rules"][3]["parameters"][
+            "allowed_merge_methods"
+        ].remove("rebase"),
+        lambda rules: rules["rules"][0].update(parameters={}),
     ),
 )
 def test_ruleset_validation_fails_closed(mutation: Any) -> None:

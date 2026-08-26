@@ -1157,6 +1157,9 @@ def test_ci_gate_accepts_exact_mode_result_matrix(mode: str) -> None:
         ("docs-only", "docs_result", "skipped"),
         ("docs-only", "equivalent_result", "success"),
         ("docs-only", "full_attestation_result", "success"),
+        ("coordination-start", "coordination_start_result", "failure"),
+        ("coordination-start", "coordination_start_result", "cancelled"),
+        ("coordination-start", "coordination_start_result", "skipped"),
     ),
 )
 def test_ci_gate_rejects_mode_result_mismatch(
