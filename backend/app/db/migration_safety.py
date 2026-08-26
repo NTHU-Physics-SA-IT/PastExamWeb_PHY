@@ -331,6 +331,10 @@ def _remove_homepage_slogan_submissions(metadata: MetaData) -> None:
     metadata.remove(metadata.tables["homepage_slogan_submissions"])
 
 
+def _restore_required_archive_submission_event_link(metadata: MetaData) -> None:
+    metadata.tables["archive_submission_events"].c.submission_id.nullable = False
+
+
 def _remove_about_us_ordering(metadata: MetaData) -> None:
     table = metadata.tables["about_us_entries"]
     for index in list(table.indexes):
@@ -344,11 +348,16 @@ def _metadata_for_variant(variant: str) -> MetaData:
     if variant == "head":
         return metadata
 
+    _restore_required_archive_submission_event_link(metadata)
+    if variant == "pre_archive_submission_event_detachment":
+        return metadata
+
     _remove_homepage_slogan_submissions(metadata)
     if variant == "pre_homepage_slogan_submissions":
         return metadata
     if variant not in {
         "pre_archive_wish_report_trash_metadata",
+        "pre_archive_submission_event_detachment",
         "pre_archive_report_active_pending_uniqueness",
         "pre_wish_optional_semester",
         "pre_about_us_ordering",

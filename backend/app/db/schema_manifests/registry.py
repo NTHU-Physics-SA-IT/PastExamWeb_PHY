@@ -7,8 +7,9 @@ from pathlib import Path
 
 ARCHIVE_REPORT_PREVIOUS_SCHEMA_REVISION = "c7e4a9b2d6f1"
 WISH_REPORT_PREVIOUS_SCHEMA_REVISION = "c8e4a1f7b2d9"
-PREVIOUS_HEAD_SCHEMA_REVISION = "d1f5a9c3e7b2"
-HEAD_SCHEMA_REVISION = "e2c6a8f4b1d9"
+HOMEPAGE_SLOGAN_PREVIOUS_SCHEMA_REVISION = "d1f5a9c3e7b2"
+PREVIOUS_HEAD_SCHEMA_REVISION = "e2c6a8f4b1d9"
+HEAD_SCHEMA_REVISION = "f6b8d2c4a9e1"
 
 
 @dataclass(frozen=True)
@@ -145,10 +146,15 @@ MANIFESTS = {
         description="schema before ArchiveWishReport trash metadata",
         metadata_variant="pre_archive_wish_report_trash_metadata",
     ),
-    PREVIOUS_HEAD_SCHEMA_REVISION: ManifestSpec(
-        revision=PREVIOUS_HEAD_SCHEMA_REVISION,
+    HOMEPAGE_SLOGAN_PREVIOUS_SCHEMA_REVISION: ManifestSpec(
+        revision=HOMEPAGE_SLOGAN_PREVIOUS_SCHEMA_REVISION,
         description="schema before homepage slogan submissions",
         metadata_variant="pre_homepage_slogan_submissions",
+    ),
+    PREVIOUS_HEAD_SCHEMA_REVISION: ManifestSpec(
+        revision=PREVIOUS_HEAD_SCHEMA_REVISION,
+        description="schema before ArchiveSubmissionEvent detachment",
+        metadata_variant="pre_archive_submission_event_detachment",
     ),
     HEAD_SCHEMA_REVISION: ManifestSpec(
         revision=HEAD_SCHEMA_REVISION,

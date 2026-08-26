@@ -78,8 +78,9 @@ Reviewed manifests currently cover:
   excludes trashed rows; and
 - `c8e4a1f7b2d9`: the reviewed schema before Archive Wish report Trash metadata;
   and
-- `d1f5a9c3e7b2`: the reviewed schema before homepage slogan submissions; and
-- `e2c6a8f4b1d9`: the current repository head and SQLModel metadata contract.
+- `d1f5a9c3e7b2`: the reviewed schema before homepage slogan submissions;
+- `e2c6a8f4b1d9`: the reviewed schema before retained event detachment; and
+- `f6b8d2c4a9e1`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,
@@ -262,6 +263,13 @@ indexes, and nullable submitter/reviewer references using `ON DELETE SET NULL`.
 It inserts or rewrites no application row. The submitter-name snapshot remains
 required so later account deletion does not erase moderation context.
 Downgrade removes only this new table.
+
+The ArchiveSubmissionEvent retained-history migration makes only
+`archive_submission_events.submission_id` nullable. It inserts, deletes, or
+rewrites no event. Permanent deletion later nulls that link transactionally
+while retaining the event ID and exact timestamp. Downgrade restores the
+required link only when no detached row exists; otherwise it fails closed
+rather than deleting history or fabricating a source relationship.
 
 
 On the first bootstrap, one missing canonical key or any extra custom category

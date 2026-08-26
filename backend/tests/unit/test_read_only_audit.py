@@ -19,6 +19,7 @@ from app.db.audit.registry import (
     ARCHIVE_REPORT_UNIQUENESS_REVISION,
     ELIGIBILITY_AUDIT_ID,
     HOMEPAGE_SLOGAN_REVISION,
+    RETAINED_EVENT_REVISION,
     WISH_OPTIONAL_SEMESTER_REVISION,
     WISH_REPORT_TRASH_REVISION,
     get_audit_adapter,
@@ -185,6 +186,7 @@ def test_bilingual_head_audit_is_new_version_and_preserves_lifecycle_classifier(
             ARCHIVE_REPORT_UNIQUENESS_REVISION,
             WISH_REPORT_TRASH_REVISION,
             HOMEPAGE_SLOGAN_REVISION,
+            RETAINED_EVENT_REVISION,
         }
     )
     previous = get_audit_adapter(ELIGIBILITY_AUDIT_ID, 3)
@@ -205,6 +207,7 @@ def test_archive_report_audit_is_revision_bounded_aggregate_only_and_read_only()
             ARCHIVE_REPORT_UNIQUENESS_REVISION,
             WISH_REPORT_TRASH_REVISION,
             HOMEPAGE_SLOGAN_REVISION,
+            RETAINED_EVENT_REVISION,
         }
     )
     assert set(adapter.approved_aggregate_labels) == {
@@ -328,6 +331,45 @@ def test_a9_continuity_requires_course_submission_lifecycle_shape() -> None:
         assert column in sql
     assert "table_name = 'course_submissions'" in sql
     assert "SELECT count(*) = 5" in sql
+
+
+def test_retained_event_continuity_inherits_the_complete_previous_head_shape() -> None:
+    retained_request = AuditRequest(
+        audit_id=ELIGIBILITY_AUDIT_ID,
+        audit_version=4,
+        mode=AuditMode.ISOLATED_TEST,
+        expected_ledger=RETAINED_EVENT_REVISION,
+        repository_revision="a" * 40,
+    )
+    sql = build_transaction_sql(
+        retained_request,
+        get_audit_adapter(ELIGIBILITY_AUDIT_ID, 4),
+    )
+
+    for column in (
+        "owner_self_delete_consumed",
+        "previous_status",
+        "name_en",
+        "requested_course_name_en",
+        "pre_delete_is_active",
+        "source_wish_id",
+        "order_index",
+        "deleted_at",
+        "homepage_slogan_submissions",
+    ):
+        assert column in sql
+    for column in (
+        "owner_self_delete_consumed",
+        "previous_status",
+        "pre_delete_is_active",
+        "source_wish_id",
+        "order_index",
+    ):
+        assert "NOT EXISTS (" not in _column_condition_context(sql, column)
+    wish_report_position = sql.index("table_name = 'archive_wish_reports'")
+    assert "SELECT count(*) = 2" in sql[wish_report_position - 180 : wish_report_position]
+    slogan_position = sql.index("table_name = 'homepage_slogan_submissions'")
+    assert "SELECT count(*) = 10" in sql[slogan_position - 180 : slogan_position]
 
 
 def test_cli_defaults_to_current_bilingual_audit_version() -> None:

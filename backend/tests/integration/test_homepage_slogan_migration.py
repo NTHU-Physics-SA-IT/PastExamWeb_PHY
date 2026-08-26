@@ -7,9 +7,9 @@ from app.models.models import HomepageSloganSubmission
 
 def test_homepage_slogan_migration_is_the_additive_schema_head() -> None:
     script, heads = revision_graph()
-    assert HEAD_SCHEMA_REVISION == "e2c6a8f4b1d9"
+    assert HEAD_SCHEMA_REVISION == "f6b8d2c4a9e1"
     assert heads == [HEAD_SCHEMA_REVISION]
-    assert script.get_revision(HEAD_SCHEMA_REVISION).down_revision == "d1f5a9c3e7b2"
+    assert script.get_revision("e2c6a8f4b1d9").down_revision == "d1f5a9c3e7b2"
 
     table = HomepageSloganSubmission.__table__
     assert tuple(table.c.keys()) == (

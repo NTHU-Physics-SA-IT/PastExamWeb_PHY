@@ -584,7 +584,7 @@ class ArchiveSubmissionEvent(SQLModel, table=True):
     )
 
     id: int | None = Field(default=None, primary_key=True)
-    submission_id: int = Field(unique=True, index=True)
+    submission_id: int | None = Field(default=None, unique=True, index=True)
     submitted_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False)
     )
@@ -788,9 +788,7 @@ class HomepageSloganSubmission(SQLModel, table=True):
             index=True,
         ),
     )
-    submitter_name_snapshot: str = Field(
-        sa_column=Column(String(100), nullable=False)
-    )
+    submitter_name_snapshot: str = Field(sa_column=Column(String(100), nullable=False))
     status: str = Field(
         default=HomepageSloganStatus.PENDING.value,
         sa_column=Column(
