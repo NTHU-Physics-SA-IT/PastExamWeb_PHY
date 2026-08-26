@@ -26,7 +26,7 @@ current implementation separately from the intended product relation.
 | `CourseSubmission` | Separate historical course-request record with requester/reviewer, independent soft-delete metadata, and nullable `created_course_id` using `ON DELETE SET NULL` | Retains the request and review history without owning the resulting Category/Course | Course deletion detaches the optional historical link; submission deletion never cascades to Course |
 | `Archive` | Required `course_id`, optional uploader, one `object_name`, optional soft-delete metadata; at most one submission points to it through the named nullable unique `created_archive_id` constraint | One independently accessible approved public file for authenticated system users, optionally created by exactly one submission | Administrator-created Archives may have no source submission; approval, exact restore, and source projection fail closed on occupancy or cardinality violations |
 | `ArchiveSubmission` | Required requester and object name; optional reviewer, legacy owner, nullable unique `created_archive_id`, and nullable `source_wish_id`; review/trash fields and monotonic owner-self-delete eligibility coexist | One independent submission and PDF, optionally paired with exactly one Archive. Ownership survives eligibility consumption, and Help Upload retains its source wish without creating a separate upload lifecycle | Database uniqueness, application fail-fast guards, and exact-pair soft-lifecycle coverage are enforced; deleting a wish sets the optional source link null |
-| `ArchiveSubmissionEvent` | Unique `submission_id` integer and timestamp, without a declared FK | Immutable statistical event retained after submission deletion, with active link/PII detached as needed | Implementation gap: permanent-delete helper currently deletes events |
+| `ArchiveSubmissionEvent` | Nullable unique `submission_id` and exact `submitted_at`, without a declared FK | Immutable creation-only statistical event; true permanent deletion nulls only `submission_id` while retaining the event ID and exact timestamp | Confirmed by code, migration, and focused tests |
 | `ArchiveDiscussionMessage` / `ArchiveDiscussionLike` | Message requires archive and user IDs; parent/reply references form a thread; likes cascade with message/user deletion | Discussion belongs to the referenced public item; soft-deleted messages should not remain an active source | Confirmed by code and `test_archive_discussion.py` |
 | `CommentReport` | Reporter FK cascades; target and actor/resource FKs mostly `SET NULL`; snapshots preserve context; independent soft delete | Report history survives source changes while active uniqueness and source availability remain explicit | Partially implemented |
 | `ArchiveReport` | Optional archive/submission/user FKs with `SET NULL`; required snapshots preserve archive context | May report both submission-backed and legacy archives; review can optionally take down the target | A source-less legacy takedown soft-trashes the exact Archive without fabricating an ArchiveSubmission |
@@ -286,11 +286,14 @@ and frontend controls remain later application work.
 The event is immutable statistical history. Permanent submission deletion:
 
 - retains the event;
-- removes or anonymizes unnecessary personal data and the active entity link;
+- nulls the live `submission_id` link while preserving the event identity and
+  exact `submitted_at` timestamp;
 - does not expose a usable link to the deleted submission;
 - is not blocked by the event.
 
-The exact snapshot/anonymization schema is a later technical design.
+The retained event deliberately contains no actor identity or descriptive
+submission snapshot. It is aggregate-only history and has no row-level API or
+UI representation.
 
 ### Current implementation and test evidence
 
@@ -299,12 +302,14 @@ submission ID and timestamp. `test_record_submission_event_keeps_only_stable_sta
 and `test_submission_event_survives_delete_restore_and_permanent_delete` express
 the statistical retention goal.
 
-### Implementation gap
+### Permanent-delete implementation
 
-`archive_submission_lifecycle.py::delete_archive_submission_events` currently
-deletes matching events during permanent deletion. Focused unit tests cover the
-helper's deletion behavior, demonstrating the current conflict rather than the
-intended invariant.
+`archive_submission_lifecycle.py::detach_archive_submission_events` updates
+matching rows in the route-owned transaction, setting only `submission_id` to
+null. Both exact-pair and grouped permanent-delete paths acquire the canonical
+Course, Archive, and ArchiveSubmission lock order with one bounded membership
+rebuild before detaching events and deleting live submissions. Rollback keeps
+the live row and event link coherent.
 
 ## CourseSubmission
 

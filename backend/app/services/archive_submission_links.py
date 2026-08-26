@@ -36,6 +36,7 @@ ArchiveSubmissionLinkOperation = Literal[
     "archive_report_review",
     "archive_report_trash",
     "archive_report_restore",
+    "permanent_delete",
     "source_lookup",
 ]
 
