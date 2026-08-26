@@ -354,6 +354,7 @@ def test_retained_event_continuity_inherits_the_complete_previous_head_shape() -
         "pre_delete_is_active",
         "source_wish_id",
         "order_index",
+        "deleted_at",
         "homepage_slogan_submissions",
     ):
         assert column in sql
@@ -365,6 +366,8 @@ def test_retained_event_continuity_inherits_the_complete_previous_head_shape() -
         "order_index",
     ):
         assert "NOT EXISTS (" not in _column_condition_context(sql, column)
+    wish_report_position = sql.index("table_name = 'archive_wish_reports'")
+    assert "SELECT count(*) = 2" in sql[wish_report_position - 180 : wish_report_position]
     slogan_position = sql.index("table_name = 'homepage_slogan_submissions'")
     assert "SELECT count(*) = 10" in sql[slogan_position - 180 : slogan_position]
 

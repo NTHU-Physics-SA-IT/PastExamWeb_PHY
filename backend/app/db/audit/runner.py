@@ -495,7 +495,11 @@ def _continuity_cte(request: AuditRequest) -> str:
         )
         """
         if request.expected_ledger
-        in {WISH_REPORT_TRASH_REVISION, HOMEPAGE_SLOGAN_REVISION}
+        in {
+            WISH_REPORT_TRASH_REVISION,
+            HOMEPAGE_SLOGAN_REVISION,
+            RETAINED_EVENT_REVISION,
+        }
         else """
         NOT EXISTS (
             SELECT 1
