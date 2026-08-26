@@ -13,11 +13,12 @@ from app.api.services.archive_submission_lifecycle import (
     LIFECYCLE_ARCHIVE_TRASHED,
     LIFECYCLE_COURSE_TRASHED,
     LIFECYCLE_LINKED_ARCHIVE_PERMANENTLY_DELETED,
+    acquire_stable_archive_submission_group_locks,
     acquire_stable_submission_lifecycle_locks,
     archive_lifecycle_conflict_error,
     collect_archive_submission_group,
     course_lifecycle_conflict_error,
-    delete_archive_submission_events,
+    detach_archive_submission_events,
     get_course_trash_course_id,
     get_course_trash_previous_status,
     hard_delete_archive_submission_group,
@@ -1104,6 +1105,12 @@ async def _hard_delete_submission_archive_pair(
     archive: Archive,
     warnings: list[str],
 ) -> dict:
+    group = await acquire_stable_archive_submission_group_locks(
+        db, archive=archive, submission=submission
+    )
+    warnings.extend(group.warnings)
+    archive = next(item for item in group.archives if item.id == archive.id)
+    submission = next(item for item in group.submissions if item.id == submission.id)
     timestamp = datetime.now(UTC)
     linked_submissions = (
         (
@@ -1164,7 +1171,7 @@ async def _hard_delete_submission_archive_pair(
     for item in submissions_to_delete:
         item.created_archive_id = None
         await db.delete(item)
-    deleted_events = await delete_archive_submission_events(db, set(submission_ids))
+    retained_events = await detach_archive_submission_events(db, set(submission_ids))
     await db.flush()
     await db.delete(archive)
     return {
@@ -1175,7 +1182,7 @@ async def _hard_delete_submission_archive_pair(
             "archives": 1,
             "linkedSubmissionsDeleted": len(submissions_to_delete),
             "linkedSubmissionsMarkedDeleted": marked_unrecoverable,
-            "submissionEvents": deleted_events,
+            "submissionEventsRetained": retained_events,
             "comments": len(messages),
             "files": deleted_objects,
         },

@@ -10,10 +10,13 @@ from sqlalchemy.engine import Engine, make_url
 
 from alembic import command
 from app.core.config import settings
+from app.db.audit.models import AuditMode, AuditRequest
 from app.db.audit.registry import (
     ELIGIBILITY_AUDIT_ID,
+    RETAINED_EVENT_REVISION,
     get_audit_adapter,
 )
+from app.db.audit.runner import _continuity_cte
 from app.db.migration_safety import alembic_config
 from app.db.test_database_guard import (
     validate_connected_test_database,
@@ -161,6 +164,26 @@ def _migration_module() -> dict[str, object]:
         / "versions"
         / "f5e1d8c3a7b2_add_archive_submission_self_delete_eligibility.py"
     )
+
+
+def test_retained_history_head_passes_sealed_audit_schema_continuity(
+    audit_engine: Engine,
+) -> None:
+    command.upgrade(alembic_config(), "head")
+    request = AuditRequest(
+        audit_id=ELIGIBILITY_AUDIT_ID,
+        audit_version=4,
+        mode=AuditMode.ISOLATED_TEST,
+        expected_ledger=RETAINED_EVENT_REVISION,
+        repository_revision="a" * 40,
+    )
+
+    with audit_engine.connect() as connection:
+        schema_ok = connection.scalar(
+            text(_continuity_cte(request) + "SELECT schema_ok FROM schema_state")
+        )
+
+    assert schema_ok is True
 
 
 def test_adapter_matches_migration_classifier_and_reports_fixed_combinations(
