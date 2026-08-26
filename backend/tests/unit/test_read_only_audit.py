@@ -333,6 +333,42 @@ def test_a9_continuity_requires_course_submission_lifecycle_shape() -> None:
     assert "SELECT count(*) = 5" in sql
 
 
+def test_retained_event_continuity_inherits_the_complete_previous_head_shape() -> None:
+    retained_request = AuditRequest(
+        audit_id=ELIGIBILITY_AUDIT_ID,
+        audit_version=4,
+        mode=AuditMode.ISOLATED_TEST,
+        expected_ledger=RETAINED_EVENT_REVISION,
+        repository_revision="a" * 40,
+    )
+    sql = build_transaction_sql(
+        retained_request,
+        get_audit_adapter(ELIGIBILITY_AUDIT_ID, 4),
+    )
+
+    for column in (
+        "owner_self_delete_consumed",
+        "previous_status",
+        "name_en",
+        "requested_course_name_en",
+        "pre_delete_is_active",
+        "source_wish_id",
+        "order_index",
+        "homepage_slogan_submissions",
+    ):
+        assert column in sql
+    for column in (
+        "owner_self_delete_consumed",
+        "previous_status",
+        "pre_delete_is_active",
+        "source_wish_id",
+        "order_index",
+    ):
+        assert "NOT EXISTS (" not in _column_condition_context(sql, column)
+    slogan_position = sql.index("table_name = 'homepage_slogan_submissions'")
+    assert "SELECT count(*) = 10" in sql[slogan_position - 180 : slogan_position]
+
+
 def test_cli_defaults_to_current_bilingual_audit_version() -> None:
     arguments = audit.parser().parse_args(
         [
