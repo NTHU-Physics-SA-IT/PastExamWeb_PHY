@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import ArchiveDiscussionPanel from '@/components/ArchiveDiscussionPanel.vue'
+import { setLocale } from '@/i18n'
 
 const mocks = vi.hoisted(() => ({
   like: vi.fn(),
@@ -49,6 +50,8 @@ vi.mock('@/utils/storage', () => ({
 }))
 vi.mock('@/utils/submissionLevel', () => ({
   loadContributorLevelSettings: vi.fn(),
+  localizedSubmissionLevelName: vi.fn(() => '投稿者'),
+  resolveSubmissionLevel: vi.fn(() => ({ level: 1, name: '投稿者' })),
 }))
 function makeSocket() {
   return {
@@ -84,6 +87,45 @@ function mountPanel(socket, confirm = { require: ({ accept }) => accept() }) {
   })
 }
 
+function mountPanelWithRealMessageCard(socket) {
+  mocks.openSocket.mockReturnValue(socket)
+  return mount(ArchiveDiscussionPanel, {
+    props: { courseId: 1, archiveId: 2 },
+    global: {
+      provide: {
+        toast: { add: mocks.toastAdd },
+        confirm: { require: ({ accept }) => accept() },
+      },
+      stubs: {
+        Button: {
+          props: ['label'],
+          template: '<button><slot />{{ label }}</button>',
+        },
+        Textarea: {
+          props: ['modelValue'],
+          emits: ['update:modelValue'],
+          template:
+            '<textarea :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
+        },
+        Dialog: { template: '<div><slot /><slot name="footer" /></div>' },
+        InputText: { template: '<input />' },
+        Checkbox: { template: '<input type="checkbox" />' },
+        ProgressSpinner: { template: '<div />' },
+        ContributorLevelBadge: true,
+        InlineCommentReport: true,
+      },
+    },
+  })
+}
+
+async function loadDiscussionHistory(socket, messages) {
+  socket.onopen()
+  socket.onmessage({
+    data: JSON.stringify({ type: 'history', messages }),
+  })
+  await flushPromises()
+}
+
 describe('ArchiveDiscussionPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -95,6 +137,94 @@ describe('ArchiveDiscussionPanel', () => {
     mocks.unlike.mockResolvedValue({ data: { liked: false, like_count: 9 } })
     mocks.report.mockResolvedValue({ data: { id: 88 } })
     mocks.remove.mockResolvedValue({ data: { preserve_thread: false } })
+  })
+
+  it('opens the reply editor from the real message-card reply button', async () => {
+    const socket = makeSocket()
+    const wrapper = mountPanelWithRealMessageCard(socket)
+    await loadDiscussionHistory(socket, [
+      {
+        id: 10,
+        user_id: 2,
+        user_name: '使用者',
+        content: 'Root message',
+        created_at: '2026-01-01T00:00:00Z',
+        replies: [],
+      },
+    ])
+
+    const replyButton = wrapper.get('[aria-label="回覆留言"]')
+    expect(replyButton.attributes('type')).toBe('button')
+    await replyButton.trigger('click')
+
+    expect(wrapper.get('.discussion-reply-editor').text()).toContain('回覆 @使用者')
+    expect(wrapper.get('textarea[name="discussion-reply"]').attributes('placeholder')).toBe(
+      '回覆 @使用者'
+    )
+    expect(wrapper.get('[aria-label="取消回覆"]').attributes('type')).toBe('button')
+
+    setLocale('en')
+    await wrapper.vm.$nextTick()
+    expect(wrapper.get('.discussion-reply-editor').text()).toContain('Reply to @使用者')
+    expect(wrapper.get('textarea[name="discussion-reply"]').attributes('placeholder')).toBe(
+      'Reply to @使用者'
+    )
+  })
+
+  it('sends a reply to the clicked message through the WebSocket payload', async () => {
+    const socket = makeSocket()
+    const wrapper = mountPanelWithRealMessageCard(socket)
+    await loadDiscussionHistory(socket, [
+      {
+        id: 10,
+        user_id: 2,
+        user_name: '使用者',
+        content: 'Root message',
+        created_at: '2026-01-01T00:00:00Z',
+        replies: [],
+      },
+    ])
+    await wrapper.get('[aria-label="回覆留言"]').trigger('click')
+    await wrapper.get('textarea[name="discussion-reply"]').setValue('test reply')
+
+    await wrapper.get('.discussion-reply-editor').trigger('submit')
+
+    expect(JSON.parse(socket.send.mock.calls[0][0])).toEqual({
+      type: 'send',
+      content: 'test reply',
+      reply_to_message_id: 10,
+    })
+  })
+
+  it('renders an existing reply context after expanding the thread', async () => {
+    const socket = makeSocket()
+    const wrapper = mountPanelWithRealMessageCard(socket)
+    await loadDiscussionHistory(socket, [
+      {
+        id: 10,
+        user_id: 2,
+        user_name: 'Root User',
+        content: 'Root message',
+        created_at: '2026-01-01T00:00:00Z',
+        replies: [
+          {
+            id: 11,
+            parent_id: 10,
+            reply_to_message_id: 10,
+            reply_to_user_name: '使用者',
+            user_id: 3,
+            user_name: 'Reply User',
+            content: 'Existing reply',
+            created_at: '2026-01-02T00:00:00Z',
+          },
+        ],
+      },
+    ])
+
+    await wrapper.get('.discussion-thread-toggle__button').trigger('click')
+
+    expect(wrapper.get('.discussion-card__reply-context').text()).toBe('回覆 @使用者')
+    expect(wrapper.get('.discussion-replies').text()).toContain('Existing reply')
   })
 
   it('sorts roots and appends a reply to the existing thread without reloading', async () => {
