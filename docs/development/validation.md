@@ -109,9 +109,10 @@ Normal independent development starts from fresh `main`; coordination is used
 only when the task or milestone explicitly requires the optional coordination
 branch defined by canonical project governance. `main` pull requests use Full
 CI by default, except when the centralized classifier conclusively identifies
-every changed path as docs-only. Main pushes always use Full CI. Pull requests
-to the exact configured coordination branch and their source pushes use Full.
-Only the exact ADR-0006 final Case-B postmerge push may use Equivalent after
+every changed path as docs-only. Main pushes always use Full CI. Governance-path
+source pushes and pull requests to the exact configured coordination branch use
+Full; ordinary coordination receives no generic Equivalent eligibility. Only
+the exact ADR-0006 final Case-B postmerge push may use Equivalent after
 distinct successful Source Full and PR Full evidence plus exact topology,
 content, governance, pull-request, and stable-ref proof. All uncertainty and
 other coordination events retain the fail-closed Full fallback.
