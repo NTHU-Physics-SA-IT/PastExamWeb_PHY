@@ -1631,6 +1631,13 @@ def validate_coordination_postmerge_full_reuse(
     if source_run_id == pr_run_id:
         raise ClassificationFailure("source and PR Full evidence reused one run ID")
 
+    if api.ref_sha(coordination_branch) != event.current_sha:
+        raise ClassificationFailure(
+            "remote coordination ref drifted during postmerge validation"
+        )
+    if api.ref_sha(default_branch) != main_sha:
+        raise ClassificationFailure("current main drifted during postmerge validation")
+
     return Classification(
         "equivalent-merge",
         "exact Case-B coordination merge reuses successful Source Full and PR Full",
@@ -1650,6 +1657,7 @@ def validate_equivalent_merge(
     coordination_branch: str,
     default_branch: str,
     now: datetime,
+    require_coordination_postmerge: bool = False,
 ) -> Classification:
     if event.event_name != "push":
         raise ClassificationFailure("equivalent mode requires a push event")
@@ -1680,6 +1688,10 @@ def validate_equivalent_merge(
     if not source_paths:
         raise ClassificationFailure("source change set is empty")
     governance_paths = tuple(path for path in source_paths if is_governance_path(path))
+    if require_coordination_postmerge and not governance_paths:
+        raise ClassificationFailure(
+            "coordination postmerge reuse requires a governance-sensitive Case-B source"
+        )
     if governance_paths:
         return validate_coordination_postmerge_full_reuse(
             event=event,
@@ -1879,6 +1891,31 @@ def classify_ci_mode(
         )
     ):
         if event.event_name == "push" and event.ref == governance.coordination_ref:
+            if event.before_sha != ZERO_SHA:
+                if api is None:
+                    return _full("coordination postmerge evidence API is unavailable")
+                try:
+                    return validate_equivalent_merge(
+                        event=event,
+                        git=git,
+                        api=api,
+                        coordination_branch=coordination_branch,
+                        default_branch=governance.default_development_base,
+                        now=(now or datetime.now(timezone.utc)),
+                        require_coordination_postmerge=True,
+                    )
+                except (
+                    AttributeError,
+                    ClassificationFailure,
+                    KeyError,
+                    subprocess.SubprocessError,
+                    OSError,
+                    TypeError,
+                    ValueError,
+                ) as error:
+                    return _full(
+                        f"coordination postmerge validation failed closed: {error}"
+                    )
             if api is None:
                 return _full("coordination Start evidence API is unavailable")
             try:

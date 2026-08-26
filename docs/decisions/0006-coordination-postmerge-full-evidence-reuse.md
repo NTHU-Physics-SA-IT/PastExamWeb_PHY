@@ -17,6 +17,7 @@
   - [ADR-0002](0002-ci-evidence-and-main-full-authority.md)
   - [ADR-0003](0003-coordination-branch-freshness.md)
   - [ADR-0005](0005-main-pr-docs-only-exception.md)
+  - [ADR-0013](0013-simplified-protected-coordination.md)
 - Related PR / issue: None known
 - Supersedes: Only ADR-0002's blanket requirement that every governance-
   sensitive coordination stage fall back to Full, and only for the exact

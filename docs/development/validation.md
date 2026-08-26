@@ -109,11 +109,12 @@ Normal independent development starts from fresh `main`; coordination is used
 only when the task or milestone explicitly requires the optional coordination
 branch defined by canonical project governance. `main` pull requests use Full
 CI by default, except when the centralized classifier conclusively identifies
-every changed path as docs-only. Main pushes always use Full CI. For the exact
-configured coordination branch, ordinary eligible pull requests and merges may
-use Equivalent only with the existing exact Full-source provenance and topology
-evidence. Governance-path pull requests and merges retain their existing
-fail-closed Full fallback.
+every changed path as docs-only. Main pushes always use Full CI. Pull requests
+to the exact configured coordination branch and their source pushes use Full.
+Only the exact ADR-0006 final Case-B postmerge push may use Equivalent after
+distinct successful Source Full and PR Full evidence plus exact topology,
+content, governance, pull-request, and stable-ref proof. All uncertainty and
+other coordination events retain the fail-closed Full fallback.
 
 Protected coordination has one narrow `coordination-start` mode for the exact
 App-created bootstrap commit. It requires independent machine proof of the
@@ -121,8 +122,9 @@ current-main parent, governance-only tree identity, trusted protected-main
 lifecycle artifact, lifecycle-App origin, unchanged exact integration ruleset,
 and fresh exact-parent Full evidence. Every uncertainty falls back to Full.
 Active integration pull requests and feature pushes, reconciliation, return,
-closeout, stale or invalid authority, and coordination postmerge remain
-Full-only or blocked; the exception does not restore Equivalent evidence.
+closeout, and stale or invalid authority remain Full-only or blocked. The exact
+ADR-0006 dual-Full final postmerge exception is separate from Start and does not
+broaden Equivalent eligibility for any other coordination event.
 Ordinary main does not run or require a coordination-specific App gate. See
 [ADR-0013](../decisions/0013-simplified-protected-coordination.md) and the
 [operator runbook](../runbooks/coordination.md).

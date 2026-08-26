@@ -181,6 +181,7 @@ class DualFullAPI:
             "main": M,
             "sync/case-b-refresh": S,
         }
+        self.ref_sequences: dict[str, list[str]] = {}
         self.runs = [
             _full_run(run_id=SOURCE_RUN_ID, event="push"),
             _full_run(run_id=PR_RUN_ID, event="pull_request"),
@@ -239,6 +240,9 @@ class DualFullAPI:
 
     def ref_sha(self, ref_name: str) -> str:
         self.calls.append(("ref_sha", ref_name))
+        sequence = self.ref_sequences.get(ref_name)
+        if sequence:
+            return sequence.pop(0)
         return self.refs[ref_name]
 
     def pull_request(self, number: int) -> dict[str, Any]:
@@ -304,6 +308,8 @@ def test_exact_case_b_dual_full_postmerge_contract_uses_equivalent() -> None:
         ("workflow_runs", S, None),
         ("run_attempt_jobs", SOURCE_RUN_ID, 1),
         ("run_attempt_jobs", PR_RUN_ID, 1),
+        ("ref_sha", COORDINATION_BRANCH),
+        ("ref_sha", "main"),
     ]
 
 
@@ -370,6 +376,7 @@ def test_commit_pull_request_api_rejects_off_origin_pagination() -> None:
     "case",
     (
         "wrong-parent-order",
+        "missing-parent",
         "extra-parent",
         "before-mismatch",
         "multiple-first-parent-commits",
@@ -387,6 +394,8 @@ def test_postmerge_topology_uncertainty_fails_closed(case: str) -> None:
 
     if case == "wrong-parent-order":
         git.parents_by_commit[Q] = (S, C)
+    elif case == "missing-parent":
+        git.parents_by_commit[Q] = (C,)
     elif case == "extra-parent":
         git.parents_by_commit[Q] = (C, S, OTHER)
     elif case == "before-mismatch":
@@ -405,6 +414,15 @@ def test_postmerge_topology_uncertainty_fails_closed(case: str) -> None:
         api.refs[COORDINATION_BRANCH] = OTHER
 
     assert _classify(git=git, api=api, event_changes=event_changes).ci_mode == "full"
+
+
+@pytest.mark.parametrize("ref_name", (COORDINATION_BRANCH, "main"))
+def test_postmerge_refs_must_remain_stable_through_validation(ref_name: str) -> None:
+    api = DualFullAPI()
+    expected = api.refs[ref_name]
+    api.ref_sequences[ref_name] = [expected, OTHER]
+
+    assert _classify(api=api).ci_mode == "full"
 
 
 @pytest.mark.parametrize(
@@ -434,6 +452,7 @@ def test_case_b_source_or_main_identity_mismatch_fails_closed(case: str) -> None
         "ambiguous",
         "wrong-repository",
         "wrong-workflow",
+        "wrong-source-ref",
         "wrong-attempt",
         "required-job-missing",
         "required-job-failed",
@@ -458,6 +477,8 @@ def test_source_full_evidence_mismatch_fails_closed(case: str) -> None:
         source["repository"] = {"id": 999, "full_name": "other/repository"}
     elif case == "wrong-workflow":
         source["workflow_id"] = 999
+    elif case == "wrong-source-ref":
+        source["head_branch"] = "sync/other-source"
     elif case == "wrong-attempt":
         source["run_attempt"] = 0
     elif case == "required-job-missing":
@@ -481,13 +502,21 @@ def test_source_full_evidence_mismatch_fails_closed(case: str) -> None:
         "ambiguous",
         "wrong-repository",
         "wrong-workflow",
+        "wrong-source-ref",
         "wrong-base",
         "wrong-head",
+        "wrong-base-repository",
+        "wrong-head-repository",
         "wrong-pr",
+        "pr-association-missing",
         "pr-association-ambiguous",
+        "stale-merge",
         "run-wrong-pr",
         "run-before-pr",
         "run-job-attempt-mismatch",
+        "required-job-missing",
+        "required-job-failed",
+        "required-job-duplicated",
     ),
 )
 def test_pr_full_evidence_or_identity_mismatch_fails_closed(case: str) -> None:
@@ -508,19 +537,40 @@ def test_pr_full_evidence_or_identity_mismatch_fails_closed(case: str) -> None:
         pr_run["repository"] = {"id": 999, "full_name": "other/repository"}
     elif case == "wrong-workflow":
         pr_run["path"] = ".github/workflows/other.yml"
+    elif case == "wrong-source-ref":
+        pr_run["head_branch"] = "sync/other-source"
     elif case == "wrong-base":
         api.pull_request_payload["base"]["sha"] = OTHER
         api.pull_requests_by_commit[Q][0]["base"]["sha"] = OTHER
     elif case == "wrong-head":
         api.pull_request_payload["head"]["sha"] = OTHER
         api.pull_requests_by_commit[Q][0]["head"]["sha"] = OTHER
+    elif case == "wrong-base-repository":
+        for commit in (Q, S):
+            api.pull_requests_by_commit[commit][0]["base"]["repo"] = {
+                "id": 999,
+                "full_name": "other/repository",
+            }
+    elif case == "wrong-head-repository":
+        for commit in (Q, S):
+            api.pull_requests_by_commit[commit][0]["head"]["repo"] = {
+                "id": 999,
+                "full_name": "other/repository",
+            }
     elif case == "wrong-pr":
         api.pull_request_payload["number"] = 96
         api.pull_requests_by_commit[Q][0]["number"] = 96
+    elif case == "pr-association-missing":
+        api.pull_requests_by_commit[Q] = []
     elif case == "pr-association-ambiguous":
         second = deepcopy(api.pull_requests_by_commit[Q][0])
         second["number"] = 96
         api.pull_requests_by_commit[Q].append(second)
+    elif case == "stale-merge":
+        for commit in (Q, S):
+            api.pull_requests_by_commit[commit][0]["merged_at"] = (
+                NOW - timedelta(hours=73)
+            ).isoformat()
     elif case == "run-wrong-pr":
         pr_run["pull_requests"] = [{"number": 96}]
     elif case == "run-before-pr":
@@ -528,6 +578,34 @@ def test_pr_full_evidence_or_identity_mismatch_fails_closed(case: str) -> None:
     elif case == "run-job-attempt-mismatch":
         pr_run["run_attempt"] = 2
         assert all(job["run_attempt"] == 1 for job in api.jobs_by_run[PR_RUN_ID])
+    elif case == "required-job-missing":
+        api.jobs_by_run[PR_RUN_ID].pop()
+    elif case == "required-job-failed":
+        api.jobs_by_run[PR_RUN_ID][0]["conclusion"] = "failure"
+    elif case == "required-job-duplicated":
+        api.jobs_by_run[PR_RUN_ID].append(deepcopy(api.jobs_by_run[PR_RUN_ID][0]))
+
+    assert _classify(api=api).ci_mode == "full"
+
+
+def test_source_and_pr_full_cannot_reuse_one_run_id() -> None:
+    api = DualFullAPI()
+    pr_run = next(run for run in api.runs if run["event"] == "pull_request")
+    pr_run["id"] = SOURCE_RUN_ID
+
+    assert _classify(api=api).ci_mode == "full"
+
+
+def test_postmerge_api_uncertainty_fails_closed() -> None:
+    api = DualFullAPI()
+
+    def unavailable(
+        source_sha: str,
+        event: str | None = "push",
+    ) -> list[dict[str, Any]]:
+        raise ci.ClassificationFailure("workflow evidence unavailable")
+
+    api.workflow_runs = unavailable  # type: ignore[method-assign]
 
     assert _classify(api=api).ci_mode == "full"
 

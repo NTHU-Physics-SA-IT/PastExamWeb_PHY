@@ -531,7 +531,7 @@ def test_valid_two_parent_equivalent_merge_is_eligible(tmp_path: Path) -> None:
     assert result.source_tree == fixture["git"].tree_sha(fixture["source"])
 
 
-def test_live_coordination_push_is_full_only(
+def test_non_case_b_coordination_push_remains_full(
     tmp_path: Path,
 ) -> None:
     fixture = _equivalent_repository(tmp_path)
@@ -552,7 +552,7 @@ def test_live_coordination_push_is_full_only(
     )
 
     assert result.ci_mode == "full"
-    assert result.reason.startswith("coordination Start validation failed closed:")
+    assert result.reason.startswith("coordination postmerge validation failed closed:")
 
 
 def test_explicit_pr_equivalent_allowlist_cannot_override_full_only(
@@ -614,7 +614,7 @@ def test_live_push_governance_merge_falls_back_to_full(
     )
 
     assert result.ci_mode == "full"
-    assert result.reason.startswith("coordination Start validation failed closed:")
+    assert result.reason.startswith("coordination postmerge validation failed closed:")
 
 
 def test_pr_governance_change_requires_full_before_allowlist(
@@ -1151,6 +1151,8 @@ def test_ci_gate_accepts_exact_mode_result_matrix(mode: str) -> None:
         ("full", "docs_result", "success"),
         ("equivalent-merge", "lint_result", "success"),
         ("equivalent-merge", "equivalent_result", "skipped"),
+        ("equivalent-merge", "equivalent_result", "failure"),
+        ("equivalent-merge", "equivalent_result", "cancelled"),
         ("equivalent-merge", "full_attestation_result", "success"),
         ("equivalent-merge", "docs_result", "success"),
         ("docs-only", "lint_result", "success"),

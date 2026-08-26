@@ -82,7 +82,11 @@ ambiguous, unprotected, or multiple integration refs fail closed.
 The integration branch becomes `STALE`. No history is rewritten and no branch
 is silently called fresh. Reconcile main through an ordinary protected Full-CI
 pull request to the integration branch, resolve semantic conflicts using the
-collaboration runbook, and confirm current main is again an ancestor.
+collaboration runbook, and confirm current main is again an ancestor. Push the
+exact reconciliation source and promptly open its normal pull request so the
+independent Source Full and PR Full workflows may overlap. After both are
+successful, only the exact ADR-0006 content-identical final postmerge push may
+use `equivalent-merge`; missing, stale, ambiguous, or drifted evidence runs Full.
 
 ## Return coordinated work to main
 
@@ -129,8 +133,9 @@ closeout SHA, and `RETIRED`. No second person or machine identifier is entered.
 - Never force-push, weaken protection, use a candidate workflow, transcribe
   hidden identifiers, or reuse the obsolete rehearsal identity.
 - Do not treat `coordination-start` as an ordinary coordination optimization.
-  Pull requests, feature pushes, reconciliation, closeout, and postmerge reuse
-  remain outside that exact bootstrap exception.
+  Pull requests, feature pushes, reconciliation sources, and closeout remain
+  Full. Only the exact ADR-0006 dual-Full final postmerge push has a separate
+  `equivalent-merge` exception.
 
 The old run `32628689925`, UUID
 `714d9c51-8b6b-405d-bd7c-4c92f6f26699`, and branch name
