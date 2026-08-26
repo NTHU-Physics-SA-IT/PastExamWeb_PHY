@@ -718,7 +718,10 @@ def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
     )
     assert (
         script.get_revision(PREVIOUS_HEAD_SCHEMA_REVISION).down_revision
-        == PRE_ARCHIVE_WISH_REPORT_TRASH_HEAD
+        == "d1f5a9c3e7b2"
+    )
+    assert script.get_revision("d1f5a9c3e7b2").down_revision == (
+        PRE_ARCHIVE_WISH_REPORT_TRASH_HEAD
     )
     assert (
         script.get_revision(PRE_ARCHIVE_WISH_REPORT_TRASH_HEAD).down_revision
@@ -728,9 +731,7 @@ def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
         script.get_revision(PRE_ARCHIVE_REPORT_UNIQUENESS_HEAD).down_revision
         == PRE_ABOUT_US_ORDERING_HEAD
     )
-    assert (
-        script.get_revision(PRE_ABOUT_US_ORDERING_HEAD).down_revision == MERGED_HEAD
-    )
+    assert script.get_revision(PRE_ABOUT_US_ORDERING_HEAD).down_revision == MERGED_HEAD
     merge_parents = script.get_revision(MERGED_HEAD).down_revision
     assert merge_parents == (COORDINATION_SIBLING, MAIN_SIBLING)
     previous_revision = MAIN_SIBLING
@@ -743,6 +744,85 @@ def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
     after = inspect_database()
     assert after.current_revision == head_revision()
     assert after.schema_matches_head is True
+
+
+def test_retained_event_detachment_migration_is_additive_and_fail_closed(
+    clean_public_schema: Engine,
+) -> None:
+    config = alembic_config()
+    command.upgrade(config, PREVIOUS_HEAD_SCHEMA_REVISION)
+    submitted_at = "2026-08-26T04:00:00+00:00"
+    with clean_public_schema.begin() as connection:
+        event_id = int(
+            connection.scalar(
+                text(
+                    "INSERT INTO archive_submission_events "
+                    "(submission_id, submitted_at) VALUES (12345, :submitted_at) "
+                    "RETURNING id"
+                ),
+                {"submitted_at": submitted_at},
+            )
+        )
+
+    command.upgrade(config, HEAD_SCHEMA_REVISION)
+    with clean_public_schema.begin() as connection:
+        column = next(
+            item
+            for item in sa_inspect(connection).get_columns(
+                "archive_submission_events", schema="public"
+            )
+            if item["name"] == "submission_id"
+        )
+        assert column["nullable"] is True
+        before = connection.execute(
+            text(
+                "SELECT id, submission_id, submitted_at "
+                "FROM archive_submission_events WHERE id=:event_id"
+            ),
+            {"event_id": event_id},
+        ).one()
+        assert before.id == event_id
+        assert before.submission_id == 12345
+        connection.execute(
+            text(
+                "INSERT INTO archive_submission_events "
+                "(submission_id, submitted_at) VALUES "
+                "(NULL, :submitted_at), (NULL, :submitted_at)"
+            ),
+            {"submitted_at": submitted_at},
+        )
+
+    with pytest.raises(RuntimeError, match="detached retained-history rows exist"):
+        command.downgrade(config, PREVIOUS_HEAD_SCHEMA_REVISION)
+    with clean_public_schema.connect() as connection:
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
+            HEAD_SCHEMA_REVISION
+        )
+
+    with clean_public_schema.begin() as connection:
+        connection.execute(
+            text("DELETE FROM archive_submission_events WHERE submission_id IS NULL")
+        )
+    command.downgrade(config, PREVIOUS_HEAD_SCHEMA_REVISION)
+    with clean_public_schema.connect() as connection:
+        column = next(
+            item
+            for item in sa_inspect(connection).get_columns(
+                "archive_submission_events", schema="public"
+            )
+            if item["name"] == "submission_id"
+        )
+        assert column["nullable"] is False
+        after = connection.execute(
+            text(
+                "SELECT id, submission_id, submitted_at "
+                "FROM archive_submission_events WHERE id=:event_id"
+            ),
+            {"event_id": event_id},
+        ).one()
+        assert after.id == before.id
+        assert after.submission_id == before.submission_id
+        assert after.submitted_at == before.submitted_at
 
 
 def test_archive_wish_report_trash_migration_is_additive_and_reversible(

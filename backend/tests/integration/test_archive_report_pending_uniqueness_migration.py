@@ -22,7 +22,8 @@ PREVIOUS_PREVIOUS_REVISION = "f3a7c1e9d5b2"
 PREVIOUS_REVISION = "c7e4a9b2d6f1"
 NEW_REVISION = "c8e4a1f7b2d9"
 NEXT_REVISION = "d1f5a9c3e7b2"
-CURRENT_HEAD = "e2c6a8f4b1d9"
+PREVIOUS_HEAD = "e2c6a8f4b1d9"
+CURRENT_HEAD = "f6b8d2c4a9e1"
 INDEX_NAME = "uq_archive_reports_pending_reporter_archive"
 NOW = datetime(2026, 8, 22, 12, 0, tzinfo=UTC)
 
@@ -245,7 +246,8 @@ def test_revision_is_the_sole_forward_head() -> None:
 
     assert HEAD_SCHEMA_REVISION == CURRENT_HEAD
     assert heads == [HEAD_SCHEMA_REVISION]
-    assert script.get_revision(CURRENT_HEAD).down_revision == NEXT_REVISION
+    assert script.get_revision(CURRENT_HEAD).down_revision == PREVIOUS_HEAD
+    assert script.get_revision(PREVIOUS_HEAD).down_revision == NEXT_REVISION
     assert script.get_revision(NEXT_REVISION).down_revision == NEW_REVISION
     assert script.get_revision(NEW_REVISION).down_revision == PREVIOUS_REVISION
     assert (
