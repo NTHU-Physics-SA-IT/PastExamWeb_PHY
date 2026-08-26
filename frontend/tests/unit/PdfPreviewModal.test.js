@@ -42,6 +42,13 @@ vi.mock('@/utils/useUnauthorizedEvent.js', () => ({
 }))
 
 const stubComponent = { template: '<div><slot /></div>' }
+const DialogStyleStub = {
+  name: 'DialogStyleStub',
+  props: {
+    contentStyle: { type: Object, default: null },
+  },
+  template: '<div><slot /></div>',
+}
 
 describe('PdfPreviewModal', () => {
   beforeAll(async () => {
@@ -204,6 +211,34 @@ describe('PdfPreviewModal', () => {
       },
     })
 
+    expect(wrapper.find('.discussion-panel-stub').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('keeps the main dialog out of the nested discussion scroll hierarchy', () => {
+    const wrapper = mount(PdfPreviewModal, {
+      props: {
+        visible: true,
+        previewUrl: '',
+        courseId: 1,
+        archiveId: 2,
+        showDiscussion: true,
+      },
+      global: {
+        stubs: {
+          Dialog: DialogStyleStub,
+          ProgressSpinner: stubComponent,
+          Button: stubComponent,
+          ArchiveDiscussionPanel: { template: '<div class="discussion-panel-stub"></div>' },
+          ArchiveReportPanel: { template: '<div class="archive-report-panel-stub"></div>' },
+        },
+      },
+    })
+
+    const dialogs = wrapper.findAllComponents({ name: 'DialogStyleStub' })
+    expect(dialogs).toHaveLength(2)
+    expect(dialogs[0].props('contentStyle')).toEqual({ flex: '1 1 auto', overflow: 'clip' })
+    expect(dialogs[1].props('contentStyle')).toEqual({ flex: '1 1 auto' })
     expect(wrapper.find('.discussion-panel-stub').exists()).toBe(true)
     wrapper.unmount()
   })
