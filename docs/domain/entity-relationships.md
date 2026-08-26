@@ -286,11 +286,14 @@ and frontend controls remain later application work.
 The event is immutable statistical history. Permanent submission deletion:
 
 - retains the event;
-- removes or anonymizes unnecessary personal data and the active entity link;
+- nulls the live `submission_id` link while preserving the event identity and
+  exact `submitted_at` timestamp;
 - does not expose a usable link to the deleted submission;
 - is not blocked by the event.
 
-The exact snapshot/anonymization schema is a later technical design.
+The retained event deliberately contains no actor identity or descriptive
+submission snapshot. It is aggregate-only history and has no row-level API or
+UI representation.
 
 ### Current implementation and test evidence
 
@@ -299,12 +302,14 @@ submission ID and timestamp. `test_record_submission_event_keeps_only_stable_sta
 and `test_submission_event_survives_delete_restore_and_permanent_delete` express
 the statistical retention goal.
 
-### Implementation gap
+### Permanent-delete implementation
 
-`archive_submission_lifecycle.py::delete_archive_submission_events` currently
-deletes matching events during permanent deletion. Focused unit tests cover the
-helper's deletion behavior, demonstrating the current conflict rather than the
-intended invariant.
+`archive_submission_lifecycle.py::detach_archive_submission_events` updates
+matching rows in the route-owned transaction, setting only `submission_id` to
+null. Both exact-pair and grouped permanent-delete paths acquire the canonical
+Course, Archive, and ArchiveSubmission lock order with one bounded membership
+rebuild before detaching events and deleting live submissions. Rollback keeps
+the live row and event link coherent.
 
 ## CourseSubmission
 
