@@ -50,6 +50,7 @@ CI_GATE_RESULT_LABELS = {
     "full_attestation_result": "Full CI Attestation",
     "equivalent_result": "equivalent provenance",
     "docs_result": "docs gate",
+    "coordination_start_result": "Coordination Start provenance",
 }
 
 CI_GATE_EXPECTED_RESULTS = {
@@ -61,6 +62,7 @@ CI_GATE_EXPECTED_RESULTS = {
         "full_attestation_result": "success",
         "equivalent_result": "skipped",
         "docs_result": "skipped",
+        "coordination_start_result": "skipped",
     },
     "equivalent-merge": {
         "classifier_result": "success",
@@ -70,6 +72,7 @@ CI_GATE_EXPECTED_RESULTS = {
         "full_attestation_result": "skipped",
         "equivalent_result": "success",
         "docs_result": "skipped",
+        "coordination_start_result": "skipped",
     },
     "docs-only": {
         "classifier_result": "success",
@@ -79,6 +82,17 @@ CI_GATE_EXPECTED_RESULTS = {
         "full_attestation_result": "skipped",
         "equivalent_result": "skipped",
         "docs_result": "success",
+        "coordination_start_result": "skipped",
+    },
+    "coordination-start": {
+        "classifier_result": "success",
+        "lint_result": "skipped",
+        "test_result": "skipped",
+        "build_result": "skipped",
+        "full_attestation_result": "skipped",
+        "equivalent_result": "skipped",
+        "docs_result": "skipped",
+        "coordination_start_result": "success",
     },
 }
 
@@ -457,6 +471,7 @@ def _parser() -> argparse.ArgumentParser:
     gate.add_argument("--build-result", required=True)
     gate.add_argument("--equivalent-result", required=True)
     gate.add_argument("--docs-result", required=True)
+    gate.add_argument("--coordination-start-result", required=True)
     gate.add_argument("--full-attestation-result", required=True)
     return parser
 

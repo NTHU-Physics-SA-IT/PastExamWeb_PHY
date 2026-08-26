@@ -25,7 +25,11 @@ MAIN_TREE = "5" * 40
 
 def _ruleset() -> dict[str, Any]:
     return {
+        "id": 21226609,
         "name": "trusted-integration-lifecycle",
+        "source": coordination.EXPECTED_REPOSITORY,
+        "source_type": "Repository",
+        "updated_at": "2026-08-26T01:00:00Z",
         "target": "branch",
         "enforcement": "active",
         "conditions": {
@@ -48,8 +52,16 @@ def _ruleset() -> dict[str, Any]:
             {
                 "type": "pull_request",
                 "parameters": {
+                    "allowed_merge_methods": ["merge", "squash", "rebase"],
+                    "dismiss_stale_reviews_on_push": True,
+                    "dismissal_restriction": {
+                        "allowed_actors": [],
+                        "enabled": False,
+                    },
                     "required_approving_review_count": 0,
+                    "required_reviewers": [],
                     "require_code_owner_review": False,
+                    "require_extra_approval_for_unattributed_changes": False,
                     "require_last_push_approval": False,
                     "required_review_thread_resolution": True,
                 },
@@ -57,6 +69,7 @@ def _ruleset() -> dict[str, Any]:
             {
                 "type": "required_status_checks",
                 "parameters": {
+                    "do_not_enforce_on_create": False,
                     "strict_required_status_checks_policy": True,
                     "required_status_checks": [
                         {"context": "check-branch", "integration_id": 15368},
@@ -282,6 +295,30 @@ def test_start_requires_exact_main_ci() -> None:
         )
 
 
+def test_start_attestation_binds_generated_identity_and_live_authority() -> None:
+    result = {
+        "branch": "integration/stage-5e-ab12cd34",
+        "head_sha": START_SHA,
+        "base_main_sha": MAIN_SHA,
+    }
+    attestation = coordination.build_start_attestation(
+        result=result,
+        ruleset=_ruleset(),
+        expected_app_id=APP_ID,
+        app_slug="pastexam-phy-trusted-gate-0823",
+        repository=coordination.EXPECTED_REPOSITORY,
+        repository_id=1271339534,
+        lifecycle_run_id=32918420724,
+        lifecycle_run_attempt=1,
+    )
+
+    assert attestation["kind"] == "coordination-start"
+    assert attestation["branch"] == result["branch"]
+    assert attestation["head_sha"] == START_SHA
+    assert attestation["parent_main_sha"] == MAIN_SHA
+    assert attestation["ruleset"]["bypass_actors"] == _ruleset()["bypass_actors"]
+
+
 def test_close_requires_containment_then_clears_and_retires() -> None:
     client = CloseClient()
     result = coordination.close_coordination(
@@ -329,6 +366,10 @@ def test_close_recovers_verified_null_governance_closeout() -> None:
     assert client.refs == []
 
 
+def test_ruleset_validation_accepts_exact_minimal_contract() -> None:
+    coordination.validate_ruleset(_ruleset(), expected_app_id=APP_ID)
+
+
 @pytest.mark.parametrize(
     "mutation",
     (
@@ -344,6 +385,40 @@ def test_close_recovers_verified_null_governance_closeout() -> None:
         lambda rules: rules["rules"][-1]["parameters"][
             "required_status_checks"
         ].append({"unexpected": "malformed"}),
+        lambda rules: rules["rules"][3]["parameters"].update(
+            required_reviewers=[
+                {
+                    "file_patterns": ["**"],
+                    "minimum_approvals": 1,
+                    "reviewer": {"id": 1, "type": "Team"},
+                }
+            ]
+        ),
+        lambda rules: rules["rules"][3]["parameters"].update(
+            require_extra_approval_for_unattributed_changes=True
+        ),
+        lambda rules: rules["rules"][4]["parameters"].update(
+            do_not_enforce_on_create=True
+        ),
+        lambda rules: rules["rules"][3]["parameters"].update(
+            unexpected_approval_policy=False
+        ),
+        lambda rules: rules["rules"][4]["parameters"].update(
+            unexpected_status_policy=False
+        ),
+        lambda rules: rules["rules"][3]["parameters"].pop(
+            "dismiss_stale_reviews_on_push"
+        ),
+        lambda rules: rules["rules"][3]["parameters"].update(
+            dismissal_restriction={"allowed_actors": []}
+        ),
+        lambda rules: rules["rules"][3]["parameters"][
+            "allowed_merge_methods"
+        ].append("fast-forward"),
+        lambda rules: rules["rules"][3]["parameters"][
+            "allowed_merge_methods"
+        ].remove("rebase"),
+        lambda rules: rules["rules"][0].update(parameters={}),
     ),
 )
 def test_ruleset_validation_fails_closed(mutation: Any) -> None:
@@ -494,6 +569,12 @@ def test_workflow_accepts_only_human_intent_and_separates_tokens() -> None:
     assert operate["env"]["GITHUB_RULESET_AUDITOR_TOKEN"] == (
         "${{ steps.ruleset-auditor-token.outputs.token }}"
     )
+    assert operate["env"]["APP_SLUG"] == "${{ steps.ref-token.outputs.app-slug }}"
+    artifact = next(
+        step for step in steps if step["name"] == "Publish canonical Start attestation"
+    )
+    assert artifact["if"] == "${{ inputs.operation == 'start' }}"
+    assert artifact["with"]["retention-days"] == "3"
     assert "permission-actions" not in source
     assert "permission-checks" not in source
 

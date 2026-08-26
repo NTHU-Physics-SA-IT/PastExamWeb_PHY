@@ -263,6 +263,47 @@ jobs:
             --api-url '${{ github.api_url }}' \
             --expect-mode docs-only
 
+  coordination_start_provenance:
+    name: Coordination Start provenance
+    needs: ci_mode
+    if: >-
+      ${{ always() &&
+          needs.ci_mode.result == 'success' &&
+          needs.ci_mode.outputs.ci_mode == 'coordination-start' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout repository with complete history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Revalidate canonical Start provenance
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_BEFORE_SHA: ${{ github.event.before }}
+          EVENT_CURRENT_SHA: ${{ github.sha }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_FORCED: ${{ github.event.forced || false }}
+          EVENT_REPOSITORY: ${{ github.repository }}
+          EVENT_REPOSITORY_ID: ${{ github.repository_id }}
+        run: |
+          python3 scripts/ci/classify_ci_mode.py \
+            --event-name "$EVENT_NAME" \
+            --action "$EVENT_ACTION" \
+            --before-sha "$EVENT_BEFORE_SHA" \
+            --current-sha "$EVENT_CURRENT_SHA" \
+            --ref "$EVENT_REF" \
+            --forced "$EVENT_FORCED" \
+            --repository "$EVENT_REPOSITORY" \
+            --repository-id "$EVENT_REPOSITORY_ID" \
+            --api-url '${{ github.api_url }}' \
+            --expect-mode coordination-start
+
   full_attestation:
     name: Full CI Attestation
     needs: [ci_mode, lint, test, build]
@@ -322,6 +363,7 @@ jobs:
       - equivalent_provenance
       - docs_gate
       - full_attestation
+      - coordination_start_provenance
     if: ${{ always() }}
     runs-on: ubuntu-latest
     permissions:
@@ -340,6 +382,7 @@ jobs:
           --build-result '${{ needs.build.result }}'
           --equivalent-result '${{ needs.equivalent_provenance.result }}'
           --docs-result '${{ needs.docs_gate.result }}'
+          --coordination-start-result '${{ needs.coordination_start_provenance.result }}'
           --full-attestation-result '${{ needs.full_attestation.result }}'
 
   release:

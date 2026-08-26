@@ -5,17 +5,22 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
+import io
 import json
+import os
 import re
 import subprocess
 import sys
+import time
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode
-from urllib.request import Request, urlopen
+from urllib.parse import quote, urlencode, urlparse
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from project_governance import (
     GovernanceConfigError,
@@ -23,15 +28,23 @@ from project_governance import (
     load_project_governance,
 )
 
-CI_MODES = frozenset({"full", "equivalent-merge", "docs-only"})
+CI_MODES = frozenset({"full", "equivalent-merge", "docs-only", "coordination-start"})
 SUPPORTED_PR_ACTIONS = frozenset(
     {"opened", "reopened", "synchronize", "ready_for_review"}
 )
 APPROVED_WORKFLOW_PATH = ".github/workflows/main.yml"
 APPROVED_WORKFLOW_ID = 299724871
 SOURCE_CI_FRESHNESS = timedelta(hours=72)
+START_EVIDENCE_MAX_OBSERVATIONS = 10
+START_EVIDENCE_POLL_INTERVAL_SECONDS = 2.0
+COORDINATION_WORKFLOW_PATH = ".github/workflows/coordination.yml"
+START_ARTIFACT_FILE = "coordination-start-attestation.json"
+MAX_JOB_LOG_BYTES = 1_000_000
 ZERO_SHA = "0" * 40
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+RUNNER_LOG_LINE_PATTERN = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z (.*)$"
+)
 
 REQUIRED_SOURCE_JOBS = frozenset(
     {
@@ -157,6 +170,8 @@ class ActionsEvidence(Protocol):
         run_attempt: int,
     ) -> list[dict[str, Any]]: ...
 
+    def job_log(self, job_id: int) -> bytes: ...
+
     def ref_sha(self, ref_name: str) -> str: ...
 
     def pull_request(self, number: int) -> dict[str, Any]: ...
@@ -268,6 +283,47 @@ class GitRepository:
             raise ClassificationFailure("governance path identity is malformed")
         return fields[0], fields[1], fields[2]
 
+    def blob_bytes(self, commit: str, path: str) -> bytes:
+        process = subprocess.run(
+            ["git", "show", f"{commit}:{path}"],
+            cwd=self.root,
+            capture_output=True,
+            check=True,
+        )
+        return process.stdout
+
+    def tree_entries(self, commit: str) -> dict[str, tuple[str, str, str]]:
+        process = subprocess.run(
+            ["git", "ls-tree", "-r", "-z", commit],
+            cwd=self.root,
+            capture_output=True,
+            check=True,
+        )
+        entries: dict[str, tuple[str, str, str]] = {}
+        for raw_entry in process.stdout.split(b"\0"):
+            if not raw_entry:
+                continue
+            try:
+                metadata, raw_path = raw_entry.split(b"\t", 1)
+                mode, kind, raw_sha = metadata.split()
+                path = raw_path.decode("utf-8")
+                identity = (
+                    mode.decode("ascii"),
+                    kind.decode("ascii"),
+                    raw_sha.decode("ascii"),
+                )
+            except (UnicodeDecodeError, ValueError) as error:
+                raise ClassificationFailure("Git tree entry is malformed") from error
+            if (
+                path in entries
+                or not re.fullmatch(r"[0-7]{6}", identity[0])
+                or identity[1] not in {"blob", "commit"}
+                or not SHA_PATTERN.fullmatch(identity[2])
+            ):
+                raise ClassificationFailure("Git tree entry identity is malformed")
+            entries[path] = identity
+        return entries
+
 
 class GitHubActionsAPI:
     def __init__(
@@ -308,6 +364,61 @@ class GitHubActionsAPI:
         ) as error:
             raise ClassificationFailure(
                 f"GitHub API evidence unavailable: {type(error).__name__}"
+            ) from error
+
+    def _get_bytes(self, url: str) -> bytes:
+        class NoRedirect(HTTPRedirectHandler):
+            def redirect_request(
+                self,
+                request: Request,
+                file_pointer: Any,
+                code: int,
+                message: str,
+                headers: Any,
+                new_url: str,
+            ) -> None:
+                return None
+
+        request = Request(
+            url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self.token}",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            method="GET",
+        )
+        try:
+            with build_opener(NoRedirect).open(
+                request, timeout=self.timeout
+            ) as response:
+                return response.read()
+        except HTTPError as redirect:
+            if redirect.code != 302:
+                raise ClassificationFailure(
+                    f"GitHub artifact evidence unavailable: HTTP {redirect.code}"
+                ) from redirect
+            location = redirect.headers.get("Location", "")
+            parsed = urlparse(location)
+            if parsed.scheme != "https" or not parsed.netloc:
+                raise ClassificationFailure(
+                    "GitHub artifact redirect is malformed"
+                ) from redirect
+            unsigned_request = Request(
+                location,
+                headers={"Accept": "application/octet-stream"},
+                method="GET",
+            )
+            try:
+                with urlopen(unsigned_request, timeout=self.timeout) as response:
+                    return response.read()
+            except (HTTPError, URLError, TimeoutError) as error:
+                raise ClassificationFailure(
+                    f"GitHub artifact download unavailable: {type(error).__name__}"
+                ) from error
+        except (URLError, TimeoutError) as error:
+            raise ClassificationFailure(
+                f"GitHub artifact evidence unavailable: {type(error).__name__}"
             ) from error
 
     def _url(self, path: str, parameters: dict[str, str] | None = None) -> str:
@@ -398,6 +509,78 @@ class GitHubActionsAPI:
             raise ClassificationFailure("GitHub workflow run response is malformed")
         return payload
 
+    def workflow_definition(self, path: str) -> dict[str, Any]:
+        repository = quote(self.repository, safe="/")
+        encoded = quote(path, safe="")
+        payload, _ = self._get(
+            self._url(f"/repos/{repository}/actions/workflows/{encoded}")
+        )
+        if not isinstance(payload, dict):
+            raise ClassificationFailure("GitHub workflow response is malformed")
+        return payload
+
+    def run_artifacts(self, run_id: int) -> list[dict[str, Any]]:
+        if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1:
+            raise ClassificationFailure("workflow run identity is malformed")
+        repository = quote(self.repository, safe="/")
+        return self._paged_list(
+            path=f"/repos/{repository}/actions/runs/{run_id}/artifacts",
+            key="artifacts",
+            parameters={"per_page": "100"},
+        )
+
+    def artifact_archive(self, artifact_id: int) -> bytes:
+        if (
+            isinstance(artifact_id, bool)
+            or not isinstance(artifact_id, int)
+            or artifact_id < 1
+        ):
+            raise ClassificationFailure("artifact identity is malformed")
+        repository = quote(self.repository, safe="/")
+        return self._get_bytes(
+            self._url(f"/repos/{repository}/actions/artifacts/{artifact_id}/zip")
+        )
+
+    def ruleset(self, ruleset_id: int) -> dict[str, Any]:
+        if (
+            isinstance(ruleset_id, bool)
+            or not isinstance(ruleset_id, int)
+            or ruleset_id < 1
+        ):
+            raise ClassificationFailure("ruleset identity is malformed")
+        repository = quote(self.repository, safe="/")
+        payload, _ = self._get(self._url(f"/repos/{repository}/rulesets/{ruleset_id}"))
+        if not isinstance(payload, dict):
+            raise ClassificationFailure("GitHub ruleset response is malformed")
+        return payload
+
+    def github_app(self, slug: str) -> dict[str, Any]:
+        if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?", slug):
+            raise ClassificationFailure("GitHub App slug is malformed")
+        payload, _ = self._get(self._url(f"/apps/{quote(slug, safe='')}"))
+        if not isinstance(payload, dict):
+            raise ClassificationFailure("GitHub App response is malformed")
+        return payload
+
+    def user(self, login: str) -> dict[str, Any]:
+        if not isinstance(login, str) or not login:
+            raise ClassificationFailure("GitHub user login is malformed")
+        payload, _ = self._get(self._url(f"/users/{quote(login, safe='')}"))
+        if not isinstance(payload, dict):
+            raise ClassificationFailure("GitHub user response is malformed")
+        return payload
+
+    def repository_commit(self, commit: str) -> dict[str, Any]:
+        if not isinstance(commit, str) or not SHA_PATTERN.fullmatch(commit):
+            raise ClassificationFailure("commit identity is malformed")
+        repository = quote(self.repository, safe="/")
+        payload, _ = self._get(self._url(f"/repos/{repository}/commits/{commit}"))
+        if not isinstance(payload, dict):
+            raise ClassificationFailure(
+                "GitHub repository commit response is malformed"
+            )
+        return payload
+
     def commit_object(self, commit: str) -> dict[str, Any]:
         if not isinstance(commit, str) or not SHA_PATTERN.fullmatch(commit):
             raise ClassificationFailure("commit identity is malformed")
@@ -436,6 +619,14 @@ class GitHubActionsAPI:
             ),
             key="jobs",
             parameters={"per_page": "100"},
+        )
+
+    def job_log(self, job_id: int) -> bytes:
+        if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id < 1:
+            raise ClassificationFailure("workflow job identity is malformed")
+        repository = quote(self.repository, safe="/")
+        return self._get_bytes(
+            self._url(f"/repos/{repository}/actions/jobs/{job_id}/logs")
         )
 
     def ref_sha(self, ref_name: str) -> str:
@@ -656,6 +847,518 @@ def _require_source_ci(
     return run_id, source_revision
 
 
+def _strict_json_object(data: bytes, *, label: str) -> dict[str, Any]:
+    def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ClassificationFailure(f"{label} contains duplicate key {key!r}")
+            result[key] = value
+        return result
+
+    try:
+        payload = json.loads(data.decode("utf-8"), object_pairs_hook=reject_duplicates)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ClassificationFailure(f"{label} is not strict UTF-8 JSON") from error
+    if not isinstance(payload, dict):
+        raise ClassificationFailure(f"{label} must be a JSON object")
+    return payload
+
+
+def _require_exact_governance(
+    *,
+    git: GitRepository,
+    commit: str,
+    expected_coordination: str | None,
+    label: str,
+) -> None:
+    payload = _strict_json_object(
+        git.blob_bytes(commit, ".github/project-governance.json"),
+        label=label,
+    )
+    expected = {
+        "schema_version": 1,
+        "default_development_base": "main",
+        "coordination_branch": expected_coordination,
+    }
+    if payload != expected:
+        raise ClassificationFailure(f"{label} does not match canonical schema")
+
+
+def _require_start_tree_identity(
+    *,
+    git: GitRepository,
+    parent_sha: str,
+    head_sha: str,
+) -> None:
+    governance_path = ".github/project-governance.json"
+    parent_entries = git.tree_entries(parent_sha)
+    head_entries = git.tree_entries(head_sha)
+    if set(parent_entries) != set(head_entries):
+        raise ClassificationFailure("Start tracked-tree inventory differs from main")
+    if governance_path not in parent_entries:
+        raise ClassificationFailure("canonical governance path is missing")
+    parent_governance = parent_entries[governance_path]
+    head_governance = head_entries[governance_path]
+    if (
+        parent_governance[:2] != ("100644", "blob")
+        or head_governance[:2] != ("100644", "blob")
+        or parent_governance[2] == head_governance[2]
+    ):
+        raise ClassificationFailure("Start governance blob identity is invalid")
+    for path in sorted(parent_entries):
+        if path == governance_path:
+            continue
+        if parent_entries[path] != head_entries[path]:
+            raise ClassificationFailure(
+                f"Start non-governance tree identity differs: {path}"
+            )
+    if git.changed_paths(parent_sha, head_sha) != (governance_path,):
+        raise ClassificationFailure("Start source difference is not governance-only")
+
+
+def _require_parent_full_ci(
+    *,
+    event: CIEvent,
+    git: GitRepository,
+    api: Any,
+    parent_sha: str,
+    not_after: datetime,
+    now: datetime,
+) -> tuple[int, int]:
+    candidates: list[dict[str, Any]] = []
+    for run in api.workflow_runs(parent_sha, event="push"):
+        repository = run.get("repository")
+        if (
+            run.get("head_sha") == parent_sha
+            and run.get("head_branch") == "main"
+            and run.get("event") == "push"
+            and run.get("status") == "completed"
+            and run.get("conclusion") == "success"
+            and run.get("path") == APPROVED_WORKFLOW_PATH
+            and run.get("workflow_id") == APPROVED_WORKFLOW_ID
+            and isinstance(repository, dict)
+            and repository.get("id") == event.repository_id
+            and repository.get("full_name") == event.repository
+        ):
+            candidates.append(run)
+    if len(candidates) != 1:
+        raise ClassificationFailure("parent Full run is missing or ambiguous")
+
+    run = candidates[0]
+    run_id = run.get("id")
+    attempt = run.get("run_attempt")
+    if (
+        isinstance(run_id, bool)
+        or not isinstance(run_id, int)
+        or run_id < 1
+        or isinstance(attempt, bool)
+        or not isinstance(attempt, int)
+        or attempt < 1
+    ):
+        raise ClassificationFailure("parent Full run attempt identity is malformed")
+    created_at = _parse_named_timestamp(
+        run.get("created_at"), "parent run creation time"
+    )
+    completed_at = _parse_named_timestamp(
+        run.get("updated_at"), "parent run completion time"
+    )
+    if (
+        created_at > completed_at
+        or completed_at > not_after
+        or completed_at > now + timedelta(minutes=5)
+        or now - completed_at > SOURCE_CI_FRESHNESS
+    ):
+        raise ClassificationFailure("parent Full run freshness is invalid")
+
+    conclusions: dict[str, list[tuple[Any, ...]]] = {}
+    for job in api.run_attempt_jobs(run_id, attempt):
+        name = job.get("name")
+        if isinstance(name, str):
+            conclusions.setdefault(name, []).append(
+                (
+                    job.get("status"),
+                    job.get("conclusion"),
+                    job.get("run_id"),
+                    job.get("run_attempt"),
+                    job.get("head_sha"),
+                )
+            )
+    expected = [("completed", "success", run_id, attempt, parent_sha)]
+    for name in REQUIRED_SOURCE_JOBS:
+        if conclusions.get(name, []) != expected:
+            raise ClassificationFailure(
+                f"parent required Full job is not uniquely successful: {name}"
+            )
+    if git.blob_sha(parent_sha, APPROVED_WORKFLOW_PATH) != git.blob_sha(
+        event.current_sha, APPROVED_WORKFLOW_PATH
+    ):
+        raise ClassificationFailure("parent Full workflow revision differs from Start")
+    return run_id, attempt
+
+
+def _read_start_artifact(archive: bytes, *, expected_digest: str) -> dict[str, Any]:
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", expected_digest):
+        raise ClassificationFailure("Start artifact digest is malformed")
+    observed_digest = "sha256:" + hashlib.sha256(archive).hexdigest()
+    if observed_digest != expected_digest:
+        raise ClassificationFailure("Start artifact digest does not match")
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+            members = bundle.infolist()
+            if (
+                len(members) != 1
+                or members[0].filename != START_ARTIFACT_FILE
+                or members[0].is_dir()
+                or members[0].file_size > 131_072
+            ):
+                raise ClassificationFailure("Start artifact archive is malformed")
+            return _strict_json_object(
+                bundle.read(members[0]), label="Start lifecycle attestation"
+            )
+    except (zipfile.BadZipFile, OSError, RuntimeError) as error:
+        if isinstance(error, ClassificationFailure):
+            raise
+        raise ClassificationFailure("Start artifact archive is unreadable") from error
+
+
+def _load_start_lifecycle_evidence(
+    *,
+    event: CIEvent,
+    api: Any,
+    parent_sha: str,
+    now: datetime,
+    max_observations: int = START_EVIDENCE_MAX_OBSERVATIONS,
+    poll_interval_seconds: float = START_EVIDENCE_POLL_INTERVAL_SECONDS,
+    sleeper: Any = time.sleep,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    workflow = api.workflow_definition(COORDINATION_WORKFLOW_PATH)
+    workflow_id = workflow.get("id")
+    if (
+        isinstance(workflow_id, bool)
+        or not isinstance(workflow_id, int)
+        or workflow_id < 1
+        or workflow.get("path") != COORDINATION_WORKFLOW_PATH
+        or workflow.get("state") != "active"
+    ):
+        raise ClassificationFailure("canonical coordination workflow is unavailable")
+
+    for observation in range(1, max_observations + 1):
+        matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for run in api.workflow_runs(parent_sha, event="workflow_dispatch"):
+            repository = run.get("repository")
+            if not (
+                run.get("workflow_id") == workflow_id
+                and run.get("path") == COORDINATION_WORKFLOW_PATH
+                and run.get("event") == "workflow_dispatch"
+                and run.get("head_branch") == "main"
+                and run.get("head_sha") == parent_sha
+                and run.get("status") == "completed"
+                and run.get("conclusion") == "success"
+                and isinstance(repository, dict)
+                and repository.get("id") == event.repository_id
+                and repository.get("full_name") == event.repository
+            ):
+                continue
+            run_id = run.get("id")
+            attempt = run.get("run_attempt")
+            if (
+                isinstance(run_id, bool)
+                or not isinstance(run_id, int)
+                or run_id < 1
+                or isinstance(attempt, bool)
+                or not isinstance(attempt, int)
+                or attempt < 1
+            ):
+                raise ClassificationFailure("lifecycle run identity is malformed")
+            created_at = _parse_named_timestamp(
+                run.get("created_at"), "lifecycle run creation time"
+            )
+            completed_at = _parse_named_timestamp(
+                run.get("updated_at"), "lifecycle run completion time"
+            )
+            if (
+                created_at > completed_at
+                or completed_at > now + timedelta(minutes=5)
+                or now - completed_at > SOURCE_CI_FRESHNESS
+            ):
+                raise ClassificationFailure("lifecycle run freshness is invalid")
+            artifact_name = f"coordination-start-{run_id}-{attempt}"
+            artifacts = [
+                artifact
+                for artifact in api.run_artifacts(run_id)
+                if artifact.get("name") == artifact_name
+            ]
+            if not artifacts:
+                continue
+            if len(artifacts) != 1:
+                raise ClassificationFailure("Start lifecycle artifact is ambiguous")
+            artifact = artifacts[0]
+            artifact_id = artifact.get("id")
+            workflow_run = artifact.get("workflow_run")
+            if (
+                artifact.get("expired") is not False
+                or not isinstance(workflow_run, dict)
+                or workflow_run.get("id") != run_id
+                or workflow_run.get("repository_id") != event.repository_id
+                or workflow_run.get("head_repository_id") != event.repository_id
+                or workflow_run.get("head_branch") != "main"
+                or workflow_run.get("head_sha") != parent_sha
+            ):
+                raise ClassificationFailure("Start artifact authority is malformed")
+            attestation = _read_start_artifact(
+                api.artifact_archive(artifact_id),
+                expected_digest=artifact.get("digest"),
+            )
+            if attestation.get("head_sha") == event.current_sha:
+                matches.append((attestation, run))
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise ClassificationFailure("Start lifecycle evidence is ambiguous")
+        if observation < max_observations:
+            sleeper(poll_interval_seconds)
+    raise ClassificationFailure("Start lifecycle evidence is unavailable")
+
+
+def _require_start_origin(
+    *,
+    event: CIEvent,
+    api: Any,
+    attestation: dict[str, Any],
+) -> int:
+    app_slug = attestation.get("app_slug")
+    expected_app_id = attestation.get("expected_app_id")
+    if not isinstance(app_slug, str):
+        raise ClassificationFailure("Start lifecycle App slug is malformed")
+    app = api.github_app(app_slug)
+    if app.get("id") != expected_app_id or app.get("slug") != app_slug:
+        raise ClassificationFailure("Start lifecycle App identity does not match")
+    bot_login = f"{app_slug}[bot]"
+    bot = api.user(bot_login)
+    bot_id = bot.get("id")
+    if (
+        isinstance(bot_id, bool)
+        or not isinstance(bot_id, int)
+        or bot_id < 1
+        or bot.get("login") != bot_login
+        or bot.get("type") != "Bot"
+    ):
+        raise ClassificationFailure("Start lifecycle bot identity is malformed")
+
+    commit = api.repository_commit(event.current_sha)
+    verification = commit.get("commit", {}).get("verification")
+    author = commit.get("author")
+    if (
+        commit.get("sha") != event.current_sha
+        or not isinstance(verification, dict)
+        or verification.get("verified") is not True
+        or verification.get("reason") != "valid"
+        or not isinstance(author, dict)
+        or author.get("id") != bot_id
+        or author.get("login") != bot_login
+        or author.get("type") != "Bot"
+    ):
+        raise ClassificationFailure("Start commit lacks verified lifecycle-App origin")
+
+    runs = []
+    for run in api.workflow_runs(event.current_sha, event="push"):
+        repository = run.get("repository")
+        actor = run.get("actor")
+        triggering_actor = run.get("triggering_actor")
+        if (
+            run.get("head_sha") == event.current_sha
+            and run.get("head_branch") == attestation.get("branch")
+            and run.get("event") == "push"
+            and run.get("path") == APPROVED_WORKFLOW_PATH
+            and run.get("workflow_id") == APPROVED_WORKFLOW_ID
+            and isinstance(repository, dict)
+            and repository.get("id") == event.repository_id
+            and repository.get("full_name") == event.repository
+            and isinstance(actor, dict)
+            and actor.get("id") == bot_id
+            and actor.get("login") == bot_login
+            and isinstance(triggering_actor, dict)
+            and triggering_actor.get("id") == bot_id
+            and triggering_actor.get("login") == bot_login
+        ):
+            runs.append(run)
+    if len(runs) != 1:
+        raise ClassificationFailure("Start push lifecycle-App origin is ambiguous")
+    return expected_app_id
+
+
+def _require_start_ruleset(
+    *,
+    event: CIEvent,
+    api: Any,
+    attestation: dict[str, Any],
+    expected_app_id: int,
+) -> None:
+    from coordination import CoordinationError, validate_ruleset
+
+    ruleset = attestation.get("ruleset")
+    if not isinstance(ruleset, dict):
+        raise ClassificationFailure("Start ruleset attestation is malformed")
+    try:
+        validate_ruleset(ruleset, expected_app_id=expected_app_id)
+    except CoordinationError as error:
+        raise ClassificationFailure(
+            f"Start ruleset attestation is invalid: {error}"
+        ) from error
+    ruleset_id = ruleset.get("id")
+    if (
+        isinstance(ruleset_id, bool)
+        or not isinstance(ruleset_id, int)
+        or ruleset_id < 1
+        or ruleset.get("source") != event.repository
+        or ruleset.get("source_type") != "Repository"
+        or not isinstance(ruleset.get("updated_at"), str)
+    ):
+        raise ClassificationFailure("Start ruleset metadata is malformed")
+    live = api.ruleset(ruleset_id)
+    observable = {
+        "id",
+        "name",
+        "target",
+        "source",
+        "source_type",
+        "enforcement",
+        "conditions",
+        "rules",
+        "updated_at",
+    }
+    if {key: live.get(key) for key in observable} != {
+        key: ruleset.get(key) for key in observable
+    }:
+        raise ClassificationFailure("live integration ruleset differs from attestation")
+
+
+def validate_coordination_start(
+    *,
+    event: CIEvent,
+    git: GitRepository,
+    api: Any,
+    governance: ProjectGovernance,
+    now: datetime,
+) -> Classification:
+    branch = governance.coordination_branch
+    if (
+        event.event_name != "push"
+        or branch is None
+        or event.ref != f"refs/heads/{branch}"
+        or event.before_sha != ZERO_SHA
+        or event.forced
+        or not SHA_PATTERN.fullmatch(event.current_sha)
+        or not re.fullmatch(
+            r"integration/[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?-[0-9a-f]{8}",
+            branch,
+        )
+    ):
+        raise ClassificationFailure("event is not a canonical Start push")
+    if not event.repository or event.repository_id < 1:
+        raise ClassificationFailure("Start repository identity is malformed")
+
+    parents = git.commit_object_parents(event.current_sha)
+    if len(parents) != 1:
+        raise ClassificationFailure("Start HEAD is not a one-parent commit")
+    parent_sha = parents[0]
+    if api.ref_sha(branch) != event.current_sha:
+        raise ClassificationFailure("remote integration ref drifted")
+    if api.ref_sha("main") != parent_sha:
+        raise ClassificationFailure("live main advanced beyond Start parent")
+
+    _require_exact_governance(
+        git=git,
+        commit=parent_sha,
+        expected_coordination=None,
+        label="parent main governance",
+    )
+    _require_exact_governance(
+        git=git,
+        commit=event.current_sha,
+        expected_coordination=branch,
+        label="Start governance",
+    )
+    _require_start_tree_identity(
+        git=git,
+        parent_sha=parent_sha,
+        head_sha=event.current_sha,
+    )
+
+    attestation, lifecycle_run = _load_start_lifecycle_evidence(
+        event=event,
+        api=api,
+        parent_sha=parent_sha,
+        now=now,
+    )
+    expected_keys = {
+        "schema_version",
+        "kind",
+        "repository",
+        "repository_id",
+        "lifecycle_run_id",
+        "lifecycle_run_attempt",
+        "app_slug",
+        "expected_app_id",
+        "branch",
+        "head_sha",
+        "parent_main_sha",
+        "ruleset",
+    }
+    if set(attestation) != expected_keys:
+        raise ClassificationFailure("Start lifecycle attestation schema is unsupported")
+    if (
+        attestation.get("schema_version") != 1
+        or attestation.get("kind") != "coordination-start"
+        or attestation.get("repository") != event.repository
+        or attestation.get("repository_id") != event.repository_id
+        or attestation.get("lifecycle_run_id") != lifecycle_run.get("id")
+        or attestation.get("lifecycle_run_attempt") != lifecycle_run.get("run_attempt")
+        or attestation.get("branch") != branch
+        or attestation.get("head_sha") != event.current_sha
+        or attestation.get("parent_main_sha") != parent_sha
+    ):
+        raise ClassificationFailure("Start lifecycle attestation does not match event")
+
+    lifecycle_created_at = _parse_named_timestamp(
+        lifecycle_run.get("created_at"), "lifecycle run creation time"
+    )
+    parent_run_id, _ = _require_parent_full_ci(
+        event=event,
+        git=git,
+        api=api,
+        parent_sha=parent_sha,
+        not_after=lifecycle_created_at,
+        now=now,
+    )
+    expected_app_id = _require_start_origin(
+        event=event,
+        api=api,
+        attestation=attestation,
+    )
+    _require_start_ruleset(
+        event=event,
+        api=api,
+        attestation=attestation,
+        expected_app_id=expected_app_id,
+    )
+
+    if api.ref_sha("main") != parent_sha:
+        raise ClassificationFailure("live main drifted during Start validation")
+    if api.ref_sha(branch) != event.current_sha:
+        raise ClassificationFailure("integration ref drifted during Start validation")
+    return Classification(
+        "coordination-start",
+        "canonical App-created Start bootstrap reuses exact parent Full CI",
+        comparison_base=parent_sha,
+        source_sha=parent_sha,
+        source_run_id=str(parent_run_id),
+        source_tree=git.tree_sha(parent_sha),
+        workflow_revision=git.blob_sha(parent_sha, APPROVED_WORKFLOW_PATH),
+    )
+
+
 def _require_main_derived_governance(
     *,
     git: GitRepository,
@@ -770,6 +1473,127 @@ def _require_merged_pull_request(
     return head_ref, number, created_at, merged_at
 
 
+def _require_pr_full_job_log_binding(
+    *,
+    raw_log: bytes,
+    pull_request_number: int,
+    pull_request_base_ref: str,
+    pull_request_base_sha: str,
+    source_sha: str,
+    expected_tree: str,
+    workflow_revision: str,
+) -> None:
+    if not isinstance(raw_log, bytes) or len(raw_log) > MAX_JOB_LOG_BYTES:
+        raise ClassificationFailure("Full CI Attestation job log is malformed")
+    try:
+        text = raw_log.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise ClassificationFailure(
+            "Full CI Attestation job log is not UTF-8"
+        ) from error
+
+    messages: list[str] = []
+    for line in text.splitlines():
+        match = RUNNER_LOG_LINE_PATTERN.fullmatch(line)
+        if match is None:
+            raise ClassificationFailure("Full CI Attestation job log line is malformed")
+        messages.append(match.group(1))
+
+    authority_patterns = {
+        "event_environment": re.compile(r"  EVENT_NAME: (.*)"),
+        "pr_number_environment": re.compile(r"  EVENT_PR_NUMBER: (.*)"),
+        "head_environment": re.compile(r"  EXECUTION_HEAD_SHA: (.*)"),
+        "attested_sha_environment": re.compile(r"  ATTESTED_SHA: (.*)"),
+        "base_ref_environment": re.compile(r"  EVENT_BASE_REF: (.*)"),
+        "base_sha_environment": re.compile(r"  EVENT_BASE_SHA: (.*)"),
+        "event_output": re.compile(r"event_name=(.*)"),
+        "attested_sha_output": re.compile(r"sha=(.*)"),
+        "head_output": re.compile(r"execution_head_sha=(.*)"),
+        "base_ref_output": re.compile(r"pull_request_base_ref=(.*)"),
+        "base_sha_output": re.compile(r"pull_request_base_sha=(.*)"),
+        "tree_output": re.compile(r"tree_sha=(.*)"),
+        "workflow_revision_output": re.compile(r"workflow_revision=(.*)"),
+    }
+    authority_values: dict[str, list[str]] = {key: [] for key in authority_patterns}
+    for message in messages:
+        for key, pattern in authority_patterns.items():
+            if (match := pattern.fullmatch(message)) is not None:
+                authority_values[key].append(match.group(1))
+
+    def require_single_value(key: str, expected: str, label: str) -> str:
+        values = authority_values[key]
+        if len(values) != 1:
+            raise ClassificationFailure(
+                f"Full CI Attestation job log {label} is missing or ambiguous"
+            )
+        if values[0] != expected:
+            raise ClassificationFailure(
+                f"Full CI Attestation job log {label} does not match"
+            )
+        return values[0]
+
+    require_single_value("event_environment", "pull_request", "event")
+    require_single_value(
+        "pr_number_environment",
+        str(pull_request_number),
+        "pull request number",
+    )
+    require_single_value("head_environment", source_sha, "head SHA")
+    require_single_value("event_output", "pull_request", "attested event")
+    require_single_value("head_output", source_sha, "attested head SHA")
+    require_single_value("tree_output", expected_tree, "attested tree")
+    require_single_value(
+        "workflow_revision_output",
+        workflow_revision,
+        "workflow revision",
+    )
+
+    attested_sha_values = authority_values["attested_sha_environment"]
+    if (
+        len(attested_sha_values) != 1
+        or SHA_PATTERN.fullmatch(attested_sha_values[0]) is None
+    ):
+        raise ClassificationFailure(
+            "Full CI Attestation job log attested SHA is missing or ambiguous"
+        )
+    require_single_value(
+        "attested_sha_output",
+        attested_sha_values[0],
+        "attested SHA output",
+    )
+
+    ref_keys = ("base_ref_environment", "base_ref_output")
+    sha_keys = ("base_sha_environment", "base_sha_output")
+    ref_present = any(authority_values[key] for key in ref_keys)
+    sha_present = any(authority_values[key] for key in sha_keys)
+    if ref_present == sha_present:
+        raise ClassificationFailure(
+            "Full CI Attestation job log base identity is missing or ambiguous"
+        )
+    if ref_present:
+        require_single_value(
+            "base_ref_environment",
+            pull_request_base_ref,
+            "base ref environment",
+        )
+        require_single_value(
+            "base_ref_output",
+            pull_request_base_ref,
+            "base ref output",
+        )
+    else:
+        require_single_value(
+            "base_sha_environment",
+            pull_request_base_sha,
+            "base SHA environment",
+        )
+        require_single_value(
+            "base_sha_output",
+            pull_request_base_sha,
+            "base SHA output",
+        )
+
+
 def _require_exact_full_run(
     *,
     event: CIEvent,
@@ -779,6 +1603,10 @@ def _require_exact_full_run(
     source_ref: str,
     run_event: str,
     pull_request_number: int | None,
+    pull_request_base_ref: str | None,
+    pull_request_base_sha: str | None,
+    expected_tree: str,
+    workflow_revision: str,
     not_before: datetime | None,
     merged_at: datetime,
     now: datetime,
@@ -842,25 +1670,44 @@ def _require_exact_full_run(
         ] != [pull_request_number]:
             raise ClassificationFailure("pull_request run association does not match")
 
-    conclusions: dict[str, list[tuple[Any, ...]]] = {}
+    jobs_by_name: dict[str, list[dict[str, Any]]] = {}
     for job in api.run_attempt_jobs(run_id, attempt):
         name = job.get("name")
         if isinstance(name, str):
-            conclusions.setdefault(name, []).append(
-                (
-                    job.get("status"),
-                    job.get("conclusion"),
-                    job.get("run_id"),
-                    job.get("run_attempt"),
-                    job.get("head_sha"),
-                )
-            )
-    expected = [("completed", "success", run_id, attempt, source_sha)]
+            jobs_by_name.setdefault(name, []).append(job)
+    expected = ("completed", "success", run_id, attempt, source_sha)
     for name in REQUIRED_SOURCE_JOBS:
-        if conclusions.get(name, []) != expected:
+        jobs = jobs_by_name.get(name, [])
+        observed = [
+            (
+                job.get("status"),
+                job.get("conclusion"),
+                job.get("run_id"),
+                job.get("run_attempt"),
+                job.get("head_sha"),
+            )
+            for job in jobs
+        ]
+        if observed != [expected]:
             raise ClassificationFailure(
                 f"{run_event} required job is not uniquely successful: {name}"
             )
+    if pull_request_number is not None:
+        if pull_request_base_ref is None or pull_request_base_sha is None:
+            raise ClassificationFailure("pull_request base identity is missing")
+        attestation_job = jobs_by_name["Full CI Attestation"][0]
+        job_id = attestation_job.get("id")
+        if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id < 1:
+            raise ClassificationFailure("Full CI Attestation job ID is malformed")
+        _require_pr_full_job_log_binding(
+            raw_log=api.job_log(job_id),
+            pull_request_number=pull_request_number,
+            pull_request_base_ref=pull_request_base_ref,
+            pull_request_base_sha=pull_request_base_sha,
+            source_sha=source_sha,
+            expected_tree=expected_tree,
+            workflow_revision=workflow_revision,
+        )
     return run_id
 
 
@@ -914,6 +1761,8 @@ def validate_coordination_postmerge_full_reuse(
         source_sha=source_sha,
         now=now,
     )
+    source_tree = git.tree_sha(source_sha)
+    workflow_revision = git.blob_sha(source_sha, APPROVED_WORKFLOW_PATH)
     runs = api.workflow_runs(source_sha, event=None)
     source_run_id = _require_exact_full_run(
         event=event,
@@ -923,6 +1772,10 @@ def validate_coordination_postmerge_full_reuse(
         source_ref=source_ref,
         run_event="push",
         pull_request_number=None,
+        pull_request_base_ref=None,
+        pull_request_base_sha=None,
+        expected_tree=source_tree,
+        workflow_revision=workflow_revision,
         not_before=None,
         merged_at=merged_at,
         now=now,
@@ -935,6 +1788,10 @@ def validate_coordination_postmerge_full_reuse(
         source_ref=source_ref,
         run_event="pull_request",
         pull_request_number=pull_request_number,
+        pull_request_base_ref=coordination_branch,
+        pull_request_base_sha=base_sha,
+        expected_tree=source_tree,
+        workflow_revision=workflow_revision,
         not_before=pull_request_created_at,
         merged_at=merged_at,
         now=now,
@@ -942,14 +1799,21 @@ def validate_coordination_postmerge_full_reuse(
     if source_run_id == pr_run_id:
         raise ClassificationFailure("source and PR Full evidence reused one run ID")
 
+    if api.ref_sha(coordination_branch) != event.current_sha:
+        raise ClassificationFailure(
+            "remote coordination ref drifted during postmerge validation"
+        )
+    if api.ref_sha(default_branch) != main_sha:
+        raise ClassificationFailure("current main drifted during postmerge validation")
+
     return Classification(
         "equivalent-merge",
         "exact Case-B coordination merge reuses successful Source Full and PR Full",
         comparison_base=base_sha,
         source_sha=source_sha,
         source_run_id=str(source_run_id),
-        source_tree=git.tree_sha(source_sha),
-        workflow_revision=git.blob_sha(source_sha, APPROVED_WORKFLOW_PATH),
+        source_tree=source_tree,
+        workflow_revision=workflow_revision,
     )
 
 
@@ -961,6 +1825,7 @@ def validate_equivalent_merge(
     coordination_branch: str,
     default_branch: str,
     now: datetime,
+    require_coordination_postmerge: bool = False,
 ) -> Classification:
     if event.event_name != "push":
         raise ClassificationFailure("equivalent mode requires a push event")
@@ -991,6 +1856,10 @@ def validate_equivalent_merge(
     if not source_paths:
         raise ClassificationFailure("source change set is empty")
     governance_paths = tuple(path for path in source_paths if is_governance_path(path))
+    if require_coordination_postmerge and not governance_paths:
+        raise ClassificationFailure(
+            "coordination postmerge reuse requires a governance-sensitive Case-B source"
+        )
     if governance_paths:
         return validate_coordination_postmerge_full_reuse(
             event=event,
@@ -1186,10 +2055,55 @@ def classify_ci_mode(
     if coordination_branch is not None and (
         event.ref == governance.coordination_ref
         or (
-            event.event_name == "pull_request"
-            and event.base_ref == coordination_branch
+            event.event_name == "pull_request" and event.base_ref == coordination_branch
         )
     ):
+        if event.event_name == "push" and event.ref == governance.coordination_ref:
+            if event.before_sha != ZERO_SHA:
+                if api is None:
+                    return _full("coordination postmerge evidence API is unavailable")
+                try:
+                    return validate_equivalent_merge(
+                        event=event,
+                        git=git,
+                        api=api,
+                        coordination_branch=coordination_branch,
+                        default_branch=governance.default_development_base,
+                        now=(now or datetime.now(timezone.utc)),
+                        require_coordination_postmerge=True,
+                    )
+                except (
+                    AttributeError,
+                    ClassificationFailure,
+                    KeyError,
+                    subprocess.SubprocessError,
+                    OSError,
+                    TypeError,
+                    ValueError,
+                ) as error:
+                    return _full(
+                        f"coordination postmerge validation failed closed: {error}"
+                    )
+            if api is None:
+                return _full("coordination Start evidence API is unavailable")
+            try:
+                return validate_coordination_start(
+                    event=event,
+                    git=git,
+                    api=api,
+                    governance=governance,
+                    now=(now or datetime.now(timezone.utc)),
+                )
+            except (
+                AttributeError,
+                ClassificationFailure,
+                KeyError,
+                subprocess.SubprocessError,
+                OSError,
+                TypeError,
+                ValueError,
+            ) as error:
+                return _full(f"coordination Start validation failed closed: {error}")
         return _full("simplified protected coordination is Full-only")
     if equivalent_allowlist is None:
         equivalent_allowlist = frozenset()
@@ -1373,9 +2287,20 @@ def main(argv: list[str] | None = None) -> int:
     except GovernanceConfigError as error:
         classification = _full(f"project governance failed closed: {error}")
     else:
+        token = os.environ.get("GITHUB_TOKEN", "")
+        api = (
+            GitHubActionsAPI(
+                api_url=arguments.api_url,
+                repository=arguments.repository,
+                token=token,
+            )
+            if token
+            else None
+        )
         classification = classify_ci_mode(
             event=event,
             git=git,
+            api=api,
             governance=governance,
         )
     if arguments.github_output:

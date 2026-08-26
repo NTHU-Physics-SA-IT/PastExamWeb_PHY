@@ -55,6 +55,7 @@ jobs:
           permission-administration: write
 
       - name: Resolve authority and apply intent
+        id: apply
         env:
           GITHUB_TOKEN: ${{ steps.ref-token.outputs.token }}
           GITHUB_ACTIONS_READ_TOKEN: ${{ github.token }}
@@ -63,11 +64,29 @@ jobs:
           RULESET_ID: ${{ vars.TRUSTED_INTEGRATION_RULESET_ID }}
           OPERATION: ${{ inputs.operation }}
           COORDINATION_NAME: ${{ inputs.name }}
+          APP_SLUG: ${{ steps.ref-token.outputs.app-slug }}
+          ATTESTATION_PATH: ${{ runner.temp }}/coordination-start-attestation.json
         run: >-
           python3 scripts/ci/coordination.py
           --api-url '${{ github.api_url }}'
           --repository '${{ github.repository }}'
+          --repository-id '${{ github.repository_id }}'
           --expected-app-id "$EXPECTED_APP_ID"
+          --app-slug "$APP_SLUG"
           --ruleset-id "$RULESET_ID"
+          --lifecycle-run-id '${{ github.run_id }}'
+          --lifecycle-run-attempt '${{ github.run_attempt }}'
+          --attestation-output "$ATTESTATION_PATH"
+          --github-output "$GITHUB_OUTPUT"
           "$OPERATION"
           "$COORDINATION_NAME"
+
+      - name: Publish canonical Start attestation
+        if: ${{ inputs.operation == 'start' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: >-
+            coordination-start-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/coordination-start-attestation.json
+          if-no-files-found: error
+          retention-days: 3

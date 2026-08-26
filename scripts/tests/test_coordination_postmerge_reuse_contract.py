@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-from datetime import UTC, datetime, timedelta
 import hashlib
 import importlib
-from pathlib import Path
 import sys
+from copy import deepcopy
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
-
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
 CI_SCRIPTS = REPOSITORY_ROOT / "scripts" / "ci"
@@ -40,6 +39,7 @@ OTHER = "f" * 40
 PR_NUMBER = 95
 SOURCE_RUN_ID = 9001
 PR_RUN_ID = 9002
+ATTESTED_SHA = "e" * 40
 
 TCB_WORKFLOW = ".github/workflows/main.yml"
 TCB_CLASSIFIER = "scripts/ci/classify_ci_mode.py"
@@ -83,6 +83,7 @@ def _required_jobs(
     overrides = overrides or {}
     return [
         {
+            "id": run_id * 100 + index,
             "name": name,
             "status": "completed",
             "conclusion": overrides.get(name, "success"),
@@ -90,8 +91,58 @@ def _required_jobs(
             "run_attempt": attempt,
             "head_sha": S,
         }
-        for name in sorted(ci.REQUIRED_SOURCE_JOBS)
+        for index, name in enumerate(sorted(ci.REQUIRED_SOURCE_JOBS), start=1)
     ]
+
+
+def _job_id(run_id: int, name: str) -> int:
+    names = sorted(ci.REQUIRED_SOURCE_JOBS)
+    return run_id * 100 + names.index(name) + 1
+
+
+def _attestation_log(
+    *,
+    pr_number: int = PR_NUMBER,
+    head_sha: str = S,
+    base_ref: str | None = COORDINATION_BRANCH,
+    base_sha: str | None = None,
+    tree: str | None = None,
+    workflow_revision: str | None = None,
+) -> bytes:
+    tree = tree or _blob("source-tree", "tree")
+    workflow_revision = workflow_revision or _blob("trusted-main", TCB_WORKFLOW)
+    messages = [
+        "env:",
+        "  EVENT_NAME: pull_request",
+        f"  ATTESTED_SHA: {ATTESTED_SHA}",
+        f"  EXECUTION_HEAD_SHA: {head_sha}",
+        f"  EVENT_PR_NUMBER: {pr_number}",
+    ]
+    if base_ref is not None:
+        messages.append(f"  EVENT_BASE_REF: {base_ref}")
+    if base_sha is not None:
+        messages.append(f"  EVENT_BASE_SHA: {base_sha}")
+    messages.extend(
+        [
+            "##[endgroup]",
+            "Full CI dependencies and required jobs are successful.",
+            "event_name=pull_request",
+            f"sha={ATTESTED_SHA}",
+            f"execution_head_sha={head_sha}",
+        ]
+    )
+    if base_ref is not None:
+        messages.append(f"pull_request_base_ref={base_ref}")
+    if base_sha is not None:
+        messages.append(f"pull_request_base_sha={base_sha}")
+    messages.extend([f"tree_sha={tree}", f"workflow_revision={workflow_revision}"])
+    return "".join(
+        f"2026-08-14T10:00:00.0000000Z {message}\n" for message in messages
+    ).encode()
+
+
+def _attestation_log_line(message: str) -> bytes:
+    return f"2026-08-14T10:00:00.0000000Z {message}\n".encode()
 
 
 class CaseBGit:
@@ -181,6 +232,7 @@ class DualFullAPI:
             "main": M,
             "sync/case-b-refresh": S,
         }
+        self.ref_sequences: dict[str, list[str]] = {}
         self.runs = [
             _full_run(run_id=SOURCE_RUN_ID, event="push"),
             _full_run(run_id=PR_RUN_ID, event="pull_request"),
@@ -188,6 +240,9 @@ class DualFullAPI:
         self.jobs_by_run = {
             SOURCE_RUN_ID: _required_jobs(run_id=SOURCE_RUN_ID),
             PR_RUN_ID: _required_jobs(run_id=PR_RUN_ID),
+        }
+        self.job_logs = {
+            _job_id(PR_RUN_ID, "Full CI Attestation"): _attestation_log(),
         }
         self.pull_request_payload = {
             "number": PR_NUMBER,
@@ -237,8 +292,15 @@ class DualFullAPI:
         self.calls.append(("run_attempt_jobs", run_id, run_attempt))
         return deepcopy(self.jobs_by_run[run_id])
 
+    def job_log(self, job_id: int) -> bytes:
+        self.calls.append(("job_log", job_id))
+        return self.job_logs[job_id]
+
     def ref_sha(self, ref_name: str) -> str:
         self.calls.append(("ref_sha", ref_name))
+        sequence = self.ref_sequences.get(ref_name)
+        if sequence:
+            return sequence.pop(0)
         return self.refs[ref_name]
 
     def pull_request(self, number: int) -> dict[str, Any]:
@@ -304,7 +366,95 @@ def test_exact_case_b_dual_full_postmerge_contract_uses_equivalent() -> None:
         ("workflow_runs", S, None),
         ("run_attempt_jobs", SOURCE_RUN_ID, 1),
         ("run_attempt_jobs", PR_RUN_ID, 1),
+        ("job_log", _job_id(PR_RUN_ID, "Full CI Attestation")),
+        ("ref_sha", COORDINATION_BRANCH),
+        ("ref_sha", "main"),
     ]
+
+
+def test_historical_empty_pr_association_uses_exact_base_sha_log_binding() -> None:
+    api = DualFullAPI()
+    attestation_job_id = _job_id(PR_RUN_ID, "Full CI Attestation")
+    api.job_logs[attestation_job_id] = _attestation_log(
+        base_ref=None,
+        base_sha=C,
+    )
+
+    assert _classify(api=api).ci_mode == "equivalent-merge"
+
+
+@pytest.mark.parametrize(
+    "conflicting_message",
+    (
+        f"  EVENT_PR_NUMBER: {PR_NUMBER}",
+        "  EVENT_PR_NUMBER: 96",
+        f"  EXECUTION_HEAD_SHA: {OTHER}",
+        "event_name=push",
+        f"tree_sha={OTHER}",
+    ),
+)
+def test_duplicate_authoritative_job_log_key_fails_closed(
+    conflicting_message: str,
+) -> None:
+    api = DualFullAPI()
+    log_id = _job_id(PR_RUN_ID, "Full CI Attestation")
+    api.job_logs[log_id] += _attestation_log_line(conflicting_message)
+
+    assert _classify(api=api).ci_mode == "full"
+
+
+@pytest.mark.parametrize(
+    "case",
+    (
+        "both-correct",
+        "correct-ref-wrong-sha",
+        "wrong-ref-correct-sha",
+        "correct-sha-wrong-ref",
+        "partial-ref",
+        "partial-sha",
+        "neither",
+        "duplicate-ref-key",
+        "duplicate-sha-key",
+    ),
+)
+def test_job_log_base_family_ambiguity_fails_closed(case: str) -> None:
+    api = DualFullAPI()
+    log_id = _job_id(PR_RUN_ID, "Full CI Attestation")
+
+    if case == "both-correct":
+        log = _attestation_log(base_ref=COORDINATION_BRANCH, base_sha=C)
+    elif case == "correct-ref-wrong-sha":
+        log = _attestation_log(base_ref=COORDINATION_BRANCH, base_sha=OTHER)
+    elif case == "wrong-ref-correct-sha":
+        log = _attestation_log(base_ref="integration/other", base_sha=C)
+    elif case == "correct-sha-wrong-ref":
+        log = _attestation_log(base_ref=None, base_sha=C)
+        log += _attestation_log_line("  EVENT_BASE_REF: integration/other")
+        log += _attestation_log_line("pull_request_base_ref=integration/other")
+    elif case == "partial-ref":
+        log = _attestation_log()
+        log = log.replace(
+            _attestation_log_line(f"pull_request_base_ref={COORDINATION_BRANCH}"),
+            b"",
+        )
+    elif case == "partial-sha":
+        log = _attestation_log(base_ref=None, base_sha=C)
+        log = log.replace(
+            _attestation_log_line(f"pull_request_base_sha={C}"),
+            b"",
+        )
+    elif case == "neither":
+        log = _attestation_log(base_ref=None, base_sha=None)
+    elif case == "duplicate-ref-key":
+        log = _attestation_log()
+        log += _attestation_log_line(f"  EVENT_BASE_REF: {COORDINATION_BRANCH}")
+    else:
+        log = _attestation_log(base_ref=None, base_sha=C)
+        log += _attestation_log_line(f"pull_request_base_sha={C}")
+
+    api.job_logs[log_id] = log
+
+    assert _classify(api=api).ci_mode == "full"
 
 
 def test_later_pr_that_only_contains_historical_commits_is_not_ambiguous() -> None:
@@ -328,10 +478,16 @@ def test_later_pr_that_only_contains_historical_commits_is_not_ambiguous() -> No
 
 
 def test_historical_pr95_git_topology_and_governance_are_eligible() -> None:
+    git = ci.GitRepository(REPOSITORY_ROOT)
+    api = DualFullAPI()
+    api.job_logs[_job_id(PR_RUN_ID, "Full CI Attestation")] = _attestation_log(
+        tree=git.tree_sha(S),
+        workflow_revision=git.blob_sha(S, ci.APPROVED_WORKFLOW_PATH),
+    )
     result = ci.classify_ci_mode(
         event=_push_event(),
-        git=ci.GitRepository(REPOSITORY_ROOT),
-        api=DualFullAPI(),
+        git=git,
+        api=api,
         governance=ACTIVE_COORDINATION_GOVERNANCE,
         now=NOW,
     )
@@ -370,6 +526,7 @@ def test_commit_pull_request_api_rejects_off_origin_pagination() -> None:
     "case",
     (
         "wrong-parent-order",
+        "missing-parent",
         "extra-parent",
         "before-mismatch",
         "multiple-first-parent-commits",
@@ -387,6 +544,8 @@ def test_postmerge_topology_uncertainty_fails_closed(case: str) -> None:
 
     if case == "wrong-parent-order":
         git.parents_by_commit[Q] = (S, C)
+    elif case == "missing-parent":
+        git.parents_by_commit[Q] = (C,)
     elif case == "extra-parent":
         git.parents_by_commit[Q] = (C, S, OTHER)
     elif case == "before-mismatch":
@@ -405,6 +564,15 @@ def test_postmerge_topology_uncertainty_fails_closed(case: str) -> None:
         api.refs[COORDINATION_BRANCH] = OTHER
 
     assert _classify(git=git, api=api, event_changes=event_changes).ci_mode == "full"
+
+
+@pytest.mark.parametrize("ref_name", (COORDINATION_BRANCH, "main"))
+def test_postmerge_refs_must_remain_stable_through_validation(ref_name: str) -> None:
+    api = DualFullAPI()
+    expected = api.refs[ref_name]
+    api.ref_sequences[ref_name] = [expected, OTHER]
+
+    assert _classify(api=api).ci_mode == "full"
 
 
 @pytest.mark.parametrize(
@@ -434,6 +602,7 @@ def test_case_b_source_or_main_identity_mismatch_fails_closed(case: str) -> None
         "ambiguous",
         "wrong-repository",
         "wrong-workflow",
+        "wrong-source-ref",
         "wrong-attempt",
         "required-job-missing",
         "required-job-failed",
@@ -458,6 +627,8 @@ def test_source_full_evidence_mismatch_fails_closed(case: str) -> None:
         source["repository"] = {"id": 999, "full_name": "other/repository"}
     elif case == "wrong-workflow":
         source["workflow_id"] = 999
+    elif case == "wrong-source-ref":
+        source["head_branch"] = "sync/other-source"
     elif case == "wrong-attempt":
         source["run_attempt"] = 0
     elif case == "required-job-missing":
@@ -481,13 +652,30 @@ def test_source_full_evidence_mismatch_fails_closed(case: str) -> None:
         "ambiguous",
         "wrong-repository",
         "wrong-workflow",
+        "wrong-source-ref",
         "wrong-base",
         "wrong-head",
+        "wrong-base-repository",
+        "wrong-head-repository",
         "wrong-pr",
+        "pr-association-missing",
         "pr-association-ambiguous",
+        "stale-merge",
         "run-wrong-pr",
+        "run-log-missing",
+        "run-log-malformed",
+        "run-log-ambiguous",
+        "run-log-wrong-pr",
+        "run-log-wrong-base",
+        "run-log-wrong-head",
+        "run-log-wrong-tree",
+        "run-log-wrong-workflow",
+        "run-log-other-run",
         "run-before-pr",
         "run-job-attempt-mismatch",
+        "required-job-missing",
+        "required-job-failed",
+        "required-job-duplicated",
     ),
 )
 def test_pr_full_evidence_or_identity_mismatch_fails_closed(case: str) -> None:
@@ -508,26 +696,114 @@ def test_pr_full_evidence_or_identity_mismatch_fails_closed(case: str) -> None:
         pr_run["repository"] = {"id": 999, "full_name": "other/repository"}
     elif case == "wrong-workflow":
         pr_run["path"] = ".github/workflows/other.yml"
+    elif case == "wrong-source-ref":
+        pr_run["head_branch"] = "sync/other-source"
     elif case == "wrong-base":
         api.pull_request_payload["base"]["sha"] = OTHER
         api.pull_requests_by_commit[Q][0]["base"]["sha"] = OTHER
     elif case == "wrong-head":
         api.pull_request_payload["head"]["sha"] = OTHER
         api.pull_requests_by_commit[Q][0]["head"]["sha"] = OTHER
+    elif case == "wrong-base-repository":
+        for commit in (Q, S):
+            api.pull_requests_by_commit[commit][0]["base"]["repo"] = {
+                "id": 999,
+                "full_name": "other/repository",
+            }
+    elif case == "wrong-head-repository":
+        for commit in (Q, S):
+            api.pull_requests_by_commit[commit][0]["head"]["repo"] = {
+                "id": 999,
+                "full_name": "other/repository",
+            }
     elif case == "wrong-pr":
         api.pull_request_payload["number"] = 96
         api.pull_requests_by_commit[Q][0]["number"] = 96
+    elif case == "pr-association-missing":
+        api.pull_requests_by_commit[Q] = []
     elif case == "pr-association-ambiguous":
         second = deepcopy(api.pull_requests_by_commit[Q][0])
         second["number"] = 96
         api.pull_requests_by_commit[Q].append(second)
+    elif case == "stale-merge":
+        for commit in (Q, S):
+            api.pull_requests_by_commit[commit][0]["merged_at"] = (
+                NOW - timedelta(hours=73)
+            ).isoformat()
     elif case == "run-wrong-pr":
         pr_run["pull_requests"] = [{"number": 96}]
+    elif case == "run-log-missing":
+        api.job_logs.clear()
+    elif case == "run-log-malformed":
+        api.job_logs[_job_id(PR_RUN_ID, "Full CI Attestation")] = b"malformed\n"
+    elif case == "run-log-ambiguous":
+        api.job_logs[_job_id(PR_RUN_ID, "Full CI Attestation")] += (
+            b"2026-08-14T10:00:00.0000000Z   EVENT_PR_NUMBER: 95\n"
+        )
+    elif case == "run-log-wrong-pr":
+        api.job_logs[_job_id(PR_RUN_ID, "Full CI Attestation")] = _attestation_log(
+            pr_number=96
+        )
+    elif case == "run-log-wrong-base":
+        api.job_logs[_job_id(PR_RUN_ID, "Full CI Attestation")] = _attestation_log(
+            base_ref="integration/other"
+        )
+    elif case == "run-log-wrong-head":
+        api.job_logs[_job_id(PR_RUN_ID, "Full CI Attestation")] = _attestation_log(
+            head_sha=OTHER
+        )
+    elif case == "run-log-wrong-tree":
+        log_id = _job_id(PR_RUN_ID, "Full CI Attestation")
+        api.job_logs[log_id] = api.job_logs[log_id].replace(
+            f"tree_sha={_blob('source-tree', 'tree')}".encode(),
+            f"tree_sha={OTHER}".encode(),
+        )
+    elif case == "run-log-wrong-workflow":
+        log_id = _job_id(PR_RUN_ID, "Full CI Attestation")
+        api.job_logs[log_id] = api.job_logs[log_id].replace(
+            f"workflow_revision={_blob('trusted-main', TCB_WORKFLOW)}".encode(),
+            f"workflow_revision={OTHER}".encode(),
+        )
+    elif case == "run-log-other-run":
+        attestation_job = next(
+            job
+            for job in api.jobs_by_run[PR_RUN_ID]
+            if job["name"] == "Full CI Attestation"
+        )
+        attestation_job["run_id"] = SOURCE_RUN_ID
     elif case == "run-before-pr":
         pr_run["created_at"] = (NOW - timedelta(hours=4)).isoformat()
     elif case == "run-job-attempt-mismatch":
         pr_run["run_attempt"] = 2
         assert all(job["run_attempt"] == 1 for job in api.jobs_by_run[PR_RUN_ID])
+    elif case == "required-job-missing":
+        api.jobs_by_run[PR_RUN_ID].pop()
+    elif case == "required-job-failed":
+        api.jobs_by_run[PR_RUN_ID][0]["conclusion"] = "failure"
+    elif case == "required-job-duplicated":
+        api.jobs_by_run[PR_RUN_ID].append(deepcopy(api.jobs_by_run[PR_RUN_ID][0]))
+
+    assert _classify(api=api).ci_mode == "full"
+
+
+def test_source_and_pr_full_cannot_reuse_one_run_id() -> None:
+    api = DualFullAPI()
+    pr_run = next(run for run in api.runs if run["event"] == "pull_request")
+    pr_run["id"] = SOURCE_RUN_ID
+
+    assert _classify(api=api).ci_mode == "full"
+
+
+def test_postmerge_api_uncertainty_fails_closed() -> None:
+    api = DualFullAPI()
+
+    def unavailable(
+        source_sha: str,
+        event: str | None = "push",
+    ) -> list[dict[str, Any]]:
+        raise ci.ClassificationFailure("workflow evidence unavailable")
+
+    api.workflow_runs = unavailable  # type: ignore[method-assign]
 
     assert _classify(api=api).ci_mode == "full"
 

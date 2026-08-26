@@ -42,7 +42,12 @@ Say:
 Codex uses the same protected workflow as the manual fallback. It refreshes
 main and live settings, verifies exact-main CI and the integration ruleset,
 checks that no integration coordination exists, generates a safe suffix,
-creates the branch through the lifecycle App, and reads the final state back.
+creates the branch through the lifecycle App, publishes a short-lived non-secret
+Start attestation, and reads the final state back. The resulting bootstrap may
+use lightweight CI only when the independent provenance job revalidates the
+exact App origin, unchanged ruleset, one-parent current-main topology,
+governance-only tree identity, and fresh parent Full evidence. Missing,
+ambiguous, stale, or changed evidence runs Full instead.
 
 ## Start manually
 
@@ -77,7 +82,11 @@ ambiguous, unprotected, or multiple integration refs fail closed.
 The integration branch becomes `STALE`. No history is rewritten and no branch
 is silently called fresh. Reconcile main through an ordinary protected Full-CI
 pull request to the integration branch, resolve semantic conflicts using the
-collaboration runbook, and confirm current main is again an ancestor.
+collaboration runbook, and confirm current main is again an ancestor. Push the
+exact reconciliation source and promptly open its normal pull request so the
+independent Source Full and PR Full workflows may overlap. After both are
+successful, only the exact ADR-0006 content-identical final postmerge push may
+use `equivalent-merge`; missing, stale, ambiguous, or drifted evidence runs Full.
 
 ## Return coordinated work to main
 
@@ -123,6 +132,10 @@ closeout SHA, and `RETIRED`. No second person or machine identifier is entered.
   exact tree. Resume only after proving those exact facts.
 - Never force-push, weaken protection, use a candidate workflow, transcribe
   hidden identifiers, or reuse the obsolete rehearsal identity.
+- Do not treat `coordination-start` as an ordinary coordination optimization.
+  Pull requests, feature pushes, reconciliation sources, and closeout remain
+  Full. Only the exact ADR-0006 dual-Full final postmerge push has a separate
+  `equivalent-merge` exception.
 
 The old run `32628689925`, UUID
 `714d9c51-8b6b-405d-bd7c-4c92f6f26699`, and branch name
