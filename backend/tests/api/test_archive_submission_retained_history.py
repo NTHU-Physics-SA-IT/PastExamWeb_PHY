@@ -195,10 +195,12 @@ async def test_permanent_delete_retains_minimal_event_and_durable_notification(
         app.dependency_overrides[get_current_user] = _override_user(
             requester.id, is_admin=False
         )
-        notifications = await client.get("/notifications")
+        notifications = await client.get("/notifications/center")
         assert notifications.status_code == 200
         projected = next(
-            item for item in notifications.json() if item["id"] == notification.id
+            item
+            for item in notifications.json()["personal_notifications"]
+            if item["id"] == notification.id
         )
         assert projected["source_available"] is False
         assert projected["title"] == notification.title
