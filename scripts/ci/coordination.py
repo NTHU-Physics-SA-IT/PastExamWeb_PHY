@@ -13,6 +13,7 @@ import json
 import os
 import re
 import secrets
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -36,6 +37,7 @@ EXPECTED_CHECKS = {
     ("check-branch", 15368),
     ("CI Gate", 15368),
 }
+START_ATTESTATION_SCHEMA_VERSION = 1
 
 
 class CoordinationError(RuntimeError):
@@ -217,6 +219,63 @@ def validate_ruleset(payload: dict[str, Any], *, expected_app_id: int) -> None:
     ]
     if len(observed) != len(checks) or len(observed) != 2 or set(observed) != EXPECTED_CHECKS:
         raise CoordinationError("integration required checks are not the minimal baseline")
+
+
+def build_start_attestation(
+    *,
+    result: dict[str, Any],
+    ruleset: dict[str, Any],
+    expected_app_id: int,
+    app_slug: str,
+    repository: str,
+    repository_id: int,
+    lifecycle_run_id: int,
+    lifecycle_run_attempt: int,
+) -> dict[str, Any]:
+    """Build non-secret evidence emitted only by the protected lifecycle run."""
+
+    validate_ruleset(ruleset, expected_app_id=expected_app_id)
+    if repository != EXPECTED_REPOSITORY or repository_id < 1:
+        raise CoordinationError("start attestation repository identity is malformed")
+    if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?", app_slug):
+        raise CoordinationError("lifecycle App slug is malformed")
+    if lifecycle_run_id < 1 or lifecycle_run_attempt < 1:
+        raise CoordinationError("lifecycle workflow identity is malformed")
+    ruleset_id = ruleset.get("id")
+    updated_at = ruleset.get("updated_at")
+    if (
+        isinstance(ruleset_id, bool)
+        or not isinstance(ruleset_id, int)
+        or ruleset_id < 1
+        or not isinstance(updated_at, str)
+        or not updated_at
+        or ruleset.get("source") != EXPECTED_REPOSITORY
+        or ruleset.get("source_type") != "Repository"
+    ):
+        raise CoordinationError("ruleset attestation metadata is malformed")
+
+    return {
+        "schema_version": START_ATTESTATION_SCHEMA_VERSION,
+        "kind": "coordination-start",
+        "repository": repository,
+        "repository_id": repository_id,
+        "lifecycle_run_id": lifecycle_run_id,
+        "lifecycle_run_attempt": lifecycle_run_attempt,
+        "app_slug": app_slug,
+        "expected_app_id": expected_app_id,
+        "branch": result["branch"],
+        "head_sha": result["head_sha"],
+        "parent_main_sha": result["base_main_sha"],
+        "ruleset": ruleset,
+    }
+
+
+def write_start_attestation(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 class RefLifecycleClient:
@@ -681,6 +740,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--expected-app-id", type=int, required=True)
     parser.add_argument("--ruleset-id", type=int, required=True)
+    parser.add_argument("--repository-id", type=int, default=0)
+    parser.add_argument("--app-slug", default="")
+    parser.add_argument("--lifecycle-run-id", type=int, default=0)
+    parser.add_argument("--lifecycle-run-attempt", type=int, default=0)
+    parser.add_argument("--attestation-output", type=Path)
+    parser.add_argument("--github-output", type=Path)
     parser.add_argument("operation", choices=("start", "close"))
     parser.add_argument("name")
     return parser
@@ -715,6 +780,25 @@ def main(argv: list[str] | None = None) -> int:
             name=arguments.name,
             expected_app_id=arguments.expected_app_id,
         )
+        if arguments.operation == "start":
+            if arguments.attestation_output is None:
+                raise CoordinationError("start attestation output is required")
+            attestation = build_start_attestation(
+                result=result,
+                ruleset=ruleset,
+                expected_app_id=arguments.expected_app_id,
+                app_slug=arguments.app_slug,
+                repository=arguments.repository,
+                repository_id=arguments.repository_id,
+                lifecycle_run_id=arguments.lifecycle_run_id,
+                lifecycle_run_attempt=arguments.lifecycle_run_attempt,
+            )
+            write_start_attestation(arguments.attestation_output, attestation)
+        if arguments.github_output is not None:
+            with arguments.github_output.open("a", encoding="utf-8") as output:
+                for key in ("operation", "branch", "head_sha", "base_main_sha"):
+                    if key in result:
+                        output.write(f"{key}={result[key]}\n")
     except (CoordinationError, OSError) as error:
         print(json.dumps({"state": "ERROR", "error": str(error)}, sort_keys=True))
         return 1

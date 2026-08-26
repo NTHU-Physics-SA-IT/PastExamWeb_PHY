@@ -115,11 +115,15 @@ use Equivalent only with the existing exact Full-source provenance and topology
 evidence. Governance-path pull requests and merges retain their existing
 fail-closed Full fallback.
 
-Protected coordination adds no CI mode. Start, active integration pull
-requests, reconciliation, return, stale authority, invalid authority, and
-ambiguity remain Full-only or blocked. The simplified lifecycle intentionally
-does not make coordination eligible for Equivalent evidence. Ordinary main
-does not run or require a coordination-specific App gate. See
+Protected coordination has one narrow `coordination-start` mode for the exact
+App-created bootstrap commit. It requires independent machine proof of the
+current-main parent, governance-only tree identity, trusted protected-main
+lifecycle artifact, lifecycle-App origin, unchanged exact integration ruleset,
+and fresh exact-parent Full evidence. Every uncertainty falls back to Full.
+Active integration pull requests and feature pushes, reconciliation, return,
+closeout, stale or invalid authority, and coordination postmerge remain
+Full-only or blocked; the exception does not restore Equivalent evidence.
+Ordinary main does not run or require a coordination-specific App gate. See
 [ADR-0013](../decisions/0013-simplified-protected-coordination.md) and the
 [operator runbook](../runbooks/coordination.md).
 

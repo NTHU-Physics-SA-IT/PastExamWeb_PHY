@@ -294,8 +294,10 @@ def _classify_pr_equivalent(
     )
 
 
-def test_classifier_defines_only_three_modes_and_resolves_exact_authority() -> None:
-    assert ci.CI_MODES == frozenset({"full", "equivalent-merge", "docs-only"})
+def test_classifier_defines_modes_and_resolves_exact_authority() -> None:
+    assert ci.CI_MODES == frozenset(
+        {"full", "equivalent-merge", "docs-only", "coordination-start"}
+    )
     assert COORDINATION_REF == f"refs/heads/{COORDINATION_BRANCH}"
     assert all(token not in COORDINATION_BRANCH for token in ("*", "?", "["))
     source = (CI_SCRIPTS / "classify_ci_mode.py").read_text(encoding="utf-8")
@@ -550,7 +552,7 @@ def test_live_coordination_push_is_full_only(
     )
 
     assert result.ci_mode == "full"
-    assert result.reason == "simplified protected coordination is Full-only"
+    assert result.reason.startswith("coordination Start validation failed closed:")
 
 
 def test_explicit_pr_equivalent_allowlist_cannot_override_full_only(
@@ -612,7 +614,7 @@ def test_live_push_governance_merge_falls_back_to_full(
     )
 
     assert result.ci_mode == "full"
-    assert result.reason == "simplified protected coordination is Full-only"
+    assert result.reason.startswith("coordination Start validation failed closed:")
 
 
 def test_pr_governance_change_requires_full_before_allowlist(
@@ -1089,6 +1091,7 @@ VALID_GATE_RESULTS = {
         "full_attestation_result": "success",
         "equivalent_result": "skipped",
         "docs_result": "skipped",
+        "coordination_start_result": "skipped",
     },
     "equivalent-merge": {
         "classifier_result": "success",
@@ -1098,6 +1101,7 @@ VALID_GATE_RESULTS = {
         "full_attestation_result": "skipped",
         "equivalent_result": "success",
         "docs_result": "skipped",
+        "coordination_start_result": "skipped",
     },
     "docs-only": {
         "classifier_result": "success",
@@ -1107,6 +1111,17 @@ VALID_GATE_RESULTS = {
         "full_attestation_result": "skipped",
         "equivalent_result": "skipped",
         "docs_result": "success",
+        "coordination_start_result": "skipped",
+    },
+    "coordination-start": {
+        "classifier_result": "success",
+        "lint_result": "skipped",
+        "test_result": "skipped",
+        "build_result": "skipped",
+        "full_attestation_result": "skipped",
+        "equivalent_result": "skipped",
+        "docs_result": "skipped",
+        "coordination_start_result": "success",
     },
 }
 
@@ -1120,7 +1135,9 @@ def _gate_arguments(
     return type("Arguments", (), {"mode": mode, **values})()
 
 
-@pytest.mark.parametrize("mode", ("full", "equivalent-merge", "docs-only"))
+@pytest.mark.parametrize(
+    "mode", ("full", "equivalent-merge", "docs-only", "coordination-start")
+)
 def test_ci_gate_accepts_exact_mode_result_matrix(mode: str) -> None:
     gate.validate_gate(_gate_arguments(mode))
 
@@ -1366,6 +1383,15 @@ def test_workflow_contracts_and_check_branch_remain_stable() -> None:
         "actions": "read",
         "pull-requests": "read",
     }
+    start_provenance = parsed["jobs"]["coordination_start_provenance"]
+    assert start_provenance["name"] == "Coordination Start provenance"
+    assert start_provenance["permissions"] == {
+        "contents": "read",
+        "actions": "read",
+    }
+    assert "coordination-start" in start_provenance["if"]
+    assert "--expect-mode coordination-start" in workflow
+    assert "coordination_start_provenance.result" in workflow
     full_attestation = next(
         step
         for step in parsed["jobs"]["full_attestation"]["steps"]

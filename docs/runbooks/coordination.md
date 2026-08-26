@@ -42,7 +42,12 @@ Say:
 Codex uses the same protected workflow as the manual fallback. It refreshes
 main and live settings, verifies exact-main CI and the integration ruleset,
 checks that no integration coordination exists, generates a safe suffix,
-creates the branch through the lifecycle App, and reads the final state back.
+creates the branch through the lifecycle App, publishes a short-lived non-secret
+Start attestation, and reads the final state back. The resulting bootstrap may
+use lightweight CI only when the independent provenance job revalidates the
+exact App origin, unchanged ruleset, one-parent current-main topology,
+governance-only tree identity, and fresh parent Full evidence. Missing,
+ambiguous, stale, or changed evidence runs Full instead.
 
 ## Start manually
 
@@ -123,6 +128,9 @@ closeout SHA, and `RETIRED`. No second person or machine identifier is entered.
   exact tree. Resume only after proving those exact facts.
 - Never force-push, weaken protection, use a candidate workflow, transcribe
   hidden identifiers, or reuse the obsolete rehearsal identity.
+- Do not treat `coordination-start` as an ordinary coordination optimization.
+  Pull requests, feature pushes, reconciliation, closeout, and postmerge reuse
+  remain outside that exact bootstrap exception.
 
 The old run `32628689925`, UUID
 `714d9c51-8b6b-405d-bd7c-4c92f6f26699`, and branch name

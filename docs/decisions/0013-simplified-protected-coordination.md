@@ -70,8 +70,13 @@ PastExamWeb_PHY adopts the App-assisted minimal model (S1):
    strict `check-branch`, strict `CI Gate`, and conversation resolution.
 5. Routine integration review requires no approval count, CODEOWNER review, or
    last-push approval. One Owner remains sufficient.
-6. Coordination changes use Full CI. Equivalent eligibility no longer depends
-   on a candidate-authenticated Trusted Activation protocol.
+6. Ordinary coordination changes and all pull requests into coordination use
+   Full CI. The exact App-created Start bootstrap may use the dedicated
+   lightweight `coordination-start` path only when independent revalidation
+   proves its one-parent current-main topology, governance-only tree identity,
+   protected-main lifecycle attestation, unchanged exact ruleset, lifecycle-App
+   origin, and fresh exact-parent Full evidence. Any uncertainty uses Full.
+   Postmerge Equivalent eligibility remains disabled under this decision.
 7. The App-owned Trusted Governance Gate is required by neither ordinary main
    nor integration. Its historical verifier becomes dormant after live
    required-check dependencies are removed.
@@ -151,7 +156,9 @@ that prevents that self-authorization.
 - Only the retained App may create or delete matching refs.
 - Integration refs cannot be force-pushed or directly mutated outside the
   protected lifecycle and normal PR rules.
-- Coordination uses Full CI; no candidate evidence authenticates Equivalent.
+- Ordinary coordination uses Full CI. Only the exact canonical Start bootstrap
+  may use `coordination-start`; no candidate evidence authenticates it or
+  Equivalent, and coordination postmerge Equivalent remains disabled.
 - Main advancement makes coordination STALE without mutating it.
 - Close requires final integration containment in Green main, clears local
   governance, and deletes only the exact resolved ref.
@@ -161,17 +168,20 @@ that prevents that self-authorization.
 
 ## Consequences
 
-Coordination gives up Equivalent CI reuse in exchange for a much smaller trust
-protocol. Start and close consume one short lifecycle workflow each; ordinary
-main returns to its pre-Trusted-Activation check set. Existing App,
-installation, key, Environments, legacy workflows, and historical ledgers may
-remain dormant for audit and rollback; deleting permanent resources is outside
-this decision.
+Coordination gives up postmerge Equivalent CI reuse in exchange for a much
+smaller trust protocol. Start may reuse its exact Green-main parent's Full
+evidence only through the narrowly attested bootstrap exception; close and all
+ordinary coordination changes remain Full. Start and close consume one short
+lifecycle workflow each; ordinary main returns to its pre-Trusted-Activation
+check set. Existing App, installation, key, Environments, legacy workflows, and
+historical ledgers may remain dormant for audit and rollback; deleting
+permanent resources is outside this decision.
 
 ## Conflict / integration guidance
 
 Any change that lets candidate code create the protected ref, makes main
-non-null, makes coordination eligible for Equivalent without a new explicit
-trust decision, permits force/deletion, closes before containment, or adds
-machine-ID or second-person steps conflicts with this decision. A future
+non-null, broadens the Start exception beyond exact machine proof, makes
+coordination postmerge eligible for Equivalent without a new explicit trust
+decision, permits force/deletion, closes before containment, or adds machine-ID
+or second-person steps conflicts with this decision. A future
 high-risk dual-control mode must be optional and separately justified.
