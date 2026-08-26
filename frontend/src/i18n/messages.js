@@ -1102,7 +1102,7 @@ const en = {
     'Report submission failed. Try again later; your input has been retained.',
   回報這則留言: 'Report this comment',
   回覆: 'Reply',
-  '回覆 @{name}': 'Reply to @{name}',
+  '回覆 {name}': 'Reply to {name}',
   回覆留言: 'Reply to Comment',
   在線時長統計: 'Online Duration Statistics',
   '在線時長載入失敗，請稍後再試。': 'Unable to load online duration. Try again later.',
