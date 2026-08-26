@@ -40,6 +40,7 @@ OTHER = "f" * 40
 PR_NUMBER = 95
 SOURCE_RUN_ID = 9001
 PR_RUN_ID = 9002
+ATTESTED_SHA = "e" * 40
 
 TCB_WORKFLOW = ".github/workflows/main.yml"
 TCB_CLASSIFIER = "scripts/ci/classify_ci_mode.py"
@@ -83,6 +84,7 @@ def _required_jobs(
     overrides = overrides or {}
     return [
         {
+            "id": run_id * 100 + index,
             "name": name,
             "status": "completed",
             "conclusion": overrides.get(name, "success"),
@@ -90,8 +92,54 @@ def _required_jobs(
             "run_attempt": attempt,
             "head_sha": S,
         }
-        for name in sorted(ci.REQUIRED_SOURCE_JOBS)
+        for index, name in enumerate(sorted(ci.REQUIRED_SOURCE_JOBS), start=1)
     ]
+
+
+def _job_id(run_id: int, name: str) -> int:
+    names = sorted(ci.REQUIRED_SOURCE_JOBS)
+    return run_id * 100 + names.index(name) + 1
+
+
+def _attestation_log(
+    *,
+    pr_number: int = PR_NUMBER,
+    head_sha: str = S,
+    base_ref: str | None = COORDINATION_BRANCH,
+    base_sha: str | None = None,
+    tree: str | None = None,
+    workflow_revision: str | None = None,
+) -> bytes:
+    tree = tree or _blob("source-tree", "tree")
+    workflow_revision = workflow_revision or _blob("trusted-main", TCB_WORKFLOW)
+    messages = [
+        "env:",
+        "  EVENT_NAME: pull_request",
+        f"  ATTESTED_SHA: {ATTESTED_SHA}",
+        f"  EXECUTION_HEAD_SHA: {head_sha}",
+        f"  EVENT_PR_NUMBER: {pr_number}",
+    ]
+    if base_ref is not None:
+        messages.append(f"  EVENT_BASE_REF: {base_ref}")
+    if base_sha is not None:
+        messages.append(f"  EVENT_BASE_SHA: {base_sha}")
+    messages.extend(
+        [
+            "##[endgroup]",
+            "Full CI dependencies and required jobs are successful.",
+            "event_name=pull_request",
+            f"sha={ATTESTED_SHA}",
+            f"execution_head_sha={head_sha}",
+        ]
+    )
+    if base_ref is not None:
+        messages.append(f"pull_request_base_ref={base_ref}")
+    if base_sha is not None:
+        messages.append(f"pull_request_base_sha={base_sha}")
+    messages.extend([f"tree_sha={tree}", f"workflow_revision={workflow_revision}"])
+    return "".join(
+        f"2026-08-14T10:00:00.0000000Z {message}\n" for message in messages
+    ).encode()
 
 
 class CaseBGit:
@@ -190,6 +238,9 @@ class DualFullAPI:
             SOURCE_RUN_ID: _required_jobs(run_id=SOURCE_RUN_ID),
             PR_RUN_ID: _required_jobs(run_id=PR_RUN_ID),
         }
+        self.job_logs = {
+            _job_id(PR_RUN_ID, "Full CI Attestation"): _attestation_log(),
+        }
         self.pull_request_payload = {
             "number": PR_NUMBER,
             "state": "closed",
@@ -237,6 +288,10 @@ class DualFullAPI:
     ) -> list[dict[str, Any]]:
         self.calls.append(("run_attempt_jobs", run_id, run_attempt))
         return deepcopy(self.jobs_by_run[run_id])
+
+    def job_log(self, job_id: int) -> bytes:
+        self.calls.append(("job_log", job_id))
+        return self.job_logs[job_id]
 
     def ref_sha(self, ref_name: str) -> str:
         self.calls.append(("ref_sha", ref_name))
@@ -308,9 +363,21 @@ def test_exact_case_b_dual_full_postmerge_contract_uses_equivalent() -> None:
         ("workflow_runs", S, None),
         ("run_attempt_jobs", SOURCE_RUN_ID, 1),
         ("run_attempt_jobs", PR_RUN_ID, 1),
+        ("job_log", _job_id(PR_RUN_ID, "Full CI Attestation")),
         ("ref_sha", COORDINATION_BRANCH),
         ("ref_sha", "main"),
     ]
+
+
+def test_historical_empty_pr_association_uses_exact_base_sha_log_binding() -> None:
+    api = DualFullAPI()
+    attestation_job_id = _job_id(PR_RUN_ID, "Full CI Attestation")
+    api.job_logs[attestation_job_id] = _attestation_log(
+        base_ref=None,
+        base_sha=C,
+    )
+
+    assert _classify(api=api).ci_mode == "equivalent-merge"
 
 
 def test_later_pr_that_only_contains_historical_commits_is_not_ambiguous() -> None:
@@ -334,10 +401,16 @@ def test_later_pr_that_only_contains_historical_commits_is_not_ambiguous() -> No
 
 
 def test_historical_pr95_git_topology_and_governance_are_eligible() -> None:
+    git = ci.GitRepository(REPOSITORY_ROOT)
+    api = DualFullAPI()
+    api.job_logs[_job_id(PR_RUN_ID, "Full CI Attestation")] = _attestation_log(
+        tree=git.tree_sha(S),
+        workflow_revision=git.blob_sha(S, ci.APPROVED_WORKFLOW_PATH),
+    )
     result = ci.classify_ci_mode(
         event=_push_event(),
-        git=ci.GitRepository(REPOSITORY_ROOT),
-        api=DualFullAPI(),
+        git=git,
+        api=api,
         governance=ACTIVE_COORDINATION_GOVERNANCE,
         now=NOW,
     )
@@ -512,6 +585,15 @@ def test_source_full_evidence_mismatch_fails_closed(case: str) -> None:
         "pr-association-ambiguous",
         "stale-merge",
         "run-wrong-pr",
+        "run-log-missing",
+        "run-log-malformed",
+        "run-log-ambiguous",
+        "run-log-wrong-pr",
+        "run-log-wrong-base",
+        "run-log-wrong-head",
+        "run-log-wrong-tree",
+        "run-log-wrong-workflow",
+        "run-log-other-run",
         "run-before-pr",
         "run-job-attempt-mismatch",
         "required-job-missing",
@@ -573,6 +655,45 @@ def test_pr_full_evidence_or_identity_mismatch_fails_closed(case: str) -> None:
             ).isoformat()
     elif case == "run-wrong-pr":
         pr_run["pull_requests"] = [{"number": 96}]
+    elif case == "run-log-missing":
+        api.job_logs.clear()
+    elif case == "run-log-malformed":
+        api.job_logs[_job_id(PR_RUN_ID, "Full CI Attestation")] = b"malformed\n"
+    elif case == "run-log-ambiguous":
+        api.job_logs[
+            _job_id(PR_RUN_ID, "Full CI Attestation")
+        ] += b"2026-08-14T10:00:00.0000000Z   EVENT_PR_NUMBER: 95\n"
+    elif case == "run-log-wrong-pr":
+        api.job_logs[_job_id(PR_RUN_ID, "Full CI Attestation")] = _attestation_log(
+            pr_number=96
+        )
+    elif case == "run-log-wrong-base":
+        api.job_logs[_job_id(PR_RUN_ID, "Full CI Attestation")] = _attestation_log(
+            base_ref="integration/other"
+        )
+    elif case == "run-log-wrong-head":
+        api.job_logs[_job_id(PR_RUN_ID, "Full CI Attestation")] = _attestation_log(
+            head_sha=OTHER
+        )
+    elif case == "run-log-wrong-tree":
+        log_id = _job_id(PR_RUN_ID, "Full CI Attestation")
+        api.job_logs[log_id] = api.job_logs[log_id].replace(
+            f"tree_sha={_blob('source-tree', 'tree')}".encode(),
+            f"tree_sha={OTHER}".encode(),
+        )
+    elif case == "run-log-wrong-workflow":
+        log_id = _job_id(PR_RUN_ID, "Full CI Attestation")
+        api.job_logs[log_id] = api.job_logs[log_id].replace(
+            f"workflow_revision={_blob('trusted-main', TCB_WORKFLOW)}".encode(),
+            f"workflow_revision={OTHER}".encode(),
+        )
+    elif case == "run-log-other-run":
+        attestation_job = next(
+            job
+            for job in api.jobs_by_run[PR_RUN_ID]
+            if job["name"] == "Full CI Attestation"
+        )
+        attestation_job["run_id"] = SOURCE_RUN_ID
     elif case == "run-before-pr":
         pr_run["created_at"] = (NOW - timedelta(hours=4)).isoformat()
     elif case == "run-job-attempt-mismatch":

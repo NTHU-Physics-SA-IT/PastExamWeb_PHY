@@ -989,6 +989,26 @@ def test_actions_api_never_follows_pagination_off_github_origin() -> None:
         api.workflow_runs("a" * 40)
 
 
+def test_actions_api_downloads_exact_job_log() -> None:
+    api = ci.GitHubActionsAPI(
+        api_url="https://api.github.invalid",
+        repository=REPOSITORY,
+        token="fixture-token",
+    )
+    observed: list[str] = []
+
+    def get_bytes(url: str) -> bytes:
+        observed.append(url)
+        return b"job-log"
+
+    api._get_bytes = get_bytes  # type: ignore[method-assign]
+
+    assert api.job_log(123) == b"job-log"
+    assert observed == [
+        f"https://api.github.invalid/repos/{REPOSITORY}/actions/jobs/123/logs"
+    ]
+
+
 @pytest.mark.parametrize(
     ("run_change", "job_overrides"),
     (

@@ -39,8 +39,12 @@ START_EVIDENCE_MAX_OBSERVATIONS = 10
 START_EVIDENCE_POLL_INTERVAL_SECONDS = 2.0
 COORDINATION_WORKFLOW_PATH = ".github/workflows/coordination.yml"
 START_ARTIFACT_FILE = "coordination-start-attestation.json"
+MAX_JOB_LOG_BYTES = 1_000_000
 ZERO_SHA = "0" * 40
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+RUNNER_LOG_LINE_PATTERN = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z (.*)$"
+)
 
 REQUIRED_SOURCE_JOBS = frozenset(
     {
@@ -165,6 +169,8 @@ class ActionsEvidence(Protocol):
         run_id: int,
         run_attempt: int,
     ) -> list[dict[str, Any]]: ...
+
+    def job_log(self, job_id: int) -> bytes: ...
 
     def ref_sha(self, ref_name: str) -> str: ...
 
@@ -613,6 +619,14 @@ class GitHubActionsAPI:
             ),
             key="jobs",
             parameters={"per_page": "100"},
+        )
+
+    def job_log(self, job_id: int) -> bytes:
+        if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id < 1:
+            raise ClassificationFailure("workflow job identity is malformed")
+        repository = quote(self.repository, safe="/")
+        return self._get_bytes(
+            self._url(f"/repos/{repository}/actions/jobs/{job_id}/logs")
         )
 
     def ref_sha(self, ref_name: str) -> str:
@@ -1459,6 +1473,95 @@ def _require_merged_pull_request(
     return head_ref, number, created_at, merged_at
 
 
+def _require_pr_full_job_log_binding(
+    *,
+    raw_log: bytes,
+    pull_request_number: int,
+    pull_request_base_ref: str,
+    pull_request_base_sha: str,
+    source_sha: str,
+    expected_tree: str,
+    workflow_revision: str,
+) -> None:
+    if not isinstance(raw_log, bytes) or len(raw_log) > MAX_JOB_LOG_BYTES:
+        raise ClassificationFailure("Full CI Attestation job log is malformed")
+    try:
+        text = raw_log.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise ClassificationFailure(
+            "Full CI Attestation job log is not UTF-8"
+        ) from error
+
+    messages: list[str] = []
+    for line in text.splitlines():
+        match = RUNNER_LOG_LINE_PATTERN.fullmatch(line)
+        if match is None:
+            raise ClassificationFailure("Full CI Attestation job log line is malformed")
+        messages.append(match.group(1))
+
+    def require_exact(message: str, label: str) -> None:
+        if messages.count(message) != 1:
+            raise ClassificationFailure(
+                f"Full CI Attestation job log {label} is missing or ambiguous"
+            )
+
+    def require_capture(pattern: str, expected: str, label: str) -> None:
+        values = [
+            match.group(1)
+            for message in messages
+            if (match := re.fullmatch(pattern, message)) is not None
+        ]
+        if values != [expected]:
+            raise ClassificationFailure(
+                f"Full CI Attestation job log {label} does not match"
+            )
+
+    require_exact("  EVENT_NAME: pull_request", "event")
+    require_exact(
+        f"  EVENT_PR_NUMBER: {pull_request_number}",
+        "pull request number",
+    )
+    require_exact(f"  EXECUTION_HEAD_SHA: {source_sha}", "head SHA")
+    require_exact("event_name=pull_request", "attested event")
+    require_exact(f"execution_head_sha={source_sha}", "attested head SHA")
+    require_exact(f"tree_sha={expected_tree}", "attested tree")
+    require_exact(
+        f"workflow_revision={workflow_revision}",
+        "workflow revision",
+    )
+
+    attested_sha_pattern = rf"  ATTESTED_SHA: ({SHA_PATTERN.pattern[1:-1]})"
+    attested_sha_values = [
+        match.group(1)
+        for message in messages
+        if (match := re.fullmatch(attested_sha_pattern, message)) is not None
+    ]
+    if len(attested_sha_values) != 1:
+        raise ClassificationFailure(
+            "Full CI Attestation job log attested SHA is missing or ambiguous"
+        )
+    require_capture(
+        rf"sha=({SHA_PATTERN.pattern[1:-1]})",
+        attested_sha_values[0],
+        "attested SHA output",
+    )
+
+    ref_messages = (
+        f"  EVENT_BASE_REF: {pull_request_base_ref}",
+        f"pull_request_base_ref={pull_request_base_ref}",
+    )
+    sha_messages = (
+        f"  EVENT_BASE_SHA: {pull_request_base_sha}",
+        f"pull_request_base_sha={pull_request_base_sha}",
+    )
+    ref_binding = all(messages.count(message) == 1 for message in ref_messages)
+    sha_binding = all(messages.count(message) == 1 for message in sha_messages)
+    if ref_binding == sha_binding:
+        raise ClassificationFailure(
+            "Full CI Attestation job log base identity is missing or ambiguous"
+        )
+
+
 def _require_exact_full_run(
     *,
     event: CIEvent,
@@ -1468,6 +1571,10 @@ def _require_exact_full_run(
     source_ref: str,
     run_event: str,
     pull_request_number: int | None,
+    pull_request_base_ref: str | None,
+    pull_request_base_sha: str | None,
+    expected_tree: str,
+    workflow_revision: str,
     not_before: datetime | None,
     merged_at: datetime,
     now: datetime,
@@ -1531,25 +1638,44 @@ def _require_exact_full_run(
         ] != [pull_request_number]:
             raise ClassificationFailure("pull_request run association does not match")
 
-    conclusions: dict[str, list[tuple[Any, ...]]] = {}
+    jobs_by_name: dict[str, list[dict[str, Any]]] = {}
     for job in api.run_attempt_jobs(run_id, attempt):
         name = job.get("name")
         if isinstance(name, str):
-            conclusions.setdefault(name, []).append(
-                (
-                    job.get("status"),
-                    job.get("conclusion"),
-                    job.get("run_id"),
-                    job.get("run_attempt"),
-                    job.get("head_sha"),
-                )
-            )
-    expected = [("completed", "success", run_id, attempt, source_sha)]
+            jobs_by_name.setdefault(name, []).append(job)
+    expected = ("completed", "success", run_id, attempt, source_sha)
     for name in REQUIRED_SOURCE_JOBS:
-        if conclusions.get(name, []) != expected:
+        jobs = jobs_by_name.get(name, [])
+        observed = [
+            (
+                job.get("status"),
+                job.get("conclusion"),
+                job.get("run_id"),
+                job.get("run_attempt"),
+                job.get("head_sha"),
+            )
+            for job in jobs
+        ]
+        if observed != [expected]:
             raise ClassificationFailure(
                 f"{run_event} required job is not uniquely successful: {name}"
             )
+    if pull_request_number is not None:
+        if pull_request_base_ref is None or pull_request_base_sha is None:
+            raise ClassificationFailure("pull_request base identity is missing")
+        attestation_job = jobs_by_name["Full CI Attestation"][0]
+        job_id = attestation_job.get("id")
+        if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id < 1:
+            raise ClassificationFailure("Full CI Attestation job ID is malformed")
+        _require_pr_full_job_log_binding(
+            raw_log=api.job_log(job_id),
+            pull_request_number=pull_request_number,
+            pull_request_base_ref=pull_request_base_ref,
+            pull_request_base_sha=pull_request_base_sha,
+            source_sha=source_sha,
+            expected_tree=expected_tree,
+            workflow_revision=workflow_revision,
+        )
     return run_id
 
 
@@ -1603,6 +1729,8 @@ def validate_coordination_postmerge_full_reuse(
         source_sha=source_sha,
         now=now,
     )
+    source_tree = git.tree_sha(source_sha)
+    workflow_revision = git.blob_sha(source_sha, APPROVED_WORKFLOW_PATH)
     runs = api.workflow_runs(source_sha, event=None)
     source_run_id = _require_exact_full_run(
         event=event,
@@ -1612,6 +1740,10 @@ def validate_coordination_postmerge_full_reuse(
         source_ref=source_ref,
         run_event="push",
         pull_request_number=None,
+        pull_request_base_ref=None,
+        pull_request_base_sha=None,
+        expected_tree=source_tree,
+        workflow_revision=workflow_revision,
         not_before=None,
         merged_at=merged_at,
         now=now,
@@ -1624,6 +1756,10 @@ def validate_coordination_postmerge_full_reuse(
         source_ref=source_ref,
         run_event="pull_request",
         pull_request_number=pull_request_number,
+        pull_request_base_ref=coordination_branch,
+        pull_request_base_sha=base_sha,
+        expected_tree=source_tree,
+        workflow_revision=workflow_revision,
         not_before=pull_request_created_at,
         merged_at=merged_at,
         now=now,
@@ -1644,8 +1780,8 @@ def validate_coordination_postmerge_full_reuse(
         comparison_base=base_sha,
         source_sha=source_sha,
         source_run_id=str(source_run_id),
-        source_tree=git.tree_sha(source_sha),
-        workflow_revision=git.blob_sha(source_sha, APPROVED_WORKFLOW_PATH),
+        source_tree=source_tree,
+        workflow_revision=workflow_revision,
     )
 
 
