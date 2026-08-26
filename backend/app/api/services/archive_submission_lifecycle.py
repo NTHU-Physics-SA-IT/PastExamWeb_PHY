@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
 from minio.error import S3Error
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import and_, func, select, update
 from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
 from app.core.config import settings
@@ -18,6 +18,8 @@ from app.models.models import (
 )
 from app.services import archive_lifecycle_locks
 from app.services.archive_lifecycle_locks import (
+    ArchiveLifecycleLockPlan,
+    LifecycleMembershipFingerprint,
     LockedLifecycleRows,
     PlanRebuildBudget,
 )
@@ -193,20 +195,98 @@ async def acquire_stable_submission_lifecycle_locks(
         budget = budget.consume()
 
 
-async def delete_archive_submission_events(
+async def detach_archive_submission_events(
     db: SQLModelAsyncSession,
     submission_ids: set[int],
 ) -> int:
-    """Remove immutable ledger rows when their submissions are permanently deleted."""
+    """Retain immutable ledger rows while removing their live submission links."""
     if not submission_ids:
         return 0
 
     result = await db.execute(
-        delete(ArchiveSubmissionEvent).where(
-            ArchiveSubmissionEvent.submission_id.in_(submission_ids)
-        )
+        update(ArchiveSubmissionEvent)
+        .where(ArchiveSubmissionEvent.submission_id.in_(submission_ids))
+        .values(submission_id=None)
     )
     return int(result.rowcount or 0)
+
+
+def _group_identity(
+    group: ArchiveSubmissionGroup,
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    return (
+        tuple(sorted(item.id for item in group.archives if item.id is not None)),
+        tuple(sorted(item.id for item in group.submissions if item.id is not None)),
+    )
+
+
+async def acquire_stable_archive_submission_group_locks(
+    db: SQLModelAsyncSession,
+    *,
+    archive: Archive | None = None,
+    submission: ArchiveSubmission | None = None,
+) -> ArchiveSubmissionGroup:
+    """Discover and lock one exact permanent-delete group with one rebuild."""
+
+    budget = PlanRebuildBudget()
+    while True:
+        discovered = await collect_archive_submission_group(
+            db, archive=archive, submission=submission
+        )
+        archive_ids, submission_ids = _group_identity(discovered)
+        linked_submission_ids = tuple(
+            sorted(
+                item.id
+                for item in discovered.submissions
+                if item.id is not None and item.created_archive_id in archive_ids
+            )
+        )
+        archive_course_pairs = tuple(
+            (item.id, item.course_id)
+            for item in discovered.archives
+            if item.id is not None and item.course_id is not None
+        )
+        target = submission or (
+            discovered.submissions[0] if discovered.submissions else None
+        )
+        plan = ArchiveLifecycleLockPlan.build(
+            course_ids=(item.course_id for item in discovered.archives),
+            archive_ids=archive_ids,
+            submission_ids=submission_ids,
+            fingerprint=LifecycleMembershipFingerprint(
+                target_submission_id=target.id if target else None,
+                target_created_archive_id=target.created_archive_id if target else None,
+                target_requester_id=target.requester_id if target else None,
+                target_owner_id=target.owner_id if target else None,
+                archive_course_pairs=archive_course_pairs,
+                sibling_submission_ids=linked_submission_ids,
+            ),
+        )
+        locked = await archive_lifecycle_locks.acquire_lifecycle_locks(db, plan)
+        revalidation = await archive_lifecycle_locks.revalidate_lifecycle_membership(
+            db, locked
+        )
+        locked_archive = (
+            locked.archive(archive.id) if archive is not None and archive.id else None
+        )
+        locked_submission = (
+            locked.submission(submission.id)
+            if submission is not None and submission.id
+            else None
+        )
+        current = await collect_archive_submission_group(
+            db,
+            archive=locked_archive,
+            submission=locked_submission,
+        )
+        if revalidation.valid and _group_identity(current) == (
+            archive_ids,
+            submission_ids,
+        ):
+            return current
+
+        await db.rollback()
+        budget = budget.consume()
 
 
 async def _resolve_linked_archive(
@@ -697,7 +777,7 @@ async def hard_delete_archive_submission_group(
     submission: ArchiveSubmission | None = None,
     warnings: list[str],
 ) -> dict:
-    group = await collect_archive_submission_group(
+    group = await acquire_stable_archive_submission_group_locks(
         db, archive=archive, submission=submission
     )
     group.warnings.extend(warnings)
@@ -752,7 +832,7 @@ async def hard_delete_archive_submission_group(
 
     for item in group.submissions:
         await db.delete(item)
-    deleted_events = await delete_archive_submission_events(db, submission_ids)
+    retained_events = await detach_archive_submission_events(db, submission_ids)
     for message in messages:
         await db.delete(message)
     await db.flush()
@@ -773,7 +853,7 @@ async def hard_delete_archive_submission_group(
         "deletedChildren": {
             "archives": archive_count,
             "linkedSubmissionsDeleted": submission_count,
-            "submissionEvents": deleted_events,
+            "submissionEventsRetained": retained_events,
             "comments": len(messages),
             "files": deleted_objects,
         },

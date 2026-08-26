@@ -323,13 +323,15 @@ The statistical event survives deletion. Permanent deletion removes its active
 submission link and unnecessary identity, but does not create a link to deleted
 content and does not block the deletion.
 
-### Current implementation and gap
+### Current implementation
 
 Creation writes the event in the submission transaction. Permanent lifecycle
-cleanup currently deletes events through
-`delete_archive_submission_events`, conflicting with the intended retention
-contract. The later technical design must define a nullable link and/or stable
-snapshot without retroactively changing statistical meaning.
+cleanup retains the same event ID and exact timestamp while setting only its
+live `submission_id` link to null. The event stores no actor identity or
+descriptive snapshot and remains available only to aggregate statistics. The
+detach and live-row deletion share the route-owned database transaction;
+rollback restores both. Existing durable notifications are not rewritten or
+scrubbed and continue to use neutral unavailable-source semantics.
 
 ## PostgreSQL and MinIO permanent deletion
 
