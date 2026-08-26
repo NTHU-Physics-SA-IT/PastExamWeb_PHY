@@ -3,7 +3,7 @@
     :visible="localVisible"
     @update:visible="localVisible = $event"
     :style="{ width: 'min(1200px, 95vw)', height: 'min(90vh, 90dvh)' }"
-    :contentStyle="{ flex: '1 1 auto' }"
+    :contentStyle="{ flex: '1 1 auto', overflow: 'clip' }"
     :modal="true"
     :draggable="false"
     :closeOnEscape="false"
