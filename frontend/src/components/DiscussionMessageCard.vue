@@ -32,6 +32,7 @@
     <div v-if="!message.is_deleted" class="discussion-card__action-stack">
       <div class="discussion-card__actions is-primary">
         <Button
+          type="button"
           icon="pi pi-reply"
           severity="secondary"
           text
@@ -43,6 +44,7 @@
           @click="$emit('reply', message)"
         />
         <Button
+          type="button"
           :icon="message.liked_by_current_user ? 'pi pi-heart-fill' : 'pi pi-heart'"
           :label="formattedLikeCount"
           :severity="message.liked_by_current_user ? 'danger' : 'secondary'"
@@ -59,6 +61,7 @@
           @click="$emit('like', message)"
         />
         <Button
+          type="button"
           icon="pi pi-flag"
           severity="secondary"
           text
@@ -74,6 +77,7 @@
       <div v-if="(canPin && !isReply) || canDelete" class="discussion-card__actions is-secondary">
         <Button
           v-if="canPin && !isReply"
+          type="button"
           :icon="message.is_pinned ? 'pi pi-bookmark-fill' : 'pi pi-bookmark'"
           severity="warning"
           text
@@ -86,6 +90,7 @@
         />
         <Button
           v-if="canDelete"
+          type="button"
           icon="pi pi-trash"
           severity="danger"
           text
@@ -104,7 +109,7 @@
     </div>
     <div v-else class="discussion-card__body">
       <div v-if="isReply && message.reply_to_user_name" class="discussion-card__reply-context">
-        {{ $t('回覆 @{name}', { name: message.reply_to_user_name }) }}
+        {{ $t('回覆 {name}', { name: `@${message.reply_to_user_name}` }) }}
       </div>
       <div class="discussion-card__content">{{ displayedContent }}</div>
       <div v-if="shouldShowToggle" class="discussion-card__more-row">

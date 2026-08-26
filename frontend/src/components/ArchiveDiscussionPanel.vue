@@ -108,8 +108,11 @@
           @submit.prevent="sendReply"
         >
           <div class="discussion-reply-editor__heading">
-            <span>{{ $t('回覆 @{name}', { name: replyTarget.message.user_name }) }}</span>
+            <span>
+              {{ $t('回覆 {name}', { name: `@${replyTarget.message.user_name}` }) }}
+            </span>
             <Button
+              type="button"
               icon="pi pi-times"
               severity="secondary"
               text
@@ -124,7 +127,7 @@
           <Textarea
             name="discussion-reply"
             v-model="replyDraft"
-            :placeholder="$t('回覆 @{name}', { name: replyTarget.message.user_name })"
+            :placeholder="$t('回覆 {name}', { name: `@${replyTarget.message.user_name}` })"
             class="w-full"
             :maxlength="MESSAGE_MAX_LENGTH"
             :disabled="!canSend"
