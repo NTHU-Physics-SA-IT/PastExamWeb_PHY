@@ -165,7 +165,7 @@ def test_workflow_runs_independent_shards_and_parallel_coverage_combine() -> Non
     } <= backend_step_names
     assert coverage["name"] == "backend-coverage"
     assert coverage["needs"] == ["backend"]
-    assert e2e["needs"] == ["backend", "frontend-unit"]
+    assert e2e["needs"] == ["frontend-unit"]
 
 
 def test_raw_and_combined_coverage_artifacts_fail_closed() -> None:

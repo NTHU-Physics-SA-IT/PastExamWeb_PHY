@@ -72,7 +72,7 @@ def test_workflow_runs_three_isolated_browser_family_jobs() -> None:
 
     assert family["name"] == "frontend-e2e-${{ matrix.family }}"
     assert family["runs-on"] == "ubuntu-latest"
-    assert family["needs"] == ["backend", "frontend-unit"]
+    assert family["needs"] == ["frontend-unit"]
     assert family["strategy"] == {
         "fail-fast": "false",
         "matrix": {"family": list(FAMILIES)},
