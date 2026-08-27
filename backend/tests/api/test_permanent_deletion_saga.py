@@ -298,6 +298,7 @@ async def test_db_only_acceptance_reuses_intent_and_completes_idempotently(
             storage=None,
             now=now + timedelta(minutes=1),
             jitter_fraction=0.0,
+            lease_clock=MutableLeaseClock(now + timedelta(minutes=1, seconds=1)),
         )
         assert result == PermanentDeletionStatus.COMPLETED
         assert await session.get(CourseSubmission, request.id) is None
@@ -308,6 +309,7 @@ async def test_db_only_acceptance_reuses_intent_and_completes_idempotently(
             storage=None,
             now=now + timedelta(minutes=2),
             jitter_fraction=0.0,
+            lease_clock=MutableLeaseClock(now + timedelta(minutes=2, seconds=1)),
         )
         assert again == PermanentDeletionStatus.COMPLETED
 
@@ -350,6 +352,7 @@ async def test_exact_storage_completion_is_atomic_with_stage5e_detach(
             storage=storage,
             now=now + timedelta(minutes=1),
             jitter_fraction=0.0,
+            lease_clock=MutableLeaseClock(now + timedelta(minutes=1, seconds=1)),
         )
         assert result == PermanentDeletionStatus.COMPLETED
         assert client.removals == [
@@ -376,6 +379,7 @@ async def test_exact_storage_completion_is_atomic_with_stage5e_detach(
             storage=storage,
             now=now + timedelta(minutes=2),
             jitter_fraction=0.0,
+            lease_clock=MutableLeaseClock(now + timedelta(minutes=2, seconds=1)),
         )
         assert repeated == PermanentDeletionStatus.COMPLETED
         assert client.removals == [
@@ -413,6 +417,7 @@ async def test_unknown_delete_outcome_verifies_before_finalization(
             storage=storage,
             now=now + timedelta(minutes=1),
             jitter_fraction=0.0,
+            lease_clock=MutableLeaseClock(now + timedelta(minutes=1, seconds=1)),
         )
         assert first == PermanentDeletionStatus.VERIFICATION_REQUIRED
         assert await session.get(ArchiveSubmission, submission.id) is not None
@@ -423,6 +428,7 @@ async def test_unknown_delete_outcome_verifies_before_finalization(
             storage=storage,
             now=now + timedelta(minutes=2),
             jitter_fraction=0.0,
+            lease_clock=MutableLeaseClock(now + timedelta(minutes=2, seconds=1)),
         )
         assert second == PermanentDeletionStatus.COMPLETED
         assert len(client.removals) == 1
@@ -463,6 +469,9 @@ async def test_replacement_drift_enters_manual_review_without_delete(
                 storage=storage,
                 now=now + timedelta(minutes=1),
                 jitter_fraction=0.0,
+                lease_clock=MutableLeaseClock(
+                    now + timedelta(minutes=1, seconds=1)
+                ),
             )
             assert result == PermanentDeletionStatus.MANUAL_REVIEW
             assert client.removals == []
@@ -723,6 +732,9 @@ async def test_retryable_failure_tracks_budget_and_retries_same_exact_version(
                 storage=storage,
                 now=now + timedelta(minutes=1),
                 jitter_fraction=0.0,
+                lease_clock=MutableLeaseClock(
+                    now + timedelta(minutes=1, seconds=1)
+                ),
             )
             assert first == PermanentDeletionStatus.RETRYABLE_FAILED
             await session.refresh(operation)
@@ -737,6 +749,7 @@ async def test_retryable_failure_tracks_budget_and_retries_same_exact_version(
                 storage=storage,
                 now=retry_at,
                 jitter_fraction=0.0,
+                lease_clock=MutableLeaseClock(retry_at + timedelta(seconds=1)),
             )
             assert second == PermanentDeletionStatus.COMPLETED
             assert client.removals == [
@@ -926,6 +939,9 @@ async def test_db_finalization_rollback_recovers_from_verified_storage_absence(
                 storage=storage,
                 now=now + timedelta(minutes=1),
                 jitter_fraction=0.0,
+                lease_clock=MutableLeaseClock(
+                    now + timedelta(minutes=1, seconds=1)
+                ),
             )
             assert first == PermanentDeletionStatus.RETRYABLE_FAILED
             assert await session.get(ArchiveSubmission, submission.id) is not None
@@ -942,6 +958,7 @@ async def test_db_finalization_rollback_recovers_from_verified_storage_absence(
                 storage=storage,
                 now=retry_at,
                 jitter_fraction=0.0,
+                lease_clock=MutableLeaseClock(retry_at + timedelta(seconds=1)),
             )
             assert second == PermanentDeletionStatus.COMPLETED
             assert client.removals == [
