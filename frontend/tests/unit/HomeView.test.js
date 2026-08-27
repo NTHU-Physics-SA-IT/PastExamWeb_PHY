@@ -153,7 +153,7 @@ describe('HomeView', () => {
     expect(homeSource).toMatch(
       /@media \(max-width: 1180px\)[\s\S]*?\.hero-action-divider\s*\{[^}]*display:\s*block;[^}]*width:\s*100%;/
     )
-    expect(homeSource).toMatch(
+    expect(homeSource).not.toMatch(
       /@media \(max-width: 560px\)[\s\S]*?\.title-line\s*\{[^}]*display:\s*block;/
     )
     expect(homeSource).not.toMatch(

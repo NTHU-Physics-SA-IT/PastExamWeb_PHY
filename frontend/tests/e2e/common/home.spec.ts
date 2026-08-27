@@ -77,9 +77,9 @@ test.describe('Home page', () => {
       catalogAction.boundingBox(),
     ])
     expect(actionBoxes.every(Boolean)).toBe(true)
-    expect(actionBoxes.every((box) => Math.abs((box?.width ?? 0) - (actionBoxes[0]?.width ?? 0)) <= 1)).toBe(
-      true
-    )
+    expect(
+      actionBoxes.every((box) => Math.abs((box?.width ?? 0) - (actionBoxes[0]?.width ?? 0)) <= 1)
+    ).toBe(true)
     expect(
       actionBoxes.every((box) => Math.abs((box?.height ?? 0) - (actionBoxes[0]?.height ?? 0)) <= 1)
     ).toBe(true)
@@ -122,7 +122,9 @@ test.describe('Home page', () => {
       [...actionLayout.map(({ top }) => top)].sort()
     )
     expect(actionLayout.map(({ tabIndex }) => tabIndex)).toEqual([0, 0, 0])
-    expect(actionLayout.every(({ width }) => Math.abs(width - actionLayout[0].width) <= 1)).toBe(true)
+    expect(actionLayout.every(({ width }) => Math.abs(width - actionLayout[0].width) <= 1)).toBe(
+      true
+    )
     expect(actionLayout.every(({ height }) => Math.abs(height - actionLayout[0].height) <= 1)).toBe(
       true
     )
@@ -142,22 +144,87 @@ test.describe('Home page', () => {
     expect(actionStyles[1].borderColor).not.toBe('rgba(0, 0, 0, 0)')
     expect(actionStyles[2].backgroundColor).toBe('rgba(0, 0, 0, 0)')
     expect(actionStyles[2].borderColor).toBe('rgba(0, 0, 0, 0)')
-    expect(actionStyles.every(({ borderRadius }) => borderRadius === actionStyles[0].borderRadius)).toBe(
-      true
-    )
+    expect(
+      actionStyles.every(({ borderRadius }) => borderRadius === actionStyles[0].borderRadius)
+    ).toBe(true)
     await expect(page.getByText('書卷沒有，考古這有', { exact: true })).toBeVisible()
 
     const titleLines = await page.locator('.title-line').evaluateAll((lines) =>
       lines.map((line) => {
         const { left, right, top } = line.getBoundingClientRect()
-        return { center: (left + right) / 2, top }
+        return { left, right, top }
       })
     )
     expect(titleLines).toHaveLength(2)
-    expect(titleLines[1].top).toBeGreaterThan(titleLines[0].top)
-    expect(Math.abs(titleLines[0].center - titleLines[1].center)).toBeLessThanOrEqual(1)
+    expect(Math.abs(titleLines[1].top - titleLines[0].top)).toBeLessThanOrEqual(1)
+    expect(titleLines[1].left).toBeGreaterThanOrEqual(titleLines[0].right)
     await expect(page.locator('.hero-action-divider')).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+  })
+
+  test('uses the tablet portrait hero composition unchanged on mobile', async ({ page }) => {
+    const readHeroComposition = async (width: number, height: number) => {
+      await page.setViewportSize({ width, height })
+      await page.goto('/')
+      await expect(page.locator('.hero-title-lockup h1')).toBeVisible()
+      await expect(page.getByText('書卷沒有，考古這有', { exact: true })).toBeVisible()
+
+      return page.evaluate(() => {
+        const hero = document.querySelector<HTMLElement>('.hero-copy')
+        const title = document.querySelector<HTMLElement>('.hero-title-lockup h1')
+        const slogan = document.querySelector<HTMLElement>('.subtitle')
+        const actions = document.querySelector<HTMLElement>('.hero-actions')
+        const buttons = [...document.querySelectorAll<HTMLElement>('.hero-actions button')]
+        const titleLines = [...document.querySelectorAll<HTMLElement>('.title-line')]
+        if (!hero || !title || !slogan || !actions || buttons.length !== 3) {
+          throw new Error('Home hero composition is incomplete')
+        }
+
+        const heroBox = hero.getBoundingClientRect()
+        const titleBox = title.getBoundingClientRect()
+        const sloganBox = slogan.getBoundingClientRect()
+        const actionsBox = actions.getBoundingClientRect()
+        const buttonBoxes = buttons.map((button) => button.getBoundingClientRect())
+        const titleLineCount = new Set(
+          titleLines.map((line) => Math.round(line.getBoundingClientRect().top))
+        ).size
+
+        return {
+          heroCenterRatio: (heroBox.top + heroBox.height / 2) / window.innerHeight,
+          heroHeight: heroBox.height,
+          titleFontSize: Number.parseFloat(getComputedStyle(title).fontSize),
+          titleLineCount,
+          titleToSloganGapInTitleUnits: (sloganBox.top - titleBox.bottom) / titleBox.height,
+          sloganToActionsGapRatio: (actionsBox.top - sloganBox.bottom) / heroBox.height,
+          ctaWidth: buttonBoxes[0].width,
+          ctaHeight: buttonBoxes[0].height,
+          ctaGapRatio: (buttonBoxes[1].top - buttonBoxes[0].bottom) / heroBox.height,
+          minimumCtaHeight: Math.min(...buttonBoxes.map(({ height }) => height)),
+        }
+      })
+    }
+
+    const tablet = await readHeroComposition(834, 1210)
+    const mobile = await readHeroComposition(402, 874)
+
+    expect(tablet.titleLineCount).toBe(1)
+    expect(mobile.titleLineCount).toBe(1)
+    expect(Math.abs(mobile.heroCenterRatio - tablet.heroCenterRatio)).toBeLessThanOrEqual(0.035)
+    expect(mobile.titleFontSize / tablet.titleFontSize).toBeGreaterThanOrEqual(0.85)
+    expect(mobile.titleFontSize / tablet.titleFontSize).toBeLessThanOrEqual(1)
+    expect(mobile.heroHeight / tablet.heroHeight).toBeGreaterThanOrEqual(0.95)
+    expect(mobile.heroHeight / tablet.heroHeight).toBeLessThanOrEqual(1.05)
+    expect(
+      Math.abs(mobile.titleToSloganGapInTitleUnits - tablet.titleToSloganGapInTitleUnits)
+    ).toBeLessThanOrEqual(0.12)
+    expect(
+      Math.abs(mobile.sloganToActionsGapRatio - tablet.sloganToActionsGapRatio)
+    ).toBeLessThanOrEqual(0.015)
+    expect(mobile.ctaWidth / tablet.ctaWidth).toBeGreaterThanOrEqual(0.95)
+    expect(mobile.ctaWidth / tablet.ctaWidth).toBeLessThanOrEqual(1)
+    expect(Math.abs(mobile.ctaHeight - tablet.ctaHeight)).toBeLessThanOrEqual(1)
+    expect(Math.abs(mobile.ctaGapRatio - tablet.ctaGapRatio)).toBeLessThanOrEqual(0.01)
+    expect(mobile.minimumCtaHeight).toBeGreaterThanOrEqual(44)
   })
 
   test('preserves the desktop hero action row and right-side metrics', async ({ page }) => {
@@ -207,7 +274,8 @@ test.describe('Home page', () => {
     expect(metricsBox?.x ?? 0).toBeGreaterThan((heroBox?.x ?? 0) + (heroBox?.width ?? 0) / 2)
     expect(
       Math.abs(
-        (heroBox?.y ?? 0) + (heroBox?.height ?? 0) / 2 -
+        (heroBox?.y ?? 0) +
+          (heroBox?.height ?? 0) / 2 -
           ((metricsBox?.y ?? 0) + (metricsBox?.height ?? 0) / 2)
       )
     ).toBeLessThanOrEqual(2)
@@ -330,7 +398,9 @@ test.describe('Home page', () => {
     )
     const initialFill = await circle.evaluate((element) => getComputedStyle(element).fill)
     await page.locator('.theme-toggle-button').click()
-    await expect(home).toHaveClass(initialThemeIsDark ? /physics-home(?!-dark)/ : /physics-home-dark/)
+    await expect(home).toHaveClass(
+      initialThemeIsDark ? /physics-home(?!-dark)/ : /physics-home-dark/
+    )
     await expect(entry).not.toHaveClass(/mass-core-entry-animate/)
     expect(await circle.evaluate((element) => getComputedStyle(element).fill)).not.toBe(initialFill)
   })
@@ -474,9 +544,9 @@ test.describe('Home page', () => {
     const courseCards = page.locator('.course-card')
     await expect(courseCards).toHaveCount(71)
     await expect(page.locator('.public-catalog > .empty-state')).toHaveCount(0)
-    expect(await courseCards.first().evaluate((card) => getComputedStyle(card).borderTopWidth)).toBe(
-      '1px'
-    )
+    expect(
+      await courseCards.first().evaluate((card) => getComputedStyle(card).borderTopWidth)
+    ).toBe('1px')
 
     const zeroArchiveCourse = page.locator('a[href="/courses/1"]')
     await expect(zeroArchiveCourse).toBeVisible()
