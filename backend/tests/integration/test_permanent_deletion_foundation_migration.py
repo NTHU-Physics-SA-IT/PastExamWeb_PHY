@@ -306,3 +306,92 @@ def test_exact_identity_and_active_reservation_constraints(
             )
         ).one()
     assert row == ("MINIO_VERSION_ID_V1", "null", "CAPTURED")
+
+
+def test_retry_completion_and_recovery_compaction_constraints(
+    migration_engine: Engine,
+) -> None:
+    command.upgrade(alembic_config(), CURRENT_HEAD)
+    operation_id = _insert_operation(migration_engine)
+    target_id = _insert_target(migration_engine, operation_id)
+    with migration_engine.begin() as connection:
+        object_id = int(
+            connection.scalar(
+                text(
+                    "INSERT INTO permanent_deletion_objects "
+                    "(operation_id, target_id, bucket_name, object_key, version_id) "
+                    "VALUES (:operation_id, :target_id, 'archives', "
+                    "'versioned.pdf', 'version-1') RETURNING id"
+                ),
+                {"operation_id": operation_id, "target_id": target_id},
+            )
+        )
+
+    invalid_operation_updates = (
+        "automatic_attempt_count = 11",
+        "retry_deadline_at = accepted_at + INTERVAL '25 hours'",
+        "lease_token = 'claim-without-expiry'",
+        (
+            "status = 'COMPLETED', completed_at = accepted_at + INTERVAL '1 day', "
+            "audit_purge_after = accepted_at + INTERVAL '180 days'"
+        ),
+    )
+    for assignment in invalid_operation_updates:
+        with pytest.raises(IntegrityError), migration_engine.begin() as connection:
+            connection.execute(
+                text(
+                    f"UPDATE permanent_deletion_operations SET {assignment} "
+                    "WHERE id = :operation_id"
+                ),
+                {"operation_id": operation_id},
+            )
+
+    with pytest.raises(IntegrityError), migration_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE permanent_deletion_objects "
+                "SET state = 'VERIFIED_ABSENT' WHERE id = :object_id"
+            ),
+            {"object_id": object_id},
+        )
+
+    with migration_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE permanent_deletion_objects SET state = 'VERIFIED_ABSENT', "
+                "verified_absent_at = now() WHERE id = :object_id"
+            ),
+            {"object_id": object_id},
+        )
+        connection.execute(
+            text(
+                "UPDATE permanent_deletion_operations SET status = 'COMPLETED', "
+                "completed_at = accepted_at + INTERVAL '1 day', "
+                "audit_purge_after = accepted_at + INTERVAL '181 days' "
+                "WHERE id = :operation_id"
+            ),
+            {"operation_id": operation_id},
+        )
+        connection.execute(
+            text("DELETE FROM permanent_deletion_objects WHERE id = :object_id"),
+            {"object_id": object_id},
+        )
+
+    with migration_engine.connect() as connection:
+        operation = connection.execute(
+            text(
+                "SELECT status::text, completed_at IS NOT NULL, "
+                "audit_purge_after >= completed_at + INTERVAL '180 days' "
+                "FROM permanent_deletion_operations WHERE id = :operation_id"
+            ),
+            {"operation_id": operation_id},
+        ).one()
+        object_count = connection.scalar(
+            text(
+                "SELECT count(*) FROM permanent_deletion_objects "
+                "WHERE operation_id = :operation_id"
+            ),
+            {"operation_id": operation_id},
+        )
+    assert operation == ("COMPLETED", True, True)
+    assert object_count == 0
