@@ -774,6 +774,7 @@ async def test_membership_drift_prevents_storage_delete(
             operation_id = int(operation.id)
             live_submission = await session.get(ArchiveSubmission, submission.id)
             live_submission.status = SubmissionStatus.PENDING
+            live_submission.previous_status = None
             live_submission.deleted_at = None
             await session.commit()
             result = await process_one_permanent_deletion(
