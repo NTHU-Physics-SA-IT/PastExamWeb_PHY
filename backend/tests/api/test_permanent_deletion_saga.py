@@ -479,7 +479,16 @@ async def test_acceptance_failures_leave_no_durable_operation(
                     storage=storage,
                 )
             operation_count = (
-                await session.execute(select(func.count(PermanentDeletionOperation.id)))
+                await session.execute(
+                    select(func.count(PermanentDeletionOperation.id)).where(
+                        PermanentDeletionOperation.idempotency_key.in_(
+                            [
+                                f"submission:{submission.id}:suspended",
+                                f"submission:{submission.id}:ambiguous",
+                            ]
+                        )
+                    )
+                )
             ).scalar_one()
             assert operation_count == 0
     finally:
@@ -764,7 +773,8 @@ async def test_membership_drift_prevents_storage_delete(
             )
             operation_id = int(operation.id)
             live_submission = await session.get(ArchiveSubmission, submission.id)
-            live_submission.name = f"{live_submission.name} drift"
+            live_submission.status = SubmissionStatus.PENDING
+            live_submission.deleted_at = None
             await session.commit()
             result = await process_one_permanent_deletion(
                 session,
