@@ -161,6 +161,14 @@ export const archiveService = {
     return api.delete(`/trash/${itemType}/${itemId}`)
   },
 
+  getPermanentDeletionStatus(operationId) {
+    return api.get(`/trash/permanent-deletions/${operationId}`)
+  },
+
+  retryPermanentDeletion(operationId) {
+    return api.post(`/trash/permanent-deletions/${operationId}/retry`)
+  },
+
   permanentlyDeleteTrashScope(itemType = null) {
     return api.delete('/trash/bulk', {
       params: itemType ? { item_type: itemType } : {},

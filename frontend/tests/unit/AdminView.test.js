@@ -195,6 +195,11 @@ const republishSubmissionMock = vi.hoisted(() => vi.fn())
 const updateSubmissionMock = vi.hoisted(() => vi.fn())
 const deleteSubmissionMock = vi.hoisted(() => vi.fn())
 const downloadArchiveBackupMock = vi.hoisted(() => vi.fn())
+const listTrashItemsMock = vi.hoisted(() => vi.fn())
+const restoreTrashItemMock = vi.hoisted(() => vi.fn())
+const permanentlyDeleteTrashItemMock = vi.hoisted(() => vi.fn())
+const getPermanentDeletionStatusMock = vi.hoisted(() => vi.fn())
+const retryPermanentDeletionMock = vi.hoisted(() => vi.fn())
 
 const trackEventMock = vi.hoisted(() => vi.fn())
 const isUnauthorizedErrorMock = vi.hoisted(() => vi.fn(() => false))
@@ -274,6 +279,11 @@ vi.mock('@/api', () => ({
     updateSubmission: updateSubmissionMock,
     deleteSubmission: deleteSubmissionMock,
     downloadArchiveBackup: downloadArchiveBackupMock,
+    listTrashItems: listTrashItemsMock,
+    restoreTrashItem: restoreTrashItemMock,
+    permanentlyDeleteTrashItem: permanentlyDeleteTrashItemMock,
+    getPermanentDeletionStatus: getPermanentDeletionStatusMock,
+    retryPermanentDeletion: retryPermanentDeletionMock,
   },
 }))
 
@@ -367,6 +377,11 @@ describe('AdminView', () => {
     updateSubmissionMock.mockReset()
     deleteSubmissionMock.mockReset()
     downloadArchiveBackupMock.mockReset()
+    listTrashItemsMock.mockReset()
+    restoreTrashItemMock.mockReset()
+    permanentlyDeleteTrashItemMock.mockReset()
+    getPermanentDeletionStatusMock.mockReset()
+    retryPermanentDeletionMock.mockReset()
     approveSubmissionMock.mockResolvedValue({ data: {} })
     rejectSubmissionMock.mockResolvedValue({ data: {} })
     takedownSubmissionMock.mockResolvedValue({ data: {} })
@@ -377,6 +392,8 @@ describe('AdminView', () => {
       data: new Blob(['backup']),
       headers: { 'content-disposition': 'attachment; filename="PhysArchive_Backup_test.zip"' },
     })
+    listTrashItemsMock.mockResolvedValue({ data: [] })
+    restoreTrashItemMock.mockResolvedValue({ data: { message: '項目已還原' } })
     getSubmissionStatisticsMock.mockImplementation((range) =>
       Promise.resolve({ data: makeSubmissionStatistics(range, { 0: 2, 1: 1 }) })
     )
@@ -1228,6 +1245,141 @@ describe('AdminView', () => {
       }),
     ])
 
+    wrapper.unmount()
+  })
+
+  it('keeps HTTP 202 rows visible and never reports accepted work as completed', async () => {
+    const accepted = {
+      operation_id: 81,
+      root_type: 'archive_submission',
+      root_id: 902,
+      status: 'ACCEPTED',
+      accepted_at: now.toISOString(),
+      completed_at: null,
+      next_attempt_at: now.toISOString(),
+      result_code: null,
+      can_retry: true,
+      can_inspect_reason: false,
+      restore_available: false,
+    }
+    const pendingItem = {
+      item_type: 'archive_submission',
+      id: 902,
+      display_name: 'Pending delete',
+      status: 'deleted',
+      canRestore: false,
+      canPermanentDelete: false,
+      permanent_deletion: accepted,
+      dependencies: [],
+    }
+    permanentlyDeleteTrashItemMock.mockResolvedValue({ status: 202, data: accepted })
+    listTrashItemsMock.mockResolvedValue({ data: [pendingItem] })
+    getPermanentDeletionStatusMock.mockResolvedValue({
+      data: {
+        ...accepted,
+        status: 'VERIFICATION_REQUIRED',
+        result_code: 'delete_outcome_unknown',
+        can_inspect_reason: true,
+      },
+    })
+    const wrapper = createWrapper()
+    await flushPromises()
+    wrapper.vm.trashItems = [{ ...pendingItem, canRestore: true, canPermanentDelete: true }]
+
+    await wrapper.vm.permanentlyDeleteTrashItem(wrapper.vm.trashItems[0])
+    expect(wrapper.vm.getTrashStatusLabel('deleted', 'archive_submission')).toBe('已刪除')
+    expect(wrapper.vm.getPermanentDeletionActionLabel(wrapper.vm.trashItems[0])).toBe(
+      '永久刪除中…'
+    )
+    expect(wrapper.vm.canRestoreTrashItem(wrapper.vm.trashItems[0])).toBe(false)
+    expect(toastAddMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ summary: '已永久刪除' })
+    )
+
+    await vi.advanceTimersByTimeAsync(1500)
+    await flushPromises()
+    expect(getPermanentDeletionStatusMock).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.getPermanentDeletionActionLabel(wrapper.vm.trashItems[0])).toBe(
+      '永久刪除狀態確認中…'
+    )
+    expect(toastAddMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ summary: '已永久刪除' })
+    )
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(getPermanentDeletionStatusMock).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('shows final success only for completed operation truth and safe failure copy otherwise', async () => {
+    const item = {
+      item_type: 'archive',
+      id: 903,
+      display_name: 'Completed delete',
+      canRestore: true,
+      canPermanentDelete: true,
+      dependencies: [],
+    }
+    permanentlyDeleteTrashItemMock.mockResolvedValueOnce({
+      status: 200,
+      data: {
+        operation_id: 82,
+        root_type: 'archive',
+        root_id: 903,
+        status: 'COMPLETED',
+        accepted_at: now.toISOString(),
+        completed_at: now.toISOString(),
+        can_retry: false,
+        can_inspect_reason: true,
+        restore_available: false,
+      },
+    })
+    const wrapper = createWrapper()
+    await flushPromises()
+    await wrapper.vm.permanentlyDeleteTrashItem(item)
+    expect(toastAddMock).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'success', summary: '已永久刪除' })
+    )
+
+    toastAddMock.mockClear()
+    permanentlyDeleteTrashItemMock.mockRejectedValueOnce({
+      response: {
+        status: 503,
+        data: { detail: { message: '永久刪除失敗，請稍後再試' } },
+      },
+    })
+    await wrapper.vm.permanentlyDeleteTrashItem(item)
+    expect(toastAddMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'error',
+        summary: '永久刪除失敗',
+        detail: '永久刪除失敗，請稍後再試',
+      })
+    )
+    wrapper.unmount()
+  })
+
+  it('keeps manual review inspect-only when backend retry authority is false', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    const item = {
+      permanent_deletion: {
+        operation_id: 83,
+        status: 'MANUAL_REVIEW',
+        result_code: 'automatic_retry_budget_exhausted',
+        can_retry: false,
+        can_inspect_reason: true,
+      },
+      dependencies: [],
+    }
+
+    expect(wrapper.vm.canRetryPermanentDeletion(item)).toBe(false)
+    expect(wrapper.vm.canInspectPermanentDeletion(item)).toBe(true)
+    expect(wrapper.vm.canRefreshPermanentDeletion(item)).toBe(false)
+    expect(wrapper.vm.getTrashDependencies(item)).toEqual([
+      expect.objectContaining({ label: '永久刪除需人工處理：已達自動重試上限' }),
+    ])
+    await wrapper.vm.retryPermanentDeletion(item)
+    expect(retryPermanentDeletionMock).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
