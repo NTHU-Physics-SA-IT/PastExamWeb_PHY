@@ -61,6 +61,14 @@ const onlineRangeConfig = {
   '24h': [10, 144],
   '48h': [20, 144],
   '72h': [30, 144],
+  '7d': [1440, 7],
+  '30d': [1440, 30],
+  '90d': [1440, 90],
+}
+const submissionRangeConfig = {
+  '24h': [10, 144],
+  '48h': [20, 144],
+  '72h': [30, 144],
   '7d': [240, 42],
   '30d': [720, 60],
   '90d': [1440, 90],
@@ -75,12 +83,11 @@ const makeOnlineStatistics = (range = '24h', counts = {}) => {
     return {
       start: start.toISOString(),
       end: bucketEnd.toISOString(),
-      at: index === bucketCount - 1 ? end.toISOString() : bucketEnd.toISOString(),
-      count: counts[index] ?? 0,
+      active_users: counts[index] ?? 0,
       has_data: true,
     }
   })
-  const values = points.map(({ count }) => count)
+  const values = points.map(({ active_users }) => active_users)
   return {
     range,
     bucket_minutes: bucketMinutes,
@@ -94,7 +101,7 @@ const makeOnlineStatistics = (range = '24h', counts = {}) => {
   }
 }
 const makeSubmissionStatistics = (range = '24h', counts = {}) => {
-  const [bucketMinutes, bucketCount] = onlineRangeConfig[range]
+  const [bucketMinutes, bucketCount] = submissionRangeConfig[range]
   const mode = range.endsWith('h') ? 'time' : 'date'
   const currentStart = new Date(now)
   currentStart.setUTCMinutes(
@@ -1745,9 +1752,9 @@ describe('AdminView', () => {
     wrapper.vm.userInsightsView = 'login-hour'
 
     const hourRanges = [
-      [24, 144, 10, '統計最近 24 小時內，每 10 分鐘取樣一次的同時在線使用者人數。'],
-      [48, 144, 20, '統計最近 48 小時內，每 20 分鐘取樣一次的同時在線使用者人數。'],
-      [72, 144, 30, '統計最近 72 小時內，每 30 分鐘取樣一次的同時在線使用者人數。'],
+      [24, 144, 10, '統計最近 24 小時內，每個 10 分鐘區間內曾在線的不同使用者人數。'],
+      [48, 144, 20, '統計最近 48 小時內，每個 20 分鐘區間內曾在線的不同使用者人數。'],
+      [72, 144, 30, '統計最近 72 小時內，每個 30 分鐘區間內曾在線的不同使用者人數。'],
     ]
     for (const [range, bucketCount, bucketMinutes, description] of hourRanges) {
       wrapper.vm.setActiveLoginRange(range)
@@ -1770,15 +1777,23 @@ describe('AdminView', () => {
       )
       expect(midnightBucket?.labelLines[0]).toBe('00 時')
       expect(midnightBucket?.labelLines[1]).toMatch(/^\d{2}\/\d{2}$/)
-      expect(nonZeroBuckets[0].fullLabel).toContain('取樣')
+      expect(nonZeroBuckets[0].fullLabel).toContain('–')
+      expect(nonZeroBuckets[0].fullLabel).toMatch(/^\d{2}:\d{2}–\d{2}:\d{2}$/)
+      expect(nonZeroBuckets[0].fullLabel).not.toContain('取樣')
+      expect(wrapper.vm.formatOnlineStatisticsBucketTooltip(nonZeroBuckets[0])).not.toContain(
+        '{label}'
+      )
+      expect(wrapper.vm.formatOnlineStatisticsBucketTooltip(nonZeroBuckets[0])).not.toContain(
+        '{count}'
+      )
     }
 
     wrapper.vm.userInsightsView = 'login-date'
     await wrapper.vm.$nextTick()
     const dateRanges = [
-      [7, 42, 4 * 60, '統計最近 7 日內，每 4 小時取樣一次的同時在線使用者人數。'],
-      [30, 60, 12 * 60, '統計最近 30 日內，每 12 小時取樣一次的同時在線使用者人數。'],
-      [90, 90, 24 * 60, '統計最近 90 日內，每日取樣一次的同時在線使用者人數。'],
+      [7, 7, 24 * 60, '統計最近 7 日內，每個產品時區曆日曾在線的不同使用者人數。'],
+      [30, 30, 24 * 60, '統計最近 30 日內，每個產品時區曆日曾在線的不同使用者人數。'],
+      [90, 90, 24 * 60, '統計最近 90 日內，每個產品時區曆日曾在線的不同使用者人數。'],
     ]
     for (const [range, bucketCount, bucketMinutes, description] of dateRanges) {
       wrapper.vm.setActiveLoginRange(range)
@@ -1791,10 +1806,22 @@ describe('AdminView', () => {
       expect(wrapper.vm.loginChartData.buckets[0].showLabel).toBe(true)
       expect(wrapper.vm.loginChartData.buckets.at(-1).showLabel).toBe(true)
       expect(wrapper.vm.loginChartData.buckets.at(-1).labelLines[0]).toMatch(/^\d{2}\/\d{2}$/)
+      expect(wrapper.vm.loginChartData.buckets.at(-1).fullLabel).toMatch(/^\d{4}\/\d{2}\/\d{2}$/)
       expect(wrapper.vm.loginChartData.buckets.filter(({ count }) => count > 0)).toEqual([
         expect.objectContaining({ count: 2 }),
       ])
     }
+
+    const tooltipBucket = wrapper.vm.loginChartData.buckets.at(-1)
+    setLocale('zh-TW')
+    expect(wrapper.vm.formatOnlineStatisticsBucketTooltip(tooltipBucket)).toContain(
+      `${tooltipBucket.count} 位活躍使用者`
+    )
+    setLocale('en')
+    expect(wrapper.vm.formatOnlineStatisticsBucketTooltip(tooltipBucket)).toContain(
+      `${tooltipBucket.count} active users`
+    )
+    setLocale('zh-TW')
 
     wrapper.unmount()
   }, 10_000)

@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi import HTTPException
@@ -78,8 +79,8 @@ def test_presence_timeout_end_and_distinct_users():
         ("24h", 10, 144),
         ("48h", 20, 144),
         ("72h", 30, 144),
-        ("7d", 240, 42),
-        ("30d", 720, 60),
+        ("7d", 1440, 7),
+        ("30d", 1440, 30),
         ("90d", 1440, 90),
     ],
 )
@@ -98,19 +99,59 @@ def test_online_statistics_bucket_contract(range_key, bucket_minutes, bucket_cou
 
     assert ONLINE_RANGE_CONFIG[range_key] == (bucket_minutes, bucket_count)
     assert result.bucket_minutes == bucket_minutes
+    assert result.timezone == "Asia/Taipei"
     assert len(result.points) == bucket_count
-    assert result.points[-1].at == NOW
     assert result.current_online == 1
     assert result.peak_online == 1
     assert 0 < result.average_online <= 1
+    assert "at" not in result.points[-1].model_dump()
 
 
-def test_session_crossing_midnight_is_counted_at_sample_points():
+def test_sessions_are_distinct_per_user_and_all_activity_in_bucket_is_counted():
+    sessions = [
+        make_session(
+            1,
+            started_at=datetime(2026, 7, 12, 23, 51, tzinfo=UTC),
+            last_seen_at=datetime(2026, 7, 12, 23, 53, tzinfo=UTC),
+            ended_at=datetime(2026, 7, 12, 23, 53, tzinfo=UTC),
+        ),
+        make_session(
+            1,
+            started_at=datetime(2026, 7, 12, 23, 52, tzinfo=UTC),
+            last_seen_at=datetime(2026, 7, 12, 23, 54, tzinfo=UTC),
+            ended_at=datetime(2026, 7, 12, 23, 54, tzinfo=UTC),
+            identifier="b" * 64,
+        ),
+        make_session(
+            2,
+            started_at=datetime(2026, 7, 12, 23, 57, tzinfo=UTC),
+            last_seen_at=datetime(2026, 7, 12, 23, 59, tzinfo=UTC),
+            ended_at=datetime(2026, 7, 12, 23, 59, tzinfo=UTC),
+        ),
+    ]
+    result = build_online_statistics(
+        range_key="24h",
+        sessions=sessions,
+        now=NOW,
+        history_started_at=sessions[0].started_at,
+    )
+
+    bucket = next(
+        point
+        for point in result.points
+        if point.start == datetime(2026, 7, 12, 23, 50, tzinfo=UTC)
+    )
+    assert bucket.active_users == 2
+
+
+def test_short_session_between_sample_instants_is_counted_in_bucket():
     session = make_session(
         1,
-        started_at=datetime(2026, 7, 12, 23, 58, tzinfo=UTC),
-        last_seen_at=NOW,
+        started_at=datetime(2026, 7, 12, 23, 51, tzinfo=UTC),
+        last_seen_at=datetime(2026, 7, 12, 23, 53, tzinfo=UTC),
+        ended_at=datetime(2026, 7, 12, 23, 53, tzinfo=UTC),
     )
+
     result = build_online_statistics(
         range_key="24h",
         sessions=[session],
@@ -118,9 +159,116 @@ def test_session_crossing_midnight_is_counted_at_sample_points():
         history_started_at=session.started_at,
     )
 
-    assert result.points[-1].start == datetime(2026, 7, 13, 0, 0, tzinfo=UTC)
-    assert result.points[-1].count == 1
-    assert sum(point.count for point in result.points[:-1]) == 1
+    bucket = next(
+        point
+        for point in result.points
+        if point.start == datetime(2026, 7, 12, 23, 50, tzinfo=UTC)
+    )
+    assert bucket.active_users == 1
+
+
+def test_session_crossing_bucket_boundary_contributes_to_both_buckets():
+    session = make_session(
+        1,
+        started_at=datetime(2026, 7, 12, 23, 59, tzinfo=UTC),
+        last_seen_at=NOW,
+    )
+
+    result = build_online_statistics(
+        range_key="24h",
+        sessions=[session],
+        now=NOW,
+        history_started_at=session.started_at,
+    )
+
+    assert [point.active_users for point in result.points[-2:]] == [1, 1]
+
+
+@pytest.mark.parametrize(("range_key", "days"), [("7d", 7), ("30d", 30), ("90d", 90)])
+def test_date_ranges_use_product_timezone_calendar_days(range_key, days):
+    taipei = ZoneInfo("Asia/Taipei")
+    local_now = datetime(2026, 7, 13, 12, 0, tzinfo=taipei)
+    session = make_session(
+        1,
+        started_at=datetime(2026, 7, 12, 23, 58, tzinfo=taipei).astimezone(UTC),
+        last_seen_at=datetime(2026, 7, 13, 0, 2, tzinfo=taipei).astimezone(UTC),
+        ended_at=datetime(2026, 7, 13, 0, 2, tzinfo=taipei).astimezone(UTC),
+    )
+
+    result = build_online_statistics(
+        range_key=range_key,
+        sessions=[session],
+        now=local_now,
+        history_started_at=session.started_at,
+    )
+
+    assert len(result.points) == days
+    assert all(
+        point.start.astimezone(taipei).time().isoformat() == "00:00:00"
+        and point.end.astimezone(taipei).time().isoformat() == "00:00:00"
+        for point in result.points
+    )
+    assert [point.active_users for point in result.points[-2:]] == [1, 1]
+
+
+def test_peak_and_time_weighted_average_use_complete_distinct_user_intervals():
+    now = datetime(2026, 7, 13, 0, 0, tzinfo=UTC)
+    sessions = [
+        make_session(
+            1,
+            started_at=now - timedelta(minutes=10),
+            last_seen_at=now - timedelta(minutes=5),
+            ended_at=now,
+        ),
+        make_session(
+            1,
+            started_at=now - timedelta(minutes=3),
+            last_seen_at=now,
+            ended_at=now,
+            identifier="b" * 64,
+        ),
+        make_session(
+            2,
+            started_at=now - timedelta(minutes=5),
+            last_seen_at=now,
+            ended_at=now,
+        ),
+    ]
+
+    result = build_online_statistics(
+        range_key="24h",
+        sessions=sessions,
+        now=now,
+        history_started_at=now - timedelta(minutes=10),
+    )
+
+    assert result.current_online == 0
+    assert result.peak_online == 2
+    assert result.average_online == 1.5
+
+
+def test_history_availability_and_current_partial_bucket_use_observed_time_only():
+    now = datetime(2026, 7, 13, 0, 1, tzinfo=UTC)
+    history_start = now - timedelta(seconds=30)
+    session = make_session(
+        1,
+        started_at=history_start,
+        last_seen_at=now,
+    )
+
+    result = build_online_statistics(
+        range_key="24h",
+        sessions=[session],
+        now=now,
+        history_started_at=history_start,
+    )
+
+    assert all(not point.has_data for point in result.points[:-1])
+    assert result.points[-1].has_data
+    assert result.points[-1].active_users == 1
+    assert result.current_online == 1
+    assert result.peak_online == 1
+    assert result.average_online == 1
 
 
 @pytest.mark.asyncio

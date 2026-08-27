@@ -174,6 +174,89 @@ def merge_presence_intervals(
     return merged
 
 
+def merge_presence_intervals_by_user(
+    sessions: list[UserPresenceSession],
+    *,
+    range_start: datetime,
+    range_end: datetime,
+    now: datetime,
+    timeout_seconds: int = ONLINE_TIMEOUT_SECONDS,
+) -> dict[int, list[tuple[datetime, datetime]]]:
+    """Return bounded, merged online intervals keyed by distinct user."""
+    sessions_by_user: dict[int, list[UserPresenceSession]] = {}
+    for session in sessions:
+        sessions_by_user.setdefault(session.user_id, []).append(session)
+    return {
+        user_id: intervals
+        for user_id, user_sessions in sessions_by_user.items()
+        if (
+            intervals := merge_presence_intervals(
+                user_sessions,
+                range_start=range_start,
+                range_end=range_end,
+                now=now,
+                timeout_seconds=timeout_seconds,
+            )
+        )
+    }
+
+
+def count_users_overlapping_interval(
+    intervals_by_user: dict[int, list[tuple[datetime, datetime]]],
+    *,
+    interval_start: datetime,
+    interval_end: datetime,
+) -> int:
+    """Count distinct users active at any time in a half-open interval."""
+    start = normalize_utc(interval_start)
+    end = normalize_utc(interval_end)
+    if end <= start:
+        return 0
+    return sum(
+        any(
+            online_start < end and online_end > start
+            for online_start, online_end in intervals
+        )
+        for intervals in intervals_by_user.values()
+    )
+
+
+def calculate_concurrency_summary(
+    intervals_by_user: dict[int, list[tuple[datetime, datetime]]],
+    *,
+    observed_start: datetime,
+    observed_end: datetime,
+) -> tuple[int, float]:
+    """Return exact peak and time-weighted average distinct-user concurrency."""
+    start = normalize_utc(observed_start)
+    end = normalize_utc(observed_end)
+    if end <= start:
+        return 0, 0
+
+    events: dict[datetime, int] = {}
+    for intervals in intervals_by_user.values():
+        for interval_start, interval_end in intervals:
+            bounded_start = max(interval_start, start)
+            bounded_end = min(interval_end, end)
+            if bounded_start >= bounded_end:
+                continue
+            events[bounded_start] = events.get(bounded_start, 0) + 1
+            events[bounded_end] = events.get(bounded_end, 0) - 1
+
+    concurrent = 0
+    peak = 0
+    weighted_seconds = 0.0
+    cursor = start
+    for event_at in sorted(events):
+        weighted_seconds += concurrent * (event_at - cursor).total_seconds()
+        concurrent += events[event_at]
+        peak = max(peak, concurrent)
+        cursor = event_at
+    weighted_seconds += concurrent * (end - cursor).total_seconds()
+    observed_seconds = (end - start).total_seconds()
+    return peak, weighted_seconds / observed_seconds
+
+
 def allocate_interval_durations(
     intervals: list[tuple[datetime, datetime]],
     buckets: list[tuple[datetime, datetime]],

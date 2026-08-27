@@ -1375,7 +1375,6 @@ const en = {
     'This submission is already in trash and was not deleted again.',
   '此投稿目前不能編輯。': 'This submission cannot currently be edited.',
   '此投稿目前不能變更審核狀態。': 'This submission’s review status cannot currently be changed.',
-  每日取樣一次: 'Sampled once daily',
   比對資料載入失敗: 'Comparison data loading failed',
   '永久刪除垃圾桶項目失敗:': 'Failed to permanently delete trash item:',
   永久刪除失敗: 'Permanent deletion failed',
@@ -1492,10 +1491,10 @@ const en = {
   '相關性顯示僅適用於「全部」篩選。':
     'Relationship display is available only with the “All” filter.',
   '{count} 小時': '{count} hours',
-  '每 {count} 分鐘取樣一次': 'sampled every {count} minutes',
-  '每 {count} 小時取樣一次': 'sampled every {count} hours',
-  '統計最近 {range}內，{sampling}的同時在線使用者人數。':
-    'Concurrent users over the latest {range}, {sampling}.',
+  '統計最近 {hours} 小時內，每個 {minutes} 分鐘區間內曾在線的不同使用者人數。':
+    'Distinct users active at any time in each {minutes}-minute interval over the latest {hours} hours.',
+  '統計最近 {days} 日內，每個產品時區曆日曾在線的不同使用者人數。':
+    'Daily active users over the latest {days} product-timezone calendar days.',
   '統計最近 {hours} 小時內，每 {minutes} 分鐘區間的投稿筆數。':
     'Submissions over the latest {hours} hours, grouped into {minutes}-minute intervals.',
   '統計最近 {days} 日內，每日的投稿筆數。': 'Daily submissions over the latest {days} days.',
@@ -1517,10 +1516,12 @@ const en = {
   請先還原上層投稿: 'Restore the parent submission first',
   關聯考古題已永久刪除: 'The related exam was permanently deleted',
   '關聯考古題 #{id} 已不存在': 'Related exam #{id} no longer exists',
-  '{time} 取樣（區間 {start}–{end}）': '{time}, sampled over {start}–{end}',
-  '最近 {count} 小時的同時在線人數分布':
-    'Concurrent user distribution over the latest {count} hours',
-  '最近 {count} 日的同時在線人數分布': 'Concurrent user distribution over the latest {count} days',
+  '最近 {count} 小時的區間活躍使用者分布': 'Active users by interval over the latest {count} hours',
+  '最近 {count} 日的每日活躍使用者分布': 'Daily active users over the latest {count} days',
+  '{label}，{count} 位活躍使用者': '{label}, {count} active users',
+  '{label}：{count} 位活躍使用者': '{label}: {count} active users',
+  onlineStatisticsActiveUsersTooltip: '{label}: {count} active users',
+  onlineStatisticsNoHistoryTooltip: '{label}: no historical data',
   '{label} {count} 筆': '{label}: {count} items',
   '，': ', ',
   '{value} 年': 'Year {value}',
@@ -1655,6 +1656,8 @@ const zhTW = {
   '管理員權限（使用者管理欄位）': '管理員權限',
   '管理員投稿（身分標籤）': '管理員投稿',
   '首頁 slogan 永久刪除按鈕': '永久刪除',
+  onlineStatisticsActiveUsersTooltip: '{label}：{count} 位活躍使用者',
+  onlineStatisticsNoHistoryTooltip: '{label}：尚無歷史資料',
 }
 
 export const messages = {
