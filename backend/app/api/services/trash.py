@@ -344,6 +344,14 @@ def _permanent_deletion_storage() -> ExactVersionMinioAdapter:
     )
 
 
+def _permanent_deletion_storage_for_root(
+    item_type: TrashEntityType,
+) -> ExactVersionMinioAdapter | None:
+    if item_type not in _STORAGE_CAPABLE_DURABLE_DELETE_TYPES:
+        return None
+    return _permanent_deletion_storage()
+
+
 async def _lock_simple_trash_root(
     db: SQLModelAsyncSession,
     model,
@@ -2948,7 +2956,9 @@ async def _process_public_permanent_deletion_once(
         await process_one_permanent_deletion(
             db,
             operation_id=int(operation.id),
-            storage=_permanent_deletion_storage(),
+            storage=_permanent_deletion_storage_for_root(
+                TrashEntityType(operation.root_entity_type)
+            ),
         )
     except Exception as exc:
         await db.rollback()
@@ -3440,11 +3450,7 @@ async def _initiate_public_permanent_deletion(
                 detail="Trash item not found",
             )
         try:
-            storage = (
-                _permanent_deletion_storage()
-                if item_type in _STORAGE_CAPABLE_DURABLE_DELETE_TYPES
-                else None
-            )
+            storage = _permanent_deletion_storage_for_root(item_type)
             operation = await accept_permanent_deletion(
                 db,
                 root_entity_type=item_type,

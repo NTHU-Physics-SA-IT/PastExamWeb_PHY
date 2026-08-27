@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import os
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 from httpx import AsyncClient
+from minio import Minio
+from minio.versioningconfig import ENABLED, VersioningConfig
 from sqlalchemy import delete, func
 from sqlmodel import select
 
@@ -136,6 +140,25 @@ class FakeVersionedMinio:
         if self.unknown_once:
             self.unknown_once = False
             raise TimeoutError("synthetic unknown delete outcome")
+
+
+class UnknownOnceRealMinio:
+    def __init__(self, client: Minio) -> None:
+        self.client = client
+        self.remove_calls: list[tuple[str, str, str | None]] = []
+        self.raise_unknown_once = True
+
+    def __getattr__(self, name: str):
+        return getattr(self.client, name)
+
+    def remove_object(
+        self, bucket: str, key: str, version_id: str | None = None
+    ) -> None:
+        self.remove_calls.append((bucket, key, version_id))
+        self.client.remove_object(bucket, key, version_id=version_id)
+        if self.raise_unknown_once:
+            self.raise_unknown_once = False
+            raise TimeoutError("synthetic unknown outcome after real exact delete")
 
 
 class MutableLeaseClock:
@@ -1050,6 +1073,236 @@ async def test_bulk_overlapping_roots_use_one_operation_and_truthful_skip(
             submission_id=submission.id,
             event_id=event.id,
             notification_id=notification.id,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    not os.getenv("STAGE5FD_REAL_MINIO_ENDPOINT"),
+    reason="requires the task-owned Stage 5F-D MinIO container",
+)
+async def test_real_minio_mixed_bulk_user_root_and_stage5e_retention(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint = os.environ["STAGE5FD_REAL_MINIO_ENDPOINT"]
+    access_key = os.environ["STAGE5FD_REAL_MINIO_ACCESS_KEY"]
+    secret_key = os.environ["STAGE5FD_REAL_MINIO_SECRET_KEY"]
+    bucket_name = os.environ["STAGE5FD_REAL_MINIO_BUCKET"]
+    real_client = Minio(
+        endpoint,
+        access_key=access_key,
+        secret_key=secret_key,
+        secure=False,
+    )
+    if not real_client.bucket_exists(bucket_name):
+        real_client.make_bucket(bucket_name)
+    real_client.set_bucket_versioning(bucket_name, VersioningConfig(ENABLED))
+
+    owner = await make_user()
+    admin = await make_user(is_admin=True)
+    (
+        category,
+        course,
+        archive,
+        submission,
+        event,
+        owner_notification,
+    ) = await _create_deleted_pair(session_maker, requester_id=owner.id)
+    payload = b"stage5fd-real-versioned-object"
+    uploaded = real_client.put_object(
+        bucket_name,
+        archive.object_name,
+        BytesIO(payload),
+        len(payload),
+        content_type="application/pdf",
+    )
+    assert uploaded.version_id not in {None, "", "null"}
+
+    deleted_at = datetime(2026, 8, 27, 19, 35, tzinfo=UTC)
+    async with session_maker() as session:
+        stored_category = await session.get(CourseCategoryConfig, category.id)
+        stored_category.deleted_at = deleted_at
+        stored_category.deleted_by_id = admin.id
+        stored_category.pre_delete_is_active = True
+        stored_category.is_active = False
+        stored_owner = await session.get(User, owner.id)
+        stored_owner.deleted_at = deleted_at
+        stored_owner.deleted_by_id = admin.id
+        bulletin = Notification(
+            title="Stage 5F-D real completed item",
+            body="Task-owned real MinIO matrix",
+            deleted_at=deleted_at,
+            deleted_by_id=admin.id,
+        )
+        retained_notification = PersonalNotification(
+            user_id=admin.id,
+            notification_type="archive_submission_approved",
+            title="Retained real-matrix notification",
+            message="Retain after source deletion",
+            source_type="archive_submission",
+            source_id=submission.id,
+            dedupe_key=f"stage5fd-real-{uuid.uuid4().hex}",
+        )
+        session.add(bulletin)
+        session.add(retained_notification)
+        await session.commit()
+        await session.refresh(bulletin)
+        await session.refresh(retained_notification)
+
+    snapshot = [
+        TrashItem(
+            item_type=TrashEntityType.USER,
+            id=owner.id,
+            display_name="Pending user storage group",
+            deleted_at=deleted_at,
+        ),
+        TrashItem(
+            item_type=TrashEntityType.NOTIFICATION,
+            id=bulletin.id,
+            display_name="Completed DB-only item",
+            deleted_at=deleted_at,
+        ),
+        TrashItem(
+            item_type=TrashEntityType.COURSE_CATEGORY,
+            id=category.id,
+            display_name="Pre-accept blocked item",
+            deleted_at=deleted_at,
+        ),
+    ]
+    monkeypatch.setattr(trash, "list_trash_items", AsyncMock(return_value=snapshot))
+    observed_client = UnknownOnceRealMinio(real_client)
+    storage = ExactVersionMinioAdapter(observed_client, bucket_name=bucket_name)
+    monkeypatch.setattr(trash, "_permanent_deletion_storage", lambda: storage)
+    operation_ids: set[int] = set()
+    app.dependency_overrides[get_current_user] = _override_user(admin.id, is_admin=True)
+    try:
+        first = await client.delete("/trash/bulk")
+        assert first.status_code == 200
+        first_body = first.json()
+        assert {
+            key: first_body[key]
+            for key in (
+                "requested_count",
+                "completed_count",
+                "pending_count",
+                "manual_review_count",
+                "failed_count",
+                "skipped_count",
+            )
+        } == {
+            "requested_count": 3,
+            "completed_count": 1,
+            "pending_count": 1,
+            "manual_review_count": 0,
+            "failed_count": 1,
+            "skipped_count": 0,
+        }
+        first_by_type = {item["item_type"]: item for item in first_body["results"]}
+        assert first_by_type["user"]["outcome"] == "PENDING"
+        assert first_by_type["notification"]["outcome"] == "COMPLETED"
+        assert first_by_type["course_category"]["outcome"] == "FAILED"
+        user_operation_id = first_by_type["user"]["operation"]["operation_id"]
+        bulletin_operation_id = first_by_type["notification"]["operation"][
+            "operation_id"
+        ]
+        operation_ids.update({user_operation_id, bulletin_operation_id})
+        assert observed_client.remove_calls == [
+            (bucket_name, archive.object_name, uploaded.version_id)
+        ]
+
+        async with session_maker() as session:
+            object_record = (
+                await session.execute(
+                    select(PermanentDeletionObject).where(
+                        PermanentDeletionObject.operation_id == user_operation_id
+                    )
+                )
+            ).scalar_one()
+            assert object_record.version_id == uploaded.version_id
+            assert await session.get(User, owner.id) is not None
+
+        restore_user = await client.post(
+            "/trash/restore",
+            json={"item_type": TrashEntityType.USER, "item_id": owner.id},
+        )
+        assert restore_user.status_code == 409
+        assert restore_user.json()["detail"]["code"] == (
+            "permanent_deletion_already_accepted"
+        )
+
+        second = await client.delete("/trash/bulk")
+        assert second.status_code == 200
+        second_by_type = {item["item_type"]: item for item in second.json()["results"]}
+        assert second_by_type["user"]["outcome"] == "COMPLETED"
+        assert second_by_type["user"]["operation"]["operation_id"] == (
+            user_operation_id
+        )
+        assert second_by_type["notification"]["outcome"] == "COMPLETED"
+        assert second_by_type["notification"]["operation"]["operation_id"] == (
+            bulletin_operation_id
+        )
+        assert second_by_type["course_category"]["outcome"] == "FAILED"
+        assert observed_client.remove_calls == [
+            (bucket_name, archive.object_name, uploaded.version_id)
+        ]
+
+        restore_category = await client.post(
+            "/trash/restore",
+            json={
+                "item_type": TrashEntityType.COURSE_CATEGORY,
+                "item_id": category.id,
+            },
+        )
+        assert restore_category.status_code == 200
+        async with session_maker() as session:
+            assert await session.get(User, owner.id) is None
+            retained_event = await session.get(ArchiveSubmissionEvent, event.id)
+            assert retained_event is not None
+            assert retained_event.submission_id is None
+            assert retained_event.submitted_at == event.submitted_at
+            retained = await session.get(PersonalNotification, retained_notification.id)
+            assert retained is not None
+            assert retained.source_id == submission.id
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            if operation_ids:
+                await session.execute(
+                    delete(PermanentDeletionObject).where(
+                        PermanentDeletionObject.operation_id.in_(operation_ids)
+                    )
+                )
+                await session.execute(
+                    delete(PermanentDeletionTarget).where(
+                        PermanentDeletionTarget.operation_id.in_(operation_ids)
+                    )
+                )
+                await session.execute(
+                    delete(PermanentDeletionOperation).where(
+                        PermanentDeletionOperation.id.in_(operation_ids)
+                    )
+                )
+            await session.execute(
+                delete(PersonalNotification).where(
+                    PersonalNotification.id == retained_notification.id
+                )
+            )
+            await session.execute(
+                delete(Notification).where(Notification.id == bulletin.id)
+            )
+            await session.commit()
+        await _cleanup_pair_and_operation(
+            session_maker,
+            operation_id=None,
+            category_id=category.id,
+            course_id=course.id,
+            archive_id=archive.id,
+            submission_id=submission.id,
+            event_id=event.id,
+            notification_id=owner_notification.id,
         )
 
 
