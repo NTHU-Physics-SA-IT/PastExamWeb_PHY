@@ -295,4 +295,126 @@ test.describe('Admin › Trash Core UI', () => {
     ).toHaveCount(0)
     await captureEvidence(page, testInfo, 'trash-1440')
   })
+
+  test('keeps accepted deletion visible and reports success only after completion', async ({
+    page,
+  }) => {
+    let initiated = false
+    let completed = false
+    let statusReads = 0
+    const operation = {
+      operation_id: 81,
+      root_type: 'archive_submission',
+      root_id: 902,
+      status: 'ACCEPTED',
+      accepted_at: '2026-08-05T05:00:00Z',
+      completed_at: null,
+      next_attempt_at: '2026-08-05T05:00:00Z',
+      result_code: null,
+      can_retry: true,
+      can_inspect_reason: false,
+      restore_available: false,
+    }
+    const pendingItem = {
+      ...trashItems[1],
+      status: 'deleted',
+      canRestore: false,
+      canPermanentDelete: false,
+      permanent_deletion: operation,
+    }
+
+    await page.unroute('**/api/trash**')
+    await page.route('**/api/trash**', async (route) => {
+      const request = route.request()
+      const url = new URL(request.url())
+      if (request.method() === 'DELETE' && url.pathname.endsWith('/archive_submission/902')) {
+        initiated = true
+        await route.fulfill({
+          status: 202,
+          headers: JSON_HEADERS,
+          body: JSON.stringify(operation),
+        })
+        return
+      }
+      if (request.method() === 'GET' && url.pathname.endsWith('/permanent-deletions/81')) {
+        statusReads += 1
+        completed = true
+        await route.fulfill({
+          status: 200,
+          headers: JSON_HEADERS,
+          body: JSON.stringify({
+            ...operation,
+            status: 'COMPLETED',
+            completed_at: '2026-08-05T05:00:02Z',
+            result_code: 'completed',
+            can_retry: false,
+            can_inspect_reason: true,
+          }),
+        })
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        headers: JSON_HEADERS,
+        body: JSON.stringify(completed ? [] : initiated ? [pendingItem] : [trashItems[1]]),
+      })
+    })
+
+    await page.setViewportSize({ width: 390, height: 1000 })
+    await openAdminReviewCenter(page)
+    await clickWhenVisible(page.getByRole('tab', { name: '垃圾桶' }))
+    const pendingCard = page.locator('.trash-mobile-card').filter({ hasText: 'Allowed Trash Item' })
+    await clickWhenVisible(pendingCard.getByRole('button', { name: '永久刪除' }))
+    const confirmDialog = page.getByRole('alertdialog')
+    await clickWhenVisible(confirmDialog.locator('.p-confirmdialog-accept-button'))
+    await expect(pendingCard).toContainText('已刪除')
+    await expect(pendingCard).toContainText('永久刪除中…')
+    await expect(pendingCard.getByRole('button', { name: '還原' })).toHaveCount(0)
+    await expect(page.getByText('已永久刪除', { exact: true })).toHaveCount(0)
+
+    await expect.poll(() => statusReads).toBe(1)
+    await expect(page.getByText('已永久刪除', { exact: true })).toBeVisible()
+    await expect(pendingCard).toHaveCount(0)
+  })
+
+  test('verification-required truth never produces a final-success toast', async ({ page }) => {
+    const verification = {
+      operation_id: 82,
+      root_type: 'archive_submission',
+      root_id: 902,
+      status: 'VERIFICATION_REQUIRED',
+      accepted_at: '2026-08-05T05:00:00Z',
+      completed_at: null,
+      next_attempt_at: null,
+      result_code: 'delete_outcome_unknown',
+      can_retry: true,
+      can_inspect_reason: true,
+      restore_available: false,
+    }
+    await page.unroute('**/api/trash**')
+    await page.route('**/api/trash**', (route) =>
+      route.fulfill({
+        status: 200,
+        headers: JSON_HEADERS,
+        body: JSON.stringify([
+          {
+            ...trashItems[1],
+            status: 'deleted',
+            canRestore: false,
+            canPermanentDelete: false,
+            permanent_deletion: verification,
+          },
+        ]),
+      })
+    )
+
+    await page.setViewportSize({ width: 390, height: 1000 })
+    await openAdminReviewCenter(page)
+    await clickWhenVisible(page.getByRole('tab', { name: '垃圾桶' }))
+    const card = page.locator('.trash-mobile-card').filter({ hasText: 'Allowed Trash Item' })
+    await expect(card).toContainText('永久刪除狀態確認中…')
+    await expect(card.getByRole('button', { name: '還原' })).toHaveCount(0)
+    await expect(card.getByRole('button', { name: '重新嘗試永久刪除' })).toBeVisible()
+    await expect(page.getByText('已永久刪除', { exact: true })).toHaveCount(0)
+  })
 })
