@@ -18,8 +18,7 @@ const buildOnlinePoints = () => {
   return Array.from({ length: 144 }, (_, index) => ({
     start: new Date(start + index * 600_000).toISOString(),
     end: new Date(start + (index + 1) * 600_000).toISOString(),
-    at: new Date(start + index * 600_000).toISOString(),
-    count: index === 20 ? 1 : 0,
+    active_users: index === 20 ? 1 : 0,
     has_data: true,
   }))
 }
@@ -54,6 +53,34 @@ const expectSameRow = async (locator: import('@playwright/test').Locator) => {
     elements.map((element) => Math.round(element.getBoundingClientRect().top))
   )
   expect(new Set(tops).size).toBe(1)
+}
+
+const expectStatisticsActionsRightAligned = async (card: import('@playwright/test').Locator) => {
+  const boxes = await card.evaluate((element) => {
+    const heading = element.querySelector('.user-insights__heading')
+    const actions = element.querySelector('.user-insights__actions')
+    const selector = element.querySelector('.user-insights__switch')
+    const toggle = element.querySelector('.user-insights__toggle')
+    if (!heading || !actions || !selector || !toggle) return null
+    const rect = (target: Element) => {
+      const value = target.getBoundingClientRect()
+      return { top: value.top, right: value.right }
+    }
+    return {
+      heading: rect(heading),
+      actions: rect(actions),
+      selector: rect(selector),
+      toggle: rect(toggle),
+    }
+  })
+  expect(boxes).not.toBeNull()
+  expect(Math.abs((boxes?.actions.right ?? 0) - (boxes?.heading.right ?? 0))).toBeLessThanOrEqual(1)
+  expect(Math.abs((boxes?.toggle.right ?? 0) - (boxes?.actions.right ?? 0))).toBeLessThanOrEqual(1)
+  if ((boxes?.toggle.top ?? 0) > (boxes?.selector.top ?? 0) + 1) {
+    expect(
+      Math.abs((boxes?.selector.right ?? 0) - (boxes?.actions.right ?? 0))
+    ).toBeLessThanOrEqual(1)
+  }
 }
 
 test.use({
@@ -244,6 +271,35 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
     await expectNoHorizontalOverflow(page)
   }
 
+  for (const width of [797, 908, 964]) {
+    await page.setViewportSize({ width, height: 900 })
+    for (const dark of [false, true]) {
+      await page.evaluate(
+        (enabled) => document.documentElement.classList.toggle('dark', enabled),
+        dark
+      )
+      await expectStatisticsActionsRightAligned(userInsightsCard)
+    }
+  }
+
+  await page.getByRole('button', { name: '切換為英文' }).click()
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en')
+  const englishUserInsightsCard = page
+    .locator('.admin-insights-card')
+    .filter({ has: page.locator('#user-insights-title') })
+  for (const width of [797, 908, 964]) {
+    await page.setViewportSize({ width, height: 900 })
+    for (const dark of [false, true]) {
+      await page.evaluate(
+        (enabled) => document.documentElement.classList.toggle('dark', enabled),
+        dark
+      )
+      await expectStatisticsActionsRightAligned(englishUserInsightsCard)
+    }
+  }
+  await page.getByRole('button', { name: 'Switch to Chinese' }).click()
+  await expect(page.locator('html')).toHaveAttribute('lang', 'zh-TW')
+
   await page.setViewportSize({ width: 393, height: 852 })
 
   const modeSwitch = page.locator('.user-insights__switch--three')
@@ -392,6 +448,31 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
     await expectSameRow(reviewSummaryCards)
     await expectSameRow(reviewRangeButtons)
     await expectNoHorizontalOverflow(page)
+  }
+  for (const width of [797, 908, 964]) {
+    await page.setViewportSize({ width, height: 900 })
+    for (const dark of [false, true]) {
+      await page.evaluate(
+        (enabled) => document.documentElement.classList.toggle('dark', enabled),
+        dark
+      )
+      await expectStatisticsActionsRightAligned(reviewInsightsCard)
+    }
+  }
+  await page.getByRole('button', { name: '切換為英文' }).click()
+  await expect(page.locator('html')).toHaveAttribute('lang', 'en')
+  const englishReviewInsightsCard = page
+    .locator('.admin-insights-card')
+    .filter({ has: page.locator('#review-submission-insights-title') })
+  for (const width of [797, 908, 964]) {
+    await page.setViewportSize({ width, height: 900 })
+    for (const dark of [false, true]) {
+      await page.evaluate(
+        (enabled) => document.documentElement.classList.toggle('dark', enabled),
+        dark
+      )
+      await expectStatisticsActionsRightAligned(englishReviewInsightsCard)
+    }
   }
   await expectNoHorizontalOverflow(page)
 })

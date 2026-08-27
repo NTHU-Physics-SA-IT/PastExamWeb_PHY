@@ -899,14 +899,7 @@
                             :key="bucket.key"
                             class="user-login-column-chart__item"
                             tabindex="0"
-                            :aria-label="
-                              bucket.has_data
-                                ? $t('{label}，{count} 人在線', {
-                                    label: bucket.fullLabel,
-                                    count: bucket.count,
-                                  })
-                                : $t('{label}，尚無歷史資料', { label: bucket.fullLabel })
-                            "
+                            :aria-label="formatOnlineStatisticsBucketTooltip(bucket)"
                           >
                             <span
                               class="user-login-column-chart__bar"
@@ -916,14 +909,7 @@
                               }"
                             ></span>
                             <span class="user-login-column-chart__tooltip" role="tooltip">
-                              {{
-                                bucket.has_data
-                                  ? $t('{label}：{count} 人在線', {
-                                      label: bucket.fullLabel,
-                                      count: bucket.count,
-                                    })
-                                  : $t('{label}：尚無歷史資料', { label: bucket.fullLabel })
-                              }}
+                              {{ formatOnlineStatisticsBucketTooltip(bucket) }}
                             </span>
                           </div>
                         </div>
@@ -4965,7 +4951,9 @@ import { formatRelativeOrAbsoluteDateTime } from '../utils/time'
 import {
   PRODUCT_TIME_ZONE,
   PRODUCT_TIME_ZONE_LABEL,
+  formatProductDate,
   formatProductDateTime,
+  getProductTimeParts,
 } from '../utils/productTimezone'
 import { buildTemporalTicks, resolveTemporalTickLayout } from '../utils/temporalChart'
 import {
@@ -5169,6 +5157,16 @@ const LOGIN_HOUR_BUCKET_CONFIG = {
   72: { bucketMinutes: 30, bucketCount: 144, labelEvery: 18 },
 }
 const LOGIN_DATE_BUCKET_CONFIG = {
+  7: { bucketMinutes: 24 * 60, bucketCount: 7, labelEvery: 1 },
+  30: { bucketMinutes: 24 * 60, bucketCount: 30, labelEvery: 5 },
+  90: { bucketMinutes: 24 * 60, bucketCount: 90, labelEvery: 15 },
+}
+const REVIEW_SUBMISSION_HOUR_BUCKET_CONFIG = {
+  24: { bucketMinutes: 10, bucketCount: 144, labelEvery: 12 },
+  48: { bucketMinutes: 20, bucketCount: 144, labelEvery: 18 },
+  72: { bucketMinutes: 30, bucketCount: 144, labelEvery: 18 },
+}
+const REVIEW_SUBMISSION_DATE_BUCKET_CONFIG = {
   7: { bucketMinutes: 4 * 60, bucketCount: 42, labelEvery: 6 },
   30: { bucketMinutes: 12 * 60, bucketCount: 60, labelEvery: 10 },
   90: { bucketMinutes: 24 * 60, bucketCount: 90, labelEvery: 15 },
@@ -6277,18 +6275,15 @@ const activeLoginBucketConfig = computed(() =>
     : LOGIN_DATE_BUCKET_CONFIG[loginRangeDays.value]
 )
 const loginDistributionDescription = computed(() => {
-  const range =
-    userInsightsView.value === 'login-hour'
-      ? t('{count} 小時', { count: loginRangeHours.value })
-      : t('{count} 日', { count: loginRangeDays.value })
-  const bucketMinutes = activeLoginBucketConfig.value.bucketMinutes
-  const sampling =
-    bucketMinutes === 24 * 60
-      ? t('每日取樣一次')
-      : bucketMinutes < 60
-        ? t('每 {count} 分鐘取樣一次', { count: bucketMinutes })
-        : t('每 {count} 小時取樣一次', { count: bucketMinutes / 60 })
-  return t('統計最近 {range}內，{sampling}的同時在線使用者人數。', { range, sampling })
+  if (userInsightsView.value === 'login-hour') {
+    return t('統計最近 {hours} 小時內，每個 {minutes} 分鐘區間內曾在線的不同使用者人數。', {
+      hours: loginRangeHours.value,
+      minutes: activeLoginBucketConfig.value.bucketMinutes,
+    })
+  }
+  return t('統計最近 {days} 日內，每個產品時區曆日曾在線的不同使用者人數。', {
+    days: loginRangeDays.value,
+  })
 })
 
 const loginRangeOptions = computed(() =>
@@ -6325,8 +6320,8 @@ const buildIntegerAxis = (buckets) => {
 
 const activeReviewSubmissionBucketConfig = computed(() =>
   reviewSubmissionView.value === 'time'
-    ? LOGIN_HOUR_BUCKET_CONFIG[reviewSubmissionRangeHours.value]
-    : LOGIN_DATE_BUCKET_CONFIG[reviewSubmissionRangeDays.value]
+    ? REVIEW_SUBMISSION_HOUR_BUCKET_CONFIG[reviewSubmissionRangeHours.value]
+    : REVIEW_SUBMISSION_DATE_BUCKET_CONFIG[reviewSubmissionRangeDays.value]
 )
 const reviewSubmissionRangeOptions = computed(() =>
   reviewSubmissionView.value === 'time' ? LOGIN_HOUR_RANGE_OPTIONS : LOGIN_DATE_RANGE_OPTIONS
@@ -6427,17 +6422,12 @@ const loginChartData = computed(() => {
     ...tickLayout,
   })
   const buckets = source.map((point, index) => {
-    const start = new Date(point.start)
-    const end = new Date(point.end)
     return {
       ...point,
+      count: point.active_users,
       ...ticks[index],
-      key: point.at,
-      fullLabel: t('{time} 取樣（區間 {start}–{end}）', {
-        time: formatProductDateTime(new Date(point.at)),
-        start: formatProductDateTime(start),
-        end: formatProductDateTime(end),
-      }),
+      key: point.start,
+      fullLabel: formatOnlineStatisticsBucketLabel(point, mode),
     }
   })
   const axis = buildIntegerAxis(buckets)
@@ -6449,10 +6439,27 @@ const loginChartData = computed(() => {
     buckets,
     ariaLabel:
       mode === 'login-hour'
-        ? t('最近 {count} 小時的同時在線人數分布', { count: loginRangeHours.value })
-        : t('最近 {count} 日的同時在線人數分布', { count: loginRangeDays.value }),
+        ? t('最近 {count} 小時的區間活躍使用者分布', { count: loginRangeHours.value })
+        : t('最近 {count} 日的每日活躍使用者分布', { count: loginRangeDays.value }),
   }
 })
+
+const formatOnlineStatisticsBucketLabel = (point, mode) => {
+  if (mode === 'login-date') {
+    return formatProductDate(point.start, { includeYear: true })
+  }
+  const start = getProductTimeParts(point.start)
+  const end = getProductTimeParts(point.end)
+  return `${start.hour}:${start.minute}–${end.hour}:${end.minute}`
+}
+
+const formatOnlineStatisticsBucketTooltip = (bucket) =>
+  bucket.has_data
+    ? t('onlineStatisticsActiveUsersTooltip', {
+        label: bucket.fullLabel,
+        count: bucket.count,
+      })
+    : t('onlineStatisticsNoHistoryTooltip', { label: bucket.fullLabel })
 
 const onlineStatisticsSummary = computed(() =>
   onlineStatistics.value
@@ -7531,9 +7538,8 @@ const loadOnlineStatistics = async () => {
         (point) =>
           !point?.start ||
           !point?.end ||
-          !point?.at ||
-          !Number.isInteger(point?.count) ||
-          point.count < 0 ||
+          !Number.isInteger(point?.active_users) ||
+          point.active_users < 0 ||
           typeof point.has_data !== 'boolean'
       )
     ) {
@@ -10367,6 +10373,12 @@ onBeforeUnmount(() => {
   gap: 0.35rem;
 }
 
+.user-insights__actions {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
+}
+
 .user-insights__switch,
 .user-insights__range {
   padding: 0.16rem;
@@ -10401,9 +10413,11 @@ onBeforeUnmount(() => {
 
 .user-insights__toggle {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 0.3rem;
   min-height: 2rem;
+  margin-inline-start: 0;
   padding: 0.35rem 0.5rem;
 }
 
@@ -15532,7 +15546,8 @@ onBeforeUnmount(() => {
 
 @media (min-width: 641px) and (max-width: 871px) {
   .user-insights__actions {
-    flex: 0 1 auto;
+    flex: 1 1 100%;
+    width: 100%;
     max-width: 100%;
     min-width: 0;
     margin-inline-start: auto;

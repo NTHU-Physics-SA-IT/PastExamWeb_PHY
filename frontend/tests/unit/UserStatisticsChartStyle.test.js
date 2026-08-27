@@ -88,7 +88,7 @@ describe('user statistics chart layout styles', () => {
     )
   })
 
-  it.each([641, 700, 768, 820, 871])(
+  it.each([641, 700, 768, 797, 820, 871])(
     'covers the %spx intermediate width with shared right-aligned actions',
     (width) => {
       expect(width).toBeGreaterThanOrEqual(641)
@@ -101,6 +101,20 @@ describe('user statistics chart layout styles', () => {
       )
     }
   )
+
+  it.each([908, 964])('keeps the expand control at the far right at %spx', (width) => {
+    expect(width).toBeGreaterThan(899)
+    expect(adminSource).toMatch(
+      /\.user-insights__actions\s*\{[^}]*flex: 1 1 auto;[^}]*min-width: 0;[^}]*justify-content: flex-end;/s
+    )
+    expect(adminSource).toMatch(
+      /\.user-insights__toggle\s*\{[^}]*flex: 0 0 auto;[^}]*margin-inline-start: 0;/s
+    )
+    expect(adminSource.match(/class="user-insights__actions"/g)).toHaveLength(2)
+    const statisticsActionRules =
+      adminSource.match(/\.user-insights__(?:actions|toggle)\s*\{[^}]*\}/g) ?? []
+    expect(statisticsActionRules.every((rule) => !rule.includes('dark'))).toBe(true)
+  })
 
   it.each([320, 344, 375, 393, 399, 420, 437, 438, 640])(
     'uses complete segmented grids at the %spx narrow width',

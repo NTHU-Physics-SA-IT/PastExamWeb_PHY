@@ -9,9 +9,12 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.api.services.presence import (
     ONLINE_TIMEOUT_SECONDS,
     allocate_interval_durations,
+    calculate_concurrency_summary,
+    count_users_overlapping_interval,
     distinct_online_user_ids,
     load_presence_sessions,
     merge_presence_intervals,
+    merge_presence_intervals_by_user,
 )
 from app.core.config import settings
 from app.db.session import get_session
@@ -48,8 +51,8 @@ ONLINE_RANGE_CONFIG = {
     "24h": (10, 144),
     "48h": (20, 144),
     "72h": (30, 144),
-    "7d": (4 * 60, 42),
-    "30d": (12 * 60, 60),
+    "7d": (24 * 60, 7),
+    "30d": (24 * 60, 30),
     "90d": (24 * 60, 90),
 }
 USER_ONLINE_DURATION_DAYS = {7, 30, 90}
@@ -166,13 +169,48 @@ async def get_users(
     ]
 
 
-def _align_utc_bucket(value: datetime, bucket_minutes: int) -> datetime:
-    value_utc = _normalize_timestamp(value).astimezone(UTC)
-    minutes = value_utc.hour * 60 + value_utc.minute
+def _product_date(value: datetime) -> date:
+    return _normalize_timestamp(value).astimezone(PRODUCT_TIMEZONE).date()
+
+
+def _product_midnight_utc(value: date) -> datetime:
+    return datetime.combine(value, time.min, tzinfo=PRODUCT_TIMEZONE).astimezone(UTC)
+
+
+def _align_product_bucket(value: datetime, bucket_minutes: int) -> datetime:
+    value_local = _normalize_timestamp(value).astimezone(PRODUCT_TIMEZONE)
+    minutes = value_local.hour * 60 + value_local.minute
     aligned = (minutes // bucket_minutes) * bucket_minutes
-    return value_utc.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
-        minutes=aligned
+    local_midnight = datetime.combine(
+        value_local.date(), time.min, tzinfo=PRODUCT_TIMEZONE
     )
+    return (local_midnight + timedelta(minutes=aligned)).astimezone(UTC)
+
+
+def _online_statistics_buckets(
+    range_key: str, now: datetime
+) -> list[tuple[datetime, datetime]]:
+    bucket_minutes, bucket_count = ONLINE_RANGE_CONFIG[range_key]
+    now_utc = _normalize_timestamp(now).astimezone(UTC)
+    if range_key.endswith("d"):
+        first_date = _product_date(now_utc) - timedelta(days=bucket_count - 1)
+        return [
+            (
+                _product_midnight_utc(first_date + timedelta(days=index)),
+                _product_midnight_utc(first_date + timedelta(days=index + 1)),
+            )
+            for index in range(bucket_count)
+        ]
+
+    current_start = _align_product_bucket(now_utc, bucket_minutes)
+    first_start = current_start - timedelta(
+        minutes=(bucket_count - 1) * bucket_minutes
+    )
+    bucket_size = timedelta(minutes=bucket_minutes)
+    return [
+        (first_start + index * bucket_size, first_start + (index + 1) * bucket_size)
+        for index in range(bucket_count)
+    ]
 
 
 def build_online_statistics(
@@ -182,45 +220,60 @@ def build_online_statistics(
     now: datetime,
     history_started_at: datetime | None,
 ) -> OnlineStatisticsRead:
-    bucket_minutes, bucket_count = ONLINE_RANGE_CONFIG[range_key]
+    bucket_minutes, _ = ONLINE_RANGE_CONFIG[range_key]
     now_utc = _normalize_timestamp(now).astimezone(UTC)
-    current_start = _align_utc_bucket(now_utc, bucket_minutes)
-    first_start = current_start - timedelta(minutes=(bucket_count - 1) * bucket_minutes)
-    points = []
+    buckets = _online_statistics_buckets(range_key, now_utc)
+    range_start = buckets[0][0]
+    observed_end = min(now_utc, buckets[-1][1])
     normalized_history_start = (
         _normalize_timestamp(history_started_at).astimezone(UTC)
         if history_started_at
         else None
     )
-    for index in range(bucket_count):
-        start = first_start + timedelta(minutes=index * bucket_minutes)
-        end = start + timedelta(minutes=bucket_minutes)
-        sample_at = now_utc if index == bucket_count - 1 else end
-        points.append(
-            OnlineStatisticsPoint(
-                start=start,
-                end=end,
-                at=sample_at,
-                count=len(distinct_online_user_ids(sessions, sample_at)),
-                has_data=bool(
-                    normalized_history_start and sample_at >= normalized_history_start
-                ),
-            )
+    observed_start = (
+        max(range_start, normalized_history_start)
+        if normalized_history_start and normalized_history_start < observed_end
+        else None
+    )
+    intervals_by_user = merge_presence_intervals_by_user(
+        sessions,
+        range_start=range_start,
+        range_end=observed_end,
+        now=now_utc,
+    )
+    points = [
+        OnlineStatisticsPoint(
+            start=start,
+            end=end,
+            active_users=count_users_overlapping_interval(
+                intervals_by_user,
+                interval_start=start,
+                interval_end=min(end, observed_end),
+            ),
+            has_data=bool(
+                observed_start and start < observed_end and end > observed_start
+            ),
         )
-    available_counts = [point.count for point in points if point.has_data]
+        for start, end in buckets
+    ]
+    peak_online, average_online = (
+        calculate_concurrency_summary(
+            intervals_by_user,
+            observed_start=observed_start,
+            observed_end=observed_end,
+        )
+        if observed_start
+        else (0, 0)
+    )
     return OnlineStatisticsRead(
         range=range_key,
         bucket_minutes=bucket_minutes,
-        timezone="UTC",
+        timezone=settings.PRODUCT_TIMEZONE,
         online_timeout_seconds=ONLINE_TIMEOUT_SECONDS,
-        current_online=points[-1].count if points and points[-1].has_data else 0,
-        peak_online=max(available_counts, default=0),
-        average_online=(
-            round(sum(available_counts) / len(available_counts), 2)
-            if available_counts
-            else 0
-        ),
-        history_started_at=history_started_at,
+        current_online=len(distinct_online_user_ids(sessions, now_utc)),
+        peak_online=peak_online,
+        average_online=round(average_online, 2),
+        history_started_at=normalized_history_start,
         points=points,
     )
 
@@ -241,9 +294,8 @@ async def get_online_statistics(
         )
 
     now_utc = datetime.now(UTC)
-    bucket_minutes, bucket_count = ONLINE_RANGE_CONFIG[range_key]
-    current_start = _align_utc_bucket(now_utc, bucket_minutes)
-    range_start = current_start - timedelta(minutes=(bucket_count - 1) * bucket_minutes)
+    buckets = _online_statistics_buckets(range_key, now_utc)
+    range_start = buckets[0][0]
     sessions = await load_presence_sessions(
         db,
         range_start=range_start,
@@ -313,16 +365,6 @@ def build_user_online_duration(
             )
             for (start, end), duration in zip(buckets, durations, strict=True)
         ],
-    )
-
-
-def _product_date(value: datetime) -> date:
-    return _normalize_timestamp(value).astimezone(PRODUCT_TIMEZONE).date()
-
-
-def _product_midnight_utc(value: date) -> datetime:
-    return datetime.combine(value, time.min, tzinfo=PRODUCT_TIMEZONE).astimezone(
-        UTC
     )
 
 

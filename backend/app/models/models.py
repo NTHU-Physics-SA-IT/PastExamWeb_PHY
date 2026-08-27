@@ -1544,8 +1544,7 @@ class AdminUserRead(UserRead):
 class OnlineStatisticsPoint(BaseModel):
     start: datetime
     end: datetime
-    at: datetime
-    count: int
+    active_users: int
     has_data: bool
 
 

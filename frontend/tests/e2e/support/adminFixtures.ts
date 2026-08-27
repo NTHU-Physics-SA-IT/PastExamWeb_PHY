@@ -294,8 +294,7 @@ export const mockAdminUserEndpoints = async (
       return {
         start: start.toISOString(),
         end: end.toISOString(),
-        at: end.toISOString(),
-        count: 0,
+        active_users: 0,
         has_data: true,
       }
     })
