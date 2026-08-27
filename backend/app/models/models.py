@@ -2819,6 +2819,20 @@ class ArchiveSubmissionUpdate(BaseModel):
     review_note: str | None = None
 
 
+class PermanentDeletionRead(BaseModel):
+    operation_id: int
+    root_type: TrashEntityType
+    root_id: int
+    status: PermanentDeletionStatus
+    accepted_at: datetime
+    completed_at: datetime | None = None
+    next_attempt_at: datetime | None = None
+    result_code: str | None = None
+    can_retry: bool = False
+    can_inspect_reason: bool = False
+    restore_available: bool = False
+
+
 class TrashItem(BaseModel):
     item_type: TrashEntityType
     id: int
@@ -2858,3 +2872,4 @@ class TrashItem(BaseModel):
     canRestore: bool | None = None
     canPermanentDelete: bool | None = None
     dependencies: list[str] = []
+    permanent_deletion: PermanentDeletionRead | None = None

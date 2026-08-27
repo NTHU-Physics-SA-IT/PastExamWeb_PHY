@@ -1,7 +1,9 @@
-"""Internal PostgreSQL-authoritative permanent-deletion saga.
+"""PostgreSQL-authoritative permanent-deletion saga.
 
-Nothing in this module is wired to a public route.  Acceptance, processing,
-and finalization are explicit internal primitives for later orchestration.
+The Admin Trash single-item API activates these primitives only for the sealed
+Stage 5F-C roots. Processing and finalization remain bounded service-owned
+operations; bulk and recurring orchestration are still outside this module's
+public activation.
 """
 
 from __future__ import annotations
