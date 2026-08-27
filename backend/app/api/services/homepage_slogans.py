@@ -151,8 +151,8 @@ async def list_homepage_slogans(
     offset: int = Query(default=0, ge=0),
     slogan_status: HomepageSloganStatus | None = Query(default=None, alias="status"),
     search: str | None = Query(default=None, max_length=80),
-    sort_by: str = Query(default="created_at"),
-    sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
+    sort_by: str = Query(default="status"),
+    sort_order: str = Query(default="asc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(get_session),
     current_user: UserRoles = Depends(get_current_user),
 ):
@@ -219,9 +219,17 @@ async def list_homepage_slogans(
     if sort_column is None:
         raise HTTPException(status_code=422, detail="Invalid slogan sort field")
     ordering = sort_column.asc() if sort_order == "asc" else sort_column.desc()
+    secondary_ordering = (
+        (
+            HomepageSloganSubmission.created_at.desc(),
+            HomepageSloganSubmission.id.desc(),
+        )
+        if sort_by == "status"
+        else (HomepageSloganSubmission.id.desc(),)
+    )
     rows = (
         await db.execute(
-            statement.order_by(ordering, HomepageSloganSubmission.id.desc())
+            statement.order_by(ordering, *secondary_ordering)
             .limit(limit)
             .offset(offset)
         )
