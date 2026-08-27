@@ -2,7 +2,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from minio.error import S3Error
 from pydantic import BaseModel
 from sqlalchemy import String, and_, cast, func, or_, select
@@ -41,6 +41,9 @@ from app.models.models import (
     CourseCategoryConfig,
     CourseSubmission,
     Notification,
+    PermanentDeletionOperation,
+    PermanentDeletionRead,
+    PermanentDeletionStatus,
     SubmissionStatus,
     SystemIssueReport,
     TrashEntityType,
@@ -64,6 +67,15 @@ from app.services.archive_submission_links import (
     ensure_archive_submission_link_available,
 )
 from app.services.course_lifecycle_locks import CourseLifecycleOperation
+from app.services.permanent_deletion import (
+    PermanentDeletionError,
+    accept_permanent_deletion,
+    process_one_permanent_deletion,
+)
+from app.services.permanent_deletion_storage import (
+    ExactVersionMinioAdapter,
+    StorageSafetyError,
+)
 from app.utils.auth import get_current_user
 from app.utils.exception_logging import redacted_exc_info
 from app.utils.storage import get_minio_client
@@ -99,6 +111,132 @@ class TrashActionAuthority:
     dependencies: tuple[str, ...] = ()
     can_restore: bool = True
     can_permanent_delete: bool = True
+
+
+_DURABLE_SINGLE_DELETE_TYPES = frozenset(
+    {
+        TrashEntityType.ARCHIVE,
+        TrashEntityType.ARCHIVE_SUBMISSION,
+        TrashEntityType.COURSE,
+    }
+)
+
+
+def _permanent_deletion_idempotency_key(
+    item_type: TrashEntityType, item_id: int
+) -> str:
+    return f"trash-root:{item_type.value}:{item_id}"
+
+
+def _to_permanent_deletion_read(
+    operation: PermanentDeletionOperation, *, now: datetime | None = None
+) -> PermanentDeletionRead:
+    timestamp = now or datetime.now(UTC)
+    operation_status = PermanentDeletionStatus(operation.status)
+    can_retry = operation_status in {
+        PermanentDeletionStatus.ACCEPTED,
+        PermanentDeletionStatus.VERIFICATION_REQUIRED,
+    } or (
+        operation_status == PermanentDeletionStatus.RETRYABLE_FAILED
+        and operation.next_attempt_at is not None
+        and operation.next_attempt_at <= timestamp
+    )
+    return PermanentDeletionRead(
+        operation_id=int(operation.id),
+        root_type=TrashEntityType(operation.root_entity_type),
+        root_id=operation.root_entity_id,
+        status=operation_status,
+        accepted_at=operation.accepted_at,
+        completed_at=operation.completed_at,
+        next_attempt_at=operation.next_attempt_at,
+        result_code=operation.result_code,
+        can_retry=can_retry,
+        can_inspect_reason=bool(operation.result_code),
+        restore_available=False,
+    )
+
+
+async def _permanent_deletion_for_root(
+    db: SQLModelAsyncSession,
+    *,
+    item_type: TrashEntityType,
+    item_id: int,
+) -> PermanentDeletionOperation | None:
+    return (
+        await db.execute(
+            select(PermanentDeletionOperation).where(
+                PermanentDeletionOperation.idempotency_key
+                == _permanent_deletion_idempotency_key(item_type, item_id)
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _apply_permanent_deletion_projections(
+    db: SQLModelAsyncSession, items: list[TrashItem]
+) -> None:
+    relevant = {
+        (item.item_type.value, item.id)
+        for item in items
+        if item.item_type in _DURABLE_SINGLE_DELETE_TYPES
+    }
+    if not relevant:
+        return
+    operations = (
+        (
+            await db.execute(
+                select(PermanentDeletionOperation).where(
+                    PermanentDeletionOperation.root_entity_type.in_(
+                        [item.value for item in _DURABLE_SINGLE_DELETE_TYPES]
+                    ),
+                    PermanentDeletionOperation.status
+                    != PermanentDeletionStatus.COMPLETED,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_root = {
+        (operation.root_entity_type, operation.root_entity_id): operation
+        for operation in operations
+        if (operation.root_entity_type, operation.root_entity_id) in relevant
+    }
+    now = datetime.now(UTC)
+    for item in items:
+        operation = by_root.get((item.item_type.value, item.id))
+        if operation is None:
+            continue
+        item.permanent_deletion = _to_permanent_deletion_read(operation, now=now)
+        item.canRestore = False
+        item.canPermanentDelete = False
+
+
+async def _reject_restore_after_acceptance(
+    db: SQLModelAsyncSession,
+    *,
+    item_type: TrashEntityType,
+    item_id: int,
+) -> None:
+    operation = await _permanent_deletion_for_root(
+        db, item_type=item_type, item_id=item_id
+    )
+    if operation is None or operation.status == PermanentDeletionStatus.COMPLETED:
+        return
+    await db.rollback()
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "permanent_deletion_already_accepted",
+            "message": "永久刪除已接受，無法還原",
+        },
+    )
+
+
+def _permanent_deletion_storage() -> ExactVersionMinioAdapter:
+    return ExactVersionMinioAdapter(
+        get_minio_client(), bucket_name=settings.MINIO_BUCKET_NAME
+    )
 
 
 def _build_trash_action_authority(
@@ -2177,8 +2315,10 @@ async def list_trash_items(
                     exc_info=redacted_exc_info(exc),
                 )
 
+    deduped_items = _dedupe_trash_items(items)
+    await _apply_permanent_deletion_projections(db, deduped_items)
     return sorted(
-        _dedupe_trash_items(items),
+        deduped_items,
         key=lambda item: item.deleted_at or datetime.min.replace(tzinfo=UTC),
         reverse=True,
     )
@@ -2363,6 +2503,11 @@ async def restore_trash_item(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Course not found",
             )
+        await _reject_restore_after_acceptance(
+            db,
+            item_type=TrashEntityType.COURSE,
+            item_id=payload.item_id,
+        )
         category_ids = locked_course_plan.plan.lock_plan.ids_for(
             archive_lifecycle_locks.LifecycleResourceClass.COURSE_CATEGORY
         )
@@ -2493,6 +2638,11 @@ async def restore_trash_item(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Archive not found"
             )
+        await _reject_restore_after_acceptance(
+            db,
+            item_type=TrashEntityType.ARCHIVE,
+            item_id=payload.item_id,
+        )
 
         parent_submission = next(
             (
@@ -2566,6 +2716,11 @@ async def restore_trash_item(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
             )
+        await _reject_restore_after_acceptance(
+            db,
+            item_type=TrashEntityType.ARCHIVE_SUBMISSION,
+            item_id=payload.item_id,
+        )
         if submission.lifecycle_reason == LIFECYCLE_LINKED_ARCHIVE_PERMANENTLY_DELETED:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -2629,6 +2784,96 @@ async def restore_trash_item(
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported trash item type"
     )
+
+
+async def _get_public_permanent_deletion_operation(
+    db: SQLModelAsyncSession, operation_id: int
+) -> PermanentDeletionOperation:
+    operation = await db.get(PermanentDeletionOperation, operation_id)
+    if operation is None or operation.root_entity_type not in {
+        item.value for item in _DURABLE_SINGLE_DELETE_TYPES
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Permanent deletion operation not found",
+        )
+    return operation
+
+
+async def _process_public_permanent_deletion_once(
+    db: SQLModelAsyncSession, operation: PermanentDeletionOperation
+) -> PermanentDeletionOperation:
+    try:
+        await process_one_permanent_deletion(
+            db,
+            operation_id=int(operation.id),
+            storage=_permanent_deletion_storage(),
+        )
+    except Exception as exc:
+        await db.rollback()
+        logger.error(
+            "Bounded permanent-delete progression failed for operation %s",
+            operation.id,
+            exc_info=redacted_exc_info(exc),
+        )
+    refreshed = await db.get(PermanentDeletionOperation, int(operation.id))
+    if refreshed is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "accepted_operation_unavailable",
+                "message": "永久刪除狀態暫時無法確認",
+            },
+        )
+    return refreshed
+
+
+@router.get("/permanent-deletions/{operation_id}", response_model=PermanentDeletionRead)
+async def get_permanent_deletion_status(
+    operation_id: int,
+    current_user=Depends(get_current_user),
+    db: SQLModelAsyncSession = Depends(get_session),
+):
+    if not getattr(current_user, "is_admin", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
+    operation = await _get_public_permanent_deletion_operation(db, operation_id)
+    return _to_permanent_deletion_read(operation)
+
+
+@router.post(
+    "/permanent-deletions/{operation_id}/retry",
+    response_model=PermanentDeletionRead,
+)
+async def retry_permanent_deletion(
+    operation_id: int,
+    response: Response,
+    current_user=Depends(get_current_user),
+    db: SQLModelAsyncSession = Depends(get_session),
+):
+    if not getattr(current_user, "is_admin", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
+        )
+    operation = await _get_public_permanent_deletion_operation(db, operation_id)
+    current = _to_permanent_deletion_read(operation)
+    if not current.can_retry:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "permanent_deletion_retry_not_available",
+                "message": "目前不可重新嘗試永久刪除",
+            },
+        )
+    operation = await _process_public_permanent_deletion_once(db, operation)
+    projection = _to_permanent_deletion_read(operation)
+    response.status_code = (
+        status.HTTP_200_OK
+        if projection.status == PermanentDeletionStatus.COMPLETED
+        else status.HTTP_202_ACCEPTED
+    )
+    return projection
 
 
 @router.delete("/bulk")
@@ -2959,10 +3204,99 @@ async def _permanently_delete_trash_item(
     )
 
 
+def _raise_permanent_deletion_acceptance_error(code: str) -> None:
+    if code == "root_not_permanently_deletable":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": code, "message": "垃圾桶項目不存在"},
+        )
+    if code in {
+        "versioning_state_unavailable",
+        "object_history_unavailable",
+        "exact_stat_failed",
+        "exact_stat_unavailable",
+        "current_identity_unavailable",
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": code, "message": "永久刪除失敗，請稍後再試"},
+        )
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={"code": code, "message": "目前無法接受永久刪除"},
+    )
+
+
+async def _initiate_public_permanent_deletion(
+    *,
+    item_type: TrashEntityType,
+    item_id: int,
+    current_user,
+    db: SQLModelAsyncSession,
+) -> PermanentDeletionRead:
+    operation = await _permanent_deletion_for_root(
+        db, item_type=item_type, item_id=item_id
+    )
+    if operation is None:
+        model_by_type = {
+            TrashEntityType.ARCHIVE: Archive,
+            TrashEntityType.ARCHIVE_SUBMISSION: ArchiveSubmission,
+            TrashEntityType.COURSE: Course,
+        }
+        root = await db.get(model_by_type[item_type], item_id)
+        root_is_trashed = root is not None and (
+            is_archive_submission_trashed(root)
+            if item_type == TrashEntityType.ARCHIVE_SUBMISSION
+            else root.deleted_at is not None
+        )
+        if not root_is_trashed:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Trash item not found",
+            )
+        try:
+            operation = await accept_permanent_deletion(
+                db,
+                root_entity_type=item_type,
+                root_entity_id=item_id,
+                idempotency_key=_permanent_deletion_idempotency_key(
+                    item_type, item_id
+                ),
+                requested_by_user_id=getattr(current_user, "user_id", None),
+                storage=_permanent_deletion_storage(),
+            )
+        except PermanentDeletionError as exc:
+            _raise_permanent_deletion_acceptance_error(exc.code)
+        except StorageSafetyError as exc:
+            _raise_permanent_deletion_acceptance_error(exc.code)
+        except Exception as exc:
+            await db.rollback()
+            logger.error(
+                "Pre-accept permanent-delete failure for %s/%s",
+                item_type.value,
+                item_id,
+                exc_info=redacted_exc_info(exc),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "permanent_deletion_acceptance_unavailable",
+                    "message": "永久刪除失敗，請稍後再試",
+                },
+            ) from exc
+
+    projection = _to_permanent_deletion_read(operation)
+    if projection.can_retry:
+        operation = await _process_public_permanent_deletion_once(db, operation)
+        projection = _to_permanent_deletion_read(operation)
+    return projection
+
+
 @router.delete("/{item_type}/{item_id}")
 async def permanently_delete_trash_item(
     item_type: TrashEntityType,
     item_id: int,
+    response: Response,
     current_user=Depends(get_current_user),
     db: SQLModelAsyncSession = Depends(get_session),
 ):
@@ -2970,6 +3304,20 @@ async def permanently_delete_trash_item(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
         )
+
+    if item_type in _DURABLE_SINGLE_DELETE_TYPES:
+        projection = await _initiate_public_permanent_deletion(
+            item_type=item_type,
+            item_id=item_id,
+            current_user=current_user,
+            db=db,
+        )
+        response.status_code = (
+            status.HTTP_200_OK
+            if projection.status == PermanentDeletionStatus.COMPLETED
+            else status.HTTP_202_ACCEPTED
+        )
+        return projection
 
     warnings: list[str] = []
     try:

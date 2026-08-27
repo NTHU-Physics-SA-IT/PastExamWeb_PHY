@@ -14,22 +14,47 @@ Related documents:
 
 ## Activation status
 
-Stage 5F-A added the additive, initially empty PostgreSQL persistence
-foundation. Stage 5F-B adds an internal service that can accept and process one
-durable operation against that foundation, but no current Trash route, bulk
-path, API, scheduler, or UI calls it. Existing public permanent-delete behavior
-and its documented consistency gap therefore remain unchanged until a later
-explicitly reviewed activation stage.
+Stage 5F-A added the additive PostgreSQL persistence foundation, and Stage 5F-B
+added the internal accept/process saga. Stage 5F-C activates that sealed saga
+only for administrator single-item Trash deletion rooted at `Archive`,
+`ArchiveSubmission`, or `Course`.
+
+For those roots, a new or unfinished durable operation returns HTTP `202`; only
+an operation whose exact storage absence and final PostgreSQL transaction have
+reached `COMPLETED` returns HTTP `200`. A deterministic server-owned identity
+reuses the same operation for repeated requests, including a completed repeat
+after the live Trash row has disappeared. The response and status surface expose
+only the root identity, durable state, timestamps, stable redacted result code,
+and capability flags. Object keys, buckets, Version IDs, target manifests, raw
+exceptions, credentials, and descriptive snapshots remain private.
+
+The current Trash list carries the same minimal operation projection so an
+accepted unfinished root remains visible after reload. Lifecycle `status`
+continues to mean only lifecycle truth such as deleted or taken down; operation
+state appears only in the compact action/dependency area. The Admin UI treats
+`202` as pending/attention truth, uses bounded read-only status polling, and
+shows final success/removes the row only after `COMPLETED`.
+
+The existing bulk route and excluded single-item roots remain on their prior
+behavior until Stage 5F-D. Stage 5F-C adds no scheduler or recurring worker;
+bounded administrator process-one/status/retry actions cover only currently
+claimable states until Stage 5F-E. `MANUAL_REVIEW` is inspect-only unless the
+sealed backend policy explicitly marks a retry safe; there is no force-complete,
+cancel, resurrection, or retry-budget reset.
 
 ## Authority and irreversibility
 
 PostgreSQL is the only durable workflow ledger. MinIO answers only whether one
 recorded exact object version exists; it is not workflow authority.
 
-Permanent deletion becomes irreversible only when a later backend stage
-durably commits a deletion intent and explicitly accepts it. The durable
-initial operation state is `ACCEPTED`, never `PENDING`. Stage 5F-A can
-represent that acceptance but does not accept any real request.
+For the Stage 5F-C roots, permanent deletion becomes irreversible when the
+backend durably commits the `ACCEPTED` operation, targets, and exact storage
+identity. Before that commit, a pre-accept failure leaves the row restorable.
+After it, restore/cancel is unavailable even while storage processing is
+unfinished, uncertain, retryable, or in manual review. The Trash projection
+removes restore authority, and the restore endpoint rechecks the durable
+operation after acquiring the existing lifecycle locks so acceptance and
+restore cannot both succeed.
 
 The operation state namespace is independent of `SubmissionStatus` and
 contains exactly:
@@ -41,8 +66,8 @@ contains exactly:
 - `MANUAL_REVIEW`; and
 - `COMPLETED`.
 
-No current Trash lifecycle state or projection changes. Object-processing
-state is also explicit and separate from submission lifecycle state.
+No Trash lifecycle state changes. Object-processing state remains explicit and
+separate from submission lifecycle state.
 
 ## Durable records
 
@@ -102,9 +127,11 @@ next-attempt scheduling, bounded claim leases, unknown/timeout verification,
 stable result codes, `MANUAL_REVIEW`, and later retry after revalidation.
 
 Stage 5F-B implements deterministic bounded retry policy, a claim/lease-safe
-process-one primitive, and unknown-outcome verification. It adds no scheduler,
-recurring reconciliation worker, manual-review endpoint, force-complete,
-cancel, or restore action.
+process-one primitive, and unknown-outcome verification. Stage 5F-C exposes one
+minimal administrator status read and one capability-gated process-one retry
+surface for `ACCEPTED`, `VERIFICATION_REQUIRED`, and due `RETRYABLE_FAILED`.
+It adds no operation-history dashboard, scheduler, recurring reconciliation
+worker, force-complete, cancel, or restore action.
 
 ## Internal Stage 5F-B processing
 

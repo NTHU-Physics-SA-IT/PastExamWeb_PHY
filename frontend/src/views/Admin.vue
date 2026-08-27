@@ -3091,7 +3091,44 @@
                         @click="confirmPermanentDeleteTrashItem(data)"
                       />
                       <span
-                        v-if="!canRestoreTrashItem(data) && !canPermanentDeleteTrashItem(data)"
+                        v-if="hasPermanentDeletionOperation(data)"
+                        class="text-xs text-600 trash-permanent-deletion-state"
+                      >
+                        {{ getPermanentDeletionActionLabel(data) }}
+                      </span>
+                      <Button
+                        v-if="canRefreshPermanentDeletion(data)"
+                        icon="pi pi-refresh"
+                        :label="$t('更新狀態')"
+                        size="small"
+                        severity="secondary"
+                        text
+                        @click="refreshPermanentDeletionStatus(data)"
+                      />
+                      <Button
+                        v-if="canInspectPermanentDeletion(data)"
+                        icon="pi pi-info-circle"
+                        :label="$t('查看原因')"
+                        size="small"
+                        severity="secondary"
+                        text
+                        @click="inspectPermanentDeletionReason(data)"
+                      />
+                      <Button
+                        v-if="canRetryPermanentDeletion(data)"
+                        icon="pi pi-replay"
+                        :label="$t('重新嘗試永久刪除')"
+                        size="small"
+                        severity="danger"
+                        outlined
+                        @click="retryPermanentDeletion(data)"
+                      />
+                      <span
+                        v-if="
+                          !canRestoreTrashItem(data) &&
+                          !canPermanentDeleteTrashItem(data) &&
+                          !hasPermanentDeletionOperation(data)
+                        "
                         class="text-xs text-500"
                       >
                         {{ $t('目前無可用操作') }}
@@ -3213,7 +3250,44 @@
                         @click="confirmPermanentDeleteTrashItem(data)"
                       />
                       <span
-                        v-if="!canRestoreTrashItem(data) && !canPermanentDeleteTrashItem(data)"
+                        v-if="hasPermanentDeletionOperation(data)"
+                        class="text-xs text-600 trash-permanent-deletion-state"
+                      >
+                        {{ getPermanentDeletionActionLabel(data) }}
+                      </span>
+                      <Button
+                        v-if="canRefreshPermanentDeletion(data)"
+                        icon="pi pi-refresh"
+                        :label="$t('更新狀態')"
+                        size="small"
+                        severity="secondary"
+                        text
+                        @click="refreshPermanentDeletionStatus(data)"
+                      />
+                      <Button
+                        v-if="canInspectPermanentDeletion(data)"
+                        icon="pi pi-info-circle"
+                        :label="$t('查看原因')"
+                        size="small"
+                        severity="secondary"
+                        text
+                        @click="inspectPermanentDeletionReason(data)"
+                      />
+                      <Button
+                        v-if="canRetryPermanentDeletion(data)"
+                        icon="pi pi-replay"
+                        :label="$t('重新嘗試永久刪除')"
+                        size="small"
+                        severity="danger"
+                        outlined
+                        @click="retryPermanentDeletion(data)"
+                      />
+                      <span
+                        v-if="
+                          !canRestoreTrashItem(data) &&
+                          !canPermanentDeleteTrashItem(data) &&
+                          !hasPermanentDeletionOperation(data)
+                        "
                         class="text-xs text-500"
                       >
                         {{ $t('目前無可用操作') }}
@@ -5343,6 +5417,9 @@ const existingSubmissionRows = ref(10)
 const archiveRequests = ref([])
 const trashLoading = ref(false)
 const trashItems = ref([])
+const permanentDeletionPollTimers = new Map()
+const PERMANENT_DELETION_POLL_LIMIT = 3
+const PERMANENT_DELETION_POLL_DELAY_MS = 1500
 const showTrashRelationHierarchy = ref(true)
 const TRASH_FILTER_ALL_VALUE = 'all'
 const trashFilterType = ref(null)
@@ -7790,6 +7867,19 @@ const getTrashDeletedByLabel = (item) => {
 
 const getTrashDependencies = (item) => {
   const dependencies = Array.isArray(item?.dependencies) ? item.dependencies.filter(Boolean) : []
+  const operation = item?.permanent_deletion
+  if (operation?.status === 'MANUAL_REVIEW') {
+    dependencies.push({
+      key: `permanent-deletion-${operation.operation_id}`,
+      kind: 'permanent_deletion_manual',
+      label: t('永久刪除需人工處理：{reason}', {
+        reason: getPermanentDeletionReasonLabel(operation.result_code),
+      }),
+      severity: 'danger',
+      blocking: true,
+      deleteBlocking: true,
+    })
+  }
   return dependencies
     .map((dependency) => formatTrashDependency(dependency, item?.item_type))
     .filter((item) => item?.label)
@@ -7815,6 +7905,38 @@ const canRestoreTrashItem = (item) => {
 const canPermanentDeleteTrashItem = (item) => {
   return item?.canPermanentDelete === true
 }
+
+const hasPermanentDeletionOperation = (item) => Boolean(item?.permanent_deletion?.operation_id)
+
+const getPermanentDeletionReasonLabel = (reasonCode) => {
+  const labels = {
+    automatic_retry_budget_exhausted: t('已達自動重試上限'),
+    ambiguous_object_history: t('儲存版本狀態需要確認'),
+    identity_drift: t('儲存版本已變更'),
+    membership_drift: t('關聯資料已變更'),
+    versioning_not_enabled: t('儲存版本控制未啟用'),
+    final_storage_truth_unproven: t('尚未確認檔案已移除'),
+    storage_adapter_missing: t('暫時無法確認儲存狀態'),
+  }
+  return labels[reasonCode] || t('需要管理員確認')
+}
+
+const getPermanentDeletionActionLabel = (item) => {
+  const status = item?.permanent_deletion?.status
+  if (status === 'VERIFICATION_REQUIRED') return t('永久刪除狀態確認中…')
+  if (status === 'RETRYABLE_FAILED') return t('永久刪除暫時失敗')
+  if (status === 'MANUAL_REVIEW') return t('永久刪除需人工處理')
+  if (status === 'COMPLETED') return t('已永久刪除')
+  return t('永久刪除中…')
+}
+
+const canRetryPermanentDeletion = (item) => item?.permanent_deletion?.can_retry === true
+
+const canInspectPermanentDeletion = (item) =>
+  item?.permanent_deletion?.can_inspect_reason === true
+
+const canRefreshPermanentDeletion = (item) =>
+  hasPermanentDeletionOperation(item) && item?.permanent_deletion?.status !== 'MANUAL_REVIEW'
 
 const getTrashDependencySeverity = (dependency) => {
   return dependency?.severity || 'secondary'
@@ -7953,6 +8075,17 @@ const formatTrashDependency = (dependency, itemType = '') => {
     const count = Number(dependency.count || 0) || 1
     const normalizedKind = String(dependency.kind || '').toLowerCase()
     const typeRaw = String(dependency.type || '').toLowerCase()
+    if (normalizedKind === 'permanent_deletion_manual') {
+      return {
+        key: dependency.key || 'permanent-deletion-manual-review',
+        label: String(dependency.label || '').trim(),
+        severity: 'danger',
+        blocking: true,
+        deleteBlocking: true,
+        restoreBlocking: false,
+        kindOrder: 0,
+      }
+    }
     const typeLabel = t(String(dependency.label || '').trim()) || ''
 
     if (['active', 'blocking', 'blocking_live', 'blockingActive'].includes(normalizedKind)) {
@@ -8334,9 +8467,134 @@ const confirmPermanentDeleteTrashItem = (item) => {
   })
 }
 
+const stopPermanentDeletionPolling = (operationId) => {
+  const timer = permanentDeletionPollTimers.get(operationId)
+  if (timer !== undefined) globalThis.clearTimeout(timer)
+  permanentDeletionPollTimers.delete(operationId)
+}
+
+const updatePermanentDeletionProjection = (projection) => {
+  if (!projection?.operation_id) return
+  const item = trashItems.value.find(
+    (candidate) =>
+      candidate?.item_type === projection.root_type && candidate?.id === projection.root_id
+  )
+  if (!item) return
+  item.permanent_deletion = projection
+  item.canRestore = false
+  item.canPermanentDelete = false
+}
+
+const completePermanentDeletion = async (projection) => {
+  stopPermanentDeletionPolling(projection.operation_id)
+  toast.add({
+    severity: 'success',
+    summary: t('已永久刪除'),
+    detail: t('已永久刪除'),
+    life: 3000,
+  })
+  await loadTrashItems()
+}
+
+const applyPermanentDeletionProjection = async (projection, { allowPolling = true } = {}) => {
+  if (!projection?.operation_id) return
+  if (projection.status === 'COMPLETED') {
+    await completePermanentDeletion(projection)
+    return
+  }
+  updatePermanentDeletionProjection(projection)
+  if (allowPolling && ['ACCEPTED', 'PROCESSING'].includes(projection.status)) {
+    schedulePermanentDeletionPoll(projection, 0)
+  } else {
+    stopPermanentDeletionPolling(projection.operation_id)
+  }
+}
+
+const schedulePermanentDeletionPoll = (projection, attempt) => {
+  const operationId = projection?.operation_id
+  if (!operationId || attempt >= PERMANENT_DELETION_POLL_LIMIT) {
+    stopPermanentDeletionPolling(operationId)
+    return
+  }
+  stopPermanentDeletionPolling(operationId)
+  const timer = globalThis.setTimeout(async () => {
+    permanentDeletionPollTimers.delete(operationId)
+    try {
+      const { data } = await archiveService.getPermanentDeletionStatus(operationId)
+      if (data?.status === 'COMPLETED') {
+        await completePermanentDeletion(data)
+        return
+      }
+      updatePermanentDeletionProjection(data)
+      if (['ACCEPTED', 'PROCESSING'].includes(data?.status)) {
+        schedulePermanentDeletionPoll(data, attempt + 1)
+      }
+    } catch (error) {
+      console.error(t('更新永久刪除狀態失敗:'), error)
+      stopPermanentDeletionPolling(operationId)
+    }
+  }, PERMANENT_DELETION_POLL_DELAY_MS)
+  permanentDeletionPollTimers.set(operationId, timer)
+}
+
+const refreshPermanentDeletionStatus = async (item) => {
+  const operationId = item?.permanent_deletion?.operation_id
+  if (!operationId) return
+  try {
+    const { data } = await archiveService.getPermanentDeletionStatus(operationId)
+    await applyPermanentDeletionProjection(data, { allowPolling: false })
+  } catch (error) {
+    console.error(t('更新永久刪除狀態失敗:'), error)
+    if (isUnauthorizedError(error)) return
+    toast.add({
+      severity: 'error',
+      summary: t('更新狀態失敗'),
+      detail: t('永久刪除狀態暫時無法確認'),
+      life: 4000,
+    })
+  }
+}
+
+const inspectPermanentDeletionReason = (item) => {
+  const operation = item?.permanent_deletion
+  if (!operation?.can_inspect_reason) return
+  toast.add({
+    severity: operation.status === 'MANUAL_REVIEW' ? 'warn' : 'info',
+    summary: t('永久刪除狀態'),
+    detail: getPermanentDeletionReasonLabel(operation.result_code),
+    life: 5000,
+  })
+}
+
+const retryPermanentDeletion = async (item) => {
+  const operationId = item?.permanent_deletion?.operation_id
+  if (!operationId || !canRetryPermanentDeletion(item)) return
+  try {
+    const response = await archiveService.retryPermanentDeletion(operationId)
+    await applyPermanentDeletionProjection(response.data)
+  } catch (error) {
+    console.error(t('重新嘗試永久刪除失敗:'), error)
+    if (isUnauthorizedError(error)) return
+    toast.add({
+      severity: 'error',
+      summary: t('永久刪除失敗'),
+      detail: getTrashErrorMessage(error, t('永久刪除失敗，請稍後再試')),
+      life: 4500,
+    })
+  }
+}
+
 const permanentlyDeleteTrashItem = async (item) => {
   try {
-    const { data } = await archiveService.permanentlyDeleteTrashItem(item.item_type, item.id)
+    const response = await archiveService.permanentlyDeleteTrashItem(item.item_type, item.id)
+    const { data } = response
+    if (data?.operation_id) {
+      await applyPermanentDeletionProjection(data)
+      if (data.status !== 'COMPLETED') {
+        await loadTrashItems()
+      }
+      return
+    }
     const deletedCount = Number(data?.deleted_count ?? data?.deleted ?? 1)
     toast.add({
       severity: 'success',
@@ -8351,7 +8609,7 @@ const permanentlyDeleteTrashItem = async (item) => {
     toast.add({
       severity: 'error',
       summary: t('永久刪除失敗'),
-      detail: getTrashErrorMessage(error, t('永久刪除失敗')),
+      detail: getTrashErrorMessage(error, t('永久刪除失敗，請稍後再試')),
       life: 4500,
     })
   }
@@ -9778,6 +10036,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  permanentDeletionPollTimers.forEach((timer) => globalThis.clearTimeout(timer))
+  permanentDeletionPollTimers.clear()
   if (typeof window !== 'undefined') {
     window.removeEventListener('focus', refreshOnlineStatistics)
     if (loginStatsRefreshTimer !== null) window.clearTimeout(loginStatsRefreshTimer)

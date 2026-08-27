@@ -6,9 +6,12 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+from httpx import AsyncClient
 from sqlalchemy import delete, func
 from sqlmodel import select
 
+from app.api.services import trash
+from app.main import app
 from app.models.models import (
     Archive,
     ArchiveSubmission,
@@ -24,6 +27,7 @@ from app.models.models import (
     PersonalNotification,
     SubmissionStatus,
     TrashEntityType,
+    UserRoles,
 )
 from app.services import permanent_deletion as permanent_deletion_service
 from app.services.permanent_deletion import (
@@ -37,6 +41,7 @@ from app.services.permanent_deletion_storage import (
     ExactVersionMinioAdapter,
     StorageSafetyError,
 )
+from app.utils.auth import get_current_user
 
 
 class FakeVersionedMinio:
@@ -133,6 +138,13 @@ class MutableLeaseClock:
 
     def __call__(self) -> datetime:
         return self.current
+
+
+def _override_user(user_id: int, *, is_admin: bool):
+    async def _get_current_user():
+        return UserRoles(user_id=user_id, is_admin=is_admin)
+
+    return _get_current_user
 
 
 async def _create_deleted_pair(session_maker, *, requester_id: int):
@@ -312,6 +324,108 @@ async def test_db_only_acceptance_reuses_intent_and_completes_idempotently(
             lease_clock=MutableLeaseClock(now + timedelta(minutes=2, seconds=1)),
         )
         assert again == PermanentDeletionStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_public_single_delete_reports_accepted_then_completed_truth(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+    monkeypatch,
+) -> None:
+    requester = await make_user()
+    category, course, archive, submission, event, notification = (
+        await _create_deleted_pair(session_maker, requester_id=requester.id)
+    )
+    minio = FakeVersionedMinio(archive.object_name, "v-route")
+    minio.unknown_once = True
+    storage = ExactVersionMinioAdapter(minio, bucket_name="stage5fc-test")
+    monkeypatch.setattr(trash, "_permanent_deletion_storage", lambda: storage)
+    operation_id = None
+
+    try:
+        app.dependency_overrides[get_current_user] = _override_user(
+            requester.id, is_admin=False
+        )
+        forbidden = await client.delete(
+            f"/trash/archive_submission/{submission.id}"
+        )
+        assert forbidden.status_code == 403
+        assert minio.removals == []
+
+        app.dependency_overrides[get_current_user] = _override_user(
+            requester.id, is_admin=True
+        )
+        accepted = await client.delete(
+            f"/trash/archive_submission/{submission.id}"
+        )
+        assert accepted.status_code == 202
+        accepted_body = accepted.json()
+        operation_id = accepted_body["operation_id"]
+        assert accepted_body["status"] == "VERIFICATION_REQUIRED"
+        assert accepted_body["root_type"] == "archive_submission"
+        assert "object_key" not in accepted_body
+        assert "version_id" not in accepted_body
+
+        listed = await client.get("/trash", params={"item_type": "archive_submission"})
+        assert listed.status_code == 200
+        pending = next(item for item in listed.json() if item["id"] == submission.id)
+        assert pending["status"] == "deleted"
+        assert pending["canRestore"] is False
+        assert pending["canPermanentDelete"] is False
+        assert pending["permanent_deletion"]["operation_id"] == operation_id
+        assert pending["permanent_deletion"]["status"] == "VERIFICATION_REQUIRED"
+
+        blocked_restore = await client.post(
+            "/trash/restore",
+            json={"item_type": "archive_submission", "item_id": submission.id},
+        )
+        assert blocked_restore.status_code == 409
+        assert blocked_restore.json()["detail"]["code"] == (
+            "permanent_deletion_already_accepted"
+        )
+
+        status_response = await client.get(
+            f"/trash/permanent-deletions/{operation_id}"
+        )
+        assert status_response.status_code == 200
+        assert status_response.json()["can_retry"] is True
+
+        completed = await client.delete(
+            f"/trash/archive_submission/{submission.id}"
+        )
+        assert completed.status_code == 200
+        assert completed.json()["status"] == "COMPLETED"
+        assert len(minio.removals) == 1
+
+        repeated = await client.delete(
+            f"/trash/archive_submission/{submission.id}"
+        )
+        assert repeated.status_code == 200
+        assert repeated.json()["operation_id"] == operation_id
+        assert repeated.json()["status"] == "COMPLETED"
+        assert len(minio.removals) == 1
+
+        async with session_maker() as session:
+            assert await session.get(Archive, archive.id) is None
+            assert await session.get(ArchiveSubmission, submission.id) is None
+            retained_event = await session.get(ArchiveSubmissionEvent, event.id)
+            assert retained_event is not None
+            assert retained_event.submission_id is None
+            assert retained_event.submitted_at == event.submitted_at
+            assert await session.get(PersonalNotification, notification.id) is not None
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_pair_and_operation(
+            session_maker,
+            operation_id=operation_id,
+            category_id=category.id,
+            course_id=course.id,
+            archive_id=archive.id,
+            submission_id=submission.id,
+            event_id=event.id,
+            notification_id=notification.id,
+        )
 
 
 @pytest.mark.asyncio

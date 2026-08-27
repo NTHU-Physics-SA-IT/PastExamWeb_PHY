@@ -17,12 +17,17 @@ from app.models.models import (
     ArchiveType,
     Course,
     CourseCategoryConfig,
+    PermanentDeletionObject,
+    PermanentDeletionOperation,
+    PermanentDeletionStatus,
+    PermanentDeletionTarget,
     PersonalNotification,
     SubmissionStatus,
     UserRoles,
 )
-from app.services import archive_lifecycle_locks
+from app.services import archive_lifecycle_locks, permanent_deletion
 from app.services.archive_lifecycle_locks import LifecycleResourceClass
+from app.services.permanent_deletion_storage import ExactVersionMinioAdapter
 from app.utils.auth import get_current_user
 
 
@@ -31,6 +36,43 @@ def _override_user(user_id: int, *, is_admin: bool):
         return UserRoles(user_id=user_id, is_admin=is_admin)
 
     return _get_current_user
+
+
+class _FakeVersionedMinio:
+    def __init__(self, key: str) -> None:
+        self.key = key
+        self.version_id = "retained-v1"
+        self.present = True
+
+    def get_bucket_versioning(self, _bucket: str):
+        return SimpleNamespace(status="Enabled")
+
+    def list_objects(self, _bucket: str, **_kwargs):
+        if not self.present:
+            return []
+        return [
+            SimpleNamespace(
+                object_name=self.key,
+                version_id=self.version_id,
+                is_delete_marker=False,
+            )
+        ]
+
+    def stat_object(self, _bucket: str, key: str, version_id: str | None = None):
+        if self.present and key == self.key and (
+            version_id is None or version_id == self.version_id
+        ):
+            return SimpleNamespace(object_name=key, version_id=self.version_id)
+        from minio.error import S3Error
+
+        raise S3Error(None, "NoSuchVersion", "missing", key, "request-id", "host-id")
+
+    def remove_object(
+        self, _bucket: str, key: str, version_id: str | None = None
+    ) -> None:
+        assert key == self.key
+        assert version_id == self.version_id
+        self.present = False
 
 
 async def _create_deleted_pair(session_maker, *, requester_id: int):
@@ -109,8 +151,25 @@ async def _cleanup(
     submission_id: int,
     event_id: int,
     notification_id: int,
+    operation_id: int | None = None,
 ) -> None:
     async with session_maker() as session:
+        if operation_id is not None:
+            await session.execute(
+                delete(PermanentDeletionObject).where(
+                    PermanentDeletionObject.operation_id == operation_id
+                )
+            )
+            await session.execute(
+                delete(PermanentDeletionTarget).where(
+                    PermanentDeletionTarget.operation_id == operation_id
+                )
+            )
+            await session.execute(
+                delete(PermanentDeletionOperation).where(
+                    PermanentDeletionOperation.id == operation_id
+                )
+            )
         await session.execute(
             delete(PersonalNotification).where(
                 PersonalNotification.id == notification_id
@@ -165,20 +224,23 @@ async def test_permanent_delete_retains_minimal_event_and_durable_notification(
     monkeypatch.setattr(
         archive_lifecycle_locks, "acquire_lifecycle_locks", observed_acquire
     )
-    _disable_storage(monkeypatch)
+    storage = ExactVersionMinioAdapter(
+        _FakeVersionedMinio(archive.object_name), bucket_name="retained-history-test"
+    )
+    monkeypatch.setattr(trash, "_permanent_deletion_storage", lambda: storage)
     app.dependency_overrides[get_current_user] = _override_user(admin.id, is_admin=True)
+    operation_id = None
     try:
         response = await client.delete(f"/trash/archive_submission/{submission.id}")
         assert response.status_code == 200
-        detail = response.json()["details"][0]
-        assert detail["deletedChildren"]["submissionEventsRetained"] == 1
-        assert traces == [
-            [
-                (LifecycleResourceClass.COURSE, course.id),
-                (LifecycleResourceClass.ARCHIVE, archive.id),
-                (LifecycleResourceClass.ARCHIVE_SUBMISSION, submission.id),
-            ]
-        ]
+        operation = response.json()
+        operation_id = operation["operation_id"]
+        assert operation["status"] == PermanentDeletionStatus.COMPLETED
+        assert [
+            (LifecycleResourceClass.COURSE, course.id),
+            (LifecycleResourceClass.ARCHIVE, archive.id),
+            (LifecycleResourceClass.ARCHIVE_SUBMISSION, submission.id),
+        ] in traces
 
         async with session_maker() as session:
             assert await session.get(ArchiveSubmission, submission.id) is None
@@ -215,6 +277,7 @@ async def test_permanent_delete_retains_minimal_event_and_durable_notification(
             submission_id=submission.id,
             event_id=event.id,
             notification_id=notification.id,
+            operation_id=operation_id,
         )
 
 
@@ -235,18 +298,28 @@ async def test_permanent_delete_rollback_restores_submission_and_event_link(
         event,
         notification,
     ) = await _create_deleted_pair(session_maker, requester_id=requester.id)
-    original_detach = trash.detach_archive_submission_events
+    original_detach = permanent_deletion.detach_archive_submission_events
 
     async def fail_after_detach(db, submission_ids):
         await original_detach(db, submission_ids)
         raise RuntimeError("injected failure after event detach")
 
-    monkeypatch.setattr(trash, "detach_archive_submission_events", fail_after_detach)
-    _disable_storage(monkeypatch)
+    monkeypatch.setattr(
+        permanent_deletion, "detach_archive_submission_events", fail_after_detach
+    )
+    storage = ExactVersionMinioAdapter(
+        _FakeVersionedMinio(archive.object_name), bucket_name="retained-history-test"
+    )
+    monkeypatch.setattr(trash, "_permanent_deletion_storage", lambda: storage)
     app.dependency_overrides[get_current_user] = _override_user(admin.id, is_admin=True)
+    operation_id = None
     try:
         response = await client.delete(f"/trash/archive_submission/{submission.id}")
-        assert response.status_code == 409
+        assert response.status_code == 202
+        operation = response.json()
+        operation_id = operation["operation_id"]
+        assert operation["status"] == PermanentDeletionStatus.RETRYABLE_FAILED
+        assert operation["result_code"] == "db_finalization_failed"
         async with session_maker() as session:
             stored_submission = await session.get(ArchiveSubmission, submission.id)
             retained = await session.get(ArchiveSubmissionEvent, event.id)
@@ -265,6 +338,7 @@ async def test_permanent_delete_rollback_restores_submission_and_event_link(
             submission_id=submission.id,
             event_id=event.id,
             notification_id=notification.id,
+            operation_id=operation_id,
         )
 
 
