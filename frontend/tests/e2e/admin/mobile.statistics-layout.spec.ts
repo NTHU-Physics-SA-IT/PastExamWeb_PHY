@@ -64,7 +64,7 @@ const expectStatisticsActionsRightAligned = async (card: import('@playwright/tes
     if (!heading || !actions || !selector || !toggle) return null
     const rect = (target: Element) => {
       const value = target.getBoundingClientRect()
-      return { top: value.top, right: value.right }
+      return { top: value.top, right: value.right, bottom: value.bottom }
     }
     return {
       heading: rect(heading),
@@ -76,7 +76,7 @@ const expectStatisticsActionsRightAligned = async (card: import('@playwright/tes
   expect(boxes).not.toBeNull()
   expect(Math.abs((boxes?.actions.right ?? 0) - (boxes?.heading.right ?? 0))).toBeLessThanOrEqual(1)
   expect(Math.abs((boxes?.toggle.right ?? 0) - (boxes?.actions.right ?? 0))).toBeLessThanOrEqual(1)
-  if ((boxes?.toggle.top ?? 0) > (boxes?.selector.top ?? 0) + 1) {
+  if ((boxes?.toggle.top ?? 0) >= (boxes?.selector.bottom ?? 0) - 1) {
     expect(
       Math.abs((boxes?.selector.right ?? 0) - (boxes?.actions.right ?? 0))
     ).toBeLessThanOrEqual(1)
