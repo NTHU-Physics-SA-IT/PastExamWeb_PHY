@@ -2842,7 +2842,8 @@
                       :label="$t('清空目前範圍')"
                       severity="danger"
                       outlined
-                      :disabled="!trashItems.length || trashLoading"
+                      :disabled="!trashItems.length || trashLoading || trashBulkDeleting"
+                      :loading="trashBulkDeleting"
                       @click="confirmBulkDeleteTrash"
                     />
                   </div>
@@ -5416,6 +5417,7 @@ const existingSubmissionFirst = ref(0)
 const existingSubmissionRows = ref(10)
 const archiveRequests = ref([])
 const trashLoading = ref(false)
+const trashBulkDeleting = ref(false)
 const trashItems = ref([])
 const permanentDeletionPollTimers = new Map()
 const PERMANENT_DELETION_POLL_LIMIT = 3
@@ -7932,8 +7934,7 @@ const getPermanentDeletionActionLabel = (item) => {
 
 const canRetryPermanentDeletion = (item) => item?.permanent_deletion?.can_retry === true
 
-const canInspectPermanentDeletion = (item) =>
-  item?.permanent_deletion?.can_inspect_reason === true
+const canInspectPermanentDeletion = (item) => item?.permanent_deletion?.can_inspect_reason === true
 
 const canRefreshPermanentDeletion = (item) =>
   hasPermanentDeletionOperation(item) && item?.permanent_deletion?.status !== 'MANUAL_REVIEW'
@@ -8412,16 +8413,19 @@ const getTrashErrorMessage = (error, fallback = t('操作失敗')) => {
 }
 
 const getTrashBulkResultMessage = (data) => {
-  const deletedCount = Number(data?.deleted_count ?? data?.deleted ?? 0)
-  const failedCount = Number(data?.failed_count ?? data?.failed ?? 0)
-  if (deletedCount > 0 && failedCount > 0)
-    return t('已永久刪除 {deleted} 筆，{failed} 筆失敗', {
-      deleted: deletedCount,
-      failed: failedCount,
-    })
-  if (deletedCount > 0) return t('已永久刪除 {count} 筆', { count: deletedCount })
-  if (failedCount > 0) return t('{count} 筆永久刪除失敗', { count: failedCount })
-  return t('沒有可永久刪除的項目')
+  const parts = []
+  const completedCount = Number(data?.completed_count ?? 0)
+  const pendingCount = Number(data?.pending_count ?? 0)
+  const manualReviewCount = Number(data?.manual_review_count ?? 0)
+  const failedCount = Number(data?.failed_count ?? 0)
+  const skippedCount = Number(data?.skipped_count ?? 0)
+  if (completedCount > 0) parts.push(t('已永久刪除 {count} 筆', { count: completedCount }))
+  if (pendingCount > 0) parts.push(t('已接受 {count} 筆永久刪除', { count: pendingCount }))
+  if (manualReviewCount > 0)
+    parts.push(t('{count} 筆永久刪除需人工處理', { count: manualReviewCount }))
+  if (failedCount > 0) parts.push(t('{count} 筆永久刪除未接受', { count: failedCount }))
+  if (skippedCount > 0) parts.push(t('{count} 筆由其他永久刪除作業涵蓋', { count: skippedCount }))
+  return parts.join('；') || t('沒有可永久刪除的項目')
 }
 
 const confirmRestoreTrashItem = (item) => {
@@ -8588,21 +8592,11 @@ const permanentlyDeleteTrashItem = async (item) => {
   try {
     const response = await archiveService.permanentlyDeleteTrashItem(item.item_type, item.id)
     const { data } = response
-    if (data?.operation_id) {
-      await applyPermanentDeletionProjection(data)
-      if (data.status !== 'COMPLETED') {
-        await loadTrashItems()
-      }
-      return
+    if (!data?.operation_id) {
+      throw new TypeError('Permanent deletion response is missing operation truth')
     }
-    const deletedCount = Number(data?.deleted_count ?? data?.deleted ?? 1)
-    toast.add({
-      severity: 'success',
-      summary: t('已永久刪除'),
-      detail: t('已永久刪除 {count} 筆', { count: deletedCount }),
-      life: 3000,
-    })
-    await loadTrashItems()
+    await applyPermanentDeletionProjection(data)
+    if (data.status !== 'COMPLETED') await loadTrashItems()
   } catch (error) {
     console.error(t('永久刪除垃圾桶項目失敗:'), error)
     if (isUnauthorizedError(error)) return
@@ -8631,26 +8625,37 @@ const confirmBulkDeleteTrash = () => {
 }
 
 const bulkDeleteTrashScope = async () => {
+  if (trashBulkDeleting.value) return
+  trashBulkDeleting.value = true
   try {
     const scopeType = getTrashFilterApiValue(trashFilterType.value)
     const { data } = await archiveService.permanentlyDeleteTrashScope(scopeType)
-    const deletedCount = Number(data?.deleted_count ?? data?.deleted ?? 0)
-    const failedCount = Number(data?.failed_count ?? data?.failed ?? 0)
-    if (deletedCount > 0) {
-      toast.add({
-        severity: failedCount ? 'warn' : 'success',
-        summary: failedCount ? t('部分完成') : t('已清空'),
-        detail: getTrashBulkResultMessage(data),
-        life: 4500,
-      })
-    } else {
-      toast.add({
-        severity: failedCount ? 'error' : 'info',
-        summary: failedCount ? t('清空失敗') : t('沒有項目'),
-        detail: getTrashBulkResultMessage(data),
-        life: 4500,
-      })
-    }
+    const requestedCount = Number(data?.requested_count ?? 0)
+    const completedCount = Number(data?.completed_count ?? 0)
+    const pendingCount = Number(data?.pending_count ?? 0)
+    const manualReviewCount = Number(data?.manual_review_count ?? 0)
+    const failedCount = Number(data?.failed_count ?? 0)
+    const skippedCount = Number(data?.skipped_count ?? 0)
+    const cleanCompletion =
+      requestedCount > 0 &&
+      completedCount === requestedCount &&
+      pendingCount === 0 &&
+      manualReviewCount === 0 &&
+      failedCount === 0 &&
+      skippedCount === 0
+    const needsAttention = manualReviewCount > 0 || failedCount > 0
+    toast.add({
+      severity: cleanCompletion ? 'success' : needsAttention ? 'warn' : 'info',
+      summary: cleanCompletion
+        ? t('已永久刪除')
+        : needsAttention
+          ? t('永久刪除需要注意')
+          : requestedCount
+            ? t('永久刪除已接受')
+            : t('沒有項目'),
+      detail: getTrashBulkResultMessage(data),
+      life: 4500,
+    })
     await loadTrashItems()
   } catch (error) {
     console.error(t('清空垃圾桶範圍失敗:'), error)
@@ -8661,6 +8666,8 @@ const bulkDeleteTrashScope = async () => {
       detail: getTrashErrorMessage(error, t('清空目前範圍失敗')),
       life: 4500,
     })
+  } finally {
+    trashBulkDeleting.value = false
   }
 }
 
