@@ -152,12 +152,12 @@ test.describe('Home page', () => {
     const titleLines = await page.locator('.title-line').evaluateAll((lines) =>
       lines.map((line) => {
         const { left, right, top } = line.getBoundingClientRect()
-        return { center: (left + right) / 2, top }
+        return { left, right, top }
       })
     )
     expect(titleLines).toHaveLength(2)
-    expect(titleLines[1].top).toBeGreaterThan(titleLines[0].top)
-    expect(Math.abs(titleLines[0].center - titleLines[1].center)).toBeLessThanOrEqual(1)
+    expect(Math.abs(titleLines[1].top - titleLines[0].top)).toBeLessThanOrEqual(1)
+    expect(titleLines[1].left).toBeGreaterThanOrEqual(titleLines[0].right)
     await expect(page.locator('.hero-action-divider')).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
   })
