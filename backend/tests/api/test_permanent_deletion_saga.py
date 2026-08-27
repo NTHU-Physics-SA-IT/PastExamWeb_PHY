@@ -466,8 +466,8 @@ async def test_public_db_only_remaining_root_completes_and_reuses_operation(
             assert await session.get(CourseSubmission, request.id) is None
     finally:
         app.dependency_overrides.pop(get_current_user, None)
-        if operation_id is not None:
-            async with session_maker() as session:
+        async with session_maker() as session:
+            if operation_id is not None:
                 await session.execute(
                     delete(PermanentDeletionTarget).where(
                         PermanentDeletionTarget.operation_id == operation_id
@@ -478,7 +478,10 @@ async def test_public_db_only_remaining_root_completes_and_reuses_operation(
                         PermanentDeletionOperation.id == operation_id
                     )
                 )
-                await session.commit()
+            await session.execute(
+                delete(CourseSubmission).where(CourseSubmission.id == request.id)
+            )
+            await session.commit()
 
 
 @pytest.mark.asyncio
@@ -500,6 +503,7 @@ async def test_every_remaining_root_accepts_completes_and_reuses_durable_operati
     client: AsyncClient,
     session_maker,
     make_user,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     admin = await make_user(is_admin=True)
     now = datetime(2026, 8, 27, 19, 15, tzinfo=UTC)
@@ -587,6 +591,19 @@ async def test_every_remaining_root_accepts_completes_and_reuses_durable_operati
         await session.refresh(root)
         root_id = int(root.id)
         root_model = type(root)
+
+    if root_type == TrashEntityType.USER:
+        storage = ExactVersionMinioAdapter(
+            FakeVersionedMinio(f"unused/{marker}.pdf"),
+            bucket_name="stage5fd-empty-user-test",
+        )
+        monkeypatch.setattr(trash, "_permanent_deletion_storage", lambda: storage)
+    else:
+        monkeypatch.setattr(
+            trash,
+            "_permanent_deletion_storage",
+            lambda: pytest.fail("DB-only root must not initialize MinIO"),
+        )
 
     operation_id = None
     app.dependency_overrides[get_current_user] = _override_user(admin.id, is_admin=True)
@@ -797,6 +814,8 @@ async def test_bulk_mixed_truth_reuses_operations_and_preserves_restore_boundari
         stored_category = await session.get(CourseCategoryConfig, category.id)
         stored_category.deleted_at = deleted_at
         stored_category.deleted_by_id = admin.id
+        stored_category.pre_delete_is_active = True
+        stored_category.is_active = False
         bulletin = Notification(
             title="Stage 5F-D completed bulk item",
             body="DB-only bulk truth",

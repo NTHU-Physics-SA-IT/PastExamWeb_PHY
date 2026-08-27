@@ -118,6 +118,14 @@ class TrashActionAuthority:
 
 
 _DURABLE_DELETE_TYPES = frozenset(TrashEntityType)
+_STORAGE_CAPABLE_DURABLE_DELETE_TYPES = frozenset(
+    {
+        TrashEntityType.ARCHIVE,
+        TrashEntityType.ARCHIVE_SUBMISSION,
+        TrashEntityType.COURSE,
+        TrashEntityType.USER,
+    }
+)
 
 _PUBLIC_PERMANENT_DELETION_ROOT_MODELS = {
     TrashEntityType.ARCHIVE: Archive,
@@ -3432,13 +3440,18 @@ async def _initiate_public_permanent_deletion(
                 detail="Trash item not found",
             )
         try:
+            storage = (
+                _permanent_deletion_storage()
+                if item_type in _STORAGE_CAPABLE_DURABLE_DELETE_TYPES
+                else None
+            )
             operation = await accept_permanent_deletion(
                 db,
                 root_entity_type=item_type,
                 root_entity_id=item_id,
                 idempotency_key=_permanent_deletion_idempotency_key(item_type, item_id),
                 requested_by_user_id=getattr(current_user, "user_id", None),
-                storage=_permanent_deletion_storage(),
+                storage=storage,
             )
         except PermanentDeletionError as exc:
             _raise_permanent_deletion_acceptance_error(exc.code)
