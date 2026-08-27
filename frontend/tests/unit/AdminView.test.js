@@ -198,6 +198,7 @@ const downloadArchiveBackupMock = vi.hoisted(() => vi.fn())
 const listTrashItemsMock = vi.hoisted(() => vi.fn())
 const restoreTrashItemMock = vi.hoisted(() => vi.fn())
 const permanentlyDeleteTrashItemMock = vi.hoisted(() => vi.fn())
+const permanentlyDeleteTrashScopeMock = vi.hoisted(() => vi.fn())
 const getPermanentDeletionStatusMock = vi.hoisted(() => vi.fn())
 const retryPermanentDeletionMock = vi.hoisted(() => vi.fn())
 
@@ -282,6 +283,7 @@ vi.mock('@/api', () => ({
     listTrashItems: listTrashItemsMock,
     restoreTrashItem: restoreTrashItemMock,
     permanentlyDeleteTrashItem: permanentlyDeleteTrashItemMock,
+    permanentlyDeleteTrashScope: permanentlyDeleteTrashScopeMock,
     getPermanentDeletionStatus: getPermanentDeletionStatusMock,
     retryPermanentDeletion: retryPermanentDeletionMock,
   },
@@ -380,6 +382,7 @@ describe('AdminView', () => {
     listTrashItemsMock.mockReset()
     restoreTrashItemMock.mockReset()
     permanentlyDeleteTrashItemMock.mockReset()
+    permanentlyDeleteTrashScopeMock.mockReset()
     getPermanentDeletionStatusMock.mockReset()
     retryPermanentDeletionMock.mockReset()
     approveSubmissionMock.mockResolvedValue({ data: {} })
@@ -1248,10 +1251,10 @@ describe('AdminView', () => {
     wrapper.unmount()
   })
 
-  it('keeps HTTP 202 rows visible and never reports accepted work as completed', async () => {
+  it('keeps a remaining-root HTTP 202 row visible and never reports accepted work as completed', async () => {
     const accepted = {
       operation_id: 81,
-      root_type: 'archive_submission',
+      root_type: 'notification',
       root_id: 902,
       status: 'ACCEPTED',
       accepted_at: now.toISOString(),
@@ -1263,7 +1266,7 @@ describe('AdminView', () => {
       restore_available: false,
     }
     const pendingItem = {
-      item_type: 'archive_submission',
+      item_type: 'notification',
       id: 902,
       display_name: 'Pending delete',
       status: 'deleted',
@@ -1287,10 +1290,8 @@ describe('AdminView', () => {
     wrapper.vm.trashItems = [{ ...pendingItem, canRestore: true, canPermanentDelete: true }]
 
     await wrapper.vm.permanentlyDeleteTrashItem(wrapper.vm.trashItems[0])
-    expect(wrapper.vm.getTrashStatusLabel('deleted', 'archive_submission')).toBe('已刪除')
-    expect(wrapper.vm.getPermanentDeletionActionLabel(wrapper.vm.trashItems[0])).toBe(
-      '永久刪除中…'
-    )
+    expect(wrapper.vm.getTrashStatusLabel('deleted', 'notification')).toBe('已刪除')
+    expect(wrapper.vm.getPermanentDeletionActionLabel(wrapper.vm.trashItems[0])).toBe('永久刪除中…')
     expect(wrapper.vm.canRestoreTrashItem(wrapper.vm.trashItems[0])).toBe(false)
     expect(toastAddMock).not.toHaveBeenCalledWith(
       expect.objectContaining({ summary: '已永久刪除' })
@@ -1353,6 +1354,128 @@ describe('AdminView', () => {
         severity: 'error',
         summary: '永久刪除失敗',
         detail: '永久刪除失敗，請稍後再試',
+      })
+    )
+    wrapper.unmount()
+  })
+
+  it('does not treat a single-item response without durable operation truth as completed', async () => {
+    const item = {
+      item_type: 'notification',
+      id: 904,
+      display_name: 'Legacy-shaped response',
+      canRestore: true,
+      canPermanentDelete: true,
+      dependencies: [],
+    }
+    permanentlyDeleteTrashItemMock.mockResolvedValueOnce({
+      status: 200,
+      data: { deleted_count: 1 },
+    })
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    await wrapper.vm.permanentlyDeleteTrashItem(item)
+
+    expect(toastAddMock).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'error', summary: '永久刪除失敗' })
+    )
+    expect(toastAddMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ severity: 'success', summary: '已永久刪除' })
+    )
+    wrapper.unmount()
+  })
+
+  it('reports mixed bulk durable outcomes without claiming that pending work completed', async () => {
+    permanentlyDeleteTrashScopeMock.mockResolvedValueOnce({
+      data: {
+        requested_count: 5,
+        completed_count: 1,
+        pending_count: 1,
+        manual_review_count: 1,
+        failed_count: 1,
+        skipped_count: 1,
+        results: [],
+      },
+    })
+    const wrapper = createWrapper()
+    await flushPromises()
+    listTrashItemsMock.mockClear()
+
+    await wrapper.vm.bulkDeleteTrashScope()
+
+    expect(toastAddMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'warn',
+        summary: '永久刪除需要注意',
+        detail:
+          '已永久刪除 1 筆；已接受 1 筆永久刪除；1 筆永久刪除需人工處理；1 筆永久刪除未接受；1 筆由其他永久刪除作業涵蓋',
+      })
+    )
+    expect(toastAddMock).not.toHaveBeenCalledWith(expect.objectContaining({ summary: '已清空' }))
+    expect(listTrashItemsMock).toHaveBeenCalledTimes(1)
+    expect(getPermanentDeletionStatusMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('shows full completion only when every requested bulk item completed', async () => {
+    permanentlyDeleteTrashScopeMock.mockResolvedValueOnce({
+      data: {
+        requested_count: 2,
+        completed_count: 2,
+        pending_count: 0,
+        manual_review_count: 0,
+        failed_count: 0,
+        skipped_count: 0,
+        results: [],
+      },
+    })
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    await wrapper.vm.bulkDeleteTrashScope()
+
+    expect(toastAddMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'success',
+        summary: '已永久刪除',
+        detail: '已永久刪除 2 筆',
+      })
+    )
+    wrapper.unmount()
+  })
+
+  it('prevents duplicate bulk submission while one request is in flight', async () => {
+    let resolveBulk
+    permanentlyDeleteTrashScopeMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveBulk = resolve
+      })
+    )
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    const first = wrapper.vm.bulkDeleteTrashScope()
+    const second = wrapper.vm.bulkDeleteTrashScope()
+    expect(permanentlyDeleteTrashScopeMock).toHaveBeenCalledTimes(1)
+
+    resolveBulk({
+      data: {
+        requested_count: 1,
+        completed_count: 0,
+        pending_count: 1,
+        manual_review_count: 0,
+        failed_count: 0,
+        skipped_count: 0,
+        results: [],
+      },
+    })
+    await Promise.all([first, second])
+    expect(toastAddMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        severity: 'info',
+        summary: '永久刪除已接受',
+        detail: '已接受 1 筆永久刪除',
       })
     )
     wrapper.unmount()

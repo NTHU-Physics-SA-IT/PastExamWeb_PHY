@@ -41,9 +41,13 @@ from app.models.models import (
     CourseCategoryConfig,
     CourseSubmission,
     Notification,
+    PermanentDeletionBulkItemResult,
+    PermanentDeletionBulkOutcome,
+    PermanentDeletionBulkRead,
     PermanentDeletionOperation,
     PermanentDeletionRead,
     PermanentDeletionStatus,
+    PermanentDeletionTarget,
     SubmissionStatus,
     SystemIssueReport,
     TrashEntityType,
@@ -113,13 +117,42 @@ class TrashActionAuthority:
     can_permanent_delete: bool = True
 
 
-_DURABLE_SINGLE_DELETE_TYPES = frozenset(
+_DURABLE_DELETE_TYPES = frozenset(TrashEntityType)
+_STORAGE_CAPABLE_DURABLE_DELETE_TYPES = frozenset(
     {
         TrashEntityType.ARCHIVE,
         TrashEntityType.ARCHIVE_SUBMISSION,
         TrashEntityType.COURSE,
+        TrashEntityType.USER,
     }
 )
+
+_PUBLIC_PERMANENT_DELETION_ROOT_MODELS = {
+    TrashEntityType.ARCHIVE: Archive,
+    TrashEntityType.ARCHIVE_SUBMISSION: ArchiveSubmission,
+    TrashEntityType.COURSE_CATEGORY: CourseCategoryConfig,
+    TrashEntityType.COURSE: Course,
+    TrashEntityType.COURSE_SUBMISSION: CourseSubmission,
+    TrashEntityType.SYSTEM_ISSUE_REPORT: SystemIssueReport,
+    TrashEntityType.COMMENT_REPORT: CommentReport,
+    TrashEntityType.ARCHIVE_REPORT: ArchiveReport,
+    TrashEntityType.ARCHIVE_WISH_REPORT: ArchiveWishReport,
+    TrashEntityType.NOTIFICATION: Notification,
+    TrashEntityType.USER: User,
+}
+
+
+def _is_trashed_permanent_deletion_root(
+    item_type: TrashEntityType,
+    root,
+) -> bool:
+    if root is None:
+        return False
+    if item_type == TrashEntityType.ARCHIVE_SUBMISSION:
+        return is_archive_submission_trashed(root)
+    if item_type == TrashEntityType.COURSE_SUBMISSION:
+        return root.deleted_at is not None or root.status == SubmissionStatus.DELETED
+    return root.deleted_at is not None
 
 
 def _permanent_deletion_idempotency_key(
@@ -175,20 +208,35 @@ async def _permanent_deletion_for_root(
 async def _apply_permanent_deletion_projections(
     db: SQLModelAsyncSession, items: list[TrashItem]
 ) -> None:
-    relevant = {
-        (item.item_type.value, item.id)
-        for item in items
-        if item.item_type in _DURABLE_SINGLE_DELETE_TYPES
-    }
+    relevant = {(item.item_type.value, item.id) for item in items}
     if not relevant:
         return
+    ids_by_type: dict[str, list[int]] = {}
+    for entity_type, entity_id in relevant:
+        ids_by_type.setdefault(entity_type, []).append(entity_id)
+    root_scope = or_(
+        *(
+            and_(
+                PermanentDeletionOperation.root_entity_type == entity_type,
+                PermanentDeletionOperation.root_entity_id.in_(entity_ids),
+            )
+            for entity_type, entity_ids in ids_by_type.items()
+        )
+    )
+    target_scope = or_(
+        *(
+            and_(
+                PermanentDeletionTarget.entity_type == entity_type,
+                PermanentDeletionTarget.entity_id.in_(entity_ids),
+            )
+            for entity_type, entity_ids in ids_by_type.items()
+        )
+    )
     operations = (
         (
             await db.execute(
                 select(PermanentDeletionOperation).where(
-                    PermanentDeletionOperation.root_entity_type.in_(
-                        [item.value for item in _DURABLE_SINGLE_DELETE_TYPES]
-                    ),
+                    root_scope,
                     PermanentDeletionOperation.status
                     != PermanentDeletionStatus.COMPLETED,
                 )
@@ -202,9 +250,29 @@ async def _apply_permanent_deletion_projections(
         for operation in operations
         if (operation.root_entity_type, operation.root_entity_id) in relevant
     }
+    targets = (
+        await db.execute(
+            select(PermanentDeletionTarget, PermanentDeletionOperation)
+            .join(
+                PermanentDeletionOperation,
+                PermanentDeletionOperation.id == PermanentDeletionTarget.operation_id,
+            )
+            .where(
+                target_scope,
+                PermanentDeletionTarget.reservation_released_at.is_(None),
+                PermanentDeletionOperation.status != PermanentDeletionStatus.COMPLETED,
+            )
+        )
+    ).all()
+    by_target = {
+        (target.entity_type, target.entity_id): operation
+        for target, operation in targets
+        if (target.entity_type, target.entity_id) in relevant
+    }
     now = datetime.now(UTC)
     for item in items:
-        operation = by_root.get((item.item_type.value, item.id))
+        identity = (item.item_type.value, item.id)
+        operation = by_root.get(identity) or by_target.get(identity)
         if operation is None:
             continue
         item.permanent_deletion = _to_permanent_deletion_read(operation, now=now)
@@ -218,8 +286,12 @@ async def _reject_restore_after_acceptance(
     item_type: TrashEntityType,
     item_id: int,
 ) -> None:
-    operation = await _permanent_deletion_for_root(
-        db, item_type=item_type, item_id=item_id
+    operation = await _proven_covering_permanent_deletion(
+        db,
+        item_type=item_type,
+        item_id=item_id,
+        operation_ids=None,
+        include_released=False,
     )
     if operation is None or operation.status == PermanentDeletionStatus.COMPLETED:
         return
@@ -233,10 +305,61 @@ async def _reject_restore_after_acceptance(
     )
 
 
+async def _proven_covering_permanent_deletion(
+    db: SQLModelAsyncSession,
+    *,
+    item_type: TrashEntityType,
+    item_id: int,
+    operation_ids: set[int] | None,
+    include_released: bool,
+) -> PermanentDeletionRead | None:
+    statement = (
+        select(PermanentDeletionOperation)
+        .join(
+            PermanentDeletionTarget,
+            PermanentDeletionTarget.operation_id == PermanentDeletionOperation.id,
+        )
+        .where(
+            PermanentDeletionTarget.entity_type == item_type.value,
+            PermanentDeletionTarget.entity_id == item_id,
+        )
+        .order_by(PermanentDeletionOperation.id.desc())
+    )
+    if operation_ids is not None:
+        if not operation_ids:
+            return None
+        statement = statement.where(PermanentDeletionOperation.id.in_(operation_ids))
+    if not include_released:
+        statement = statement.where(
+            PermanentDeletionTarget.reservation_released_at.is_(None),
+            PermanentDeletionOperation.status != PermanentDeletionStatus.COMPLETED,
+        )
+    operation = (await db.execute(statement.limit(1))).scalar_one_or_none()
+    return _to_permanent_deletion_read(operation) if operation is not None else None
+
+
 def _permanent_deletion_storage() -> ExactVersionMinioAdapter:
     return ExactVersionMinioAdapter(
         get_minio_client(), bucket_name=settings.MINIO_BUCKET_NAME
     )
+
+
+def _permanent_deletion_storage_for_root(
+    item_type: TrashEntityType,
+) -> ExactVersionMinioAdapter | None:
+    if item_type not in _STORAGE_CAPABLE_DURABLE_DELETE_TYPES:
+        return None
+    return _permanent_deletion_storage()
+
+
+async def _lock_simple_trash_root(
+    db: SQLModelAsyncSession,
+    model,
+    item_id: int,
+):
+    return (
+        await db.execute(select(model).where(model.id == item_id).with_for_update())
+    ).scalar_one_or_none()
 
 
 def _build_trash_action_authority(
@@ -2338,36 +2461,45 @@ async def restore_trash_item(
     now = datetime.now(UTC)
 
     if payload.item_type == TrashEntityType.SYSTEM_ISSUE_REPORT:
-        report = await db.get(SystemIssueReport, payload.item_id)
+        report = await _lock_simple_trash_root(db, SystemIssueReport, payload.item_id)
         if not report or report.deleted_at is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="System issue report not found",
             )
+        await _reject_restore_after_acceptance(
+            db, item_type=payload.item_type, item_id=payload.item_id
+        )
         report.deleted_at = None
         report.deleted_by_id = None
         await db.commit()
         return {"message": "系統問題回報已還原"}
 
     if payload.item_type == TrashEntityType.COMMENT_REPORT:
-        report = await db.get(CommentReport, payload.item_id)
+        report = await _lock_simple_trash_root(db, CommentReport, payload.item_id)
         if not report or report.deleted_at is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Comment report not found",
             )
+        await _reject_restore_after_acceptance(
+            db, item_type=payload.item_type, item_id=payload.item_id
+        )
         report.deleted_at = None
         report.deleted_by_id = None
         await db.commit()
         return {"message": "留言回報已還原"}
 
     if payload.item_type == TrashEntityType.ARCHIVE_WISH_REPORT:
-        report = await db.get(ArchiveWishReport, payload.item_id)
+        report = await _lock_simple_trash_root(db, ArchiveWishReport, payload.item_id)
         if not report or report.deleted_at is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Wish report not found",
             )
+        await _reject_restore_after_acceptance(
+            db, item_type=payload.item_type, item_id=payload.item_id
+        )
         report.deleted_at = None
         report.deleted_by_id = None
         await db.commit()
@@ -2389,6 +2521,9 @@ async def restore_trash_item(
                 detail="Archive report not found",
             )
         report = locked.report
+        await _reject_restore_after_acceptance(
+            db, item_type=payload.item_type, item_id=payload.item_id
+        )
         if (
             report.status == "pending"
             and report.reporter_user_id is not None
@@ -2418,11 +2553,16 @@ async def restore_trash_item(
         return {"message": "考古題回報已還原"}
 
     if payload.item_type == TrashEntityType.COURSE_CATEGORY:
-        category = await db.get(CourseCategoryConfig, payload.item_id)
+        category = await _lock_simple_trash_root(
+            db, CourseCategoryConfig, payload.item_id
+        )
         if not category or category.deleted_at is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Category not found"
             )
+        await _reject_restore_after_acceptance(
+            db, item_type=payload.item_type, item_id=payload.item_id
+        )
         if category.pre_delete_is_active is None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -2456,6 +2596,9 @@ async def restore_trash_item(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Course request not found",
             )
+        await _reject_restore_after_acceptance(
+            db, item_type=payload.item_type, item_id=payload.item_id
+        )
         if submission.deleted_at is None or submission.previous_status is None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -2588,11 +2731,14 @@ async def restore_trash_item(
         }
 
     if payload.item_type == TrashEntityType.NOTIFICATION:
-        notification = await db.get(Notification, payload.item_id)
+        notification = await _lock_simple_trash_root(db, Notification, payload.item_id)
         if not notification or notification.deleted_at is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found"
             )
+        await _reject_restore_after_acceptance(
+            db, item_type=payload.item_type, item_id=payload.item_id
+        )
 
         notification.deleted_at = None
         notification.deleted_by_id = None
@@ -2691,11 +2837,14 @@ async def restore_trash_item(
         }
 
     if payload.item_type == TrashEntityType.USER:
-        user = await db.get(User, payload.item_id)
+        user = await _lock_simple_trash_root(db, User, payload.item_id)
         if not user or user.deleted_at is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
             )
+        await _reject_restore_after_acceptance(
+            db, item_type=payload.item_type, item_id=payload.item_id
+        )
 
         user.deleted_at = None
         user.deleted_by_id = None
@@ -2791,7 +2940,7 @@ async def _get_public_permanent_deletion_operation(
 ) -> PermanentDeletionOperation:
     operation = await db.get(PermanentDeletionOperation, operation_id)
     if operation is None or operation.root_entity_type not in {
-        item.value for item in _DURABLE_SINGLE_DELETE_TYPES
+        item.value for item in _DURABLE_DELETE_TYPES
     }:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -2807,7 +2956,9 @@ async def _process_public_permanent_deletion_once(
         await process_one_permanent_deletion(
             db,
             operation_id=int(operation.id),
-            storage=_permanent_deletion_storage(),
+            storage=_permanent_deletion_storage_for_root(
+                TrashEntityType(operation.root_entity_type)
+            ),
         )
     except Exception as exc:
         await db.rollback()
@@ -2876,7 +3027,39 @@ async def retry_permanent_deletion(
     return projection
 
 
-@router.delete("/bulk")
+def _bulk_outcome_for_projection(
+    projection: PermanentDeletionRead,
+) -> PermanentDeletionBulkOutcome:
+    if projection.status == PermanentDeletionStatus.COMPLETED:
+        return PermanentDeletionBulkOutcome.COMPLETED
+    if projection.status == PermanentDeletionStatus.MANUAL_REVIEW:
+        return PermanentDeletionBulkOutcome.MANUAL_REVIEW
+    return PermanentDeletionBulkOutcome.PENDING
+
+
+def _safe_bulk_failure_detail(error: HTTPException) -> tuple[str, str]:
+    code = (
+        str(error.detail.get("code"))
+        if isinstance(error.detail, dict) and error.detail.get("code")
+        else "permanent_deletion_not_accepted"
+    )
+    safe_messages = {
+        "root_not_permanently_deletable": "垃圾桶項目不存在",
+        "versioning_state_unavailable": "永久刪除未接受，請稍後再試",
+        "object_history_unavailable": "永久刪除未接受，請稍後再試",
+        "exact_stat_failed": "永久刪除未接受，請稍後再試",
+        "exact_stat_unavailable": "永久刪除未接受，請稍後再試",
+        "current_identity_unavailable": "永久刪除未接受，請稍後再試",
+        "target_reservation_conflict": "目前無法接受永久刪除",
+        "category_has_blocking_dependencies": "仍有依賴資料阻擋永久刪除",
+        "course_has_active_archives": "仍有依賴資料阻擋永久刪除",
+        "user_has_active_storage_children": "仍有依賴資料阻擋永久刪除",
+        "permanent_deletion_acceptance_unavailable": "永久刪除未接受，請稍後再試",
+    }
+    return code[:64], safe_messages.get(code, "永久刪除未接受")
+
+
+@router.delete("/bulk", response_model=PermanentDeletionBulkRead)
 async def bulk_permanently_delete_trash_items(
     item_type: TrashEntityType | None = Query(default=None),
     current_user=Depends(get_current_user),
@@ -2907,50 +3090,75 @@ async def bulk_permanently_delete_trash_items(
         items,
         key=lambda item: delete_order.get(TrashEntityType(item.item_type), 99),
     )
-    details: list[dict] = []
-    failures: list[dict] = []
-    skipped: list[dict] = []
-    warnings: list[str] = []
-    deleted_count = 0
+    results: list[PermanentDeletionBulkItemResult] = []
+    batch_operation_ids: set[int] = set()
 
     for item in sorted_items:
         trash_type = TrashEntityType(item.item_type)
         try:
-            result = await _permanently_delete_trash_item(
+            projection = await _initiate_public_permanent_deletion(
                 item_type=trash_type,
                 item_id=item.id,
+                current_user=current_user,
                 db=db,
-                warnings=warnings,
             )
-            await db.commit()
-            details.extend(result.get("details", []))
-            deleted_count += int(
-                result.get("deleted", result.get("deleted_count", 0)) or 0
+            batch_operation_ids.add(projection.operation_id)
+            results.append(
+                PermanentDeletionBulkItemResult(
+                    item_type=trash_type,
+                    item_id=item.id,
+                    display_name=item.display_name,
+                    outcome=_bulk_outcome_for_projection(projection),
+                    operation=projection,
+                )
             )
         except HTTPException as error:
             await db.rollback()
-            if error.status_code == status.HTTP_404_NOT_FOUND:
-                skipped.append(
-                    {
-                        "item_type": trash_type.value,
-                        "id": item.id,
-                        "display_name": item.display_name,
-                    }
+            code, message = _safe_bulk_failure_detail(error)
+            covering: PermanentDeletionRead | None = None
+            include_released = False
+            operation_ids: set[int] | None = None
+            if code == "target_reservation_conflict":
+                covering = await _proven_covering_permanent_deletion(
+                    db,
+                    item_type=trash_type,
+                    item_id=item.id,
+                    operation_ids=None,
+                    include_released=False,
+                )
+            elif error.status_code == status.HTTP_404_NOT_FOUND:
+                operation_ids = batch_operation_ids
+                include_released = True
+            if covering is None and operation_ids:
+                covering = await _proven_covering_permanent_deletion(
+                    db,
+                    item_type=trash_type,
+                    item_id=item.id,
+                    operation_ids=operation_ids,
+                    include_released=include_released,
+                )
+            if covering is not None:
+                results.append(
+                    PermanentDeletionBulkItemResult(
+                        item_type=trash_type,
+                        item_id=item.id,
+                        display_name=item.display_name,
+                        outcome=PermanentDeletionBulkOutcome.SKIPPED,
+                        operation=covering,
+                        reason_code="covered_by_permanent_deletion",
+                        reason_message="已由另一筆永久刪除作業涵蓋",
+                    )
                 )
                 continue
-            detail = (
-                error.detail
-                if isinstance(error.detail, dict)
-                else {"message": error.detail}
-            )
-            failures.append(
-                {
-                    "type": trash_type.value,
-                    "id": item.id,
-                    "name": item.display_name,
-                    "reason": detail.get("message", error.detail),
-                    "blockingDependencies": detail.get("blockingDependencies", []),
-                }
+            results.append(
+                PermanentDeletionBulkItemResult(
+                    item_type=trash_type,
+                    item_id=item.id,
+                    display_name=item.display_name,
+                    outcome=PermanentDeletionBulkOutcome.FAILED,
+                    reason_code=code,
+                    reason_message=message,
+                )
             )
         except Exception as exc:
             await db.rollback()
@@ -2960,34 +3168,31 @@ async def bulk_permanently_delete_trash_items(
                 item.id,
                 exc_info=redacted_exc_info(exc),
             )
-            failures.append(
-                {
-                    "type": trash_type.value,
-                    "id": item.id,
-                    "name": item.display_name,
-                    "reason": "永久刪除失敗，請稍後再試或查看伺服器日誌。",
-                    "blockingDependencies": [],
-                }
+            results.append(
+                PermanentDeletionBulkItemResult(
+                    item_type=trash_type,
+                    item_id=item.id,
+                    display_name=item.display_name,
+                    outcome=PermanentDeletionBulkOutcome.FAILED,
+                    reason_code="permanent_deletion_evaluation_failed",
+                    reason_message="永久刪除未接受，請稍後再試",
+                )
             )
 
-    return {
-        "success": True,
-        "scope": item_type.value if item_type else "all",
-        "deleted": deleted_count,
-        "deleted_count": deleted_count,
-        "failed": len(failures),
-        "failed_count": len(failures),
-        "skipped": len(skipped),
-        "message": (
-            "部分項目因仍有未刪除的依賴資料而無法永久刪除"
-            if failures
-            else "永久刪除完成"
-        ),
-        "details": details,
-        "failures": failures,
-        "skipped_items": skipped,
-        "warnings": warnings,
+    counts = {
+        outcome: sum(result.outcome == outcome for result in results)
+        for outcome in PermanentDeletionBulkOutcome
     }
+    return PermanentDeletionBulkRead(
+        scope=item_type,
+        requested_count=len(sorted_items),
+        completed_count=counts[PermanentDeletionBulkOutcome.COMPLETED],
+        pending_count=counts[PermanentDeletionBulkOutcome.PENDING],
+        manual_review_count=counts[PermanentDeletionBulkOutcome.MANUAL_REVIEW],
+        failed_count=counts[PermanentDeletionBulkOutcome.FAILED],
+        skipped_count=counts[PermanentDeletionBulkOutcome.SKIPPED],
+        results=results,
+    )
 
 
 async def _permanently_delete_trash_item(
@@ -3238,32 +3443,21 @@ async def _initiate_public_permanent_deletion(
         db, item_type=item_type, item_id=item_id
     )
     if operation is None:
-        model_by_type = {
-            TrashEntityType.ARCHIVE: Archive,
-            TrashEntityType.ARCHIVE_SUBMISSION: ArchiveSubmission,
-            TrashEntityType.COURSE: Course,
-        }
-        root = await db.get(model_by_type[item_type], item_id)
-        root_is_trashed = root is not None and (
-            is_archive_submission_trashed(root)
-            if item_type == TrashEntityType.ARCHIVE_SUBMISSION
-            else root.deleted_at is not None
-        )
-        if not root_is_trashed:
+        root = await db.get(_PUBLIC_PERMANENT_DELETION_ROOT_MODELS[item_type], item_id)
+        if not _is_trashed_permanent_deletion_root(item_type, root):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Trash item not found",
             )
         try:
+            storage = _permanent_deletion_storage_for_root(item_type)
             operation = await accept_permanent_deletion(
                 db,
                 root_entity_type=item_type,
                 root_entity_id=item_id,
-                idempotency_key=_permanent_deletion_idempotency_key(
-                    item_type, item_id
-                ),
+                idempotency_key=_permanent_deletion_idempotency_key(item_type, item_id),
                 requested_by_user_id=getattr(current_user, "user_id", None),
-                storage=_permanent_deletion_storage(),
+                storage=storage,
             )
         except PermanentDeletionError as exc:
             _raise_permanent_deletion_acceptance_error(exc.code)
@@ -3305,50 +3499,15 @@ async def permanently_delete_trash_item(
             status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
         )
 
-    if item_type in _DURABLE_SINGLE_DELETE_TYPES:
-        projection = await _initiate_public_permanent_deletion(
-            item_type=item_type,
-            item_id=item_id,
-            current_user=current_user,
-            db=db,
-        )
-        response.status_code = (
-            status.HTTP_200_OK
-            if projection.status == PermanentDeletionStatus.COMPLETED
-            else status.HTTP_202_ACCEPTED
-        )
-        return projection
-
-    warnings: list[str] = []
-    try:
-        result = await _permanently_delete_trash_item(
-            item_type=item_type,
-            item_id=item_id,
-            db=db,
-            warnings=warnings,
-        )
-        await db.commit()
-        return result
-    except HTTPException:
-        await db.rollback()
-        raise
-    except Exception as error:
-        await db.rollback()
-        logger.exception(
-            "Failed to permanently delete trash item %s/%s", item_type, item_id
-        )
-        error_text = str(error)
-        message = "永久刪除失敗，請稍後再試或查看伺服器日誌。"
-        if "archive_discussion_messages" in error_text:
-            message = "永久刪除失敗：仍有考古題留言引用此考古題，請查看伺服器日誌。"
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "success": False,
-                "deleted": 0,
-                "failed": 1,
-                "message": message,
-                "blockingDependencies": [],
-                "warnings": warnings,
-            },
-        )
+    projection = await _initiate_public_permanent_deletion(
+        item_type=item_type,
+        item_id=item_id,
+        current_user=current_user,
+        db=db,
+    )
+    response.status_code = (
+        status.HTTP_200_OK
+        if projection.status == PermanentDeletionStatus.COMPLETED
+        else status.HTTP_202_ACCEPTED
+    )
+    return projection

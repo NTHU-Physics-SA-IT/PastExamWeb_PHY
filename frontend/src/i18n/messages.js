@@ -1570,6 +1570,13 @@ const en = {
   '已永久刪除 {deleted} 筆，{failed} 筆失敗':
     'Permanently deleted {deleted} items; {failed} failed',
   '已永久刪除 {count} 筆': 'Permanently deleted {count} items',
+  '已接受 {count} 筆永久刪除': 'Accepted {count} items for permanent deletion',
+  '{count} 筆永久刪除需人工處理': '{count} permanent deletions require manual review',
+  '{count} 筆永久刪除未接受': '{count} permanent deletions were not accepted',
+  '{count} 筆由其他永久刪除作業涵蓋':
+    '{count} items are covered by another permanent deletion operation',
+  永久刪除需要注意: 'Permanent Deletion Needs Attention',
+  永久刪除已接受: 'Permanent Deletion Accepted',
   '{count} 筆永久刪除失敗': 'Failed to permanently delete {count} items',
   '確定要還原「{name}」嗎？': 'Restore “{name}”?',
   '確定要永久刪除「{name}」嗎？永久刪除後無法復原。':

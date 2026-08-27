@@ -1,9 +1,8 @@
 """PostgreSQL-authoritative permanent-deletion saga.
 
-The Admin Trash single-item API activates these primitives only for the sealed
-Stage 5F-C roots. Processing and finalization remain bounded service-owned
-operations; bulk and recurring orchestration are still outside this module's
-public activation.
+The Admin Trash single-item and outcome-bounded bulk APIs activate these
+primitives for every Trash root. Processing and finalization remain bounded
+service-owned operations; no recurring orchestration is activated here.
 """
 
 from __future__ import annotations

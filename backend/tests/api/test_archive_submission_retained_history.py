@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import delete, func
 from sqlmodel import select
 
-from app.api.services import archive_submission_lifecycle, trash
+from app.api.services import trash
 from app.main import app
 from app.models.models import (
     Archive,
@@ -59,8 +59,10 @@ class _FakeVersionedMinio:
         ]
 
     def stat_object(self, _bucket: str, key: str, version_id: str | None = None):
-        if self.present and key == self.key and (
-            version_id is None or version_id == self.version_id
+        if (
+            self.present
+            and key == self.key
+            and (version_id is None or version_id == self.version_id)
         ):
             return SimpleNamespace(object_name=key, version_id=self.version_id)
         from minio.error import S3Error
@@ -73,6 +75,46 @@ class _FakeVersionedMinio:
         assert key == self.key
         assert version_id == self.version_id
         self.present = False
+
+
+class _FakeMultiVersionedMinio:
+    def __init__(self, keys: list[str]) -> None:
+        self.version_by_key = {
+            key: f"retained-v{index + 1}" for index, key in enumerate(keys)
+        }
+        self.present = set(keys)
+
+    def get_bucket_versioning(self, _bucket: str):
+        return SimpleNamespace(status="Enabled")
+
+    def list_objects(self, _bucket: str, **_kwargs):
+        return [
+            SimpleNamespace(
+                object_name=key,
+                version_id=version_id,
+                is_delete_marker=False,
+            )
+            for key, version_id in self.version_by_key.items()
+            if key in self.present
+        ]
+
+    def stat_object(self, _bucket: str, key: str, version_id: str | None = None):
+        expected = self.version_by_key.get(key)
+        if (
+            key in self.present
+            and expected is not None
+            and (version_id is None or version_id == expected)
+        ):
+            return SimpleNamespace(object_name=key, version_id=expected)
+        from minio.error import S3Error
+
+        raise S3Error(None, "NoSuchVersion", "missing", key, "request-id", "host-id")
+
+    def remove_object(
+        self, _bucket: str, key: str, version_id: str | None = None
+    ) -> None:
+        assert version_id == self.version_by_key[key]
+        self.present.remove(key)
 
 
 async def _create_deleted_pair(session_maker, *, requester_id: int):
@@ -187,14 +229,6 @@ async def _cleanup(
             delete(CourseCategoryConfig).where(CourseCategoryConfig.id == category_id)
         )
         await session.commit()
-
-
-def _disable_storage(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = SimpleNamespace(remove_object=lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(trash, "get_minio_client", lambda: client)
-    monkeypatch.setattr(
-        archive_submission_lifecycle, "get_minio_client", lambda: client
-    )
 
 
 @pytest.mark.asyncio
@@ -355,13 +389,26 @@ async def test_bulk_permanent_delete_retains_every_submission_event(
         await _create_deleted_pair(session_maker, requester_id=requester.id)
         for _ in range(2)
     ]
-    _disable_storage(monkeypatch)
+    storage = ExactVersionMinioAdapter(
+        _FakeMultiVersionedMinio([context[2].object_name for context in contexts]),
+        bucket_name="retained-history-bulk-test",
+    )
+    monkeypatch.setattr(trash, "_permanent_deletion_storage", lambda: storage)
     app.dependency_overrides[get_current_user] = _override_user(admin.id, is_admin=True)
+    operation_by_submission: dict[int, int] = {}
     try:
         response = await client.delete(
             "/trash/bulk", params={"item_type": "archive_submission"}
         )
         assert response.status_code == 200
+        body = response.json()
+        assert body["requested_count"] == 2
+        assert body["completed_count"] == 2
+        assert body["pending_count"] == 0
+        operation_by_submission = {
+            result["item_id"]: result["operation"]["operation_id"]
+            for result in body["results"]
+        }
         event_ids = [context[4].id for context in contexts]
         submission_ids = [context[3].id for context in contexts]
         async with session_maker() as session:
@@ -400,4 +447,5 @@ async def test_bulk_permanent_delete_retains_every_submission_event(
                 submission_id=submission.id,
                 event_id=event.id,
                 notification_id=notification.id,
+                operation_id=operation_by_submission.get(submission.id),
             )
