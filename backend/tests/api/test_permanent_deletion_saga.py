@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
@@ -49,12 +50,16 @@ class FakeVersionedMinio:
         self.replacement_during_delete: str | None = None
         self.replacement_on_history_call: tuple[int, str] | None = None
         self.history_calls = 0
+        self.on_history: Callable[[], None] | None = None
+        self.on_remove: Callable[[], None] | None = None
 
     def get_bucket_versioning(self, _bucket: str):
         return SimpleNamespace(status=self.status)
 
     def list_objects(self, _bucket: str, **_kwargs):
         self.history_calls += 1
+        if self.on_history is not None:
+            self.on_history()
         if (
             self.replacement_on_history_call is not None
             and self.history_calls == self.replacement_on_history_call[0]
@@ -115,9 +120,19 @@ class FakeVersionedMinio:
         self.versions = [
             row for row in self.versions if not (row[0] == key and row[1] == version_id)
         ]
+        if self.on_remove is not None:
+            self.on_remove()
         if self.unknown_once:
             self.unknown_once = False
             raise TimeoutError("synthetic unknown delete outcome")
+
+
+class MutableLeaseClock:
+    def __init__(self, current: datetime) -> None:
+        self.current = current
+
+    def __call__(self) -> datetime:
+        return self.current
 
 
 async def _create_deleted_pair(session_maker, *, requester_id: int):
@@ -283,6 +298,7 @@ async def test_db_only_acceptance_reuses_intent_and_completes_idempotently(
             storage=None,
             now=now + timedelta(minutes=1),
             jitter_fraction=0.0,
+            lease_clock=MutableLeaseClock(now + timedelta(minutes=1, seconds=1)),
         )
         assert result == PermanentDeletionStatus.COMPLETED
         assert await session.get(CourseSubmission, request.id) is None
@@ -293,6 +309,7 @@ async def test_db_only_acceptance_reuses_intent_and_completes_idempotently(
             storage=None,
             now=now + timedelta(minutes=2),
             jitter_fraction=0.0,
+            lease_clock=MutableLeaseClock(now + timedelta(minutes=2, seconds=1)),
         )
         assert again == PermanentDeletionStatus.COMPLETED
 
@@ -335,6 +352,7 @@ async def test_exact_storage_completion_is_atomic_with_stage5e_detach(
             storage=storage,
             now=now + timedelta(minutes=1),
             jitter_fraction=0.0,
+            lease_clock=MutableLeaseClock(now + timedelta(minutes=1, seconds=1)),
         )
         assert result == PermanentDeletionStatus.COMPLETED
         assert client.removals == [
@@ -361,6 +379,7 @@ async def test_exact_storage_completion_is_atomic_with_stage5e_detach(
             storage=storage,
             now=now + timedelta(minutes=2),
             jitter_fraction=0.0,
+            lease_clock=MutableLeaseClock(now + timedelta(minutes=2, seconds=1)),
         )
         assert repeated == PermanentDeletionStatus.COMPLETED
         assert client.removals == [
@@ -398,6 +417,7 @@ async def test_unknown_delete_outcome_verifies_before_finalization(
             storage=storage,
             now=now + timedelta(minutes=1),
             jitter_fraction=0.0,
+            lease_clock=MutableLeaseClock(now + timedelta(minutes=1, seconds=1)),
         )
         assert first == PermanentDeletionStatus.VERIFICATION_REQUIRED
         assert await session.get(ArchiveSubmission, submission.id) is not None
@@ -408,6 +428,7 @@ async def test_unknown_delete_outcome_verifies_before_finalization(
             storage=storage,
             now=now + timedelta(minutes=2),
             jitter_fraction=0.0,
+            lease_clock=MutableLeaseClock(now + timedelta(minutes=2, seconds=1)),
         )
         assert second == PermanentDeletionStatus.COMPLETED
         assert len(client.removals) == 1
@@ -448,6 +469,9 @@ async def test_replacement_drift_enters_manual_review_without_delete(
                 storage=storage,
                 now=now + timedelta(minutes=1),
                 jitter_fraction=0.0,
+                lease_clock=MutableLeaseClock(
+                    now + timedelta(minutes=1, seconds=1)
+                ),
             )
             assert result == PermanentDeletionStatus.MANUAL_REVIEW
             assert client.removals == []
@@ -708,6 +732,9 @@ async def test_retryable_failure_tracks_budget_and_retries_same_exact_version(
                 storage=storage,
                 now=now + timedelta(minutes=1),
                 jitter_fraction=0.0,
+                lease_clock=MutableLeaseClock(
+                    now + timedelta(minutes=1, seconds=1)
+                ),
             )
             assert first == PermanentDeletionStatus.RETRYABLE_FAILED
             await session.refresh(operation)
@@ -722,6 +749,7 @@ async def test_retryable_failure_tracks_budget_and_retries_same_exact_version(
                 storage=storage,
                 now=retry_at,
                 jitter_fraction=0.0,
+                lease_clock=MutableLeaseClock(retry_at + timedelta(seconds=1)),
             )
             assert second == PermanentDeletionStatus.COMPLETED
             assert client.removals == [
@@ -911,6 +939,9 @@ async def test_db_finalization_rollback_recovers_from_verified_storage_absence(
                 storage=storage,
                 now=now + timedelta(minutes=1),
                 jitter_fraction=0.0,
+                lease_clock=MutableLeaseClock(
+                    now + timedelta(minutes=1, seconds=1)
+                ),
             )
             assert first == PermanentDeletionStatus.RETRYABLE_FAILED
             assert await session.get(ArchiveSubmission, submission.id) is not None
@@ -927,6 +958,7 @@ async def test_db_finalization_rollback_recovers_from_verified_storage_absence(
                 storage=storage,
                 now=retry_at,
                 jitter_fraction=0.0,
+                lease_clock=MutableLeaseClock(retry_at + timedelta(seconds=1)),
             )
             assert second == PermanentDeletionStatus.COMPLETED
             assert client.removals == [
@@ -1025,3 +1057,325 @@ async def test_claim_is_single_owner_and_expired_lease_is_reclaimable(
             delete(CourseSubmission).where(CourseSubmission.id == request.id)
         )
         await cleanup_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_expired_unreclaimed_lease_is_not_owned(
+    session_maker,
+    make_user,
+) -> None:
+    requester = await make_user()
+    now = datetime(2026, 8, 27, 9, 0, tzinfo=UTC)
+    async with session_maker() as session:
+        request = CourseSubmission(
+            name="Expired unreclaimed lease",
+            category="physics-department",
+            requester_id=requester.id,
+            status=SubmissionStatus.DELETED,
+            previous_status=SubmissionStatus.PENDING,
+            deleted_at=now,
+        )
+        session.add(request)
+        await session.commit()
+        await session.refresh(request)
+        operation = await accept_permanent_deletion(
+            session,
+            root_entity_type=TrashEntityType.COURSE_SUBMISSION,
+            root_entity_id=request.id,
+            idempotency_key=f"course-request:{request.id}:expired-unreclaimed",
+            requested_by_user_id=requester.id,
+            storage=None,
+            now=now,
+        )
+        assert await claim_permanent_deletion(
+            session,
+            operation_id=operation.id,
+            lease_token="expired-token",
+            now=now,
+            lease_for=timedelta(seconds=1),
+        )
+
+        try:
+            with pytest.raises(PermanentDeletionError, match="lease_lost"):
+                await _owned_operation(session, int(operation.id), "expired-token")
+        finally:
+            await session.execute(
+                delete(PermanentDeletionTarget).where(
+                    PermanentDeletionTarget.operation_id == operation.id
+                )
+            )
+            await session.execute(
+                delete(PermanentDeletionOperation).where(
+                    PermanentDeletionOperation.id == operation.id
+                )
+            )
+            await session.execute(
+                delete(CourseSubmission).where(CourseSubmission.id == request.id)
+            )
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_lease_expiry_before_delete_boundary_prevents_destructive_call(
+    session_maker,
+    make_user,
+) -> None:
+    requester = await make_user()
+    category, course, archive, submission, event, notification = (
+        await _create_deleted_pair(session_maker, requester_id=requester.id)
+    )
+    client = FakeVersionedMinio(archive.object_name, "v-before-delete-expiry")
+    storage = ExactVersionMinioAdapter(client, bucket_name="stage5fb-test")
+    now = datetime(2026, 8, 27, 10, 0, tzinfo=UTC)
+    lease_clock = MutableLeaseClock(now + timedelta(seconds=1))
+    operation_id: int | None = None
+
+    try:
+        async with session_maker() as session:
+            operation = await accept_permanent_deletion(
+                session,
+                root_entity_type=TrashEntityType.ARCHIVE_SUBMISSION,
+                root_entity_id=submission.id,
+                idempotency_key=f"submission:{submission.id}:pre-delete-expiry",
+                requested_by_user_id=requester.id,
+                storage=storage,
+                now=now,
+            )
+            operation_id = int(operation.id)
+            client.on_history = lambda: setattr(
+                lease_clock, "current", now + timedelta(seconds=31)
+            )
+
+            result = await process_one_permanent_deletion(
+                session,
+                operation_id=operation.id,
+                storage=storage,
+                now=now,
+                lease_for=timedelta(seconds=30),
+                lease_clock=lease_clock,
+            )
+
+            assert result == PermanentDeletionStatus.PROCESSING
+            assert client.removals == []
+            assert await session.get(ArchiveSubmission, submission.id) is not None
+            await session.refresh(operation)
+            assert operation.completed_at is None
+    finally:
+        await _cleanup_pair_and_operation(
+            session_maker,
+            operation_id=operation_id,
+            category_id=category.id,
+            course_id=course.id,
+            archive_id=archive.id,
+            submission_id=submission.id,
+            event_id=event.id,
+            notification_id=notification.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_crossing_lease_expiry_cannot_persist_post_delete_state(
+    session_maker,
+    make_user,
+) -> None:
+    requester = await make_user()
+    category, course, archive, submission, event, notification = (
+        await _create_deleted_pair(session_maker, requester_id=requester.id)
+    )
+    client = FakeVersionedMinio(archive.object_name, "v-mid-call-expiry")
+    storage = ExactVersionMinioAdapter(client, bucket_name="stage5fb-test")
+    now = datetime(2026, 8, 27, 11, 0, tzinfo=UTC)
+    lease_clock = MutableLeaseClock(now + timedelta(seconds=1))
+    operation_id: int | None = None
+
+    try:
+        async with session_maker() as session:
+            operation = await accept_permanent_deletion(
+                session,
+                root_entity_type=TrashEntityType.ARCHIVE_SUBMISSION,
+                root_entity_id=submission.id,
+                idempotency_key=f"submission:{submission.id}:mid-call-expiry",
+                requested_by_user_id=requester.id,
+                storage=storage,
+                now=now,
+            )
+            operation_id = int(operation.id)
+            client.on_remove = lambda: setattr(
+                lease_clock, "current", now + timedelta(seconds=31)
+            )
+
+            result = await process_one_permanent_deletion(
+                session,
+                operation_id=operation.id,
+                storage=storage,
+                now=now,
+                lease_for=timedelta(seconds=30),
+                lease_clock=lease_clock,
+            )
+
+            assert result == PermanentDeletionStatus.PROCESSING
+            assert client.removals == [
+                ("stage5fb-test", archive.object_name, "v-mid-call-expiry")
+            ]
+            stored_object = (
+                await session.execute(
+                    select(PermanentDeletionObject).where(
+                        PermanentDeletionObject.operation_id == operation.id
+                    )
+                )
+            ).scalar_one()
+            assert stored_object.verified_absent_at is None
+            assert await session.get(ArchiveSubmission, submission.id) is not None
+            await session.refresh(operation)
+            assert operation.completed_at is None
+    finally:
+        await _cleanup_pair_and_operation(
+            session_maker,
+            operation_id=operation_id,
+            category_id=category.id,
+            course_id=course.id,
+            archive_id=archive.id,
+            submission_id=submission.id,
+            event_id=event.id,
+            notification_id=notification.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_lease_expiry_during_finalization_rolls_back_live_rows_and_completion(
+    session_maker,
+    make_user,
+    monkeypatch,
+) -> None:
+    requester = await make_user()
+    category, course, archive, submission, event, notification = (
+        await _create_deleted_pair(session_maker, requester_id=requester.id)
+    )
+    client = FakeVersionedMinio(archive.object_name, "v-finalization-expiry")
+    storage = ExactVersionMinioAdapter(client, bucket_name="stage5fb-test")
+    now = datetime(2026, 8, 27, 12, 0, tzinfo=UTC)
+    lease_clock = MutableLeaseClock(now + timedelta(seconds=1))
+    operation_id: int | None = None
+    original_finalize = permanent_deletion_service._finalize_plan
+
+    async def expire_after_live_row_effects(*args, **kwargs):
+        await original_finalize(*args, **kwargs)
+        lease_clock.current = now + timedelta(seconds=31)
+
+    try:
+        async with session_maker() as session:
+            operation = await accept_permanent_deletion(
+                session,
+                root_entity_type=TrashEntityType.ARCHIVE_SUBMISSION,
+                root_entity_id=submission.id,
+                idempotency_key=f"submission:{submission.id}:finalization-expiry",
+                requested_by_user_id=requester.id,
+                storage=storage,
+                now=now,
+            )
+            operation_id = int(operation.id)
+            monkeypatch.setattr(
+                permanent_deletion_service,
+                "_finalize_plan",
+                expire_after_live_row_effects,
+            )
+
+            result = await process_one_permanent_deletion(
+                session,
+                operation_id=operation.id,
+                storage=storage,
+                now=now,
+                lease_for=timedelta(seconds=30),
+                lease_clock=lease_clock,
+            )
+
+            assert result == PermanentDeletionStatus.PROCESSING
+            assert await session.get(Archive, archive.id) is not None
+            assert await session.get(ArchiveSubmission, submission.id) is not None
+            await session.refresh(operation)
+            assert operation.completed_at is None
+            assert operation.status == PermanentDeletionStatus.PROCESSING
+    finally:
+        monkeypatch.setattr(
+            permanent_deletion_service,
+            "_finalize_plan",
+            original_finalize,
+        )
+        await _cleanup_pair_and_operation(
+            session_maker,
+            operation_id=operation_id,
+            category_id=category.id,
+            course_id=course.id,
+            archive_id=archive.id,
+            submission_id=submission.id,
+            event_id=event.id,
+            notification_id=notification.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_reclaimed_owner_can_complete_after_expired_owner_loses_authority(
+    session_maker,
+    make_user,
+) -> None:
+    requester = await make_user()
+    now = datetime(2026, 8, 27, 13, 0, tzinfo=UTC)
+    async with session_maker() as session:
+        request = CourseSubmission(
+            name="Reclaimed lease request",
+            category="physics-department",
+            requester_id=requester.id,
+            status=SubmissionStatus.DELETED,
+            previous_status=SubmissionStatus.PENDING,
+            deleted_at=now,
+        )
+        session.add(request)
+        await session.commit()
+        await session.refresh(request)
+        operation = await accept_permanent_deletion(
+            session,
+            root_entity_type=TrashEntityType.COURSE_SUBMISSION,
+            root_entity_id=request.id,
+            idempotency_key=f"course-request:{request.id}:reclaimed-owner",
+            requested_by_user_id=requester.id,
+            storage=None,
+            now=now,
+        )
+        assert await claim_permanent_deletion(
+            session,
+            operation_id=operation.id,
+            lease_token="old-owner",
+            now=now,
+            lease_for=timedelta(seconds=30),
+        )
+
+        try:
+            recovered_at = now + timedelta(minutes=1)
+            result = await process_one_permanent_deletion(
+                session,
+                operation_id=operation.id,
+                storage=None,
+                now=recovered_at,
+                lease_for=timedelta(seconds=30),
+                lease_clock=MutableLeaseClock(recovered_at + timedelta(seconds=1)),
+            )
+
+            assert result == PermanentDeletionStatus.COMPLETED
+            assert await session.get(CourseSubmission, request.id) is None
+            with pytest.raises(PermanentDeletionError, match="lease_lost"):
+                await _owned_operation(session, int(operation.id), "old-owner")
+        finally:
+            await session.execute(
+                delete(PermanentDeletionTarget).where(
+                    PermanentDeletionTarget.operation_id == operation.id
+                )
+            )
+            await session.execute(
+                delete(PermanentDeletionOperation).where(
+                    PermanentDeletionOperation.id == operation.id
+                )
+            )
+            await session.execute(
+                delete(CourseSubmission).where(CourseSubmission.id == request.id)
+            )
+            await session.commit()
