@@ -15,6 +15,7 @@
       "tests/api/test_courses.py",
       "tests/api/test_nthu_dev_auth.py",
       "tests/api/test_nthu_access_policy_settings.py",
+      "tests/api/test_permanent_deletion_saga.py",
       "tests/api/test_public_catalog.py",
       "tests/api/test_statistics.py",
       "tests/api/test_users.py",
@@ -82,6 +83,7 @@
       "tests/unit/test_archive_submission_response_schemas.py",
       "tests/unit/test_audit_policy.py",
       "tests/unit/test_migration_safety_predicates.py",
+      "tests/unit/test_permanent_deletion_storage.py",
       "tests/unit/test_submission_decision.py",
       "tests/unit/test_user_online_duration.py",
       "tests/utils/test_storage_utils.py"
