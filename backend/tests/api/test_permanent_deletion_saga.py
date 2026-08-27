@@ -40,17 +40,29 @@ from app.services.permanent_deletion_storage import (
 
 class FakeVersionedMinio:
     def __init__(self, key: str, version_id: str = "v1") -> None:
+        self.key = key
         self.status = "Enabled"
         self.versions: list[tuple[str, str, bool]] = [(key, version_id, False)]
         self.removals: list[tuple[str, str, str | None]] = []
         self.unknown_once = False
         self.retryable_once = False
         self.replacement_during_delete: str | None = None
+        self.replacement_on_history_call: tuple[int, str] | None = None
+        self.history_calls = 0
 
     def get_bucket_versioning(self, _bucket: str):
         return SimpleNamespace(status=self.status)
 
     def list_objects(self, _bucket: str, **_kwargs):
+        self.history_calls += 1
+        if (
+            self.replacement_on_history_call is not None
+            and self.history_calls == self.replacement_on_history_call[0]
+        ):
+            self.versions.append(
+                (self.key, self.replacement_on_history_call[1], False)
+            )
+            self.replacement_on_history_call = None
         return [
             SimpleNamespace(
                 object_name=key,
@@ -343,6 +355,18 @@ async def test_exact_storage_completion_is_atomic_with_stage5e_detach(
             )
         ).scalar_one() == 0
 
+        repeated = await process_one_permanent_deletion(
+            session,
+            operation_id=operation.id,
+            storage=storage,
+            now=now + timedelta(minutes=2),
+            jitter_fraction=0.0,
+        )
+        assert repeated == PermanentDeletionStatus.COMPLETED
+        assert client.removals == [
+            ("stage5fb-test", archive.object_name, "v-exact")
+        ]
+
 
 @pytest.mark.asyncio
 async def test_unknown_delete_outcome_verifies_before_finalization(
@@ -587,6 +611,56 @@ async def test_replacement_between_validation_and_delete_blocks_finalization(
             ]
             assert client.versions == [
                 (archive.object_name, "v-replacement", False)
+            ]
+            assert await session.get(ArchiveSubmission, submission.id) is not None
+    finally:
+        await _cleanup_pair_and_operation(
+            session_maker,
+            operation_id=operation_id,
+            category_id=category.id,
+            course_id=course.id,
+            archive_id=archive.id,
+            submission_id=submission.id,
+            event_id=event.id,
+            notification_id=notification.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_post_delete_replacement_blocks_final_db_transaction(
+    session_maker,
+    make_user,
+) -> None:
+    requester = await make_user()
+    category, course, archive, submission, event, notification = (
+        await _create_deleted_pair(session_maker, requester_id=requester.id)
+    )
+    client = FakeVersionedMinio(archive.object_name, "v-recorded")
+    client.replacement_on_history_call = (5, "v-post-delete-replacement")
+    storage = ExactVersionMinioAdapter(client, bucket_name="stage5fb-test")
+    operation_id: int | None = None
+    try:
+        async with session_maker() as session:
+            operation = await accept_permanent_deletion(
+                session,
+                root_entity_type=TrashEntityType.ARCHIVE_SUBMISSION,
+                root_entity_id=submission.id,
+                idempotency_key=f"submission:{submission.id}:post-delete-drift",
+                requested_by_user_id=requester.id,
+                storage=storage,
+            )
+            operation_id = int(operation.id)
+            result = await process_one_permanent_deletion(
+                session,
+                operation_id=operation.id,
+                storage=storage,
+            )
+            assert result == PermanentDeletionStatus.MANUAL_REVIEW
+            assert client.removals == [
+                ("stage5fb-test", archive.object_name, "v-recorded")
+            ]
+            assert client.versions == [
+                (archive.object_name, "v-post-delete-replacement", False)
             ]
             assert await session.get(ArchiveSubmission, submission.id) is not None
     finally:

@@ -1090,6 +1090,17 @@ async def process_one_permanent_deletion(
                 object_row.object_key, object_row.version_id
             ) is not ExactVersionState.VERIFIED_ABSENT:
                 raise PermanentDeletionError("final_storage_truth_unproven")
+    except (PermanentDeletionError, StorageSafetyError) as exc:
+        await db.rollback()
+        return await _manual_review(
+            db,
+            operation_id=operation_id,
+            lease_token=lease_token,
+            code=getattr(exc, "code", "finalization_revalidation_failed"),
+            now=timestamp,
+        )
+
+    try:
         await _finalize_plan(db, plan, now=timestamp)
         operation.status = PermanentDeletionStatus.COMPLETED
         operation.completed_at = timestamp
