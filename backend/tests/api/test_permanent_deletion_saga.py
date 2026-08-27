@@ -1078,23 +1078,24 @@ async def test_expired_unreclaimed_lease_is_not_owned(
             lease_for=timedelta(seconds=1),
         )
 
-        with pytest.raises(PermanentDeletionError, match="lease_lost"):
-            await _owned_operation(session, int(operation.id), "expired-token")
-
-        await session.execute(
-            delete(PermanentDeletionTarget).where(
-                PermanentDeletionTarget.operation_id == operation.id
+        try:
+            with pytest.raises(PermanentDeletionError, match="lease_lost"):
+                await _owned_operation(session, int(operation.id), "expired-token")
+        finally:
+            await session.execute(
+                delete(PermanentDeletionTarget).where(
+                    PermanentDeletionTarget.operation_id == operation.id
+                )
             )
-        )
-        await session.execute(
-            delete(PermanentDeletionOperation).where(
-                PermanentDeletionOperation.id == operation.id
+            await session.execute(
+                delete(PermanentDeletionOperation).where(
+                    PermanentDeletionOperation.id == operation.id
+                )
             )
-        )
-        await session.execute(
-            delete(CourseSubmission).where(CourseSubmission.id == request.id)
-        )
-        await session.commit()
+            await session.execute(
+                delete(CourseSubmission).where(CourseSubmission.id == request.id)
+            )
+            await session.commit()
 
 
 @pytest.mark.asyncio
@@ -1331,29 +1332,33 @@ async def test_reclaimed_owner_can_complete_after_expired_owner_loses_authority(
             lease_for=timedelta(seconds=30),
         )
 
-        recovered_at = now + timedelta(minutes=1)
-        result = await process_one_permanent_deletion(
-            session,
-            operation_id=operation.id,
-            storage=None,
-            now=recovered_at,
-            lease_for=timedelta(seconds=30),
-            lease_clock=MutableLeaseClock(recovered_at + timedelta(seconds=1)),
-        )
-
-        assert result == PermanentDeletionStatus.COMPLETED
-        assert await session.get(CourseSubmission, request.id) is None
-        with pytest.raises(PermanentDeletionError, match="lease_lost"):
-            await _owned_operation(session, int(operation.id), "old-owner")
-
-        await session.execute(
-            delete(PermanentDeletionTarget).where(
-                PermanentDeletionTarget.operation_id == operation.id
+        try:
+            recovered_at = now + timedelta(minutes=1)
+            result = await process_one_permanent_deletion(
+                session,
+                operation_id=operation.id,
+                storage=None,
+                now=recovered_at,
+                lease_for=timedelta(seconds=30),
+                lease_clock=MutableLeaseClock(recovered_at + timedelta(seconds=1)),
             )
-        )
-        await session.execute(
-            delete(PermanentDeletionOperation).where(
-                PermanentDeletionOperation.id == operation.id
+
+            assert result == PermanentDeletionStatus.COMPLETED
+            assert await session.get(CourseSubmission, request.id) is None
+            with pytest.raises(PermanentDeletionError, match="lease_lost"):
+                await _owned_operation(session, int(operation.id), "old-owner")
+        finally:
+            await session.execute(
+                delete(PermanentDeletionTarget).where(
+                    PermanentDeletionTarget.operation_id == operation.id
+                )
             )
-        )
-        await session.commit()
+            await session.execute(
+                delete(PermanentDeletionOperation).where(
+                    PermanentDeletionOperation.id == operation.id
+                )
+            )
+            await session.execute(
+                delete(CourseSubmission).where(CourseSubmission.id == request.id)
+            )
+            await session.commit()
