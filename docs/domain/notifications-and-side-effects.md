@@ -364,9 +364,13 @@ be converted into warnings before the database commit.
 ### Implementation gap and future direction
 
 A MinIO delete failure can leave an orphan object while the API reports the
-database deletion as successful. The planned direction is staged deletion with
-explicit pending/failed state plus retry or compensation. This direction is
-not implemented and may require a separately reviewed additive migration.
+database deletion as successful. Stage 5F-A now provides the additive,
+initially empty PostgreSQL foundation described by the
+[permanent-deletion contract](permanent-deletion.md), including independent
+operation state and `MINIO_VERSION_ID_V1` exact storage identity. It does not
+wire current routes or services to that ledger, call MinIO, or activate retry,
+verification, reconciliation, notification, or UI behavior. The runtime
+consistency gap therefore remains until a later explicitly reviewed stage.
 
 ## Bulk permanent delete
 
@@ -415,6 +419,7 @@ integration.
 | ArchiveReport soft trash/restore | Route-owned uniqueness mutex, canonical parent-first lock plan, Report metadata mutation, then commit | Silent; trash releases active uniqueness on commit, and conflicting restore returns stable 409 while preserving both rows |
 | Republish | Transition and notification share the caller transaction | Comparatively complete |
 | Permanent delete | MinIO call and DB delete cannot be atomic; helper may downgrade storage failure to warning | Retry and truthful result gap |
+| Stage 5F-A permanent-deletion ledger | Additive empty PostgreSQL tables and constraints only; no current route/service writes them and no MinIO call occurs | Durable future authority is representable, but runtime activation remains later work |
 | WebSocket discussion update | Database commit precedes broadcast | Durable write succeeds even if live delivery fails |
 | Redis | Used primarily for authentication token blacklist/state | Not part of archive lifecycle atomicity |
 | About Us create/update | Route-authorized single PostgreSQL commit | No notification, receipt, storage, Redis, or WebSocket side effect |

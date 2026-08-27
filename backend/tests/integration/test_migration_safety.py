@@ -27,6 +27,7 @@ from app.db.migration_safety import (
 from app.db.schema_manifests.registry import (
     HEAD_SCHEMA_REVISION,
     PREVIOUS_HEAD_SCHEMA_REVISION,
+    RETAINED_EVENT_PREVIOUS_SCHEMA_REVISION,
 )
 from app.db.test_database_guard import (
     validate_connected_test_database,
@@ -718,6 +719,10 @@ def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
     )
     assert (
         script.get_revision(PREVIOUS_HEAD_SCHEMA_REVISION).down_revision
+        == RETAINED_EVENT_PREVIOUS_SCHEMA_REVISION
+    )
+    assert (
+        script.get_revision(RETAINED_EVENT_PREVIOUS_SCHEMA_REVISION).down_revision
         == "d1f5a9c3e7b2"
     )
     assert script.get_revision("d1f5a9c3e7b2").down_revision == (
@@ -750,7 +755,7 @@ def test_retained_event_detachment_migration_is_additive_and_fail_closed(
     clean_public_schema: Engine,
 ) -> None:
     config = alembic_config()
-    command.upgrade(config, PREVIOUS_HEAD_SCHEMA_REVISION)
+    command.upgrade(config, RETAINED_EVENT_PREVIOUS_SCHEMA_REVISION)
     submitted_at = "2026-08-26T04:00:00+00:00"
     with clean_public_schema.begin() as connection:
         event_id = int(
@@ -764,7 +769,7 @@ def test_retained_event_detachment_migration_is_additive_and_fail_closed(
             )
         )
 
-    command.upgrade(config, HEAD_SCHEMA_REVISION)
+    command.upgrade(config, PREVIOUS_HEAD_SCHEMA_REVISION)
     with clean_public_schema.begin() as connection:
         column = next(
             item
@@ -793,17 +798,17 @@ def test_retained_event_detachment_migration_is_additive_and_fail_closed(
         )
 
     with pytest.raises(RuntimeError, match="detached retained-history rows exist"):
-        command.downgrade(config, PREVIOUS_HEAD_SCHEMA_REVISION)
+        command.downgrade(config, RETAINED_EVENT_PREVIOUS_SCHEMA_REVISION)
     with clean_public_schema.connect() as connection:
         assert connection.scalar(text("SELECT version_num FROM alembic_version")) == (
-            HEAD_SCHEMA_REVISION
+            PREVIOUS_HEAD_SCHEMA_REVISION
         )
 
     with clean_public_schema.begin() as connection:
         connection.execute(
             text("DELETE FROM archive_submission_events WHERE submission_id IS NULL")
         )
-    command.downgrade(config, PREVIOUS_HEAD_SCHEMA_REVISION)
+    command.downgrade(config, RETAINED_EVENT_PREVIOUS_SCHEMA_REVISION)
     with clean_public_schema.connect() as connection:
         column = next(
             item

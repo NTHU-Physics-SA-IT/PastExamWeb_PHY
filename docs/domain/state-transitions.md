@@ -874,6 +874,20 @@ explicit action-authority booleans, present a missing Course link as valid
 detached history, and do not infer relink, recreation, or alternate lifecycle
 actions from status or relationship display data.
 
+## Permanent-deletion operation state
+
+The independent [permanent-deletion contract](permanent-deletion.md) defines
+the sealed operation namespace: `ACCEPTED`, `PROCESSING`,
+`VERIFICATION_REQUIRED`, `RETRYABLE_FAILED`, `MANUAL_REVIEW`, and `COMPLETED`.
+It does not extend or reuse `SubmissionStatus`; `PENDING` is not a
+permanent-deletion operation state. A later backend acceptance commit is the
+irreversibility point.
+
+Stage 5F-A adds only empty persistence capable of representing these states.
+No current route accepts an operation, no state transition executes, no
+authorization or business-error surface changes, and no force-complete,
+cancel, restore, single-item `202 Accepted`, bulk, or UI behavior is active.
+
 ## Authorization
 
 ### NTHU login policy
