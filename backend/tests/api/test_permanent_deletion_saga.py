@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import func
+from sqlalchemy import delete, func
 from sqlmodel import select
 
 from app.models.models import (
@@ -17,7 +17,9 @@ from app.models.models import (
     CourseCategoryConfig,
     CourseSubmission,
     PermanentDeletionObject,
+    PermanentDeletionOperation,
     PermanentDeletionStatus,
+    PermanentDeletionTarget,
     PersonalNotification,
     SubmissionStatus,
     TrashEntityType,
@@ -145,6 +147,56 @@ async def _create_deleted_pair(session_maker, *, requester_id: int):
         for row in (category, course, archive, submission, event, notification):
             await session.refresh(row)
     return category, course, archive, submission, event, notification
+
+
+async def _cleanup_pair_and_operation(
+    session_maker,
+    *,
+    operation_id: int,
+    category_id: int,
+    course_id: int,
+    archive_id: int,
+    submission_id: int,
+    event_id: int,
+    notification_id: int,
+) -> None:
+    async with session_maker() as session:
+        await session.execute(
+            delete(PermanentDeletionObject).where(
+                PermanentDeletionObject.operation_id == operation_id
+            )
+        )
+        await session.execute(
+            delete(PermanentDeletionTarget).where(
+                PermanentDeletionTarget.operation_id == operation_id
+            )
+        )
+        await session.execute(
+            delete(PermanentDeletionOperation).where(
+                PermanentDeletionOperation.id == operation_id
+            )
+        )
+        await session.execute(
+            delete(PersonalNotification).where(
+                PersonalNotification.id == notification_id
+            )
+        )
+        await session.execute(
+            delete(ArchiveSubmissionEvent).where(
+                ArchiveSubmissionEvent.id == event_id
+            )
+        )
+        await session.execute(
+            delete(ArchiveSubmission).where(ArchiveSubmission.id == submission_id)
+        )
+        await session.execute(delete(Archive).where(Archive.id == archive_id))
+        await session.execute(delete(Course).where(Course.id == course_id))
+        await session.execute(
+            delete(CourseCategoryConfig).where(
+                CourseCategoryConfig.id == category_id
+            )
+        )
+        await session.commit()
 
 
 @pytest.mark.asyncio
@@ -317,34 +369,51 @@ async def test_replacement_drift_enters_manual_review_without_delete(
     make_user,
 ) -> None:
     requester = await make_user()
-    _, _, archive, submission, _, _ = await _create_deleted_pair(
-        session_maker, requester_id=requester.id
+    category, course, archive, submission, event, notification = (
+        await _create_deleted_pair(
+            session_maker, requester_id=requester.id
+        )
     )
     client = FakeVersionedMinio(archive.object_name, "v-recorded")
     storage = ExactVersionMinioAdapter(client, bucket_name="stage5fb-test")
     now = datetime(2026, 8, 27, 5, 0, tzinfo=UTC)
 
-    async with session_maker() as session:
-        operation = await accept_permanent_deletion(
-            session,
-            root_entity_type=TrashEntityType.ARCHIVE_SUBMISSION,
-            root_entity_id=submission.id,
-            idempotency_key=f"submission:{submission.id}:drift",
-            requested_by_user_id=requester.id,
-            storage=storage,
-            now=now,
-        )
-        client.versions.append((archive.object_name, "v-replacement", False))
-        result = await process_one_permanent_deletion(
-            session,
-            operation_id=operation.id,
-            storage=storage,
-            now=now + timedelta(minutes=1),
-            jitter_fraction=0.0,
-        )
-        assert result == PermanentDeletionStatus.MANUAL_REVIEW
-        assert client.removals == []
-        assert await session.get(ArchiveSubmission, submission.id) is not None
+    operation_id: int | None = None
+    try:
+        async with session_maker() as session:
+            operation = await accept_permanent_deletion(
+                session,
+                root_entity_type=TrashEntityType.ARCHIVE_SUBMISSION,
+                root_entity_id=submission.id,
+                idempotency_key=f"submission:{submission.id}:drift",
+                requested_by_user_id=requester.id,
+                storage=storage,
+                now=now,
+            )
+            operation_id = int(operation.id)
+            client.versions.append((archive.object_name, "v-replacement", False))
+            result = await process_one_permanent_deletion(
+                session,
+                operation_id=operation.id,
+                storage=storage,
+                now=now + timedelta(minutes=1),
+                jitter_fraction=0.0,
+            )
+            assert result == PermanentDeletionStatus.MANUAL_REVIEW
+            assert client.removals == []
+            assert await session.get(ArchiveSubmission, submission.id) is not None
+    finally:
+        if operation_id is not None:
+            await _cleanup_pair_and_operation(
+                session_maker,
+                operation_id=operation_id,
+                category_id=category.id,
+                course_id=course.id,
+                archive_id=archive.id,
+                submission_id=submission.id,
+                event_id=event.id,
+                notification_id=notification.id,
+            )
 
 
 @pytest.mark.asyncio

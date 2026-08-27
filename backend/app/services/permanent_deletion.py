@@ -761,7 +761,7 @@ async def _manual_review(
     lease_token: str,
     code: str,
     now: datetime,
-    object_row: PermanentDeletionObject | None = None,
+    object_id: int | None = None,
 ) -> PermanentDeletionStatus:
     operation = await _owned_operation(db, operation_id, lease_token)
     operation.status = PermanentDeletionStatus.MANUAL_REVIEW
@@ -770,8 +770,8 @@ async def _manual_review(
     operation.lease_token = None
     operation.lease_expires_at = None
     operation.updated_at = now
-    if object_row is not None:
-        current = await db.get(PermanentDeletionObject, object_row.id)
+    if object_id is not None:
+        current = await db.get(PermanentDeletionObject, object_id)
         if current is not None:
             current.state = PermanentDeletionObjectState.MANUAL_REVIEW
             current.result_code = code[:64]
@@ -787,7 +787,7 @@ async def _retryable(
     code: str,
     now: datetime,
     jitter_fraction: float,
-    object_row: PermanentDeletionObject | None = None,
+    object_id: int | None = None,
 ) -> PermanentDeletionStatus:
     operation = await _owned_operation(db, operation_id, lease_token)
     try:
@@ -804,7 +804,7 @@ async def _retryable(
             lease_token=lease_token,
             code="automatic_retry_budget_exhausted",
             now=now,
-            object_row=object_row,
+            object_id=object_id,
         )
     operation.status = PermanentDeletionStatus.RETRYABLE_FAILED
     operation.result_code = code[:64]
@@ -812,8 +812,8 @@ async def _retryable(
     operation.lease_token = None
     operation.lease_expires_at = None
     operation.updated_at = now
-    if object_row is not None:
-        current = await db.get(PermanentDeletionObject, object_row.id)
+    if object_id is not None:
+        current = await db.get(PermanentDeletionObject, object_id)
         if current is not None:
             current.state = PermanentDeletionObjectState.RETRYABLE_FAILED
             current.result_code = code[:64]
@@ -952,6 +952,7 @@ async def process_one_permanent_deletion(
         )
 
     for object_row in objects:
+        object_id = int(object_row.id)
         try:
             operation = await _owned_operation(db, operation_id, lease_token)
             await _validate_membership(db, operation)
@@ -966,7 +967,7 @@ async def process_one_permanent_deletion(
                 lease_token=lease_token,
                 code=getattr(exc, "code", "storage_revalidation_failed"),
                 now=timestamp,
-                object_row=object_row,
+                object_id=object_id,
             )
 
         current_object = await db.get(PermanentDeletionObject, object_row.id)
@@ -995,7 +996,7 @@ async def process_one_permanent_deletion(
                 code="unknown_outcome_verified_present",
                 now=timestamp,
                 jitter_fraction=jitter_fraction,
-                object_row=current_object,
+                object_id=object_id,
             )
 
         operation = await _owned_operation(db, operation_id, lease_token)
@@ -1012,7 +1013,7 @@ async def process_one_permanent_deletion(
                 lease_token=lease_token,
                 code="automatic_retry_budget_exhausted",
                 now=timestamp,
-                object_row=current_object,
+                object_id=object_id,
             )
         operation.automatic_attempt_count += 1
         operation.updated_at = timestamp
@@ -1048,7 +1049,7 @@ async def process_one_permanent_deletion(
                 code=exc.code,
                 now=timestamp,
                 jitter_fraction=jitter_fraction,
-                object_row=current_object,
+                object_id=object_id,
             )
         except StorageSafetyError as exc:
             return await _manual_review(
@@ -1057,7 +1058,7 @@ async def process_one_permanent_deletion(
                 lease_token=lease_token,
                 code=exc.code,
                 now=timestamp,
-                object_row=current_object,
+                object_id=object_id,
             )
         if result is not ExactVersionState.VERIFIED_ABSENT:
             return await _manual_review(
@@ -1066,7 +1067,7 @@ async def process_one_permanent_deletion(
                 lease_token=lease_token,
                 code="delete_not_verified_absent",
                 now=timestamp,
-                object_row=current_object,
+                object_id=object_id,
             )
         current_object = await db.get(PermanentDeletionObject, object_row.id)
         current_object.state = PermanentDeletionObjectState.VERIFIED_ABSENT
