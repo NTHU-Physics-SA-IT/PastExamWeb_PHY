@@ -65,6 +65,14 @@ const onlineRangeConfig = {
   '30d': [1440, 30],
   '90d': [1440, 90],
 }
+const submissionRangeConfig = {
+  '24h': [10, 144],
+  '48h': [20, 144],
+  '72h': [30, 144],
+  '7d': [240, 42],
+  '30d': [720, 60],
+  '90d': [1440, 90],
+}
 const makeOnlineStatistics = (range = '24h', counts = {}) => {
   const [bucketMinutes, bucketCount] = onlineRangeConfig[range]
   const end = new Date(now)
@@ -93,7 +101,7 @@ const makeOnlineStatistics = (range = '24h', counts = {}) => {
   }
 }
 const makeSubmissionStatistics = (range = '24h', counts = {}) => {
-  const [bucketMinutes, bucketCount] = onlineRangeConfig[range]
+  const [bucketMinutes, bucketCount] = submissionRangeConfig[range]
   const mode = range.endsWith('h') ? 'time' : 'date'
   const currentStart = new Date(now)
   currentStart.setUTCMinutes(
