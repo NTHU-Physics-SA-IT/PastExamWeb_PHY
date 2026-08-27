@@ -353,7 +353,7 @@ jobs:
     name: frontend-e2e-${{ matrix.family }}
     if: ${{ inputs.run_checks }}
     runs-on: ubuntu-latest
-    needs: [backend, frontend-unit]
+    needs: [frontend-unit]
     strategy:
       fail-fast: false
       matrix:
