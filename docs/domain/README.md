@@ -88,4 +88,5 @@ publicly visible.
   durable notifications, transaction boundaries, and external effects.
 - [Permanent deletion](permanent-deletion.md) defines the independent durable
   operation ledger, exact MinIO Version-ID identity, recovery states, and
-  retention boundary. Its Stage 5F-A persistence is explicitly inert.
+  retention boundary, including the activated single-item and outcome-bounded
+  bulk Trash surfaces.

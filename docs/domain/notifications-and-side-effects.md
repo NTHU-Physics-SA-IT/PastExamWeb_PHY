@@ -357,50 +357,46 @@ response rather than presenting a partial backup as complete.
 ### Current implementation
 
 Archive upload writes the MinIO object before all database work is committed.
-Some upload/approval paths contain multiple database commits. Permanent-delete
-helpers attempt MinIO cleanup and database deletion, but storage exceptions can
-be converted into warnings before the database commit.
+Some upload/approval paths contain multiple database commits. Administrator
+Trash permanent deletion instead captures exact object versions in PostgreSQL,
+verifies exact-version absence, and finalizes database deletion only through
+the durable operation.
 
 ### Implementation gap and future direction
 
-A MinIO delete failure can leave an orphan object while the API reports the
-database deletion as successful. Stage 5F-A now provides the additive,
-initially empty PostgreSQL foundation described by the
-[permanent-deletion contract](permanent-deletion.md), including independent
-operation state and `MINIO_VERSION_ID_V1` exact storage identity. It does not
-wire current routes or services to that ledger, call MinIO, or activate retry,
-verification, reconciliation, notification, or UI behavior. The runtime
-consistency gap therefore remains until a later explicitly reviewed stage.
+Upload and any non-Trash legacy cleanup remain outside the durable deletion
+contract. For administrator Trash deletion, a storage failure cannot be
+downgraded into database-deletion success: it remains explicit durable pending,
+retryable, verification-required, or manual-review truth. Recurring worker
+reconciliation remains a separately authorized later stage.
 
 ## Bulk permanent delete
 
 ### Intended invariant
 
-Bulk permanent delete intentionally permits partial success between items:
+Bulk permanent delete intentionally permits independent outcomes between items:
 
 - return an independent result for every item;
 - keep successful items successful;
-- retain a retryable failure state and reason for failed items;
-- retry only failed items;
-- do not process completed items again;
-- show item-level failures in the UI.
+- preserve accepted unfinished and manual-review operation truth;
+- do not process completed operations again;
+- classify overlap as skipped only with durable coverage proof; and
+- expose explicit counts without reporting pending work as completed.
 
 One item may not conceal a half-completed internal deletion even though
 different items in the batch may have different final results.
 
 ### Current implementation
 
-`trash.py` processes and commits bulk items independently and returns successes
-and failures. This supports cross-item partial success. The single-item
-PostgreSQL/MinIO guarantee remains incomplete because storage errors can be
-warnings rather than failed item results.
+`trash.py` snapshots the selected scope and evaluates every item through the
+same idempotent durable accept/process-once service used by the single-item
+route. It creates no global batch ledger, transaction, state, rollback, or
+worker. Outer HTTP `200` means evaluation finished; item results are exactly
+`COMPLETED`, `PENDING`, `MANUAL_REVIEW`, `FAILED`, or `SKIPPED`.
 
-`test_bulk_permanent_delete_commits_successes_and_reports_item_failures`
-protects the bulk orchestration boundary with mocked items: every item is
-attempted, one item's commit is retained when a later item rolls back, and the
-response identifies both the success and the failure reason. It does not prove
-single-item PostgreSQL/MinIO atomicity, staged deletion, or real storage
-integration.
+Focused unit and PostgreSQL/storage tests protect all-root dispatch, mixed
+outcome accounting, overlap proof, retry reuse, and the boundary that database
+finalization cannot precede exact-version absence.
 
 ## Transaction boundaries
 
@@ -418,8 +414,8 @@ integration.
 | Comment/Wish report soft trash/restore | The active report route or Trash dispatcher mutates only deletion metadata and commits once | Silent and database-only; moderation/review state, snapshots, source records, and durable notification history remain unchanged |
 | ArchiveReport soft trash/restore | Route-owned uniqueness mutex, canonical parent-first lock plan, Report metadata mutation, then commit | Silent; trash releases active uniqueness on commit, and conflicting restore returns stable 409 while preserving both rows |
 | Republish | Transition and notification share the caller transaction | Comparatively complete |
-| Permanent delete | MinIO call and DB delete cannot be atomic; helper may downgrade storage failure to warning | Retry and truthful result gap |
-| Stage 5F-A permanent-deletion ledger | Additive empty PostgreSQL tables and constraints only; no current route/service writes them and no MinIO call occurs | Durable future authority is representable, but runtime activation remains later work |
+| Administrator Trash permanent delete | Acceptance durably records the full logical plan and exact Version IDs; bounded processing verifies storage absence before one database finalization transaction | Activated for all Trash roots; unfinished and uncertain work remains explicit, with no false completed result |
+| Outcome-bounded Trash bulk delete | Each item reuses the single-item durable authority; there is no global batch transaction or rollback | Cross-item partial outcomes are explicit and independently durable |
 | WebSocket discussion update | Database commit precedes broadcast | Durable write succeeds even if live delivery fails |
 | Redis | Used primarily for authentication token blacklist/state | Not part of archive lifecycle atomicity |
 | About Us create/update | Route-authorized single PostgreSQL commit | No notification, receipt, storage, Redis, or WebSocket side effect |
@@ -463,8 +459,9 @@ their failure policy, retry safety, idempotency, and compensation are explicit.
 
 Current tests directly cover report atomicity/deduplication, discussion durable
 notifications, personal-notification ownership, archive storage upload
-failures, and bulk dispatch. They do not yet cover rollback/compensation across
-PostgreSQL and MinIO or all repeated submission transition cycles.
+failures, and durable Trash single/bulk dispatch. The permanent-deletion matrix
+covers PostgreSQL rollback and exact-version storage outcomes; unrelated upload
+compensation and all repeated submission transition cycles remain separate.
 
 The pure review-policy matrix and expected-state classifier have exhaustive
 unit coverage. Focused PostgreSQL API tests protect direct-route precondition,

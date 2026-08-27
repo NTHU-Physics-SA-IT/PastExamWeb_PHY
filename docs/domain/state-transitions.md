@@ -883,10 +883,13 @@ It does not extend or reuse `SubmissionStatus`; `PENDING` is not a
 permanent-deletion operation state. A later backend acceptance commit is the
 irreversibility point.
 
-Stage 5F-A adds only empty persistence capable of representing these states.
-No current route accepts an operation, no state transition executes, no
-authorization or business-error surface changes, and no force-complete,
-cancel, restore, single-item `202 Accepted`, bulk, or UI behavior is active.
+Administrator Trash single-item deletion accepts and boundedly progresses this
+operation for every Trash root. A newly accepted or unfinished operation
+returns `202`; only `COMPLETED` returns `200`. The outcome-bounded bulk surface
+evaluates each selected item through the same transition authority and returns
+outer `200` with mutually exclusive per-item outcomes. Acceptance removes
+restore authority for every reserved logical target. No force-complete,
+cancel, resurrection, or operation-wide rollback transition exists.
 
 ## Authorization
 

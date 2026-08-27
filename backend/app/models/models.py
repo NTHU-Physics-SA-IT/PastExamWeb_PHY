@@ -140,6 +140,14 @@ class PermanentDeletionStatus(str, PyEnum):
     COMPLETED = "COMPLETED"
 
 
+class PermanentDeletionBulkOutcome(str, PyEnum):
+    COMPLETED = "COMPLETED"
+    PENDING = "PENDING"
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+
+
 class PermanentDeletionIdentityScheme(str, PyEnum):
     MINIO_VERSION_ID_V1 = "MINIO_VERSION_ID_V1"
 
@@ -2831,6 +2839,27 @@ class PermanentDeletionRead(BaseModel):
     can_retry: bool = False
     can_inspect_reason: bool = False
     restore_available: bool = False
+
+
+class PermanentDeletionBulkItemResult(BaseModel):
+    item_type: TrashEntityType
+    item_id: int
+    display_name: str
+    outcome: PermanentDeletionBulkOutcome
+    operation: PermanentDeletionRead | None = None
+    reason_code: str | None = None
+    reason_message: str | None = None
+
+
+class PermanentDeletionBulkRead(BaseModel):
+    scope: TrashEntityType | None = None
+    requested_count: int
+    completed_count: int
+    pending_count: int
+    manual_review_count: int
+    failed_count: int
+    skipped_count: int
+    results: list[PermanentDeletionBulkItemResult]
 
 
 class TrashItem(BaseModel):
