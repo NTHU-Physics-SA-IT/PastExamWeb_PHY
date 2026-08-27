@@ -8,6 +8,11 @@ import tseslint from 'typescript-eslint'
 export default [
   { languageOptions: { globals: globals.browser } },
 
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: { globals: globals.node },
+  },
+
   js.configs.recommended,
 
   ...vue.configs['flat/essential'],
