@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import HomepageSloganManagementPanel from '@/components/admin/HomepageSloganManagementPanel.vue'
 import source from '@/components/admin/HomepageSloganManagementPanel.vue?raw'
+import { messages } from '@/i18n/messages'
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
@@ -86,6 +87,10 @@ describe('HomepageSloganManagementPanel', () => {
     expect(source).toContain("$t('查看/審核首頁 slogan')")
     expect(source).toContain('無法復原，也不會進入垃圾桶')
     expect(source).toContain("acceptLabel: t('永久刪除')")
+    expect(messages.en['審核狀態']).toBe('Status')
+    expect(messages.en['出現等級']).toBe('Occurrence')
+    expect(messages['zh-TW']['審核狀態']).toBe('審核狀態')
+    expect(messages['zh-TW']['出現等級']).toBe('出現等級')
   })
 
   it('keeps the desktop table fluid while retaining the existing responsive card surface', async () => {
@@ -134,12 +139,40 @@ describe('HomepageSloganManagementPanel', () => {
     ).toEqual(['取消', '儲存'])
   })
 
-  it('loads lazily and saves a reviewed state with a canonical occurrence level', async () => {
+  it('defaults and resets to status-first sorting while preserving manual sorting', async () => {
     const wrapper = shallowMount(HomepageSloganManagementPanel)
     await flushPromises()
     expect(mocks.list).toHaveBeenCalledWith(
-      expect.objectContaining({ limit: 10, offset: 0, sort_by: 'created_at' })
+      expect.objectContaining({ limit: 10, offset: 0, sort_by: 'status', sort_order: 'asc' })
     )
+
+    mocks.list.mockClear()
+    await wrapper.vm.onSort({ sortField: 'content', sortOrder: -1 })
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 0, sort_by: 'content', sort_order: 'desc' })
+    )
+
+    mocks.list.mockClear()
+    await wrapper.vm.onSort({})
+    await flushPromises()
+    expect(wrapper.vm.page).toMatchObject({ first: 0, sortField: 'status', sortOrder: 1 })
+    expect(mocks.list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 0, sort_by: 'status', sort_order: 'asc' })
+    )
+
+    Object.assign(wrapper.vm.page, { first: 10, rows: 10, sortField: 'content', sortOrder: -1 })
+    mocks.list.mockClear()
+    await wrapper.vm.refreshAll()
+    expect(wrapper.vm.page).toMatchObject({ first: 0, sortField: 'status', sortOrder: 1 })
+    expect(mocks.list).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 0, sort_by: 'status', sort_order: 'asc' })
+    )
+  })
+
+  it('loads lazily and saves a reviewed state with a canonical occurrence level', async () => {
+    const wrapper = shallowMount(HomepageSloganManagementPanel)
+    await flushPromises()
     wrapper.vm.openReview(item)
     expect(wrapper.vm.reviewForm).toEqual({ status: 'disabled', occurrence_level: 'normal' })
     wrapper.vm.reviewForm.status = 'enabled'

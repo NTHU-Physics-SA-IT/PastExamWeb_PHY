@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import delete
@@ -12,6 +14,92 @@ def _override_user(user_id: int, *, is_admin: bool):
         return UserRoles(user_id=user_id, is_admin=is_admin)
 
     return _get_current_user
+
+
+@pytest.mark.asyncio
+async def test_admin_slogan_status_sort_is_stable_and_other_sorts_still_work(
+    client: AsyncClient,
+    session_maker,
+    make_user,
+):
+    admin = await make_user(is_admin=True)
+    base_time = datetime(2026, 8, 27, tzinfo=UTC)
+    slogans = [
+        HomepageSloganSubmission(
+            content="disabled newest",
+            submitter_name_snapshot="Sorter",
+            status="disabled",
+            created_at=base_time + timedelta(minutes=3),
+            updated_at=base_time + timedelta(minutes=3),
+        ),
+        HomepageSloganSubmission(
+            content="pending older",
+            submitter_name_snapshot="Sorter",
+            status="pending",
+            created_at=base_time,
+            updated_at=base_time,
+        ),
+        HomepageSloganSubmission(
+            content="enabled newest",
+            submitter_name_snapshot="Sorter",
+            status="enabled",
+            created_at=base_time + timedelta(minutes=2),
+            updated_at=base_time + timedelta(minutes=2),
+        ),
+        HomepageSloganSubmission(
+            content="pending newer lower id",
+            submitter_name_snapshot="Sorter",
+            status="pending",
+            created_at=base_time + timedelta(minutes=1),
+            updated_at=base_time + timedelta(minutes=1),
+        ),
+        HomepageSloganSubmission(
+            content="pending newer higher id",
+            submitter_name_snapshot="Sorter",
+            status="pending",
+            created_at=base_time + timedelta(minutes=1),
+            updated_at=base_time + timedelta(minutes=1),
+        ),
+    ]
+    try:
+        async with session_maker() as session:
+            session.add_all(slogans)
+            await session.commit()
+            for slogan in slogans:
+                await session.refresh(slogan)
+
+        app.dependency_overrides[get_current_user] = _override_user(
+            admin.id, is_admin=True
+        )
+        default_listing = await client.get("/homepage-slogans/admin")
+        assert default_listing.status_code == 200
+        assert [item["id"] for item in default_listing.json()["items"]] == [
+            slogans[4].id,
+            slogans[3].id,
+            slogans[1].id,
+            slogans[2].id,
+            slogans[0].id,
+        ]
+
+        content_listing = await client.get(
+            "/homepage-slogans/admin",
+            params={"sort_by": "content", "sort_order": "asc"},
+        )
+        assert content_listing.status_code == 200
+        assert [item["content"] for item in content_listing.json()["items"]] == sorted(
+            slogan.content for slogan in slogans
+        )
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            ids = [slogan.id for slogan in slogans if slogan.id is not None]
+            if ids:
+                await session.execute(
+                    delete(HomepageSloganSubmission).where(
+                        HomepageSloganSubmission.id.in_(ids)
+                    )
+                )
+                await session.commit()
 
 
 @pytest.mark.asyncio

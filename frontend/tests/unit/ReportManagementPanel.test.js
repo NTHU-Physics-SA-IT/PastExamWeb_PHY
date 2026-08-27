@@ -715,7 +715,7 @@ describe('ReportManagementPanel', () => {
 
     expect(wrapper.vm.systemPage).toMatchObject({ sortField: 'read_state', sortOrder: 1 })
     expect(wrapper.vm.commentPage).toMatchObject({ sortField: 'status', sortOrder: 1 })
-    expect(wrapper.vm.wishPage).toMatchObject({ sortField: 'created_at', sortOrder: -1 })
+    expect(wrapper.vm.wishPage).toMatchObject({ sortField: 'status', sortOrder: 1 })
     expect(mocks.listSystem).toHaveBeenCalledWith(
       expect.objectContaining({ sort_by: 'read_state', sort_order: 'asc' })
     )
@@ -723,7 +723,7 @@ describe('ReportManagementPanel', () => {
       expect.objectContaining({ sort_by: 'status', sort_order: 'asc' })
     )
     expect(mocks.listWishReports).toHaveBeenCalledWith(
-      expect.objectContaining({ sort_by: 'created_at', sort_order: 'desc' })
+      expect.objectContaining({ sort_by: 'status', sort_order: 'asc' })
     )
 
     mocks.listSystem.mockClear()
@@ -784,11 +784,18 @@ describe('ReportManagementPanel', () => {
     )
     expect(wrapper.vm.wishPage).toMatchObject({
       first: 0,
-      sortField: 'created_at',
-      sortOrder: -1,
+      sortField: 'status',
+      sortOrder: 1,
     })
     expect(mocks.listWishReports).toHaveBeenLastCalledWith(
-      expect.objectContaining({ offset: 0, sort_by: 'created_at', sort_order: 'desc' })
+      expect.objectContaining({ offset: 0, sort_by: 'status', sort_order: 'asc' })
+    )
+
+    mocks.listWishReports.mockClear()
+    await wrapper.vm.onWishSort({})
+    expect(wrapper.vm.wishPage).toMatchObject({ first: 0, sortField: 'status', sortOrder: 1 })
+    expect(mocks.listWishReports).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 0, sort_by: 'status', sort_order: 'asc' })
     )
   })
 
