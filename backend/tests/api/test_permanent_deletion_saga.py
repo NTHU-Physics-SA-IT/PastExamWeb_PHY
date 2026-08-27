@@ -470,3 +470,19 @@ async def test_claim_is_single_owner_and_expired_lease_is_reclaimable(
             lease_for=timedelta(seconds=30),
         )
         assert reclaimed is True
+
+    async with session_maker() as cleanup_session:
+        await cleanup_session.execute(
+            delete(PermanentDeletionTarget).where(
+                PermanentDeletionTarget.operation_id == operation.id
+            )
+        )
+        await cleanup_session.execute(
+            delete(PermanentDeletionOperation).where(
+                PermanentDeletionOperation.id == operation.id
+            )
+        )
+        await cleanup_session.execute(
+            delete(CourseSubmission).where(CourseSubmission.id == request.id)
+        )
+        await cleanup_session.commit()
