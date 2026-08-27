@@ -14,12 +14,12 @@ Related documents:
 
 ## Activation status
 
-Stage 5F-A adds only an additive, initially empty PostgreSQL persistence
-foundation. It does not accept a permanent-deletion request, change an
-existing Trash action, call MinIO, process or reconcile work, emit a
-notification, expose an API, or add UI behavior. Existing permanent-delete
-runtime behavior and its documented consistency gap remain unchanged until a
-later explicitly reviewed stage activates this contract.
+Stage 5F-A added the additive, initially empty PostgreSQL persistence
+foundation. Stage 5F-B adds an internal service that can accept and process one
+durable operation against that foundation, but no current Trash route, bulk
+path, API, scheduler, or UI calls it. Existing public permanent-delete behavior
+and its documented consistency gap therefore remain unchanged until a later
+explicitly reviewed activation stage.
 
 ## Authority and irreversibility
 
@@ -89,8 +89,10 @@ The only storage identity scheme is `MINIO_VERSION_ID_V1`.
 - Key-level `NoSuchKey` or a delete marker is not completion evidence.
 - Suspended/disabled versioning or known identity drift fails closed.
 
-Stage 5F-A stores this representation only. It performs no storage read or
-write and does not enable, suspend, or inspect bucket versioning.
+Stage 5F-B's internal adapter reads live bucket versioning, captures and uses
+only the recorded exact Version ID, and verifies exact-version absence. It
+never changes bucket versioning, deletes by key alone, substitutes a content
+fingerprint, or treats a key-level delete marker as completion evidence.
 
 ## Retry, reconciliation, and manual review
 
@@ -99,9 +101,33 @@ retry window of 24 hours from acceptance. It supports due-work selection,
 next-attempt scheduling, bounded claim leases, unknown/timeout verification,
 stable result codes, `MANUAL_REVIEW`, and later retry after revalidation.
 
-Stage 5F-A implements no backoff algorithm, processor, scheduler,
-reconciliation worker, manual-review endpoint, force-complete, cancel, or
-restore action.
+Stage 5F-B implements deterministic bounded retry policy, a claim/lease-safe
+process-one primitive, and unknown-outcome verification. It adds no scheduler,
+recurring reconciliation worker, manual-review endpoint, force-complete,
+cancel, or restore action.
+
+## Internal Stage 5F-B processing
+
+Internal acceptance builds and revalidates the complete logical deletion plan,
+reserves every logical target, captures each exact object version only while
+versioning is enabled, and commits the operation, target, and object recovery
+records together in PostgreSQL. Repeating the same idempotency identity reuses
+the same operation; a conflicting active target reservation fails closed.
+
+One process invocation claims a bounded PostgreSQL lease, revalidates logical
+membership and storage identity before each destructive step, and performs no
+unbounded polling or sleeping. An unknown or timeout outcome enters
+`VERIFICATION_REQUIRED` and must be exactly verified before another delete.
+Known retryable failures remain bounded by 10 automatic attempts and 24 hours;
+identity, reference, versioning, or budget drift enters `MANUAL_REVIEW`.
+
+After every recorded exact storage version is conclusively absent, one
+PostgreSQL transaction revalidates membership again, applies the live-row
+deletion effects, detaches retained `ArchiveSubmissionEvent` links, preserves
+`PersonalNotification` history, completes the operation, and releases target
+reservations and the lease. A database failure rolls back both live-row effects
+and completion; a later process invocation recognizes already-absent storage
+and retries only database finalization.
 
 ## Completion and retention
 
