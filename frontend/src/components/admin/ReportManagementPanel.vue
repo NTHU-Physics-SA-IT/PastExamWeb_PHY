@@ -1630,7 +1630,7 @@ const wishTotal = ref(0)
 const wishLoading = ref(false)
 const wishError = ref('')
 const wishFilters = ref({ search: '', status: null })
-const wishPage = ref({ first: 0, rows: 10, sortField: 'created_at', sortOrder: -1 })
+const wishPage = ref({ first: 0, rows: 10, sortField: 'status', sortOrder: 1 })
 const wishReviewVisible = ref(false)
 const selectedWishReport = ref(null)
 const wishReviewForm = ref({ status: 'pending', admin_response: '' })
@@ -1877,7 +1877,7 @@ function onArchiveSort(event) {
 async function refreshAll() {
   Object.assign(systemPage.value, { first: 0, sortField: 'read_state', sortOrder: 1 })
   Object.assign(commentPage.value, { first: 0, sortField: 'status', sortOrder: 1 })
-  Object.assign(wishPage.value, { first: 0, sortField: 'created_at', sortOrder: -1 })
+  Object.assign(wishPage.value, { first: 0, sortField: 'status', sortOrder: 1 })
   Object.assign(archiveListState.value, {
     first: 0,
     sortField: 'status',
@@ -1924,8 +1924,8 @@ function onWishPage(event) {
 }
 function onWishSort(event) {
   wishPage.value.first = 0
-  wishPage.value.sortField = event.sortField || 'created_at'
-  wishPage.value.sortOrder = event.sortOrder || -1
+  wishPage.value.sortField = event.sortField || 'status'
+  wishPage.value.sortOrder = event.sortOrder || 1
   return loadWishReports()
 }
 async function openWishReport(id) {

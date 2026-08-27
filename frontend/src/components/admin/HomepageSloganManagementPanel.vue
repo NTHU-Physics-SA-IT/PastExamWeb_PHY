@@ -363,7 +363,12 @@ const total = ref(0)
 const loading = ref(false)
 const error = ref('')
 const filters = ref({ search: '', status: null })
-const page = ref({ first: 0, rows: 10, sortField: 'created_at', sortOrder: -1 })
+const page = ref({
+  first: 0,
+  rows: 10,
+  sortField: 'status',
+  sortOrder: 1,
+})
 const statusCounts = ref({ pending: 0, enabled: 0, disabled: 0 })
 const overviewExpanded = ref(false)
 const overviewLoading = ref(false)
@@ -451,11 +456,12 @@ function onPage(event) {
 }
 function onSort(event) {
   page.value.first = 0
-  page.value.sortField = event.sortField || 'created_at'
-  page.value.sortOrder = event.sortOrder || -1
-  void load()
+  page.value.sortField = event.sortField || 'status'
+  page.value.sortOrder = event.sortOrder || 1
+  return load()
 }
 async function refreshAll() {
+  Object.assign(page.value, { first: 0, sortField: 'status', sortOrder: 1 })
   await load()
   if (overviewExpanded.value) await loadEnabledOverview(true)
 }
