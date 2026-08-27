@@ -1550,35 +1550,37 @@ class PermanentDeletionOperation(SQLModel, table=True):
             name="ck_permanent_deletion_operations_idempotency_key",
         ),
         CheckConstraint(
-            "automatic_attempt_count BETWEEN 0 AND 10",
+            "automatic_attempt_count >= 0 AND automatic_attempt_count <= 10",
             name="ck_permanent_deletion_operations_attempt_budget",
         ),
         CheckConstraint(
             "retry_deadline_at IS NULL OR "
-            "(retry_deadline_at >= accepted_at AND "
-            "retry_deadline_at <= accepted_at + INTERVAL '24 hours')",
+            "retry_deadline_at >= accepted_at AND "
+            "retry_deadline_at <= (accepted_at + '24:00:00'::interval)",
             name="ck_permanent_deletion_operations_retry_window",
         ),
         CheckConstraint(
             "next_attempt_at IS NULL OR "
-            "(retry_deadline_at IS NOT NULL AND next_attempt_at <= retry_deadline_at)",
+            "retry_deadline_at IS NOT NULL AND next_attempt_at <= retry_deadline_at",
             name="ck_permanent_deletion_operations_next_attempt",
         ),
         CheckConstraint(
-            "(lease_token IS NULL AND lease_expires_at IS NULL) OR "
-            "(lease_token IS NOT NULL AND btrim(lease_token) <> '' "
-            "AND lease_expires_at IS NOT NULL)",
+            "lease_token IS NULL AND lease_expires_at IS NULL OR "
+            "lease_token IS NOT NULL AND btrim(lease_token) <> '' "
+            "AND lease_expires_at IS NOT NULL",
             name="ck_permanent_deletion_operations_lease_pair",
         ),
         CheckConstraint(
-            "(status = 'COMPLETED' AND completed_at IS NOT NULL) OR "
-            "(status <> 'COMPLETED' AND completed_at IS NULL)",
+            "status = 'COMPLETED'::permanent_deletion_status "
+            "AND completed_at IS NOT NULL OR "
+            "status <> 'COMPLETED'::permanent_deletion_status "
+            "AND completed_at IS NULL",
             name="ck_permanent_deletion_operations_completion",
         ),
         CheckConstraint(
-            "(completed_at IS NULL AND audit_purge_after IS NULL) OR "
-            "(completed_at IS NOT NULL AND audit_purge_after IS NOT NULL AND "
-            "audit_purge_after >= completed_at + INTERVAL '180 days')",
+            "completed_at IS NULL AND audit_purge_after IS NULL OR "
+            "completed_at IS NOT NULL AND audit_purge_after IS NOT NULL AND "
+            "audit_purge_after >= (completed_at + '180 days'::interval)",
             name="ck_permanent_deletion_operations_audit_retention",
         ),
         CheckConstraint(
@@ -1621,7 +1623,7 @@ class PermanentDeletionOperation(SQLModel, table=True):
                 name="permanent_deletion_status",
             ),
             nullable=False,
-            server_default=text("'ACCEPTED'"),
+            server_default=text("'ACCEPTED'::permanent_deletion_status"),
         ),
     )
     accepted_at: datetime = Field(
@@ -1705,10 +1707,10 @@ class PermanentDeletionTarget(SQLModel, table=True):
             name="ck_permanent_deletion_targets_role",
         ),
         CheckConstraint(
-            "(membership_fingerprint IS NULL AND membership_captured_at IS NULL) OR "
-            "(membership_fingerprint IS NOT NULL AND "
+            "membership_fingerprint IS NULL AND membership_captured_at IS NULL OR "
+            "membership_fingerprint IS NOT NULL AND "
             "btrim(membership_fingerprint) <> '' AND "
-            "membership_captured_at IS NOT NULL)",
+            "membership_captured_at IS NOT NULL",
             name="ck_permanent_deletion_targets_membership_pair",
         ),
         Index(
@@ -1789,7 +1791,7 @@ class PermanentDeletionObject(SQLModel, table=True):
             name="ck_permanent_deletion_objects_nonempty_identity",
         ),
         CheckConstraint(
-            "delete_attempt_count BETWEEN 0 AND 10",
+            "delete_attempt_count >= 0 AND delete_attempt_count <= 10",
             name="ck_permanent_deletion_objects_attempt_budget",
         ),
         CheckConstraint(
@@ -1797,8 +1799,10 @@ class PermanentDeletionObject(SQLModel, table=True):
             name="ck_permanent_deletion_objects_result_code",
         ),
         CheckConstraint(
-            "(state = 'VERIFIED_ABSENT' AND verified_absent_at IS NOT NULL) OR "
-            "(state <> 'VERIFIED_ABSENT' AND verified_absent_at IS NULL)",
+            "state = 'VERIFIED_ABSENT'::permanent_deletion_object_state "
+            "AND verified_absent_at IS NOT NULL OR "
+            "state <> 'VERIFIED_ABSENT'::permanent_deletion_object_state "
+            "AND verified_absent_at IS NULL",
             name="ck_permanent_deletion_objects_verified_absence",
         ),
         Index(
@@ -1825,7 +1829,9 @@ class PermanentDeletionObject(SQLModel, table=True):
                 name="permanent_deletion_identity_scheme",
             ),
             nullable=False,
-            server_default=text("'MINIO_VERSION_ID_V1'"),
+            server_default=text(
+                "'MINIO_VERSION_ID_V1'::permanent_deletion_identity_scheme"
+            ),
         ),
     )
     version_id: str = Field(sa_column=Column(String(1024), nullable=False))
@@ -1837,7 +1843,7 @@ class PermanentDeletionObject(SQLModel, table=True):
                 name="permanent_deletion_object_state",
             ),
             nullable=False,
-            server_default=text("'CAPTURED'"),
+            server_default=text("'CAPTURED'::permanent_deletion_object_state"),
         ),
     )
     captured_at: datetime = Field(
