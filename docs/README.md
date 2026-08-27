@@ -47,7 +47,7 @@ it is not current operating authority merely because this index retains it.
 | [`domain/entity-relationships.md`](domain/entity-relationships.md) | Entity ownership, grouping, and lifecycle relationships | Active | Distinguishes current implementation from intended product relations. |
 | [`domain/state-transitions.md`](domain/state-transitions.md) | Domain states, authorization, visibility, and business errors | Active | Canonical state and action contract. |
 | [`domain/notifications-and-side-effects.md`](domain/notifications-and-side-effects.md) | Notifications, transactions, storage, and external effects | Active | Canonical side-effect and deletion-result contract. |
-| [`domain/permanent-deletion.md`](domain/permanent-deletion.md) | Durable permanent-deletion workflow and exact storage identity | Active | Stage 5F-A persistence is additive and inert; runtime activation remains later work. |
+| [`domain/permanent-deletion.md`](domain/permanent-deletion.md) | Durable permanent-deletion workflow and exact storage identity | Active | Durable administrator Trash permanent deletion is active for all supported roots; recurring reconciliation/worker remains later Stage 5F-E work. |
 | [`migration-safety.md`](migration-safety.md) | Migration policy and safe operations | Active | Canonical migration safety policy. |
 | [`production-deployment.md`](production-deployment.md) | Production candidate, activation, backup, and deployment safety | Active | Canonical production deployment guidance. |
 | [`umami-screenshot-automation.md`](umami-screenshot-automation.md) | Umami screenshot automation runbook | Active | Canonical screenshot schedule and asset publication flow. |
