@@ -373,7 +373,7 @@ test.describe('Admin › Trash Core UI', () => {
     await expect(page.getByText('已永久刪除', { exact: true })).toHaveCount(0)
 
     await expect.poll(() => statusReads).toBe(1)
-    await expect(page.getByText('已永久刪除', { exact: true })).toBeVisible()
+    await expect(page.locator('.p-toast-summary').getByText('已永久刪除', { exact: true })).toBeVisible()
     await expect(pendingCard).toHaveCount(0)
   })
 
