@@ -311,6 +311,20 @@ Course, Archive, and ArchiveSubmission lock order with one bounded membership
 rebuild before detaching events and deleting live submissions. Rollback keeps
 the live row and event link coherent.
 
+### Stage 5F-A durable recovery relationships
+
+The inert [permanent-deletion contract](permanent-deletion.md) adds an
+operation → logical target → exact object identity hierarchy without making
+the recovery records children of a live Archive, submission, Course, or other
+deletable entity. Logical target identity therefore survives deletion of the
+live row. A deletion-safe requester reference uses `ON DELETE SET NULL` and
+retains no actor snapshot. Storage identity remains a removable child record,
+so completed minimal audit need not retain bucket/key/version recovery data
+for the full 180-day operation-audit period.
+
+These empty tables do not change the existing ArchiveSubmissionEvent detach,
+live-row deletion transaction, Archive placement, or lifecycle ownership.
+
 ## CourseSubmission
 
 ### Intended invariant
