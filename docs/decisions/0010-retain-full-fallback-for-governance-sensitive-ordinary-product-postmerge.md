@@ -20,6 +20,7 @@
   - [ADR-0005](0005-main-pr-docs-only-exception.md)
   - [ADR-0006](0006-coordination-postmerge-full-evidence-reuse.md)
   - [ADR-0007](0007-retain-full-fallback-for-post-case-b-reconciliation-tails.md)
+  - [ADR-0014](0014-protected-coordination-case-b-full-policy.md)
 - Related PR / issue: PR #128 motivated the research; PR #154 records the formal closeout
 - Supersedes: None
 - Superseded by: None
@@ -65,8 +66,8 @@ a circular or candidate-controlled verifier is not.
 
 This record is complementary to existing CI authority:
 
-- ADR-0006 remains the positive authority for its exact Case-B postmerge
-  evidence-reuse contract;
+- ADR-0014 retains Full for exact Case-B postmerge under current protected
+  coordination;
 - ADR-0007 continues to require Full for post-Case-B reconciliation tails;
 - existing generic non-governance Equivalent remains unchanged; and
 - main remains Full except for ADR-0005's exact docs-only path.
@@ -129,7 +130,8 @@ savings do not justify a larger security-critical trust system.
 
 ## Invariants
 
-- ADR-0006's exact Case-B behavior remains unchanged.
+- ADR-0014's exact Case-B Full policy remains separate from this ordinary-
+  product decision.
 - ADR-0007's post-Case-B reconciliation-tail Full fallback remains unchanged.
 - Existing generic non-governance Equivalent remains unchanged.
 - Main remains Full except for ADR-0005's exact docs-only path.
@@ -170,6 +172,6 @@ Reopen this decision only when at least one material premise changes:
    verifier trust.
 
 Any reopening requires a new explicit design and Decision Record. Do not
-silently widen ADR-0006, weaken ADR-0007, reinterpret generic Equivalent, or
+silently weaken ADR-0014, weaken ADR-0007, reinterpret generic Equivalent, or
 change main Full/docs-only authority. Treat future Trusted Activation as a
 separate governance decision.

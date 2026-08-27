@@ -552,7 +552,9 @@ def test_non_case_b_coordination_push_remains_full(
     )
 
     assert result.ci_mode == "full"
-    assert result.reason.startswith("coordination postmerge validation failed closed:")
+    assert result.reason == (
+        "protected coordination after Start, including Case-B postmerge, is Full-only"
+    )
 
 
 def test_explicit_pr_equivalent_allowlist_cannot_override_full_only(
@@ -614,7 +616,9 @@ def test_live_push_governance_merge_falls_back_to_full(
     )
 
     assert result.ci_mode == "full"
-    assert result.reason.startswith("coordination postmerge validation failed closed:")
+    assert result.reason == (
+        "protected coordination after Start, including Case-B postmerge, is Full-only"
+    )
 
 
 def test_pr_governance_change_requires_full_before_allowlist(

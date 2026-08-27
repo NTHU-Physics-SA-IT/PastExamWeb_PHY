@@ -1,4 +1,4 @@
-"""Executable contract for ADR-0006 postmerge Full-evidence reuse."""
+"""Historical executable contract for ADR-0006 Full-evidence reuse."""
 
 from __future__ import annotations
 
@@ -44,6 +44,7 @@ ATTESTED_SHA = "e" * 40
 TCB_WORKFLOW = ".github/workflows/main.yml"
 TCB_CLASSIFIER = "scripts/ci/classify_ci_mode.py"
 APPLICATION_PATH = "backend/app/main.py"
+PROJECT_GOVERNANCE = ".github/project-governance.json"
 
 
 def _blob(label: str, path: str) -> str:
@@ -343,16 +344,60 @@ def _classify(
     api: Any | None = None,
     event_changes: dict[str, Any] | None = None,
 ) -> Any:
-    return ci.classify_ci_mode(
-        event=_push_event(**(event_changes or {})),
-        git=git or CaseBGit(),
-        api=api or DualFullAPI(),
+    try:
+        return ci.validate_equivalent_merge(
+            event=_push_event(**(event_changes or {})),
+            git=git or CaseBGit(),
+            api=api or DualFullAPI(),
+            coordination_branch=COORDINATION_BRANCH,
+            default_branch="main",
+            now=NOW,
+        )
+    except (
+        AttributeError,
+        ci.ClassificationFailure,
+        KeyError,
+        OSError,
+        TypeError,
+        ValueError,
+    ) as error:
+        return ci.Classification(
+            "full", f"historical ADR-0006 validation failed closed: {error}"
+        )
+
+
+def test_current_adr0013_case_b_remains_full_by_policy() -> None:
+    git = CaseBGit()
+    git.source_paths += (PROJECT_GOVERNANCE,)
+    git.path_identity_overrides[(M, PROJECT_GOVERNANCE)] = (
+        "100644",
+        "blob",
+        _blob("main-null", PROJECT_GOVERNANCE),
+    )
+    for commit in (S, Q):
+        git.path_identity_overrides[(commit, PROJECT_GOVERNANCE)] = (
+            "100644",
+            "blob",
+            _blob("active-self", PROJECT_GOVERNANCE),
+        )
+    api = DualFullAPI()
+
+    result = ci.classify_ci_mode(
+        event=_push_event(),
+        git=git,
+        api=api,
         governance=ACTIVE_COORDINATION_GOVERNANCE,
         now=NOW,
     )
 
+    assert result.ci_mode == "full"
+    assert result.reason == (
+        "protected coordination after Start, including Case-B postmerge, is Full-only"
+    )
+    assert api.calls == []
 
-def test_exact_case_b_dual_full_postmerge_contract_uses_equivalent() -> None:
+
+def test_historical_exact_case_b_dual_full_contract_uses_equivalent() -> None:
     api = DualFullAPI()
     result = _classify(api=api)
 
@@ -484,13 +529,7 @@ def test_historical_pr95_git_topology_and_governance_are_eligible() -> None:
         tree=git.tree_sha(S),
         workflow_revision=git.blob_sha(S, ci.APPROVED_WORKFLOW_PATH),
     )
-    result = ci.classify_ci_mode(
-        event=_push_event(),
-        git=git,
-        api=api,
-        governance=ACTIVE_COORDINATION_GOVERNANCE,
-        now=NOW,
-    )
+    result = _classify(git=git, api=api)
 
     assert result.ci_mode == "equivalent-merge", result.reason
     assert result.source_sha == S

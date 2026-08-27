@@ -111,21 +111,18 @@ branch defined by canonical project governance. `main` pull requests use Full
 CI by default, except when the centralized classifier conclusively identifies
 every changed path as docs-only. Main pushes always use Full CI. Governance-path
 source pushes and pull requests to the exact configured coordination branch use
-Full; ordinary coordination receives no generic Equivalent eligibility. Only
-the exact ADR-0006 final Case-B postmerge push may use Equivalent after
-distinct successful Source Full and PR Full evidence plus exact topology,
-content, governance, pull-request, and stable-ref proof. All uncertainty and
-other coordination events retain the fail-closed Full fallback.
+Full. Protected Case-B Source, pull-request, and final postmerge workflows also
+use Full; ordinary protected coordination receives no Equivalent eligibility.
+All uncertainty retains the fail-closed Full fallback.
 
 Protected coordination has one narrow `coordination-start` mode for the exact
 App-created bootstrap commit. It requires independent machine proof of the
 current-main parent, governance-only tree identity, trusted protected-main
 lifecycle artifact, lifecycle-App origin, unchanged exact integration ruleset,
 and fresh exact-parent Full evidence. Every uncertainty falls back to Full.
-Active integration pull requests and feature pushes, reconciliation, return,
-closeout, and stale or invalid authority remain Full-only or blocked. The exact
-ADR-0006 dual-Full final postmerge exception is separate from Start and does not
-broaden Equivalent eligibility for any other coordination event.
+Active integration pull requests and feature pushes, Case-B reconciliation and
+postmerge, return, closeout, and stale or invalid authority remain Full-only or
+blocked.
 Ordinary main does not run or require a coordination-specific App gate. See
 [ADR-0013](../decisions/0013-simplified-protected-coordination.md) and the
 [operator runbook](../runbooks/coordination.md).
@@ -143,8 +140,9 @@ merge. Source success is an evidence requirement for merge, not a prerequisite
 for opening an otherwise ready pull request. The main pull request uses Full CI
 unless its entire change is conclusively docs-only. Follow the detailed
 [pull request rules](../../CONTRIBUTING.md#pull-requests) and the narrower
-[ADR-0006 Case-B contract](../decisions/0006-coordination-postmerge-full-evidence-reuse.md)
-where applicable.
+[ADR-0014 protected Case-B Full policy](../decisions/0014-protected-coordination-case-b-full-policy.md)
+where applicable. ADR-0006 remains historical evidence for the older shared-
+governance model.
 After an authorized main merge, semantic-release is callable only from the
 successful exact-main-SHA CI run after `CI Gate`; it remains version authority
 but does not enable or perform production deployment. Branch-authority transfer

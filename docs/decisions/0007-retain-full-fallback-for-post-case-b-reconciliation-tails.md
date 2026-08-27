@@ -15,6 +15,7 @@
   - [ADR-0002](0002-ci-evidence-and-main-full-authority.md)
   - [ADR-0003](0003-coordination-branch-freshness.md)
   - [ADR-0006](0006-coordination-postmerge-full-evidence-reuse.md)
+  - [ADR-0014](0014-protected-coordination-case-b-full-policy.md)
 - Related PR / issue: PR #114
 - Supersedes: None
 - Superseded by: None
@@ -58,8 +59,10 @@ disproportionate to this optimization.
 PastExamWeb_PHY retains the current Full fallback for post-Case-B
 reconciliation tails.
 
-ADR-0006 semantics remain unchanged. Reconciliation-tail Equivalent reuse
-will not be implemented. A PR #114-like history falling back to Full is
+ADR-0014 also retains Full for the exact Case-B postmerge itself under current
+protected coordination. This record's separate tail decision remains
+unchanged: reconciliation-tail Equivalent reuse will not be implemented. A
+PR #114-like history falling back to Full is
 deliberate safe behavior, not an unresolved classifier defect.
 
 ## Rationale
@@ -83,12 +86,12 @@ infrastructure.
 
 ## Invariants
 
-- ADR-0006's exact Case-B behavior and all of its security invariants remain
-  unchanged.
+- ADR-0014's exact Case-B Full policy does not weaken this tail fallback.
 - Any post-Case-B reconciliation tail falls back to Full.
 - Ambiguous, incomplete, malformed, stale, or untrusted evidence fails closed
   to Full.
-- No future implementation may silently widen ADR-0006 to add this reuse path.
+- No future implementation may silently add this reconciliation-tail reuse
+  path.
 
 ## Consequences
 
@@ -112,6 +115,6 @@ changes:
 3. CI frequency or cost grows enough that avoiding these Full runs justifies
    the added trust infrastructure.
 
-Any reopening must preserve ADR-0006's invariants, fail closed on ambiguity,
+Any reopening must preserve ADR-0014's invariants, fail closed on ambiguity,
 and use a new explicit design and Decision Record rather than silently
-expanding ADR-0006.
+adding reconciliation-tail reuse to current policy.

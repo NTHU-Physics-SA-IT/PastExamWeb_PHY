@@ -168,9 +168,9 @@ freshness, and pull request content are ready, push the exact candidate and
 promptly open its ready pull request to `main`; do not wait merely for candidate
 Source CI to finish. Selected Source and PR evidence may run independently and
 overlap, but all exact evidence required by the repository must be terminal
-successful before merge. [ADR-0006](docs/decisions/0006-coordination-postmerge-full-evidence-reuse.md)
-governs the narrower exact Case-B reconciliation, provenance, and fail-closed
-contract.
+successful before merge. Current protected Case-B Source, pull-request, and
+final postmerge workflows use Full under
+[ADR-0014](docs/decisions/0014-protected-coordination-case-b-full-policy.md).
 
 Do not use no-op commits, extra pushes, workflow reruns, pull request
 close/reopen actions, or Draft/Ready transitions solely to manufacture overlap.

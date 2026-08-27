@@ -19,6 +19,7 @@
   - [ADR-0003](0003-coordination-branch-freshness.md)
   - [ADR-0006](0006-coordination-postmerge-full-evidence-reuse.md)
   - [ADR-0010](0010-retain-full-fallback-for-governance-sensitive-ordinary-product-postmerge.md)
+  - [ADR-0014](0014-protected-coordination-case-b-full-policy.md)
 - Related PR / issue: Trusted Activation simplification and safe recovery
 - Supersedes: [ADR-0012](0012-trusted-ruleset-visibility-permission-boundary.md)
 - Superseded by: None
@@ -76,11 +77,9 @@ PastExamWeb_PHY adopts the App-assisted minimal model (S1):
    lightweight `coordination-start` path only when independent revalidation
    proves its one-parent current-main topology, governance-only tree identity,
    protected-main lifecycle attestation, unchanged exact ruleset, lifecycle-App
-   origin, and fresh exact-parent Full evidence. The exact ADR-0006 final
-   Case-B postmerge push may use `equivalent-merge` only after machine proof of
-   its approved topology, content identity, stable current refs, unique merged
-   PR, and distinct successful Source Full and PR Full evidence. Any uncertainty
-   or other coordination event uses Full.
+   origin, and fresh exact-parent Full evidence. Every later protected-
+   coordination event uses Full, including Case-B Source, pull-request, and
+   final postmerge pushes, as recorded by ADR-0014.
 7. The App-owned Trusted Governance Gate is required by neither ordinary main
    nor integration. Its historical verifier becomes dormant after live
    required-check dependencies are removed.
@@ -119,10 +118,10 @@ method.
 | --- | --- | --- | --- |
 | App 4688858 | Retain only for exact protected ref create/update/delete. Prevents arbitrary candidates from creating their own active integration ref. | GitHub Actions App 15368 is shared by candidate workflows; an Owner token would create a hidden human-only path. | No identifier entry; one lifecycle run with separated short-lived tokens; bounded retry from exact read-back. |
 | `integration/*` ruleset | Retain. Prevents force push, deletion, direct unreviewed updates, and non-Green merges. | Branch naming and documentation cannot enforce Git writes. | Normal PR/CI only; settings read-back makes recovery explicit. |
-| Trusted Governance Gate | Remove from main and integration active use. It authenticated candidate-side Equivalent evidence; the exact ADR-0006 postmerge exception instead proves ordinary dual-Full, ref, PR, and topology evidence. | Strict `check-branch`, strict `CI Gate`, App-only ref creation, Full Source/PR events, and fail-closed postmerge proof cover the selected threat model. | Zero main or integration App-check tail. |
+| Trusted Governance Gate | Remove from main and integration active use. Current protected coordination uses Full after Start. | Strict `check-branch`, strict `CI Gate`, App-only ref creation, and Full protected-coordination events cover the selected threat model. | Zero main or integration App-check tail. |
 | `trusted-governance-verifier` Environment | Retain dormant for audit/rollback only. | Deletion is outside scope and adds no safety. | Zero runtime or human review. |
 | `trusted-coordination-issuance` Environment | Retain for secret and protected-main scope; remove reviewer and prevent-self-review. Prevents candidate access to App credentials. | Repository variables alone do not scope the private key to protected-main workflow use. | One Owner; no waiting approval; admin bypass stays disabled. |
-| Grant / claim / activation UUID | Do not use for new coordination. They authenticated candidate-side activation; ADR-0006's final postmerge exception uses ordinary Git/GitHub and distinct dual-Full evidence instead. | Protected App-only creation, branch-local exact identity, Full Source/PR events, and exact postmerge proof need no activation artifact. | Historical files remain immutable; no new ceremony or recovery chain. |
+| Grant / claim / activation UUID | Do not use for new coordination. Current protected coordination does not use candidate-side Equivalent authority. | Protected App-only creation, branch-local exact identity, and Full events after Start need no activation artifact. | Historical files remain immutable; no new ceremony or recovery chain. |
 | Revocation ledger | Do not use. Safe close is based on exact containment, null closeout tree, and exact ref deletion. | A revocation adds a main PR without preventing a failure not already blocked by containment and ruleset checks. | Eliminates an extra main merge and partial-pair recovery. |
 | Tombstone ledger | Do not use for random-suffixed new branches. Retain one explicit obsolete-identity retirement record. | New uniqueness is not authority; the already-granted obsolete identity needs permanent historical rejection. | No routine ledger PR; one bounded historical record. |
 | Heavy lifecycle states | Replace with `ACTIVE`, `STALE`, `RETURN_READY`, and `RETIRED`; ordinary main is simply ordinary. | The removed states represented grant/claim/revocation transitions that no longer exist. | Plain Git recovery language; fewer partial states. |
@@ -161,9 +160,8 @@ that prevents that self-authorization.
 - Integration refs cannot be force-pushed or directly mutated outside the
   protected lifecycle and normal PR rules.
 - Ordinary coordination uses Full CI. Only the exact canonical Start bootstrap
-  may use `coordination-start`. Only the exact ADR-0006 dual-Full final
-  postmerge push may use `equivalent-merge`; Source pushes and coordination
-  pull requests remain independent Full events, and all uncertainty uses Full.
+  may use `coordination-start`; Source, pull-request, Case-B postmerge, and all
+  other protected-coordination events use Full.
 - Main advancement makes coordination STALE without mutating it.
 - Close requires final integration containment in Green main, clears local
   governance, and deletes only the exact resolved ref.
@@ -176,9 +174,8 @@ that prevents that self-authorization.
 Coordination retains the smaller trust protocol without grant, claim, UUID, or
 second-person activation ceremony. Start may reuse its exact Green-main
 parent's Full evidence only through the narrowly attested bootstrap exception.
-ADR-0006 separately permits the exact final Case-B postmerge push to reuse its
-distinct Source Full and PR Full evidence; close and all ordinary coordination
-changes remain Full. Start and close consume one short lifecycle workflow each;
+ADR-0014 retains Full for Case-B postmerge and every other event after Start.
+Start and close consume one short lifecycle workflow each;
 ordinary main returns to its pre-Trusted-Activation check set. Existing App,
 installation, key, Environments, legacy workflows, and historical ledgers may
 remain dormant for audit and rollback; deleting permanent resources is outside
@@ -188,7 +185,7 @@ this decision.
 
 Any change that lets candidate code create the protected ref, makes main
 non-null, broadens the Start exception beyond exact machine proof, makes
-coordination postmerge eligible for Equivalent beyond ADR-0006's exact
-dual-Full Case-B contract, permits force/deletion, closes before containment,
+protected coordination after Start eligible for Equivalent, permits
+force/deletion, closes before containment,
 or adds machine-ID or second-person steps conflicts with this decision. A
 future high-risk dual-control mode must be optional and separately justified.

@@ -124,7 +124,7 @@ not freeze design forever; they require intentional, reviewable replacement.
 | [ADR-0003](0003-coordination-branch-freshness.md) | Coordination-branch freshness | Accepted | Optional coordination branch selection and refresh |
 | [ADR-0004](0004-decision-record-and-semantic-conflict-authority.md) | Decision Record and semantic-conflict authority | Accepted | Design evidence, conflict classification, and supersession |
 | [ADR-0005](0005-main-pr-docs-only-exception.md) | Main pull-request docs-only exception | Accepted | Docs-only classification for pull requests targeting `main` |
-| [ADR-0006](0006-coordination-postmerge-full-evidence-reuse.md) | Coordination postmerge Full-evidence reuse | Accepted | Exact Case-B coordination postmerge evidence reuse |
+| [ADR-0006](0006-coordination-postmerge-full-evidence-reuse.md) | Coordination postmerge Full-evidence reuse | Superseded | Historical exact Case-B evidence reuse under the pre-ADR-0013 governance model |
 | [ADR-0007](0007-retain-full-fallback-for-post-case-b-reconciliation-tails.md) | Retain Full Fallback for Post-Case-B Reconciliation Tails | Accepted | Post-Case-B reconciliation-tail evidence reuse |
 | [ADR-0008](0008-narrow-sibling-migration-convergence-exception.md) | Narrow sibling-migration convergence exception | Accepted | Exact three-revision sibling-migration compatibility boundary |
 | [ADR-0009](0009-retain-fail-closed-vite-readiness-under-playwright-api-limits.md) | Retain Fail-Closed Vite Readiness Under Playwright Public-API Limits | Accepted | Vite 8 / Playwright Firefox frontend-readiness safety boundary |
@@ -132,3 +132,4 @@ not freeze design forever; they require intentional, reviewable replacement.
 | [ADR-0011](0011-trusted-activation-for-protected-coordination.md) | Trusted Activation for Protected Coordination | Superseded | Historical independent-App activation and lifecycle decision; permission boundary replaced by ADR-0012 |
 | [ADR-0012](0012-trusted-ruleset-visibility-permission-boundary.md) | Trusted Ruleset Visibility Permission Boundary | Superseded | Historical App permission boundary replaced by ADR-0013 |
 | [ADR-0013](0013-simplified-protected-coordination.md) | Simplified Protected Coordination | Accepted | Main-null semantics and single-owner protected integration lifecycle |
+| [ADR-0014](0014-protected-coordination-case-b-full-policy.md) | Protected Coordination Case-B Full Policy | Accepted | Current protected Case-B postmerge Full policy |

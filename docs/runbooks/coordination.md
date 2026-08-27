@@ -8,6 +8,7 @@ temporary protected integration coordination under ADR-0013
 Related authority:
 
 - [ADR-0013](../decisions/0013-simplified-protected-coordination.md)
+- [ADR-0014](../decisions/0014-protected-coordination-case-b-full-policy.md)
 - [Validation policy](../development/validation.md)
 - [Collaboration runbook](../development/collaboration-and-conflict-resolution.md)
 - [Contributor workflow](../../CONTRIBUTING.md)
@@ -84,9 +85,9 @@ is silently called fresh. Reconcile main through an ordinary protected Full-CI
 pull request to the integration branch, resolve semantic conflicts using the
 collaboration runbook, and confirm current main is again an ancestor. Push the
 exact reconciliation source and promptly open its normal pull request so the
-independent Source Full and PR Full workflows may overlap. After both are
-successful, only the exact ADR-0006 content-identical final postmerge push may
-use `equivalent-merge`; missing, stale, ambiguous, or drifted evidence runs Full.
+independent Source Full and PR Full workflows may overlap. Case-B Source, pull-
+request, and final postmerge workflows all use Full under current protected
+coordination.
 
 ## Return coordinated work to main
 
@@ -133,9 +134,8 @@ closeout SHA, and `RETIRED`. No second person or machine identifier is entered.
 - Never force-push, weaken protection, use a candidate workflow, transcribe
   hidden identifiers, or reuse the obsolete rehearsal identity.
 - Do not treat `coordination-start` as an ordinary coordination optimization.
-  Pull requests, feature pushes, reconciliation sources, and closeout remain
-  Full. Only the exact ADR-0006 dual-Full final postmerge push has a separate
-  `equivalent-merge` exception.
+  Pull requests, feature pushes, reconciliation sources, Case-B postmerge, and
+  closeout remain Full.
 
 The old run `32628689925`, UUID
 `714d9c51-8b6b-405d-bd7c-4c92f6f26699`, and branch name
