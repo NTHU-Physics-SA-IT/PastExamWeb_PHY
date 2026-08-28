@@ -19,6 +19,7 @@ from app.db.audit.registry import (
     ARCHIVE_REPORT_UNIQUENESS_REVISION,
     ELIGIBILITY_AUDIT_ID,
     HOMEPAGE_SLOGAN_REVISION,
+    PERMANENT_DELETION_FOUNDATION_REVISION,
     RETAINED_EVENT_REVISION,
     WISH_OPTIONAL_SEMESTER_REVISION,
     WISH_REPORT_TRASH_REVISION,
@@ -187,6 +188,7 @@ def test_bilingual_head_audit_is_new_version_and_preserves_lifecycle_classifier(
             WISH_REPORT_TRASH_REVISION,
             HOMEPAGE_SLOGAN_REVISION,
             RETAINED_EVENT_REVISION,
+            PERMANENT_DELETION_FOUNDATION_REVISION,
         }
     )
     previous = get_audit_adapter(ELIGIBILITY_AUDIT_ID, 3)
@@ -208,6 +210,7 @@ def test_archive_report_audit_is_revision_bounded_aggregate_only_and_read_only()
             WISH_REPORT_TRASH_REVISION,
             HOMEPAGE_SLOGAN_REVISION,
             RETAINED_EVENT_REVISION,
+            PERMANENT_DELETION_FOUNDATION_REVISION,
         }
     )
     assert set(adapter.approved_aggregate_labels) == {
@@ -333,16 +336,22 @@ def test_a9_continuity_requires_course_submission_lifecycle_shape() -> None:
     assert "SELECT count(*) = 5" in sql
 
 
-def test_retained_event_continuity_inherits_the_complete_previous_head_shape() -> None:
-    retained_request = AuditRequest(
+@pytest.mark.parametrize(
+    "expected_ledger",
+    [RETAINED_EVENT_REVISION, PERMANENT_DELETION_FOUNDATION_REVISION],
+)
+def test_recent_head_continuity_inherits_the_complete_previous_shape(
+    expected_ledger: str,
+) -> None:
+    recent_head_request = AuditRequest(
         audit_id=ELIGIBILITY_AUDIT_ID,
         audit_version=4,
         mode=AuditMode.ISOLATED_TEST,
-        expected_ledger=RETAINED_EVENT_REVISION,
+        expected_ledger=expected_ledger,
         repository_revision="a" * 40,
     )
     sql = build_transaction_sql(
-        retained_request,
+        recent_head_request,
         get_audit_adapter(ELIGIBILITY_AUDIT_ID, 4),
     )
 

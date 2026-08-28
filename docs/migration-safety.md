@@ -80,7 +80,9 @@ Reviewed manifests currently cover:
   and
 - `d1f5a9c3e7b2`: the reviewed schema before homepage slogan submissions;
 - `e2c6a8f4b1d9`: the reviewed schema before retained event detachment; and
-- `f6b8d2c4a9e1`: the current repository head and SQLModel metadata contract.
+- `f6b8d2c4a9e1`: the reviewed schema before the inert permanent-deletion
+  foundation; and
+- `a5f7c9d2e4b6`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,

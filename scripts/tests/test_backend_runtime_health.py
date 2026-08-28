@@ -94,7 +94,7 @@ def test_backend_python_sources_use_lf_checkout_policy(path: str) -> None:
 
 
 def test_runtime_checker_tracks_current_schema_head() -> None:
-    assert checker.EXPECTED_ALEMBIC_HEAD == "f6b8d2c4a9e1"
+    assert checker.EXPECTED_ALEMBIC_HEAD == "a5f7c9d2e4b6"
 
 
 def test_posix_source_identity_is_unchanged() -> None:

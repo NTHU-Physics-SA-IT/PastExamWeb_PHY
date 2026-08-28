@@ -9,6 +9,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -16,6 +17,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -127,6 +129,36 @@ class ArchiveSubmissionAdminAction(str, PyEnum):
     TAKEDOWN = "takedown"
     REPUBLISH = "republish"
     DELETE = "delete"
+
+
+class PermanentDeletionStatus(str, PyEnum):
+    ACCEPTED = "ACCEPTED"
+    PROCESSING = "PROCESSING"
+    VERIFICATION_REQUIRED = "VERIFICATION_REQUIRED"
+    RETRYABLE_FAILED = "RETRYABLE_FAILED"
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+    COMPLETED = "COMPLETED"
+
+
+class PermanentDeletionBulkOutcome(str, PyEnum):
+    COMPLETED = "COMPLETED"
+    PENDING = "PENDING"
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+
+
+class PermanentDeletionIdentityScheme(str, PyEnum):
+    MINIO_VERSION_ID_V1 = "MINIO_VERSION_ID_V1"
+
+
+class PermanentDeletionObjectState(str, PyEnum):
+    CAPTURED = "CAPTURED"
+    DELETE_IN_PROGRESS = "DELETE_IN_PROGRESS"
+    VERIFICATION_REQUIRED = "VERIFICATION_REQUIRED"
+    RETRYABLE_FAILED = "RETRYABLE_FAILED"
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+    VERIFIED_ABSENT = "VERIFIED_ABSENT"
 
 
 class User(SQLModel, table=True):
@@ -1510,6 +1542,360 @@ class SystemIssueReport(SQLModel, table=True):
     )
 
 
+class PermanentDeletionOperation(SQLModel, table=True):
+    __tablename__ = "permanent_deletion_operations"
+    __table_args__ = (
+        UniqueConstraint(
+            "idempotency_key",
+            name="uq_permanent_deletion_operations_idempotency_key",
+        ),
+        CheckConstraint(
+            "btrim(root_entity_type) <> '' AND root_entity_id > 0",
+            name="ck_permanent_deletion_operations_root_identity",
+        ),
+        CheckConstraint(
+            "btrim(idempotency_key) <> ''",
+            name="ck_permanent_deletion_operations_idempotency_key",
+        ),
+        CheckConstraint(
+            "automatic_attempt_count >= 0 AND automatic_attempt_count <= 10",
+            name="ck_permanent_deletion_operations_attempt_budget",
+        ),
+        CheckConstraint(
+            "retry_deadline_at IS NULL OR "
+            "retry_deadline_at >= accepted_at AND "
+            "retry_deadline_at <= (accepted_at + '24:00:00'::interval)",
+            name="ck_permanent_deletion_operations_retry_window",
+        ),
+        CheckConstraint(
+            "next_attempt_at IS NULL OR "
+            "retry_deadline_at IS NOT NULL AND next_attempt_at <= retry_deadline_at",
+            name="ck_permanent_deletion_operations_next_attempt",
+        ),
+        CheckConstraint(
+            "lease_token IS NULL AND lease_expires_at IS NULL OR "
+            "lease_token IS NOT NULL AND btrim(lease_token) <> '' "
+            "AND lease_expires_at IS NOT NULL",
+            name="ck_permanent_deletion_operations_lease_pair",
+        ),
+        CheckConstraint(
+            "status = 'COMPLETED'::permanent_deletion_status "
+            "AND completed_at IS NOT NULL OR "
+            "status <> 'COMPLETED'::permanent_deletion_status "
+            "AND completed_at IS NULL",
+            name="ck_permanent_deletion_operations_completion",
+        ),
+        CheckConstraint(
+            "completed_at IS NULL AND audit_purge_after IS NULL OR "
+            "completed_at IS NOT NULL AND audit_purge_after IS NOT NULL AND "
+            "audit_purge_after >= (completed_at + '180 days'::interval)",
+            name="ck_permanent_deletion_operations_audit_retention",
+        ),
+        CheckConstraint(
+            "result_code IS NULL OR btrim(result_code) <> ''",
+            name="ck_permanent_deletion_operations_result_code",
+        ),
+        Index(
+            "ix_permanent_deletion_operations_due",
+            "status",
+            "next_attempt_at",
+        ),
+        Index(
+            "ix_permanent_deletion_operations_lease_expiry",
+            "lease_expires_at",
+        ),
+        Index(
+            "ix_permanent_deletion_operations_audit_purge",
+            "audit_purge_after",
+        ),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    root_entity_type: str = Field(sa_column=Column(String(64), nullable=False))
+    root_entity_id: int = Field(sa_column=Column(Integer, nullable=False))
+    requested_by_user_id: int | None = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey("users.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    idempotency_key: str = Field(sa_column=Column(String(160), nullable=False))
+    status: PermanentDeletionStatus = Field(
+        default=PermanentDeletionStatus.ACCEPTED,
+        sa_column=Column(
+            SAEnum(
+                PermanentDeletionStatus,
+                name="permanent_deletion_status",
+            ),
+            nullable=False,
+            server_default=text("'ACCEPTED'::permanent_deletion_status"),
+        ),
+    )
+    accepted_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(UTC),
+            nullable=False,
+            server_default=text("now()"),
+        )
+    )
+    completed_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    automatic_attempt_count: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+    )
+    retry_deadline_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    next_attempt_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    lease_token: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    lease_expires_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    result_code: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    audit_purge_after: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    created_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(UTC),
+            nullable=False,
+            server_default=text("now()"),
+        )
+    )
+    updated_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(UTC),
+            nullable=False,
+            server_default=text("now()"),
+        )
+    )
+
+
+class PermanentDeletionTarget(SQLModel, table=True):
+    __tablename__ = "permanent_deletion_targets"
+    __table_args__ = (
+        UniqueConstraint(
+            "id",
+            "operation_id",
+            name="uq_permanent_deletion_targets_id_operation",
+        ),
+        UniqueConstraint(
+            "operation_id",
+            "entity_type",
+            "entity_id",
+            name="uq_permanent_deletion_targets_operation_entity",
+        ),
+        CheckConstraint(
+            "btrim(entity_type) <> '' AND entity_id > 0",
+            name="ck_permanent_deletion_targets_entity_identity",
+        ),
+        CheckConstraint(
+            "target_role IS NULL OR btrim(target_role) <> ''",
+            name="ck_permanent_deletion_targets_role",
+        ),
+        CheckConstraint(
+            "membership_fingerprint IS NULL AND membership_captured_at IS NULL OR "
+            "membership_fingerprint IS NOT NULL AND "
+            "btrim(membership_fingerprint) <> '' AND "
+            "membership_captured_at IS NOT NULL",
+            name="ck_permanent_deletion_targets_membership_pair",
+        ),
+        Index(
+            "uq_permanent_deletion_targets_active_reservation",
+            "entity_type",
+            "entity_id",
+            unique=True,
+            postgresql_where=text("reservation_released_at IS NULL"),
+        ),
+        Index(
+            "ix_permanent_deletion_targets_operation",
+            "operation_id",
+        ),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    operation_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("permanent_deletion_operations.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    entity_type: str = Field(sa_column=Column(String(64), nullable=False))
+    entity_id: int = Field(sa_column=Column(Integer, nullable=False))
+    target_role: str | None = Field(
+        default=None,
+        sa_column=Column(String(32), nullable=True),
+    )
+    membership_fingerprint: str | None = Field(
+        default=None,
+        sa_column=Column(String(128), nullable=True),
+    )
+    membership_captured_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    reservation_released_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    created_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(UTC),
+            nullable=False,
+            server_default=text("now()"),
+        )
+    )
+
+
+class PermanentDeletionObject(SQLModel, table=True):
+    __tablename__ = "permanent_deletion_objects"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["target_id", "operation_id"],
+            [
+                "permanent_deletion_targets.id",
+                "permanent_deletion_targets.operation_id",
+            ],
+            name="fk_permanent_deletion_objects_target_operation",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "operation_id",
+            "bucket_name",
+            "object_key",
+            "identity_scheme",
+            "version_id",
+            name="uq_permanent_deletion_objects_exact_identity",
+        ),
+        CheckConstraint(
+            "btrim(bucket_name) <> '' AND btrim(object_key) <> ''",
+            name="ck_permanent_deletion_objects_storage_location",
+        ),
+        CheckConstraint(
+            "version_id IS NOT NULL AND btrim(version_id) <> ''",
+            name="ck_permanent_deletion_objects_nonempty_identity",
+        ),
+        CheckConstraint(
+            "delete_attempt_count >= 0 AND delete_attempt_count <= 10",
+            name="ck_permanent_deletion_objects_attempt_budget",
+        ),
+        CheckConstraint(
+            "result_code IS NULL OR btrim(result_code) <> ''",
+            name="ck_permanent_deletion_objects_result_code",
+        ),
+        CheckConstraint(
+            "state = 'VERIFIED_ABSENT'::permanent_deletion_object_state "
+            "AND verified_absent_at IS NOT NULL OR "
+            "state <> 'VERIFIED_ABSENT'::permanent_deletion_object_state "
+            "AND verified_absent_at IS NULL",
+            name="ck_permanent_deletion_objects_verified_absence",
+        ),
+        Index(
+            "ix_permanent_deletion_objects_operation_state",
+            "operation_id",
+            "state",
+        ),
+        Index(
+            "ix_permanent_deletion_objects_target",
+            "target_id",
+        ),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    operation_id: int = Field(sa_column=Column(Integer, nullable=False))
+    target_id: int = Field(sa_column=Column(Integer, nullable=False))
+    bucket_name: str = Field(sa_column=Column(String(255), nullable=False))
+    object_key: str = Field(sa_column=Column(Text, nullable=False))
+    identity_scheme: PermanentDeletionIdentityScheme = Field(
+        default=PermanentDeletionIdentityScheme.MINIO_VERSION_ID_V1,
+        sa_column=Column(
+            SAEnum(
+                PermanentDeletionIdentityScheme,
+                name="permanent_deletion_identity_scheme",
+            ),
+            nullable=False,
+            server_default=text(
+                "'MINIO_VERSION_ID_V1'::permanent_deletion_identity_scheme"
+            ),
+        ),
+    )
+    version_id: str = Field(sa_column=Column(String(1024), nullable=False))
+    state: PermanentDeletionObjectState = Field(
+        default=PermanentDeletionObjectState.CAPTURED,
+        sa_column=Column(
+            SAEnum(
+                PermanentDeletionObjectState,
+                name="permanent_deletion_object_state",
+            ),
+            nullable=False,
+            server_default=text("'CAPTURED'::permanent_deletion_object_state"),
+        ),
+    )
+    captured_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(UTC),
+            nullable=False,
+            server_default=text("now()"),
+        )
+    )
+    delete_attempt_count: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default=text("0")),
+    )
+    last_delete_attempt_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    last_unknown_outcome_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    last_verified_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    verified_absent_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    result_code: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    created_at: datetime = Field(
+        sa_column=Column(
+            DateTime(timezone=True),
+            default=lambda: datetime.now(UTC),
+            nullable=False,
+            server_default=text("now()"),
+        )
+    )
+
+
 class UserRead(BaseModel):
     id: int
     email: str
@@ -2441,6 +2827,41 @@ class ArchiveSubmissionUpdate(BaseModel):
     review_note: str | None = None
 
 
+class PermanentDeletionRead(BaseModel):
+    operation_id: int
+    root_type: TrashEntityType
+    root_id: int
+    status: PermanentDeletionStatus
+    accepted_at: datetime
+    completed_at: datetime | None = None
+    next_attempt_at: datetime | None = None
+    result_code: str | None = None
+    can_retry: bool = False
+    can_inspect_reason: bool = False
+    restore_available: bool = False
+
+
+class PermanentDeletionBulkItemResult(BaseModel):
+    item_type: TrashEntityType
+    item_id: int
+    display_name: str
+    outcome: PermanentDeletionBulkOutcome
+    operation: PermanentDeletionRead | None = None
+    reason_code: str | None = None
+    reason_message: str | None = None
+
+
+class PermanentDeletionBulkRead(BaseModel):
+    scope: TrashEntityType | None = None
+    requested_count: int
+    completed_count: int
+    pending_count: int
+    manual_review_count: int
+    failed_count: int
+    skipped_count: int
+    results: list[PermanentDeletionBulkItemResult]
+
+
 class TrashItem(BaseModel):
     item_type: TrashEntityType
     id: int
@@ -2480,3 +2901,4 @@ class TrashItem(BaseModel):
     canRestore: bool | None = None
     canPermanentDelete: bool | None = None
     dependencies: list[str] = []
+    permanent_deletion: PermanentDeletionRead | None = None
