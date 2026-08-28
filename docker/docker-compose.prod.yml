@@ -27,6 +27,9 @@ services:
     #   - "8000:8000"
     env_file:
       - ${PRODUCTION_BACKEND_ENV_FILE:-/opt/pastexam-config/backend.env}
+    environment:
+      # Uvicorn accepts forwarded identity only from this exact nginx peer.
+      FORWARDED_ALLOW_IPS: ${PRODUCTION_NGINX_PROXY_IP:?Set PRODUCTION_NGINX_PROXY_IP}
     networks:
       app_network:
         aliases:
@@ -113,7 +116,10 @@ services:
       - backend
       - minio
     networks:
-      - app_network
+      app_network:
+        # This operator-managed address is stable across container recreation
+        # and is the exact immediate proxy trusted by Uvicorn.
+        ipv4_address: ${PRODUCTION_NGINX_PROXY_IP:?Set PRODUCTION_NGINX_PROXY_IP}
 
 networks:
   app_network:

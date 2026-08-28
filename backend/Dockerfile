@@ -20,5 +20,5 @@ ENV PATH="/app/.venv/bin:$PATH"
 ENTRYPOINT []
 
 # CMD ["fastapi", "dev", "--host", "0.0.0.0", "main.py", "--root-path", "/api"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--root-path", "/api", "--workers", "4"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--root-path", "/api", "--proxy-headers", "--workers", "4"]
 

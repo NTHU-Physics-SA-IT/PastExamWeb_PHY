@@ -100,7 +100,10 @@ def _compose_contract(
         "services": {
             "backend": {
                 "image": BACKEND_IMAGE,
-                "environment": {"MINIO_BUCKET_NAME": "exam-archive"},
+                "environment": {
+                    "MINIO_BUCKET_NAME": "exam-archive",
+                    "FORWARDED_ALLOW_IPS": "172.30.0.10",
+                },
             },
             "frontend": {"image": FRONTEND_IMAGE},
             "migrate": {"image": BACKEND_IMAGE},
@@ -114,6 +117,9 @@ def _compose_contract(
             "minio": {"container_name": "pastexam-minio"},
             "nginx": {
                 "container_name": "pastexam-nginx",
+                "networks": {
+                    "app_network": {"ipv4_address": "172.30.0.10"},
+                },
                 "ports": [
                     {
                         "host_ip": "0.0.0.0",
@@ -443,6 +449,42 @@ def test_rendered_image_mismatch_fails_before_backup(
 
     assert process.returncode != 0
     assert "images disagree" in process.stderr
+    assert not backup_log.exists()
+    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("trusted_peer", "nginx_address"),
+    [
+        ("*", "172.30.0.10"),
+        ("172.30.0.0/24", "172.30.0.10"),
+        ("172.30.0.11", "172.30.0.10"),
+    ],
+)
+def test_unsafe_or_mismatched_uvicorn_proxy_trust_fails_before_backup(
+    tmp_path: Path, trusted_peer: str, nginx_address: str
+) -> None:
+    release = tmp_path / RELEASE_SHA
+    contract = _compose_contract(
+        release,
+        tmp_path / "origin.pem",
+        tmp_path / "origin-key.pem",
+    )
+    contract["services"]["backend"]["environment"][
+        "FORWARDED_ALLOW_IPS"
+    ] = trusted_peer
+    contract["services"]["nginx"]["networks"]["app_network"][
+        "ipv4_address"
+    ] = nginx_address
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path,
+        compose_contract=contract,
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "proxy trust" in process.stderr.lower()
     assert not backup_log.exists()
     assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
 

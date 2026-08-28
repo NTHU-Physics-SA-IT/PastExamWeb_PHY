@@ -6,11 +6,10 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
-from pathlib import Path
 import re
 import sys
+from pathlib import Path
 from typing import Any
-
 
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9_.:-]+$")
@@ -24,6 +23,10 @@ NGINX_CONFIG_TARGET = "/etc/nginx/nginx.conf"
 NGINX_LISTENER_TARGET = "/etc/nginx/pastexam-listeners.conf"
 TLS_CERTIFICATE_TARGET = "/etc/nginx/certs/origin.pem"
 TLS_KEY_TARGET = "/etc/nginx/certs/origin-key.pem"
+RFC1918_NETWORKS = tuple(
+    ipaddress.ip_network(network)
+    for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
 
 
 class ContractError(ValueError):
@@ -54,10 +57,55 @@ def _required_string(mapping: dict[str, Any], key: str, label: str) -> str:
     return value
 
 
+def _verify_proxy_trust(compose: dict[str, Any]) -> None:
+    backend = _service(compose, "backend")
+    nginx = _service(compose, "nginx")
+    backend_environment = backend.get("environment")
+    nginx_networks = nginx.get("networks")
+    if not isinstance(backend_environment, dict) or not isinstance(
+        nginx_networks, dict
+    ):
+        raise ContractError("Rendered client-IP proxy trust contract is incomplete.")
+
+    trusted_peer = _required_string(
+        backend_environment,
+        "FORWARDED_ALLOW_IPS",
+        "Uvicorn trusted proxy address",
+    )
+    app_network = nginx_networks.get("app_network")
+    if not isinstance(app_network, dict):
+        raise ContractError("Rendered nginx has no configured application network.")
+    nginx_address = _required_string(
+        app_network,
+        "ipv4_address",
+        "stable nginx application-network address",
+    )
+
+    try:
+        trusted_address = ipaddress.ip_address(trusted_peer)
+        assigned_address = ipaddress.ip_address(nginx_address)
+    except ValueError as error:
+        raise ContractError(
+            "Rendered client-IP proxy trust must use one exact IP address."
+        ) from error
+    if trusted_address.version != 4 or not any(
+        trusted_address in network for network in RFC1918_NETWORKS
+    ):
+        raise ContractError(
+            "Rendered Uvicorn proxy trust must use one private IPv4 address."
+        )
+    if trusted_address != assigned_address:
+        raise ContractError(
+            "Rendered Uvicorn proxy trust does not match nginx's assigned address."
+        )
+
+
 def _compose_values(compose_path: Path) -> None:
     compose = _load_json(compose_path)
     if not isinstance(compose, dict):
         raise ContractError("Rendered Compose root must be an object.")
+
+    _verify_proxy_trust(compose)
 
     database = _service(compose, "db")
     minio = _service(compose, "minio")

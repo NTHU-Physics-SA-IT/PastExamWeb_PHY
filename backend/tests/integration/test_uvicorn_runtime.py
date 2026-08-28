@@ -11,6 +11,7 @@ import pytest
 import pytest_asyncio
 import uvicorn
 from fastapi import FastAPI, WebSocket
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
@@ -131,3 +132,47 @@ def test_uvicorn_startup_failure_exits_with_dedicated_code(tmp_path: Path):
 
     assert result.returncode == 3
     assert "Application startup failed" in result.stderr
+
+
+@pytest.mark.asyncio
+async def test_proxy_headers_are_honored_only_from_the_configured_nginx_peer():
+    observed_clients: list[tuple[str, int] | None] = []
+
+    async def downstream(scope, receive, send):
+        observed_clients.append(scope.get("client"))
+
+    middleware = ProxyHeadersMiddleware(
+        downstream,
+        trusted_hosts="172.30.0.10",
+    )
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(_message):
+        return None
+
+    base_scope = {
+        "type": "http",
+        "headers": [(b"x-forwarded-for", b"203.0.113.40")],
+    }
+    await middleware(
+        {**base_scope, "client": ("172.30.0.10", 40000)}, receive, send
+    )
+    await middleware(
+        {**base_scope, "client": ("172.30.0.11", 40001)}, receive, send
+    )
+
+    assert observed_clients == [
+        ("203.0.113.40", 0),
+        ("172.30.0.11", 40001),
+    ]
+
+
+def test_uvicorn_reads_the_exact_proxy_peer_from_its_environment(monkeypatch):
+    monkeypatch.setenv("FORWARDED_ALLOW_IPS", "172.30.0.10")
+
+    config = uvicorn.Config(lambda _scope, _receive, _send: None)
+
+    assert config.proxy_headers is True
+    assert config.forwarded_allow_ips == "172.30.0.10"

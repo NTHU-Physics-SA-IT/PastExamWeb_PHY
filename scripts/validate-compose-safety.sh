@@ -41,6 +41,7 @@ python3 - \
   "$repository_root/proxy/nginx.conf" \
   "$repository_root/proxy/nginx.production-listeners.conf" \
   "$repository_root/proxy/nginx.development-listeners.conf" <<'PY'
+import ipaddress
 import json
 import re
 import sys
@@ -109,6 +110,20 @@ assert "listen 8443 ssl;" in production_listener_config
 assert "ssl_certificate /etc/nginx/certs/origin.pem;" in production_listener_config
 assert "ssl_certificate_key /etc/nginx/certs/origin-key.pem;" in production_listener_config
 
+trusted_proxy = production["services"]["backend"]["environment"][
+    "FORWARDED_ALLOW_IPS"
+]
+nginx_proxy_address = production["services"]["nginx"]["networks"][
+    "app_network"
+]["ipv4_address"]
+trusted_proxy_address = ipaddress.ip_address(trusted_proxy)
+assert trusted_proxy_address.version == 4
+assert any(
+    trusted_proxy_address in ipaddress.ip_network(network)
+    for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
+assert trusted_proxy_address == ipaddress.ip_address(nginx_proxy_address)
+
 assert (
     production["services"]["backend"]["depends_on"]["migrate"]["condition"]
     == "service_completed_successfully"
@@ -134,5 +149,28 @@ assert (
     != development["services"]["backend"]["environment"]["DB_USER"]
 )
 PY
+
+for listener_config in \
+  "$repository_root/proxy/nginx.development-listeners.conf" \
+  "$repository_root/proxy/nginx.production-listeners.conf"; do
+  docker run --rm --network none \
+    --add-host frontend:127.0.0.1 \
+    --add-host backend:127.0.0.1 \
+    --add-host minio:127.0.0.1 \
+    --mount \
+      "type=bind,source=$repository_root/proxy/nginx.conf,target=/etc/nginx/nginx.conf,readonly" \
+    --mount \
+      "type=bind,source=$listener_config,target=/etc/nginx/pastexam-listeners.conf,readonly" \
+    nginx:1.29.2 sh -eu -c '
+      if grep -q "ssl_certificate " /etc/nginx/pastexam-listeners.conf; then
+        mkdir -p /etc/nginx/certs
+        openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+          -subj /CN=localhost \
+          -keyout /etc/nginx/certs/origin-key.pem \
+          -out /etc/nginx/certs/origin.pem >/dev/null 2>&1
+      fi
+      nginx -t
+    '
+done
 
 echo "Compose migration safety validation passed."
