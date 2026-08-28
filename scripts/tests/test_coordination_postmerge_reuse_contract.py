@@ -1,4 +1,4 @@
-"""Executable contract for ADR-0006 postmerge Full-evidence reuse."""
+"""Executable contract for protected coordination exact-state reuse."""
 
 from __future__ import annotations
 
@@ -39,11 +39,13 @@ OTHER = "f" * 40
 PR_NUMBER = 95
 SOURCE_RUN_ID = 9001
 PR_RUN_ID = 9002
-ATTESTED_SHA = "e" * 40
+P = "e" * 40
+ATTESTED_SHA = P
 
 TCB_WORKFLOW = ".github/workflows/main.yml"
 TCB_CLASSIFIER = "scripts/ci/classify_ci_mode.py"
 APPLICATION_PATH = "backend/app/main.py"
+PROJECT_GOVERNANCE = ".github/project-governance.json"
 
 
 def _blob(label: str, path: str) -> str:
@@ -266,6 +268,13 @@ class DualFullAPI:
             Q: [deepcopy(self.pull_request_payload)],
             S: [deepcopy(self.pull_request_payload)],
         }
+        self.commit_objects = {
+            P: {
+                "sha": P,
+                "parents": [{"sha": C}, {"sha": S}],
+                "tree": {"sha": _blob("source-tree", "tree")},
+            }
+        }
 
     def workflow_runs(
         self,
@@ -314,6 +323,10 @@ class DualFullAPI:
         self.calls.append(("pull_requests_for_commit", commit))
         return deepcopy(self.pull_requests_by_commit.get(commit, []))
 
+    def commit_object(self, commit: str) -> dict[str, Any]:
+        self.calls.append(("commit_object", commit))
+        return deepcopy(self.commit_objects[commit])
+
 
 class NoProvenanceAPI:
     def __getattr__(self, name: str) -> Any:
@@ -352,7 +365,115 @@ def _classify(
     )
 
 
-def test_exact_case_b_dual_full_postmerge_contract_uses_equivalent() -> None:
+def _classify_historical(
+    *,
+    git: CaseBGit | ci.GitRepository | None = None,
+    api: Any | None = None,
+    event_changes: dict[str, Any] | None = None,
+) -> Any:
+    try:
+        return ci.validate_equivalent_merge(
+            event=_push_event(**(event_changes or {})),
+            git=git or CaseBGit(),
+            api=api or DualFullAPI(),
+            coordination_branch=COORDINATION_BRANCH,
+            default_branch="main",
+            now=NOW,
+        )
+    except (
+        AttributeError,
+        ci.ClassificationFailure,
+        KeyError,
+        OSError,
+        TypeError,
+        ValueError,
+    ) as error:
+        return ci.Classification(
+            "full", f"historical ADR-0006 validation failed closed: {error}"
+        )
+
+
+def test_current_adr0013_case_b_uses_exact_state_without_governance_equality() -> None:
+    git = CaseBGit()
+    git.source_paths += (PROJECT_GOVERNANCE,)
+    git.path_identity_overrides[(M, PROJECT_GOVERNANCE)] = (
+        "100644",
+        "blob",
+        _blob("main-null", PROJECT_GOVERNANCE),
+    )
+    for commit in (S, Q):
+        git.path_identity_overrides[(commit, PROJECT_GOVERNANCE)] = (
+            "100644",
+            "blob",
+            _blob("active-self", PROJECT_GOVERNANCE),
+        )
+    api = DualFullAPI()
+
+    result = ci.classify_ci_mode(
+        event=_push_event(),
+        git=git,
+        api=api,
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
+        now=NOW,
+    )
+
+    assert result.ci_mode == "equivalent-merge", result.reason
+    assert result.source_sha == S
+    assert ("commit_object", P) in api.calls
+
+
+def test_ordinary_protected_merge_uses_the_same_exact_state_contract() -> None:
+    git = CaseBGit()
+    git.parents_by_commit[S] = (C,)
+
+    assert _classify(git=git).ci_mode == "equivalent-merge"
+
+
+def test_docs_shaped_211_specimen_keeps_full_inputs_and_reuses_only_final_q() -> None:
+    git = CaseBGit()
+    git.parents_by_commit[S] = (C,)
+    git.source_paths = ("docs/development/example.md",)
+
+    result = _classify(git=git)
+
+    assert result.ci_mode == "equivalent-merge"
+    assert result.reason == "protected merge Q exactly matches Source Full H and PR Full P"
+
+
+def test_wrong_branch_local_coordination_identity_cannot_enter_exact_state_route() -> None:
+    governance = project_governance.ProjectGovernance(
+        schema_version=1,
+        default_development_base="main",
+        coordination_branch="integration/other",
+    )
+
+    result = ci.classify_ci_mode(
+        event=_push_event(),
+        git=CaseBGit(),
+        api=DualFullAPI(),
+        governance=governance,
+        now=NOW,
+    )
+
+    assert result.ci_mode == "full"
+
+
+def test_exact_state_route_without_evidence_api_fails_closed() -> None:
+    result = ci.classify_ci_mode(
+        event=_push_event(),
+        git=CaseBGit(),
+        api=None,
+        governance=ACTIVE_COORDINATION_GOVERNANCE,
+        now=NOW,
+    )
+
+    assert result.ci_mode == "full"
+    assert result.reason == (
+        "protected coordination exact-state evidence API is unavailable"
+    )
+
+
+def test_historical_exact_case_b_dual_full_contract_uses_equivalent() -> None:
     api = DualFullAPI()
     result = _classify(api=api)
 
@@ -367,8 +488,10 @@ def test_exact_case_b_dual_full_postmerge_contract_uses_equivalent() -> None:
         ("run_attempt_jobs", SOURCE_RUN_ID, 1),
         ("run_attempt_jobs", PR_RUN_ID, 1),
         ("job_log", _job_id(PR_RUN_ID, "Full CI Attestation")),
+        ("commit_object", P),
         ("ref_sha", COORDINATION_BRANCH),
         ("ref_sha", "main"),
+        ("pull_request", PR_NUMBER),
     ]
 
 
@@ -484,13 +607,7 @@ def test_historical_pr95_git_topology_and_governance_are_eligible() -> None:
         tree=git.tree_sha(S),
         workflow_revision=git.blob_sha(S, ci.APPROVED_WORKFLOW_PATH),
     )
-    result = ci.classify_ci_mode(
-        event=_push_event(),
-        git=git,
-        api=api,
-        governance=ACTIVE_COORDINATION_GOVERNANCE,
-        now=NOW,
-    )
+    result = _classify_historical(git=git, api=api)
 
     assert result.ci_mode == "equivalent-merge", result.reason
     assert result.source_sha == S
@@ -575,22 +692,70 @@ def test_postmerge_refs_must_remain_stable_through_validation(ref_name: str) -> 
     assert _classify(api=api).ci_mode == "full"
 
 
-@pytest.mark.parametrize(
-    "case",
-    ("source-not-two-parent", "wrong-main-parent", "current-main-advanced"),
-)
-def test_case_b_source_or_main_identity_mismatch_fails_closed(case: str) -> None:
+def test_current_main_must_be_contained_in_source_and_remain_stable() -> None:
     git = CaseBGit()
     api = DualFullAPI()
+    api.refs["main"] = OTHER
 
-    if case == "source-not-two-parent":
-        git.parents_by_commit[S] = (C,)
-    elif case == "wrong-main-parent":
-        git.parents_by_commit[S] = (C, OTHER)
-    elif case == "current-main-advanced":
-        api.refs["main"] = OTHER
 
     assert _classify(git=git, api=api).ci_mode == "full"
+
+
+def test_post_case_b_reconciliation_tail_remains_full() -> None:
+    anchor = "a" * 40
+    git = CaseBGit()
+    git.parents_by_commit[S] = (anchor,)
+    git.parents_by_commit[anchor] = (C, M)
+
+    assert _classify(git=git).ci_mode == "full"
+
+
+@pytest.mark.parametrize(
+    "case",
+    ("missing", "wrong-sha", "missing-parent", "wrong-parent", "wrong-tree"),
+)
+def test_pr_full_synthetic_merge_identity_fails_closed(case: str) -> None:
+    api = DualFullAPI()
+    commit = api.commit_objects[P]
+
+    if case == "missing":
+        api.commit_objects.clear()
+    elif case == "wrong-sha":
+        commit["sha"] = OTHER
+    elif case == "missing-parent":
+        commit["parents"] = [{"sha": C}]
+    elif case == "wrong-parent":
+        commit["parents"] = [{"sha": C}, {"sha": OTHER}]
+    elif case == "wrong-tree":
+        commit["tree"] = {"sha": OTHER}
+
+    assert _classify(api=api).ci_mode == "full"
+
+
+@pytest.mark.parametrize(
+    "case",
+    ("state", "merged", "merge-sha", "base", "head", "repository"),
+)
+def test_live_pull_request_revalidation_fails_closed(case: str) -> None:
+    api = DualFullAPI()
+
+    if case == "state":
+        api.pull_request_payload["state"] = "open"
+    elif case == "merged":
+        api.pull_request_payload["merged"] = False
+    elif case == "merge-sha":
+        api.pull_request_payload["merge_commit_sha"] = OTHER
+    elif case == "base":
+        api.pull_request_payload["base"]["sha"] = OTHER
+    elif case == "head":
+        api.pull_request_payload["head"]["sha"] = OTHER
+    elif case == "repository":
+        api.pull_request_payload["head"]["repo"] = {
+            "id": 999,
+            "full_name": "other/repository",
+        }
+
+    assert _classify(api=api).ci_mode == "full"
 
 
 @pytest.mark.parametrize(
@@ -836,7 +1001,7 @@ def test_untrusted_governance_or_tcb_content_fails_closed(case: str) -> None:
             _blob("trusted-main", TCB_WORKFLOW),
         )
 
-    assert _classify(git=git).ci_mode == "full"
+    assert _classify_historical(git=git).ci_mode == "full"
 
 
 def test_ordinary_governance_coordination_pr_remains_full() -> None:

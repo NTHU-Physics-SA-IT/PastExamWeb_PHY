@@ -2,7 +2,7 @@
 
 - ID: ADR-0006
 - Title: Coordination postmerge Full-evidence reuse
-- Status: Accepted
+- Status: Superseded
 - Date: 2026-08-14
 - Scope:
   - Paths: `.github/workflows/`, `.github/project-governance.json`,
@@ -18,11 +18,16 @@
   - [ADR-0003](0003-coordination-branch-freshness.md)
   - [ADR-0005](0005-main-pr-docs-only-exception.md)
   - [ADR-0013](0013-simplified-protected-coordination.md)
+  - [ADR-0014](0014-protected-coordination-exact-state-postmerge-reuse.md)
 - Related PR / issue: None known
 - Supersedes: Only ADR-0002's blanket requirement that every governance-
   sensitive coordination stage fall back to Full, and only for the exact
   postmerge Case-B evidence-reuse contract defined here
-- Superseded by: None
+- Superseded by: [ADR-0014](0014-protected-coordination-exact-state-postmerge-reuse.md)
+
+This record remains the historical authority for the pre-ADR-0013
+shared-governance model and its accepted PR #101/#95 evidence. ADR-0014 owns
+current protected-coordination exact-state postmerge policy.
 
 ## Context
 
