@@ -379,6 +379,13 @@ async def test_concurrent_reconciler_passes_do_not_double_delete_exact_version(
         factory_calls += 1
         return storage
 
+    async def processor(db, **kwargs):
+        return await process_one_permanent_deletion(
+            db,
+            lease_clock=MutableLeaseClock(now),
+            **kwargs,
+        )
+
     try:
         async with session_maker() as session:
             operation = await accept_permanent_deletion(
@@ -398,12 +405,14 @@ async def test_concurrent_reconciler_passes_do_not_double_delete_exact_version(
                 storage_factory=storage_factory,
                 now=now,
                 event_clock=lambda: now,
+                processor=processor,
             ),
             reconcile_due_once(
                 session_maker=session_maker,
                 storage_factory=storage_factory,
                 now=now,
                 event_clock=lambda: now,
+                processor=processor,
             ),
         )
 
