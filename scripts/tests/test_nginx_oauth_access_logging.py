@@ -10,6 +10,7 @@ PRODUCTION_LISTENERS = REPOSITORY_ROOT / "proxy" / "nginx.production-listeners.c
 PRODUCTION_COMPOSE = REPOSITORY_ROOT / "docker" / "docker-compose.prod.yml"
 PRODUCTION_ENV_EXAMPLE = REPOSITORY_ROOT / "docker" / ".env.production.example"
 BACKEND_DOCKERFILE = REPOSITORY_ROOT / "backend" / "Dockerfile"
+COMPOSE_SAFETY_VALIDATOR = REPOSITORY_ROOT / "scripts" / "validate-compose-safety.sh"
 
 OFFICIAL_CLOUDFLARE_NETWORKS = {
     "173.245.48.0/20",
@@ -193,3 +194,10 @@ def test_production_uvicorn_trust_matches_the_static_nginx_network_address() -> 
     )
     assert '"--proxy-headers"' in dockerfile
     assert '"--forwarded-allow-ips", "*"' not in dockerfile
+
+
+def test_standalone_nginx_parser_resolves_the_trusted_backend_alias() -> None:
+    validator = COMPOSE_SAFETY_VALIDATOR.read_text(encoding="utf-8")
+
+    assert "--network none" in validator
+    assert "--add-host backend-trusted:127.0.0.1" in validator

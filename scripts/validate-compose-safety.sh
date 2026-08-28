@@ -192,6 +192,7 @@ for listener_config in \
   docker run --rm --network none \
     --add-host frontend:127.0.0.1 \
     --add-host backend:127.0.0.1 \
+    --add-host backend-trusted:127.0.0.1 \
     --add-host minio:127.0.0.1 \
     --mount \
       "type=bind,source=$repository_root/proxy/nginx.conf,target=/etc/nginx/nginx.conf,readonly" \
