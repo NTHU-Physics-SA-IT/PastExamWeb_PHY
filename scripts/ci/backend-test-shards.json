@@ -15,6 +15,7 @@
       "tests/api/test_courses.py",
       "tests/api/test_nthu_dev_auth.py",
       "tests/api/test_nthu_access_policy_settings.py",
+      "tests/api/test_permanent_deletion_reconciler.py",
       "tests/api/test_permanent_deletion_saga.py",
       "tests/api/test_public_catalog.py",
       "tests/api/test_statistics.py",

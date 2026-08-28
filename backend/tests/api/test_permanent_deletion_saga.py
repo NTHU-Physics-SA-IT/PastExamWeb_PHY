@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from collections.abc import Callable
@@ -49,6 +50,7 @@ from app.services.permanent_deletion import (
     claim_permanent_deletion,
     process_one_permanent_deletion,
 )
+from app.services.permanent_deletion_reconciler import reconcile_due_once
 from app.services.permanent_deletion_storage import (
     ExactVersionMinioAdapter,
     StorageSafetyError,
@@ -287,6 +289,129 @@ async def _cleanup_pair_and_operation(
             delete(CourseCategoryConfig).where(CourseCategoryConfig.id == category_id)
         )
         await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_reconciler_recovers_unknown_exact_delete_without_second_delete(
+    session_maker,
+    make_user,
+) -> None:
+    requester = await make_user()
+    category, course, archive, submission, event, notification = (
+        await _create_deleted_pair(session_maker, requester_id=requester.id)
+    )
+    client = FakeVersionedMinio(archive.object_name, "stage5fe-unknown-v1")
+    client.unknown_once = True
+    storage = ExactVersionMinioAdapter(client, bucket_name="stage5fe-test")
+    operation_id: int | None = None
+    now = datetime(2026, 8, 28, 4, 30, tzinfo=UTC)
+    try:
+        async with session_maker() as session:
+            operation = await accept_permanent_deletion(
+                session,
+                root_entity_type=TrashEntityType.ARCHIVE,
+                root_entity_id=int(archive.id),
+                idempotency_key=f"stage5fe:unknown:{archive.id}",
+                requested_by_user_id=requester.id,
+                storage=storage,
+                now=now,
+            )
+            operation_id = int(operation.id)
+
+        first = await reconcile_due_once(
+            session_maker=session_maker,
+            storage_factory=lambda: storage,
+            now=now,
+        )
+        assert first.pending == 1
+        async with session_maker() as session:
+            pending = await session.get(PermanentDeletionOperation, operation_id)
+            assert pending.status == PermanentDeletionStatus.VERIFICATION_REQUIRED
+
+        second = await reconcile_due_once(
+            session_maker=session_maker,
+            storage_factory=lambda: storage,
+            now=now + timedelta(seconds=1),
+        )
+        assert second.completed == 1
+        assert client.removals == [
+            ("stage5fe-test", archive.object_name, "stage5fe-unknown-v1")
+        ]
+        async with session_maker() as session:
+            retained_event = await session.get(ArchiveSubmissionEvent, event.id)
+            assert retained_event is not None
+            assert retained_event.submission_id is None
+            assert retained_event.submitted_at == event.submitted_at
+            assert await session.get(PersonalNotification, notification.id) is not None
+    finally:
+        await _cleanup_pair_and_operation(
+            session_maker,
+            operation_id=operation_id,
+            category_id=category.id,
+            course_id=course.id,
+            archive_id=archive.id,
+            submission_id=submission.id,
+            event_id=event.id,
+            notification_id=notification.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_reconciler_passes_do_not_double_delete_exact_version(
+    session_maker,
+    make_user,
+) -> None:
+    requester = await make_user()
+    category, course, archive, submission, event, notification = (
+        await _create_deleted_pair(session_maker, requester_id=requester.id)
+    )
+    client = FakeVersionedMinio(archive.object_name, "stage5fe-concurrent-v1")
+    storage = ExactVersionMinioAdapter(client, bucket_name="stage5fe-test")
+    operation_id: int | None = None
+    now = datetime(2026, 8, 28, 4, 45, tzinfo=UTC)
+    try:
+        async with session_maker() as session:
+            operation = await accept_permanent_deletion(
+                session,
+                root_entity_type=TrashEntityType.ARCHIVE,
+                root_entity_id=int(archive.id),
+                idempotency_key=f"stage5fe:concurrent:{archive.id}",
+                requested_by_user_id=requester.id,
+                storage=storage,
+                now=now,
+            )
+            operation_id = int(operation.id)
+
+        await asyncio.gather(
+            reconcile_due_once(
+                session_maker=session_maker,
+                storage_factory=lambda: storage,
+                now=now,
+            ),
+            reconcile_due_once(
+                session_maker=session_maker,
+                storage_factory=lambda: storage,
+                now=now,
+            ),
+        )
+
+        assert client.removals == [
+            ("stage5fe-test", archive.object_name, "stage5fe-concurrent-v1")
+        ]
+        async with session_maker() as session:
+            completed = await session.get(PermanentDeletionOperation, operation_id)
+            assert completed.status == PermanentDeletionStatus.COMPLETED
+    finally:
+        await _cleanup_pair_and_operation(
+            session_maker,
+            operation_id=operation_id,
+            category_id=category.id,
+            course_id=course.id,
+            archive_id=archive.id,
+            submission_id=submission.id,
+            event_id=event.id,
+            notification_id=notification.id,
+        )
 
 
 @pytest.mark.asyncio
