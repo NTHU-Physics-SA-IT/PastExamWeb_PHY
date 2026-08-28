@@ -45,6 +45,9 @@ Read only the smallest set needed for the task:
   `docs/development/backend-runtime-recovery.md`.
 - UI, responsive behavior, theme, accessibility, or display:
   `docs/ui/guidelines.md`.
+- User-visible frontend text, translation catalogs, locale behavior,
+  interpolation, `$t()`, `t()`, `getMessageTemplate()`, localized placeholders,
+  tooltips, labels, or accessibility copy: `docs/development/i18n.md`.
 - Entity relationships, state, authorization, visibility, notifications, or
   side effects: start with `docs/domain/README.md`, then read only the affected
   Domain child documents.

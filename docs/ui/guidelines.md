@@ -8,6 +8,7 @@ Applies to: Vue views, components, shared styles, and user-visible labels
 
 Related documents:
 - [Code organization](../development/code-organization.md)
+- [Frontend internationalization](../development/i18n.md)
 - [Validation policy](../development/validation.md)
 - [Domain state transitions](../domain/state-transitions.md)
 
@@ -35,6 +36,8 @@ already been normalized.
 
 ## Required direction
 
+- Localized user-visible copy and translation completeness must follow the
+  [frontend internationalization contract](../development/i18n.md).
 - Use `frontend/src/utils/time.js` and `productTimezone.js` as the starting
   point for shared date/time behavior. Exact times use the product timezone and
   a 24-hour clock.

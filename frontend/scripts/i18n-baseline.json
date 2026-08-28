@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "violations": [
+    { "rule": "missing-english", "key": "來源已不存在" },
+    { "rule": "missing-english", "key": "儲存失敗" },
+    { "rule": "missing-english", "key": "載入更多" },
+    { "rule": "missing-english", "key": "許願送出失敗" },
+    { "rule": "missing-english", "key": "輸入課程中文名稱" },
+    { "rule": "missing-english", "key": "轉移失敗" },
+    {
+      "rule": "placeholder-parity",
+      "key": "公開課程 SEO 有資料",
+      "sourcePlaceholders": [],
+      "englishPlaceholders": ["count", "course"]
+    },
+    {
+      "rule": "placeholder-parity",
+      "key": "公開課程 SEO 無資料",
+      "sourcePlaceholders": [],
+      "englishPlaceholders": ["course"]
+    },
+    {
+      "rule": "placeholder-parity",
+      "key": "公開課程 SEO 標題",
+      "sourcePlaceholders": [],
+      "englishPlaceholders": ["course"]
+    },
+    {
+      "rule": "placeholder-parity",
+      "key": "投稿等級最高",
+      "sourcePlaceholders": [],
+      "englishPlaceholders": ["exp", "level", "name"]
+    },
+    {
+      "rule": "placeholder-parity",
+      "key": "投稿等級進度",
+      "sourcePlaceholders": [],
+      "englishPlaceholders": ["current", "level", "name", "percent", "range", "remaining"]
+    },
+    {
+      "rule": "placeholder-parity",
+      "key": "投稿統計摘要",
+      "sourcePlaceholders": [],
+      "englishPlaceholders": ["count", "details"]
+    },
+    {
+      "rule": "placeholder-parity",
+      "key": "投稿統計項目",
+      "sourcePlaceholders": [],
+      "englishPlaceholders": ["count", "label", "percentage"]
+    },
+    {
+      "rule": "placeholder-parity",
+      "key": "課程公開考古題中繼資料",
+      "sourcePlaceholders": [],
+      "englishPlaceholders": ["course"]
+    }
+  ]
+}
