@@ -13,7 +13,7 @@ from app.core.config import settings
 from app.db.audit.models import AuditMode, AuditRequest
 from app.db.audit.registry import (
     ELIGIBILITY_AUDIT_ID,
-    RETAINED_EVENT_REVISION,
+    PERMANENT_DELETION_FOUNDATION_REVISION,
     get_audit_adapter,
 )
 from app.db.audit.runner import _continuity_cte
@@ -166,7 +166,7 @@ def _migration_module() -> dict[str, object]:
     )
 
 
-def test_retained_history_head_passes_sealed_audit_schema_continuity(
+def test_permanent_deletion_head_passes_sealed_audit_schema_continuity(
     audit_engine: Engine,
 ) -> None:
     command.upgrade(alembic_config(), "head")
@@ -174,7 +174,7 @@ def test_retained_history_head_passes_sealed_audit_schema_continuity(
         audit_id=ELIGIBILITY_AUDIT_ID,
         audit_version=4,
         mode=AuditMode.ISOLATED_TEST,
-        expected_ledger=RETAINED_EVENT_REVISION,
+        expected_ledger=PERMANENT_DELETION_FOUNDATION_REVISION,
         repository_revision="a" * 40,
     )
 
