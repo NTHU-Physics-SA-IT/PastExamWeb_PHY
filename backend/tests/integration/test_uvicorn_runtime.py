@@ -143,7 +143,7 @@ async def test_proxy_headers_are_honored_only_from_the_configured_nginx_peer():
 
     middleware = ProxyHeadersMiddleware(
         downstream,
-        trusted_hosts="172.30.0.10",
+        trusted_hosts="172.30.0.2",
     )
 
     async def receive():
@@ -157,7 +157,7 @@ async def test_proxy_headers_are_honored_only_from_the_configured_nginx_peer():
         "headers": [(b"x-forwarded-for", b"203.0.113.40")],
     }
     await middleware(
-        {**base_scope, "client": ("172.30.0.10", 40000)}, receive, send
+        {**base_scope, "client": ("172.30.0.2", 40000)}, receive, send
     )
     await middleware(
         {**base_scope, "client": ("172.30.0.11", 40001)}, receive, send
@@ -170,9 +170,9 @@ async def test_proxy_headers_are_honored_only_from_the_configured_nginx_peer():
 
 
 def test_uvicorn_reads_the_exact_proxy_peer_from_its_environment(monkeypatch):
-    monkeypatch.setenv("FORWARDED_ALLOW_IPS", "172.30.0.10")
+    monkeypatch.setenv("FORWARDED_ALLOW_IPS", "172.30.0.2")
 
     config = uvicorn.Config(lambda _scope, _receive, _send: None)
 
     assert config.proxy_headers is True
-    assert config.forwarded_allow_ips == "172.30.0.10"
+    assert config.forwarded_allow_ips == "172.30.0.2"

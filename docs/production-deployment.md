@@ -49,11 +49,22 @@ and private-key paths with `PRODUCTION_TLS_CERT_FILE` and
 root-owned with mode `0600`. Certificate and key contents remain outside Git
 and outside every immutable release.
 
-The external Compose environment also sets `PRODUCTION_NGINX_PROXY_IP` to an
-unused stable IPv4 address inside the existing `pastexam-network` subnet.
-Compose assigns that exact address to nginx and passes the same single address
-to Uvicorn as `FORWARDED_ALLOW_IPS`; do not replace it with `*` or the whole
-application network.
+The external Compose environment also sets `PRODUCTION_NGINX_PROXY_IP` to the
+nginx address reserved outside the dynamic allocation range of the dedicated
+`pastexam-trusted-proxy-network`. That network is an explicit `172.30.0.0/28`
+bridge: `172.30.0.1` is its gateway, nginx uses `172.30.0.2`, and dynamic
+backend allocation is restricted to `172.30.0.8/29`. Compose passes the same
+single nginx address to Uvicorn as `FORWARDED_ALLOW_IPS`; do not replace it
+with `*` or a whole network.
+
+Only backend and nginx join the trusted-proxy network. The network-scoped
+`backend-trusted` alias forces nginx API, sitemap, and robots traffic across
+that bridge, so the backend sees nginx's reserved address as its immediate
+peer. Both services remain on `pastexam-network` for their existing application
+dependencies; that shared network retains Docker-selected IPAM and must not be
+recreated merely to activate this trust boundary. Development supplies the
+same backend alias on its existing default network without production IPAM or
+Cloudflare trust.
 
 `docker/.env.production.example` documents the Compose variable contract. A
 release is rendered explicitly with the production definition, external

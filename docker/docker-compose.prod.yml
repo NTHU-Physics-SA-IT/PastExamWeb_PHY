@@ -34,6 +34,9 @@ services:
       app_network:
         aliases:
           - backend
+      trusted_proxy_network:
+        aliases:
+          - backend-trusted
 
   migrate:
     image: ${BACKEND_IMAGE:-ghcr.io/nthu-physics-sa-it/pastexam:backend}
@@ -117,14 +120,23 @@ services:
       - minio
     networks:
       app_network:
-        # This operator-managed address is stable across container recreation
-        # and is the exact immediate proxy trusted by Uvicorn.
+      trusted_proxy_network:
+        # The dynamic pool excludes this exact immediate proxy trusted by Uvicorn.
         ipv4_address: ${PRODUCTION_NGINX_PROXY_IP:?Set PRODUCTION_NGINX_PROXY_IP}
 
 networks:
   app_network:
     name: pastexam-network
     driver: bridge
+  trusted_proxy_network:
+    name: pastexam-trusted-proxy-network
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.30.0.0/28
+          ip_range: 172.30.0.8/29
+          gateway: 172.30.0.1
 
 volumes:
   pg_data:

@@ -102,9 +102,9 @@ def test_public_seo_routes_and_spa_robots_policy_remain_at_the_proxy() -> None:
     config = _config()
 
     assert "location = /sitemap.xml" in config
-    assert "proxy_pass http://backend:8000/seo/sitemap.xml;" in config
+    assert "proxy_pass http://backend-trusted:8000/seo/sitemap.xml;" in config
     assert "location = /robots.txt" in config
-    assert "proxy_pass http://backend:8000/seo/robots.txt;" in config
+    assert "proxy_pass http://backend-trusted:8000/seo/robots.txt;" in config
     assert "map $uri $spa_robots_tag" in config
     assert "add_header X-Robots-Tag $spa_robots_tag always;" in config
 
@@ -177,6 +177,12 @@ def test_production_uvicorn_trust_matches_the_static_nginx_network_address() -> 
     required_reference = "${PRODUCTION_NGINX_PROXY_IP:?Set PRODUCTION_NGINX_PROXY_IP}"
     assert f"FORWARDED_ALLOW_IPS: {required_reference}" in compose
     assert f"ipv4_address: {required_reference}" in compose
+    assert "name: pastexam-trusted-proxy-network" in compose
+    assert "subnet: 172.30.0.0/28" in compose
+    assert "ip_range: 172.30.0.8/29" in compose
+    assert "gateway: 172.30.0.1" in compose
+    assert "backend-trusted" in compose
+    assert "proxy_pass http://backend-trusted:8000/;" in _config()
 
     match = re.search(r"^PRODUCTION_NGINX_PROXY_IP=(\S+)$", environment, re.MULTILINE)
     assert match is not None
