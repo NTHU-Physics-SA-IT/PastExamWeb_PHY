@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
@@ -665,27 +665,11 @@ async def claim_permanent_deletion(
 ) -> bool:
     if not lease_token.strip() or len(lease_token) > 64 or lease_for <= timedelta(0):
         raise PermanentDeletionError("invalid_lease")
-    eligible = (
-        PermanentDeletionStatus.ACCEPTED,
-        PermanentDeletionStatus.PROCESSING,
-        PermanentDeletionStatus.VERIFICATION_REQUIRED,
-        PermanentDeletionStatus.RETRYABLE_FAILED,
-    )
     statement = (
         update(PermanentDeletionOperation)
         .where(
             PermanentDeletionOperation.id == operation_id,
-            PermanentDeletionOperation.status.in_(eligible),
-            or_(
-                PermanentDeletionOperation.lease_token.is_(None),
-                PermanentDeletionOperation.lease_expires_at <= now,
-            ),
-            or_(
-                PermanentDeletionOperation.next_attempt_at.is_(None),
-                PermanentDeletionOperation.next_attempt_at <= now,
-                PermanentDeletionOperation.status
-                == PermanentDeletionStatus.VERIFICATION_REQUIRED,
-            ),
+            permanent_deletion_claimable_predicate(now),
         )
         .values(
             status=PermanentDeletionStatus.PROCESSING,
@@ -698,6 +682,30 @@ async def claim_permanent_deletion(
     result = await db.execute(statement)
     await db.commit()
     return bool(result.rowcount)
+
+
+def permanent_deletion_claimable_predicate(now: datetime):
+    """Return the exact advisory predicate used by the atomic claim update."""
+
+    eligible = (
+        PermanentDeletionStatus.ACCEPTED,
+        PermanentDeletionStatus.PROCESSING,
+        PermanentDeletionStatus.VERIFICATION_REQUIRED,
+        PermanentDeletionStatus.RETRYABLE_FAILED,
+    )
+    return and_(
+        PermanentDeletionOperation.status.in_(eligible),
+        or_(
+            PermanentDeletionOperation.lease_token.is_(None),
+            PermanentDeletionOperation.lease_expires_at <= now,
+        ),
+        or_(
+            PermanentDeletionOperation.next_attempt_at.is_(None),
+            PermanentDeletionOperation.next_attempt_at <= now,
+            PermanentDeletionOperation.status
+            == PermanentDeletionStatus.VERIFICATION_REQUIRED,
+        ),
+    )
 
 
 async def _operation_status(
