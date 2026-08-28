@@ -13,6 +13,7 @@
   - [Validation policy](../development/validation.md)
   - [Contributor workflow](../../CONTRIBUTING.md)
   - [Coordination runbook](../runbooks/coordination.md)
+  - [Historical research archive](../development/protected-coordination-postmerge-equivalent-research-archive.md)
   - [ADR-0002](0002-ci-evidence-and-main-full-authority.md)
   - [ADR-0006](0006-coordination-postmerge-full-evidence-reuse.md)
   - [ADR-0007](0007-retain-full-fallback-for-post-case-b-reconciliation-tails.md)
