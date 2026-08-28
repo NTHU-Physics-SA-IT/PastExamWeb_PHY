@@ -80,6 +80,23 @@ async def _default_reconcile(**kwargs) -> ReconciliationSummary:
     )
 
 
+def _log_summary(summary: ReconciliationSummary) -> None:
+    logger.info(
+        "Permanent-deletion reconciliation pass: candidates=%s "
+        "processed=%s completed=%s pending=%s manual_review=%s "
+        "skipped=%s errors=%s purged=%s purge_errors=%s",
+        summary.candidates,
+        summary.processed,
+        summary.completed,
+        summary.pending,
+        summary.manual_review,
+        summary.skipped,
+        summary.errors,
+        summary.purged,
+        summary.purge_errors,
+    )
+
+
 async def run_worker(
     *,
     stop_event: asyncio.Event,
@@ -97,20 +114,7 @@ async def run_worker(
                 purge_limit=purge_batch_limit,
             )
             if summary is not None:
-                logger.info(
-                    "Permanent-deletion reconciliation pass: candidates=%s "
-                    "processed=%s completed=%s pending=%s manual_review=%s "
-                    "skipped=%s errors=%s purged=%s purge_errors=%s",
-                    summary.candidates,
-                    summary.processed,
-                    summary.completed,
-                    summary.pending,
-                    summary.manual_review,
-                    summary.skipped,
-                    summary.errors,
-                    summary.purged,
-                    summary.purge_errors,
-                )
+                _log_summary(summary)
         except Exception as exc:  # noqa: BLE001 - outages must still use the wait
             logger.error(
                 "Permanent-deletion reconciliation pass failed (%s)",
@@ -138,9 +142,11 @@ def _install_signal_handlers(stop_event: asyncio.Event) -> None:
 
 async def _run(args: argparse.Namespace) -> None:
     if args.once:
-        await _default_reconcile(
-            operation_limit=args.operation_batch_limit,
-            purge_limit=args.purge_batch_limit,
+        _log_summary(
+            await _default_reconcile(
+                operation_limit=args.operation_batch_limit,
+                purge_limit=args.purge_batch_limit,
+            )
         )
         return
     stop_event = asyncio.Event()
