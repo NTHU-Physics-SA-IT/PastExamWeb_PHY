@@ -517,7 +517,7 @@ def test_simplified_coordination_is_full_only_without_candidate_authority(
     )
 
     assert result.ci_mode == "full"
-    assert result.reason == "simplified protected coordination is Full-only"
+    assert result.reason == "protected coordination pull requests remain Full-only"
 
 
 def test_valid_two_parent_equivalent_merge_is_eligible(tmp_path: Path) -> None:
@@ -531,7 +531,7 @@ def test_valid_two_parent_equivalent_merge_is_eligible(tmp_path: Path) -> None:
     assert result.source_tree == fixture["git"].tree_sha(fixture["source"])
 
 
-def test_non_case_b_coordination_push_remains_full(
+def test_protected_coordination_push_without_exact_state_evidence_remains_full(
     tmp_path: Path,
 ) -> None:
     fixture = _equivalent_repository(tmp_path)
@@ -546,6 +546,7 @@ def test_non_case_b_coordination_push_remains_full(
             source_sha=fixture["source"],
             target_sha=fixture["merge"],
             target_ref=COORDINATION_BRANCH,
+            error=ci.ClassificationFailure("dual Full evidence unavailable"),
         ),
         governance=ACTIVE_COORDINATION_GOVERNANCE,
         now=NOW,
@@ -553,7 +554,8 @@ def test_non_case_b_coordination_push_remains_full(
 
     assert result.ci_mode == "full"
     assert result.reason == (
-        "protected coordination after Start, including Case-B postmerge, is Full-only"
+        "protected coordination exact-state validation failed closed: "
+        "dual Full evidence unavailable"
     )
 
 
@@ -565,7 +567,7 @@ def test_explicit_pr_equivalent_allowlist_cannot_override_full_only(
     result = _classify_pr_equivalent(fixture)
 
     assert result.ci_mode == "full"
-    assert result.reason == "simplified protected coordination is Full-only"
+    assert result.reason == "protected coordination pull requests remain Full-only"
 
 
 def test_live_coordination_pr_is_full_only(
@@ -587,7 +589,7 @@ def test_live_coordination_pr_is_full_only(
     )
 
     assert result.ci_mode == "full"
-    assert result.reason == "simplified protected coordination is Full-only"
+    assert result.reason == "protected coordination pull requests remain Full-only"
 
 
 def test_live_push_governance_merge_falls_back_to_full(
@@ -602,6 +604,7 @@ def test_live_push_governance_merge_falls_back_to_full(
         source_sha=fixture["source"],
         target_sha=fixture["merge"],
         target_ref=COORDINATION_BRANCH,
+        error=ci.ClassificationFailure("dual Full evidence unavailable"),
     )
 
     result = ci.classify_ci_mode(
@@ -617,7 +620,8 @@ def test_live_push_governance_merge_falls_back_to_full(
 
     assert result.ci_mode == "full"
     assert result.reason == (
-        "protected coordination after Start, including Case-B postmerge, is Full-only"
+        "protected coordination exact-state validation failed closed: "
+        "dual Full evidence unavailable"
     )
 
 
@@ -640,7 +644,7 @@ def test_pr_governance_change_requires_full_before_allowlist(
     )
 
     assert result.ci_mode == "full"
-    assert result.reason == "simplified protected coordination is Full-only"
+    assert result.reason == "protected coordination pull requests remain Full-only"
 
 
 @pytest.mark.parametrize(

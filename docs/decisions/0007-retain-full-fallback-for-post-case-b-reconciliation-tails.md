@@ -15,7 +15,7 @@
   - [ADR-0002](0002-ci-evidence-and-main-full-authority.md)
   - [ADR-0003](0003-coordination-branch-freshness.md)
   - [ADR-0006](0006-coordination-postmerge-full-evidence-reuse.md)
-  - [ADR-0014](0014-protected-coordination-case-b-full-policy.md)
+  - [ADR-0014](0014-protected-coordination-exact-state-postmerge-reuse.md)
 - Related PR / issue: PR #114
 - Supersedes: None
 - Superseded by: None
@@ -59,9 +59,9 @@ disproportionate to this optimization.
 PastExamWeb_PHY retains the current Full fallback for post-Case-B
 reconciliation tails.
 
-ADR-0014 also retains Full for the exact Case-B postmerge itself under current
-protected coordination. This record's separate tail decision remains
-unchanged: reconciliation-tail Equivalent reuse will not be implemented. A
+ADR-0014 permits an exact supported final merge after dual Full evidence. This
+record's separate tail decision remains unchanged: reconciliation-tail
+Equivalent reuse will not be implemented. A
 PR #114-like history falling back to Full is
 deliberate safe behavior, not an unresolved classifier defect.
 
@@ -86,7 +86,7 @@ infrastructure.
 
 ## Invariants
 
-- ADR-0014's exact Case-B Full policy does not weaken this tail fallback.
+- ADR-0014's exact-state final-Q route does not weaken this tail fallback.
 - Any post-Case-B reconciliation tail falls back to Full.
 - Ambiguous, incomplete, malformed, stale, or untrusted evidence fails closed
   to Full.

@@ -178,6 +178,8 @@ class ActionsEvidence(Protocol):
 
     def pull_requests_for_commit(self, commit: str) -> list[dict[str, Any]]: ...
 
+    def commit_object(self, commit: str) -> dict[str, Any]: ...
+
 
 class GitRepository:
     def __init__(self, root: Path) -> None:
@@ -1473,6 +1475,46 @@ def _require_merged_pull_request(
     return head_ref, number, created_at, merged_at
 
 
+def _require_live_merged_pull_request(
+    *,
+    event: CIEvent,
+    api: ActionsEvidence,
+    pull_request_number: int,
+    coordination_branch: str,
+    base_sha: str,
+    source_ref: str,
+    source_sha: str,
+    merged_at: datetime,
+) -> None:
+    pull_request = api.pull_request(pull_request_number)
+    if (
+        pull_request.get("number") != pull_request_number
+        or pull_request.get("state") != "closed"
+        or pull_request.get("merged") is not True
+        or pull_request.get("merge_commit_sha") != event.current_sha
+        or _parse_named_timestamp(
+            pull_request.get("merged_at"),
+            "current pull request merge time",
+        )
+        != merged_at
+    ):
+        raise ClassificationFailure("current pull request merge identity drifted")
+
+    base = pull_request.get("base")
+    head = pull_request.get("head")
+    if not isinstance(base, dict) or not isinstance(head, dict):
+        raise ClassificationFailure("current pull request refs are malformed")
+    if base.get("ref") != coordination_branch or base.get("sha") != base_sha:
+        raise ClassificationFailure("current pull request base drifted")
+    if head.get("ref") != source_ref or head.get("sha") != source_sha:
+        raise ClassificationFailure("current pull request head drifted")
+    expected_repository = (event.repository, event.repository_id)
+    if _pr_repository_identity(base) != expected_repository:
+        raise ClassificationFailure("current pull request base repository drifted")
+    if _pr_repository_identity(head) != expected_repository:
+        raise ClassificationFailure("current pull request head repository drifted")
+
+
 def _require_pr_full_job_log_binding(
     *,
     raw_log: bytes,
@@ -1482,7 +1524,7 @@ def _require_pr_full_job_log_binding(
     source_sha: str,
     expected_tree: str,
     workflow_revision: str,
-) -> None:
+) -> str:
     if not isinstance(raw_log, bytes) or len(raw_log) > MAX_JOB_LOG_BYTES:
         raise ClassificationFailure("Full CI Attestation job log is malformed")
     try:
@@ -1592,6 +1634,7 @@ def _require_pr_full_job_log_binding(
             pull_request_base_sha,
             "base SHA output",
         )
+    return attested_sha_values[0]
 
 
 def _require_exact_full_run(
@@ -1610,7 +1653,7 @@ def _require_exact_full_run(
     not_before: datetime | None,
     merged_at: datetime,
     now: datetime,
-) -> int:
+) -> tuple[int, str | None]:
     candidates: list[dict[str, Any]] = []
     for run in runs:
         repository = run.get("repository")
@@ -1659,6 +1702,7 @@ def _require_exact_full_run(
         )
     if completed_at > merged_at:
         raise ClassificationFailure(f"{run_event} full-CI completed after the merge")
+    attested_sha: str | None = None
     if pull_request_number is not None:
         pull_requests = run.get("pull_requests")
         if not isinstance(pull_requests, list) or not all(
@@ -1699,7 +1743,7 @@ def _require_exact_full_run(
         job_id = attestation_job.get("id")
         if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id < 1:
             raise ClassificationFailure("Full CI Attestation job ID is malformed")
-        _require_pr_full_job_log_binding(
+        attested_sha = _require_pr_full_job_log_binding(
             raw_log=api.job_log(job_id),
             pull_request_number=pull_request_number,
             pull_request_base_ref=pull_request_base_ref,
@@ -1708,7 +1752,193 @@ def _require_exact_full_run(
             expected_tree=expected_tree,
             workflow_revision=workflow_revision,
         )
-    return run_id
+    return run_id, attested_sha
+
+
+def _require_supported_exact_state_source_history(
+    *,
+    git: GitRepository,
+    base_sha: str,
+    source_sha: str,
+) -> None:
+    """Allow a linear PR source or one exact merge from C, never a merge tail."""
+
+    current = source_sha
+    visited: set[str] = set()
+    for _ in range(1000):
+        if current in visited:
+            raise ClassificationFailure("source first-parent history contains a cycle")
+        visited.add(current)
+        parents = git.parents(current)
+        if current == source_sha and len(parents) == 2 and parents[0] == base_sha:
+            return
+        if len(parents) != 1:
+            raise ClassificationFailure(
+                "source contains an unsupported merge or reconciliation tail"
+            )
+        current = parents[0]
+        if current == base_sha:
+            return
+    raise ClassificationFailure("source first-parent history exceeds safety bound")
+
+
+def _require_synthetic_merge_commit(
+    *,
+    api: ActionsEvidence,
+    synthetic_sha: str,
+    base_sha: str,
+    source_sha: str,
+    expected_tree: str,
+) -> None:
+    commit = api.commit_object(synthetic_sha)
+    if commit.get("sha") != synthetic_sha:
+        raise ClassificationFailure("PR Full synthetic merge identity does not match")
+    parents = commit.get("parents")
+    if not isinstance(parents, list) or not all(
+        isinstance(parent, dict) for parent in parents
+    ):
+        raise ClassificationFailure("PR Full synthetic merge parents are malformed")
+    if [parent.get("sha") for parent in parents] != [base_sha, source_sha]:
+        raise ClassificationFailure("PR Full synthetic merge parents do not match")
+    tree = commit.get("tree")
+    if not isinstance(tree, dict) or tree.get("sha") != expected_tree:
+        raise ClassificationFailure("PR Full synthetic merge tree does not match")
+
+
+def validate_protected_coordination_exact_state_reuse(
+    *,
+    event: CIEvent,
+    git: GitRepository,
+    api: ActionsEvidence,
+    coordination_branch: str,
+    default_branch: str,
+    now: datetime,
+) -> Classification:
+    if event.event_name != "push":
+        raise ClassificationFailure("protected exact-state reuse requires a push")
+    if event.ref != f"refs/heads/{coordination_branch}":
+        raise ClassificationFailure("protected exact-state reuse requires the exact ref")
+    if not event.repository or event.repository_id < 1:
+        raise ClassificationFailure("repository identity is malformed")
+    if not SHA_PATTERN.fullmatch(event.before_sha) or event.before_sha == ZERO_SHA:
+        raise ClassificationFailure("push before SHA is missing or zero")
+    if not SHA_PATTERN.fullmatch(event.current_sha):
+        raise ClassificationFailure("current SHA is malformed")
+    if event.forced:
+        raise ClassificationFailure("forced pushes cannot reuse exact-state evidence")
+
+    parents = git.parents(event.current_sha)
+    if len(parents) != 2:
+        raise ClassificationFailure("final Q is not a normal two-parent merge")
+    base_sha, source_sha = parents
+    if base_sha != event.before_sha:
+        raise ClassificationFailure("final Q first parent does not equal push before SHA")
+    if git.first_parent_count(base_sha, event.current_sha) != 1:
+        raise ClassificationFailure("push contains multiple first-parent commits")
+    if not git.is_ancestor(base_sha, source_sha):
+        raise ClassificationFailure("final Q base is not an ancestor of PR head")
+    _require_supported_exact_state_source_history(
+        git=git,
+        base_sha=base_sha,
+        source_sha=source_sha,
+    )
+    if not git.trees_are_equal(event.current_sha, source_sha):
+        raise ClassificationFailure("final Q tree differs from PR head tree")
+    if not git.diff_is_empty(source_sha, event.current_sha):
+        raise ClassificationFailure("final Q contains merge-only content")
+
+    if api.ref_sha(coordination_branch) != event.current_sha:
+        raise ClassificationFailure("remote coordination ref advanced")
+    main_sha = api.ref_sha(default_branch)
+    if not git.is_ancestor(main_sha, source_sha):
+        raise ClassificationFailure("current main is not contained in the PR head")
+
+    (
+        source_ref,
+        pull_request_number,
+        pull_request_created_at,
+        merged_at,
+    ) = _require_merged_pull_request(
+        event=event,
+        api=api,
+        coordination_branch=coordination_branch,
+        base_sha=base_sha,
+        source_sha=source_sha,
+        now=now,
+    )
+    source_tree = git.tree_sha(source_sha)
+    workflow_revision = git.blob_sha(source_sha, APPROVED_WORKFLOW_PATH)
+    runs = api.workflow_runs(source_sha, event=None)
+    source_run_id, source_attested_sha = _require_exact_full_run(
+        event=event,
+        api=api,
+        runs=runs,
+        source_sha=source_sha,
+        source_ref=source_ref,
+        run_event="push",
+        pull_request_number=None,
+        pull_request_base_ref=None,
+        pull_request_base_sha=None,
+        expected_tree=source_tree,
+        workflow_revision=workflow_revision,
+        not_before=None,
+        merged_at=merged_at,
+        now=now,
+    )
+    if source_attested_sha is not None:
+        raise ClassificationFailure("Source Full returned an unexpected PR attestation")
+    pr_run_id, synthetic_sha = _require_exact_full_run(
+        event=event,
+        api=api,
+        runs=runs,
+        source_sha=source_sha,
+        source_ref=source_ref,
+        run_event="pull_request",
+        pull_request_number=pull_request_number,
+        pull_request_base_ref=coordination_branch,
+        pull_request_base_sha=base_sha,
+        expected_tree=source_tree,
+        workflow_revision=workflow_revision,
+        not_before=pull_request_created_at,
+        merged_at=merged_at,
+        now=now,
+    )
+    if synthetic_sha is None:
+        raise ClassificationFailure("PR Full synthetic merge identity is missing")
+    if source_run_id == pr_run_id:
+        raise ClassificationFailure("Source and PR Full reused one run ID")
+    _require_synthetic_merge_commit(
+        api=api,
+        synthetic_sha=synthetic_sha,
+        base_sha=base_sha,
+        source_sha=source_sha,
+        expected_tree=source_tree,
+    )
+
+    if api.ref_sha(coordination_branch) != event.current_sha:
+        raise ClassificationFailure("coordination ref drifted during validation")
+    if api.ref_sha(default_branch) != main_sha:
+        raise ClassificationFailure("main ref drifted during validation")
+    _require_live_merged_pull_request(
+        event=event,
+        api=api,
+        pull_request_number=pull_request_number,
+        coordination_branch=coordination_branch,
+        base_sha=base_sha,
+        source_ref=source_ref,
+        source_sha=source_sha,
+        merged_at=merged_at,
+    )
+
+    return Classification(
+        "equivalent-merge",
+        "protected merge Q exactly matches Source Full H and PR Full P",
+        comparison_base=base_sha,
+        source_sha=source_sha,
+        source_run_id=str(source_run_id),
+        source_tree=source_tree,
+        workflow_revision=workflow_revision,
+    )
 
 
 def validate_coordination_postmerge_full_reuse(
@@ -1767,7 +1997,7 @@ def validate_coordination_postmerge_full_reuse(
     source_tree = git.tree_sha(source_sha)
     workflow_revision = git.blob_sha(source_sha, APPROVED_WORKFLOW_PATH)
     runs = api.workflow_runs(source_sha, event=None)
-    source_run_id = _require_exact_full_run(
+    source_run_id, _ = _require_exact_full_run(
         event=event,
         api=api,
         runs=runs,
@@ -1783,7 +2013,7 @@ def validate_coordination_postmerge_full_reuse(
         merged_at=merged_at,
         now=now,
     )
-    pr_run_id = _require_exact_full_run(
+    pr_run_id, _ = _require_exact_full_run(
         event=event,
         api=api,
         runs=runs,
@@ -2058,10 +2288,32 @@ def classify_ci_mode(
     ):
         if event.event_name == "push" and event.ref == governance.coordination_ref:
             if event.before_sha != ZERO_SHA:
-                return _full(
-                    "protected coordination after Start, including Case-B "
-                    "postmerge, is Full-only"
-                )
+                if api is None:
+                    return _full(
+                        "protected coordination exact-state evidence API is unavailable"
+                    )
+                try:
+                    return validate_protected_coordination_exact_state_reuse(
+                        event=event,
+                        git=git,
+                        api=api,
+                        coordination_branch=coordination_branch,
+                        default_branch=governance.default_development_base,
+                        now=(now or datetime.now(timezone.utc)),
+                    )
+                except (
+                    AttributeError,
+                    ClassificationFailure,
+                    KeyError,
+                    subprocess.SubprocessError,
+                    OSError,
+                    TypeError,
+                    ValueError,
+                ) as error:
+                    return _full(
+                        "protected coordination exact-state validation failed "
+                        f"closed: {error}"
+                    )
             if api is None:
                 return _full("coordination Start evidence API is unavailable")
             try:
@@ -2082,7 +2334,7 @@ def classify_ci_mode(
                 ValueError,
             ) as error:
                 return _full(f"coordination Start validation failed closed: {error}")
-        return _full("simplified protected coordination is Full-only")
+        return _full("protected coordination pull requests remain Full-only")
     if equivalent_allowlist is None:
         equivalent_allowlist = frozenset()
     if pr_equivalent_allowlist is None:

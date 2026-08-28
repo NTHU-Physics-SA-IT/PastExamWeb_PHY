@@ -8,7 +8,7 @@ temporary protected integration coordination under ADR-0013
 Related authority:
 
 - [ADR-0013](../decisions/0013-simplified-protected-coordination.md)
-- [ADR-0014](../decisions/0014-protected-coordination-case-b-full-policy.md)
+- [ADR-0014](../decisions/0014-protected-coordination-exact-state-postmerge-reuse.md)
 - [Validation policy](../development/validation.md)
 - [Collaboration runbook](../development/collaboration-and-conflict-resolution.md)
 - [Contributor workflow](../../CONTRIBUTING.md)
@@ -85,9 +85,11 @@ is silently called fresh. Reconcile main through an ordinary protected Full-CI
 pull request to the integration branch, resolve semantic conflicts using the
 collaboration runbook, and confirm current main is again an ancestor. Push the
 exact reconciliation source and promptly open its normal pull request so the
-independent Source Full and PR Full workflows may overlap. Case-B Source, pull-
-request, and final postmerge workflows all use Full under current protected
-coordination.
+independent Source Full and PR Full workflows may overlap. Source and pull-
+request workflows remain Full. After the Owner's normal same-repository merge,
+only an exact C/H/P/Q state with both Full results may use lightweight
+Equivalent; every mismatch, reconciliation tail, or unavailable proof remains
+Full.
 
 ## Return coordinated work to main
 
@@ -134,8 +136,9 @@ closeout SHA, and `RETIRED`. No second person or machine identifier is entered.
 - Never force-push, weaken protection, use a candidate workflow, transcribe
   hidden identifiers, or reuse the obsolete rehearsal identity.
 - Do not treat `coordination-start` as an ordinary coordination optimization.
-  Pull requests, feature pushes, reconciliation sources, Case-B postmerge, and
-  closeout remain Full.
+  Pull requests, feature pushes, reconciliation sources and tails, return, and
+  closeout remain Full. Only ADR-0014's exact final normal merge may reuse its
+  mandatory Source and PR Full evidence.
 
 The old run `32628689925`, UUID
 `714d9c51-8b6b-405d-bd7c-4c92f6f26699`, and branch name

@@ -20,10 +20,13 @@
   - [ADR-0005](0005-main-pr-docs-only-exception.md)
   - [ADR-0006](0006-coordination-postmerge-full-evidence-reuse.md)
   - [ADR-0007](0007-retain-full-fallback-for-post-case-b-reconciliation-tails.md)
-  - [ADR-0014](0014-protected-coordination-case-b-full-policy.md)
+  - [ADR-0014](0014-protected-coordination-exact-state-postmerge-reuse.md)
 - Related PR / issue: PR #128 motivated the research; PR #154 records the formal closeout
 - Supersedes: None
-- Superseded by: None
+- Superseded by:
+  - [ADR-0014](0014-protected-coordination-exact-state-postmerge-reuse.md),
+    only for exact same-repository protected-integration final-Q reuse after
+    mandatory Source Full and PR Full
 
 ## Context
 
@@ -56,9 +59,9 @@ eligible occurrence remained.
 
 ## Decision
 
-PastExamWeb_PHY does not add a governance-sensitive ordinary-product
-coordination-postmerge Equivalent exception under current platform
-capabilities and observed economics.
+PastExamWeb_PHY does not add a governance-path or trust-surface exception.
+ADR-0014 later supersedes this record only for exact same-repository protected-
+integration final-Q state transfer after mandatory Source Full and PR Full.
 
 Governance-sensitive ordinary product cases not covered by an existing
 Accepted exception retain their Full fallback. Conservative Full is accepted;
@@ -66,8 +69,7 @@ a circular or candidate-controlled verifier is not.
 
 This record is complementary to existing CI authority:
 
-- ADR-0014 retains Full for exact Case-B postmerge under current protected
-  coordination;
+- ADR-0014 permits exact-state final-Q reuse without classifying paths;
 - ADR-0007 continues to require Full for post-Case-B reconciliation tails;
 - existing generic non-governance Equivalent remains unchanged; and
 - main remains Full except for ADR-0005's exact docs-only path.
@@ -130,8 +132,8 @@ savings do not justify a larger security-critical trust system.
 
 ## Invariants
 
-- ADR-0014's exact Case-B Full policy remains separate from this ordinary-
-  product decision.
+- ADR-0014 supersedes only this record's conclusion for an exact protected
+  final Q; it does not authorize path-based governance exceptions.
 - ADR-0007's post-Case-B reconciliation-tail Full fallback remains unchanged.
 - Existing generic non-governance Equivalent remains unchanged.
 - Main remains Full except for ADR-0005's exact docs-only path.

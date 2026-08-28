@@ -132,4 +132,4 @@ not freeze design forever; they require intentional, reviewable replacement.
 | [ADR-0011](0011-trusted-activation-for-protected-coordination.md) | Trusted Activation for Protected Coordination | Superseded | Historical independent-App activation and lifecycle decision; permission boundary replaced by ADR-0012 |
 | [ADR-0012](0012-trusted-ruleset-visibility-permission-boundary.md) | Trusted Ruleset Visibility Permission Boundary | Superseded | Historical App permission boundary replaced by ADR-0013 |
 | [ADR-0013](0013-simplified-protected-coordination.md) | Simplified Protected Coordination | Accepted | Main-null semantics and single-owner protected integration lifecycle |
-| [ADR-0014](0014-protected-coordination-case-b-full-policy.md) | Protected Coordination Case-B Full Policy | Accepted | Current protected Case-B postmerge Full policy |
+| [ADR-0014](0014-protected-coordination-exact-state-postmerge-reuse.md) | Protected Coordination Exact-State Postmerge Reuse | Accepted | Exact same-repository protected-integration final-Q reuse after Source Full and PR Full |
