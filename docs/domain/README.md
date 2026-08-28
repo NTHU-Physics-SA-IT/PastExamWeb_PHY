@@ -10,6 +10,7 @@ Related documents:
 - [Entity relationships](entity-relationships.md)
 - [State transitions](state-transitions.md)
 - [Notifications and side effects](notifications-and-side-effects.md)
+- [Permanent deletion](permanent-deletion.md)
 - [Code organization](../development/code-organization.md)
 
 ## Purpose
@@ -85,3 +86,7 @@ publicly visible.
   authorization, visibility, and business-error semantics.
 - [Notifications and side effects](notifications-and-side-effects.md) defines
   durable notifications, transaction boundaries, and external effects.
+- [Permanent deletion](permanent-deletion.md) defines the independent durable
+  operation ledger, exact MinIO Version-ID identity, recovery states, and
+  retention boundary, including the activated single-item and outcome-bounded
+  bulk Trash surfaces.

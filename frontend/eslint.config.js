@@ -6,7 +6,14 @@ import json from '@eslint/json'
 import tseslint from 'typescript-eslint'
 
 export default [
+  { ignores: ['scripts/**/*.json'] },
+
   { languageOptions: { globals: globals.browser } },
+
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: { globals: globals.node },
+  },
 
   js.configs.recommended,
 
