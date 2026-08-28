@@ -12,7 +12,6 @@ from sqlalchemy import case, delete, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession as SQLModelAsyncSession
 
 from app.models.models import (
-    PermanentDeletionObject,
     PermanentDeletionOperation,
     PermanentDeletionStatus,
 )
@@ -100,17 +99,6 @@ async def select_due_operation_ids(
     return [int(value) for value in (await db.execute(statement)).scalars().all()]
 
 
-async def _operation_has_storage_work(
-    db: SQLModelAsyncSession, operation_id: int
-) -> bool:
-    statement = select(
-        select(PermanentDeletionObject.id)
-        .where(PermanentDeletionObject.operation_id == operation_id)
-        .exists()
-    )
-    return bool((await db.execute(statement)).scalar_one())
-
-
 async def purge_completed_audits(
     session_maker: SessionFactory,
     *,
@@ -166,6 +154,7 @@ async def reconcile_due_once(
     session_maker: SessionFactory,
     storage_factory: StorageFactory,
     now: datetime | None = None,
+    event_clock: Callable[[], datetime] | None = None,
     operation_limit: int = DEFAULT_OPERATION_BATCH_LIMIT,
     purge_limit: int = DEFAULT_PURGE_BATCH_LIMIT,
     processor: Processor = process_one_permanent_deletion,
@@ -173,6 +162,7 @@ async def reconcile_due_once(
     """Process one bounded candidate batch, then independently purge due audits."""
 
     timestamp = now or datetime.now(UTC)
+    clock = event_clock or (lambda: datetime.now(UTC))
     _validate_limit(operation_limit, field="operation limit")
     _validate_limit(purge_limit, field="purge limit")
     async with session_maker() as db:
@@ -186,16 +176,11 @@ async def reconcile_due_once(
     for operation_id in operation_ids:
         async with session_maker() as db:
             try:
-                storage = (
-                    storage_factory()
-                    if await _operation_has_storage_work(db, operation_id)
-                    else None
-                )
                 status = await processor(
                     db,
                     operation_id=operation_id,
-                    storage=storage,
-                    now=timestamp,
+                    storage_factory=storage_factory,
+                    event_clock=clock,
                 )
                 processed += 1
                 if status == PermanentDeletionStatus.COMPLETED:

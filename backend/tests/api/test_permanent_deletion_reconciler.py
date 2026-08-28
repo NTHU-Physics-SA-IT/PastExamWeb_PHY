@@ -160,9 +160,10 @@ async def test_reconcile_due_once_is_item_independent_and_storage_lazy(
 
     called: list[int] = []
 
-    async def processor(db, *, operation_id, storage, now):
+    async def processor(db, *, operation_id, storage_factory, event_clock):
         called.append(operation_id)
-        assert storage is None
+        assert storage_factory is forbidden_storage_factory
+        assert event_clock() > NOW
         if operation_id == first.id:
             raise RuntimeError("sanitized by reconciler")
         return PermanentDeletionStatus.COMPLETED
@@ -174,6 +175,9 @@ async def test_reconcile_due_once_is_item_independent_and_storage_lazy(
         session_maker=session_maker,
         storage_factory=forbidden_storage_factory,
         now=NOW,
+        event_clock=iter(
+            [NOW + timedelta(seconds=1), NOW + timedelta(seconds=2)]
+        ).__next__,
         operation_limit=10,
         purge_limit=10,
         processor=processor,

@@ -71,6 +71,7 @@ class FakeVersionedMinio:
         self.history_calls = 0
         self.on_history: Callable[[], None] | None = None
         self.on_remove: Callable[[], None] | None = None
+        self.on_retryable: Callable[[], None] | None = None
 
     def get_bucket_versioning(self, _bucket: str):
         return SimpleNamespace(status=self.status)
@@ -121,6 +122,8 @@ class FakeVersionedMinio:
         self.removals.append((bucket, key, version_id))
         if self.retryable_once:
             self.retryable_once = False
+            if self.on_retryable is not None:
+                self.on_retryable()
             from minio.error import S3Error
 
             raise S3Error(
@@ -368,7 +371,21 @@ async def test_concurrent_reconciler_passes_do_not_double_delete_exact_version(
     client = FakeVersionedMinio(archive.object_name, "stage5fe-concurrent-v1")
     storage = ExactVersionMinioAdapter(client, bucket_name="stage5fe-test")
     operation_id: int | None = None
+    factory_calls = 0
     now = datetime(2026, 8, 28, 4, 45, tzinfo=UTC)
+
+    def storage_factory():
+        nonlocal factory_calls
+        factory_calls += 1
+        return storage
+
+    async def processor(db, **kwargs):
+        return await process_one_permanent_deletion(
+            db,
+            lease_clock=MutableLeaseClock(now),
+            **kwargs,
+        )
+
     try:
         async with session_maker() as session:
             operation = await accept_permanent_deletion(
@@ -385,16 +402,21 @@ async def test_concurrent_reconciler_passes_do_not_double_delete_exact_version(
         await asyncio.gather(
             reconcile_due_once(
                 session_maker=session_maker,
-                storage_factory=lambda: storage,
+                storage_factory=storage_factory,
                 now=now,
+                event_clock=lambda: now,
+                processor=processor,
             ),
             reconcile_due_once(
                 session_maker=session_maker,
-                storage_factory=lambda: storage,
+                storage_factory=storage_factory,
                 now=now,
+                event_clock=lambda: now,
+                processor=processor,
             ),
         )
 
+        assert factory_calls == 1
         assert client.removals == [
             ("stage5fe-test", archive.object_name, "stage5fe-concurrent-v1")
         ]
@@ -411,6 +433,154 @@ async def test_concurrent_reconciler_passes_do_not_double_delete_exact_version(
             submission_id=submission.id,
             event_id=event.id,
             notification_id=notification.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_fresh_attempt_time_blocks_delete_after_true_retry_deadline(
+    session_maker,
+    make_user,
+) -> None:
+    requester = await make_user()
+    category, course, archive, submission, event, notification = (
+        await _create_deleted_pair(session_maker, requester_id=requester.id)
+    )
+    client = FakeVersionedMinio(archive.object_name, "stage5fe-deadline-v1")
+    storage = ExactVersionMinioAdapter(client, bucket_name="stage5fe-test")
+    accepted_at = datetime(2026, 8, 27, 6, 0, tzinfo=UTC)
+    clock = MutableLeaseClock(accepted_at + timedelta(hours=24, seconds=-1))
+    operation_id: int | None = None
+
+    def cross_deadline() -> None:
+        clock.current = accepted_at + timedelta(hours=24)
+
+    client.on_history = cross_deadline
+    try:
+        async with session_maker() as session:
+            operation = await accept_permanent_deletion(
+                session,
+                root_entity_type=TrashEntityType.ARCHIVE,
+                root_entity_id=int(archive.id),
+                idempotency_key=f"stage5fe:deadline:{archive.id}",
+                requested_by_user_id=requester.id,
+                storage=storage,
+                now=accepted_at,
+            )
+            operation_id = int(operation.id)
+            result = await process_one_permanent_deletion(
+                session,
+                operation_id=operation_id,
+                storage=storage,
+                event_clock=clock,
+                lease_clock=MutableLeaseClock(
+                    accepted_at + timedelta(hours=24, seconds=-1)
+                ),
+            )
+            assert result == PermanentDeletionStatus.MANUAL_REVIEW
+            await session.refresh(operation)
+            assert operation.result_code == "automatic_retry_budget_exhausted"
+            assert operation.automatic_attempt_count == 0
+            assert client.removals == []
+    finally:
+        client.on_history = None
+        await _cleanup_pair_and_operation(
+            session_maker,
+            operation_id=operation_id,
+            category_id=category.id,
+            course_id=course.id,
+            archive_id=archive.id,
+            submission_id=submission.id,
+            event_id=event.id,
+            notification_id=notification.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_storage_factory_failure_after_claim_is_durable_and_redacted(
+    session_maker,
+    make_user,
+) -> None:
+    requester = await make_user()
+    category, course, archive, submission, event, notification = (
+        await _create_deleted_pair(session_maker, requester_id=requester.id)
+    )
+    storage = ExactVersionMinioAdapter(
+        FakeVersionedMinio(archive.object_name, "stage5fe-init-v1"),
+        bucket_name="stage5fe-test",
+    )
+    now = datetime(2026, 8, 28, 5, 0, tzinfo=UTC)
+    failure_time = now + timedelta(seconds=2)
+    clock = MutableLeaseClock(now + timedelta(seconds=1))
+    event_times: list[datetime] = []
+    operation_id: int | None = None
+    factory_calls = 0
+
+    def failed_factory():
+        nonlocal factory_calls
+        factory_calls += 1
+        clock.current = failure_time
+        raise ConnectionError("secret endpoint and credential details")
+
+    def event_clock() -> datetime:
+        event_times.append(clock.current)
+        return clock.current
+
+    try:
+        async with session_maker() as session:
+            operation = await accept_permanent_deletion(
+                session,
+                root_entity_type=TrashEntityType.ARCHIVE,
+                root_entity_id=int(archive.id),
+                idempotency_key=f"stage5fe:init:{archive.id}",
+                requested_by_user_id=requester.id,
+                storage=storage,
+                now=now,
+            )
+            operation_id = int(operation.id)
+            result = await process_one_permanent_deletion(
+                session,
+                operation_id=operation_id,
+                storage=None,
+                storage_factory=failed_factory,
+                event_clock=event_clock,
+                lease_clock=MutableLeaseClock(now + timedelta(seconds=1)),
+            )
+            assert result == PermanentDeletionStatus.RETRYABLE_FAILED
+            await session.refresh(operation)
+            assert operation.result_code == "storage_initialization_failed"
+            assert operation.updated_at == failure_time
+            assert operation.lease_token is None
+            assert factory_calls == 1
+            assert event_times[0] == now + timedelta(seconds=1)
+            assert event_times[-1] == failure_time
+    finally:
+        await _cleanup_pair_and_operation(
+            session_maker,
+            operation_id=operation_id,
+            category_id=category.id,
+            course_id=course.id,
+            archive_id=archive.id,
+            submission_id=submission.id,
+            event_id=event.id,
+            notification_id=notification.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_processor_rejects_ambiguous_storage_provider() -> None:
+    storage = ExactVersionMinioAdapter(
+        FakeVersionedMinio("unused.pdf"),
+        bucket_name="stage5fe-test",
+    )
+    with pytest.raises(
+        ValueError,
+        match="storage and storage_factory are mutually exclusive",
+    ):
+        await process_one_permanent_deletion(
+            None,
+            operation_id=1,
+            storage=storage,
+            storage_factory=lambda: storage,
         )
 
 
@@ -1443,6 +1613,9 @@ async def test_exact_storage_completion_is_atomic_with_stage5e_detach(
     client = FakeVersionedMinio(archive.object_name, "v-exact")
     storage = ExactVersionMinioAdapter(client, bucket_name="stage5fb-test")
     now = datetime(2026, 8, 27, 3, 0, tzinfo=UTC)
+    clock = MutableLeaseClock(now + timedelta(minutes=1))
+    completion_time = now + timedelta(minutes=1, seconds=2)
+    client.on_remove = lambda: setattr(clock, "current", completion_time)
 
     async with session_maker() as session:
         operation = await accept_permanent_deletion(
@@ -1467,11 +1640,14 @@ async def test_exact_storage_completion_is_atomic_with_stage5e_detach(
             session,
             operation_id=operation.id,
             storage=storage,
-            now=now + timedelta(minutes=1),
+            event_clock=clock,
             jitter_fraction=0.0,
             lease_clock=MutableLeaseClock(now + timedelta(minutes=1, seconds=1)),
         )
         assert result == PermanentDeletionStatus.COMPLETED
+        await session.refresh(operation)
+        assert operation.completed_at == completion_time
+        assert operation.audit_purge_after == completion_time + timedelta(days=180)
         assert client.removals == [("stage5fb-test", archive.object_name, "v-exact")]
         assert await session.get(Archive, archive.id) is None
         assert await session.get(ArchiveSubmission, submission.id) is None
@@ -1513,6 +1689,9 @@ async def test_unknown_delete_outcome_verifies_before_finalization(
     client.unknown_once = True
     storage = ExactVersionMinioAdapter(client, bucket_name="stage5fb-test")
     now = datetime(2026, 8, 27, 4, 0, tzinfo=UTC)
+    clock = MutableLeaseClock(now + timedelta(minutes=1))
+    unknown_time = now + timedelta(minutes=1, seconds=2)
+    client.on_remove = lambda: setattr(clock, "current", unknown_time)
 
     async with session_maker() as session:
         operation = await accept_permanent_deletion(
@@ -1528,18 +1707,28 @@ async def test_unknown_delete_outcome_verifies_before_finalization(
             session,
             operation_id=operation.id,
             storage=storage,
-            now=now + timedelta(minutes=1),
+            event_clock=clock,
             jitter_fraction=0.0,
             lease_clock=MutableLeaseClock(now + timedelta(minutes=1, seconds=1)),
         )
         assert first == PermanentDeletionStatus.VERIFICATION_REQUIRED
         assert await session.get(ArchiveSubmission, submission.id) is not None
+        stored_object = (
+            await session.execute(
+                select(PermanentDeletionObject).where(
+                    PermanentDeletionObject.operation_id == operation.id
+                )
+            )
+        ).scalar_one()
+        assert stored_object.last_unknown_outcome_at == unknown_time
+        assert operation.updated_at == unknown_time
 
+        clock.current = now + timedelta(minutes=2)
         second = await process_one_permanent_deletion(
             session,
             operation_id=operation.id,
             storage=storage,
-            now=now + timedelta(minutes=2),
+            event_clock=clock,
             jitter_fraction=0.0,
             lease_clock=MutableLeaseClock(now + timedelta(minutes=2, seconds=1)),
         )
@@ -1850,6 +2039,9 @@ async def test_retryable_failure_tracks_budget_and_retries_same_exact_version(
     client.retryable_once = True
     storage = ExactVersionMinioAdapter(client, bucket_name="stage5fb-test")
     now = datetime(2026, 8, 27, 7, 0, tzinfo=UTC)
+    clock = MutableLeaseClock(now + timedelta(minutes=1))
+    failure_time = now + timedelta(minutes=1, seconds=2)
+    client.on_retryable = lambda: setattr(clock, "current", failure_time)
     operation_id: int | None = None
     try:
         async with session_maker() as session:
@@ -1867,22 +2059,25 @@ async def test_retryable_failure_tracks_budget_and_retries_same_exact_version(
                 session,
                 operation_id=operation.id,
                 storage=storage,
-                now=now + timedelta(minutes=1),
+                event_clock=clock,
                 jitter_fraction=0.0,
                 lease_clock=MutableLeaseClock(now + timedelta(minutes=1, seconds=1)),
             )
             assert first == PermanentDeletionStatus.RETRYABLE_FAILED
             await session.refresh(operation)
             assert operation.automatic_attempt_count == 1
+            assert operation.updated_at == failure_time
+            assert operation.next_attempt_at == failure_time + timedelta(seconds=30)
             assert operation.next_attempt_at is not None
             assert operation.next_attempt_at <= operation.retry_deadline_at
             retry_at = operation.next_attempt_at
 
+            clock.current = retry_at
             second = await process_one_permanent_deletion(
                 session,
                 operation_id=operation.id,
                 storage=storage,
-                now=retry_at,
+                event_clock=clock,
                 jitter_fraction=0.0,
                 lease_clock=MutableLeaseClock(retry_at + timedelta(seconds=1)),
             )

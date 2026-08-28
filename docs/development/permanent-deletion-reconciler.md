@@ -18,6 +18,14 @@ force-complete, or process `MANUAL_REVIEW` or `COMPLETED` destructively. The
 existing process-one saga remains the sole claim, lease, exact-Version-ID,
 retry, verification, and finalization authority.
 
+One pass timestamp is used only for deterministic candidate selection and the
+conservative completed-audit purge snapshot. Processing obtains fresh event
+times at each durable or destructive boundary. The reconciler passes a lazy
+storage provider into process-one; process-one invokes it only after winning
+the atomic claim, revalidating lease ownership, and finding persisted object
+rows. Initialization failure is recorded with a stable redacted result code,
+while claim losers and database-only operations make no MinIO call.
+
 The worker is not registered with FastAPI startup and no tracked Compose service
 starts it by default. Repository implementation does not authorize running it
 against the canonical local database or production. Production activation,
