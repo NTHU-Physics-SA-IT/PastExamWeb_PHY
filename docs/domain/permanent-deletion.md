@@ -53,9 +53,12 @@ conflict, or error without that proof is `FAILED`; absence is never guessed to
 mean success. Bulk performs one immediate Trash reload and does not create a
 polling loop per result.
 
-Stage 5F-D adds no scheduler or recurring worker. Bounded administrator
-process-one/status/retry actions cover only currently claimable states until a
-separately authorized worker stage. `MANUAL_REVIEW` is inspect-only unless the
+Stage 5F-E adds a dedicated backend reconciler process. Once intentionally
+started, it discovers a bounded deterministic batch of due PostgreSQL
+operations and passes each ID to the existing process-one claim/lease path.
+It is not a FastAPI startup task and is not enabled by ordinary development or
+production Compose startup. Production activation remains deferred and needs
+separate Owner authorization. `MANUAL_REVIEW` remains inspect-only unless the
 sealed backend policy explicitly marks a retry safe; there is no force-complete,
 cancel, resurrection, or retry-budget reset.
 
@@ -147,9 +150,15 @@ Stage 5F-B implements deterministic bounded retry policy, a claim/lease-safe
 process-one primitive, and unknown-outcome verification. Stage 5F-C exposes one
 minimal administrator status read and one capability-gated process-one retry
 surface for `ACCEPTED`, `VERIFICATION_REQUIRED`, and due `RETRYABLE_FAILED`;
-Stage 5F-D reuses those surfaces for all Trash roots. It adds no
-operation-history dashboard, scheduler, recurring reconciliation worker,
-force-complete, cancel, or restore action.
+Stage 5F-D reuses those surfaces for all Trash roots. Stage 5F-E's internal
+worker selects claimable `ACCEPTED` and `VERIFICATION_REQUIRED`, due
+`RETRYABLE_FAILED`, and expired-lease `PROCESSING` operations. It never selects
+`MANUAL_REVIEW` or `COMPLETED`, creates no operation, scans no live Trash row or
+storage object, and duplicates no claim, retry, verification, or lease policy.
+Concurrent selectors may observe the same candidate; the existing atomic claim
+and fresh ownership barriers decide the winner safely. No operation-history
+dashboard, force-complete, cancel, restore action, or durable batch ledger is
+added.
 
 ## Internal Stage 5F-B processing
 
@@ -181,6 +190,15 @@ later. Incomplete or live operations do not expire merely because time passes.
 The retained operation is minimal audit only; descriptive snapshots are
 forbidden. Exact storage child identity remains recoverable while needed and
 can be removed after completion.
+
+The Stage 5F-E operational pass also purges a bounded deterministic batch only
+when an operation is already `COMPLETED` and its persisted
+`audit_purge_after` is due. It does not recompute or shorten that deadline,
+contact MinIO, or delete a live Domain row. Existing cascades remove only the
+completed ledger's audit children. Unfinished operations, including
+`MANUAL_REVIEW`, never expire merely because they are old. Reconciliation and
+audit purge use independent transactions, so purge failure cannot reverse or
+misreport already processed operations.
 
 The additive migration backfills or rewrites no existing row. Its downgrade
 is permitted only while all three new ledger tables are empty. Once any

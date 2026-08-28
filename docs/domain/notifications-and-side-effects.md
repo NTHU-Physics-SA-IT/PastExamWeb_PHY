@@ -362,13 +362,17 @@ Trash permanent deletion instead captures exact object versions in PostgreSQL,
 verifies exact-version absence, and finalizes database deletion only through
 the durable operation.
 
-### Implementation gap and future direction
+### Remaining boundary
 
 Upload and any non-Trash legacy cleanup remain outside the durable deletion
 contract. For administrator Trash deletion, a storage failure cannot be
 downgraded into database-deletion success: it remains explicit durable pending,
-retryable, verification-required, or manual-review truth. Recurring worker
-reconciliation remains a separately authorized later stage.
+retryable, verification-required, or manual-review truth. The dedicated
+Stage 5F-E reconciler can now advance those existing PostgreSQL operations
+without an administrator page interaction, while reusing the same exact-version,
+lease, verification, retry-budget, and finalization authority. It performs no
+orphan/storage scan and creates no operation. Its code is deployable, but
+production activation remains a separately Owner-authorized operations task.
 
 ## Bulk permanent delete
 
@@ -416,6 +420,7 @@ finalization cannot precede exact-version absence.
 | Republish | Transition and notification share the caller transaction | Comparatively complete |
 | Administrator Trash permanent delete | Acceptance durably records the full logical plan and exact Version IDs; bounded processing verifies storage absence before one database finalization transaction | Activated for all Trash roots; unfinished and uncertain work remains explicit, with no false completed result |
 | Outcome-bounded Trash bulk delete | Each item reuses the single-item durable authority; there is no global batch transaction or rollback | Cross-item partial outcomes are explicit and independently durable |
+| Dedicated permanent-deletion reconciliation | Each bounded candidate uses its own existing process-one transaction/lease lifecycle; completed-audit purge is a separate bounded transaction | Existing operations progress automatically only while the dedicated process is intentionally running; production activation is deferred |
 | WebSocket discussion update | Database commit precedes broadcast | Durable write succeeds even if live delivery fails |
 | Redis | Used primarily for authentication token blacklist/state | Not part of archive lifecycle atomicity |
 | About Us create/update | Route-authorized single PostgreSQL commit | No notification, receipt, storage, Redis, or WebSocket side effect |
