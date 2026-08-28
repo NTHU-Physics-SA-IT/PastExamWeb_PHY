@@ -71,6 +71,7 @@ class FakeVersionedMinio:
         self.history_calls = 0
         self.on_history: Callable[[], None] | None = None
         self.on_remove: Callable[[], None] | None = None
+        self.on_retryable: Callable[[], None] | None = None
 
     def get_bucket_versioning(self, _bucket: str):
         return SimpleNamespace(status=self.status)
@@ -121,6 +122,8 @@ class FakeVersionedMinio:
         self.removals.append((bucket, key, version_id))
         if self.retryable_once:
             self.retryable_once = False
+            if self.on_retryable is not None:
+                self.on_retryable()
             from minio.error import S3Error
 
             raise S3Error(
@@ -497,6 +500,7 @@ async def test_storage_factory_failure_after_claim_is_durable_and_redacted(
     now = datetime(2026, 8, 28, 5, 0, tzinfo=UTC)
     failure_time = now + timedelta(seconds=2)
     clock = MutableLeaseClock(now + timedelta(seconds=1))
+    event_times: list[datetime] = []
     operation_id: int | None = None
     factory_calls = 0
 
@@ -505,6 +509,10 @@ async def test_storage_factory_failure_after_claim_is_durable_and_redacted(
         factory_calls += 1
         clock.current = failure_time
         raise ConnectionError("secret endpoint and credential details")
+
+    def event_clock() -> datetime:
+        event_times.append(clock.current)
+        return clock.current
 
     try:
         async with session_maker() as session:
@@ -523,7 +531,7 @@ async def test_storage_factory_failure_after_claim_is_durable_and_redacted(
                 operation_id=operation_id,
                 storage=None,
                 storage_factory=failed_factory,
-                event_clock=clock,
+                event_clock=event_clock,
                 lease_clock=MutableLeaseClock(now + timedelta(seconds=1)),
             )
             assert result == PermanentDeletionStatus.RETRYABLE_FAILED
@@ -532,6 +540,8 @@ async def test_storage_factory_failure_after_claim_is_durable_and_redacted(
             assert operation.updated_at == failure_time
             assert operation.lease_token is None
             assert factory_calls == 1
+            assert event_times[0] == now + timedelta(seconds=1)
+            assert event_times[-1] == failure_time
     finally:
         await _cleanup_pair_and_operation(
             session_maker,
@@ -542,6 +552,24 @@ async def test_storage_factory_failure_after_claim_is_durable_and_redacted(
             submission_id=submission.id,
             event_id=event.id,
             notification_id=notification.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_processor_rejects_ambiguous_storage_provider() -> None:
+    storage = ExactVersionMinioAdapter(
+        FakeVersionedMinio("unused.pdf"),
+        bucket_name="stage5fe-test",
+    )
+    with pytest.raises(
+        ValueError,
+        match="storage and storage_factory are mutually exclusive",
+    ):
+        await process_one_permanent_deletion(
+            None,
+            operation_id=1,
+            storage=storage,
+            storage_factory=lambda: storage,
         )
 
 
@@ -1574,6 +1602,9 @@ async def test_exact_storage_completion_is_atomic_with_stage5e_detach(
     client = FakeVersionedMinio(archive.object_name, "v-exact")
     storage = ExactVersionMinioAdapter(client, bucket_name="stage5fb-test")
     now = datetime(2026, 8, 27, 3, 0, tzinfo=UTC)
+    clock = MutableLeaseClock(now + timedelta(minutes=1))
+    completion_time = now + timedelta(minutes=1, seconds=2)
+    client.on_remove = lambda: setattr(clock, "current", completion_time)
 
     async with session_maker() as session:
         operation = await accept_permanent_deletion(
@@ -1598,11 +1629,14 @@ async def test_exact_storage_completion_is_atomic_with_stage5e_detach(
             session,
             operation_id=operation.id,
             storage=storage,
-            now=now + timedelta(minutes=1),
+            event_clock=clock,
             jitter_fraction=0.0,
             lease_clock=MutableLeaseClock(now + timedelta(minutes=1, seconds=1)),
         )
         assert result == PermanentDeletionStatus.COMPLETED
+        await session.refresh(operation)
+        assert operation.completed_at == completion_time
+        assert operation.audit_purge_after == completion_time + timedelta(days=180)
         assert client.removals == [("stage5fb-test", archive.object_name, "v-exact")]
         assert await session.get(Archive, archive.id) is None
         assert await session.get(ArchiveSubmission, submission.id) is None
@@ -1644,6 +1678,9 @@ async def test_unknown_delete_outcome_verifies_before_finalization(
     client.unknown_once = True
     storage = ExactVersionMinioAdapter(client, bucket_name="stage5fb-test")
     now = datetime(2026, 8, 27, 4, 0, tzinfo=UTC)
+    clock = MutableLeaseClock(now + timedelta(minutes=1))
+    unknown_time = now + timedelta(minutes=1, seconds=2)
+    client.on_remove = lambda: setattr(clock, "current", unknown_time)
 
     async with session_maker() as session:
         operation = await accept_permanent_deletion(
@@ -1659,18 +1696,28 @@ async def test_unknown_delete_outcome_verifies_before_finalization(
             session,
             operation_id=operation.id,
             storage=storage,
-            now=now + timedelta(minutes=1),
+            event_clock=clock,
             jitter_fraction=0.0,
             lease_clock=MutableLeaseClock(now + timedelta(minutes=1, seconds=1)),
         )
         assert first == PermanentDeletionStatus.VERIFICATION_REQUIRED
         assert await session.get(ArchiveSubmission, submission.id) is not None
+        stored_object = (
+            await session.execute(
+                select(PermanentDeletionObject).where(
+                    PermanentDeletionObject.operation_id == operation.id
+                )
+            )
+        ).scalar_one()
+        assert stored_object.last_unknown_outcome_at == unknown_time
+        assert operation.updated_at == unknown_time
 
+        clock.current = now + timedelta(minutes=2)
         second = await process_one_permanent_deletion(
             session,
             operation_id=operation.id,
             storage=storage,
-            now=now + timedelta(minutes=2),
+            event_clock=clock,
             jitter_fraction=0.0,
             lease_clock=MutableLeaseClock(now + timedelta(minutes=2, seconds=1)),
         )
@@ -1981,6 +2028,9 @@ async def test_retryable_failure_tracks_budget_and_retries_same_exact_version(
     client.retryable_once = True
     storage = ExactVersionMinioAdapter(client, bucket_name="stage5fb-test")
     now = datetime(2026, 8, 27, 7, 0, tzinfo=UTC)
+    clock = MutableLeaseClock(now + timedelta(minutes=1))
+    failure_time = now + timedelta(minutes=1, seconds=2)
+    client.on_retryable = lambda: setattr(clock, "current", failure_time)
     operation_id: int | None = None
     try:
         async with session_maker() as session:
@@ -1998,22 +2048,25 @@ async def test_retryable_failure_tracks_budget_and_retries_same_exact_version(
                 session,
                 operation_id=operation.id,
                 storage=storage,
-                now=now + timedelta(minutes=1),
+                event_clock=clock,
                 jitter_fraction=0.0,
                 lease_clock=MutableLeaseClock(now + timedelta(minutes=1, seconds=1)),
             )
             assert first == PermanentDeletionStatus.RETRYABLE_FAILED
             await session.refresh(operation)
             assert operation.automatic_attempt_count == 1
+            assert operation.updated_at == failure_time
+            assert operation.next_attempt_at == failure_time + timedelta(seconds=30)
             assert operation.next_attempt_at is not None
             assert operation.next_attempt_at <= operation.retry_deadline_at
             retry_at = operation.next_attempt_at
 
+            clock.current = retry_at
             second = await process_one_permanent_deletion(
                 session,
                 operation_id=operation.id,
                 storage=storage,
-                now=retry_at,
+                event_clock=clock,
                 jitter_fraction=0.0,
                 lease_clock=MutableLeaseClock(retry_at + timedelta(seconds=1)),
             )

@@ -156,9 +156,14 @@ worker selects claimable `ACCEPTED` and `VERIFICATION_REQUIRED`, due
 `MANUAL_REVIEW` or `COMPLETED`, creates no operation, scans no live Trash row or
 storage object, and duplicates no claim, retry, verification, or lease policy.
 Concurrent selectors may observe the same candidate; the existing atomic claim
-and fresh ownership barriers decide the winner safely. No operation-history
-dashboard, force-complete, cancel, restore action, or durable batch ledger is
-added.
+and fresh ownership barriers decide the winner safely. The pass selection time
+is only a conservative due-work snapshot. Each claim, storage observation,
+destructive-attempt deadline check, retry or unknown-outcome transition, and
+completion uses a fresh event time. Storage initialization occurs only after a
+successful owned claim and only when persisted object recovery rows require it;
+a claim loser and a database-only operation never contact MinIO. No
+operation-history dashboard, force-complete, cancel, restore action, or durable
+batch ledger is added.
 
 ## Internal Stage 5F-B processing
 
@@ -185,8 +190,9 @@ and retries only database finalization.
 
 ## Completion and retention
 
-`COMPLETED` requires a completion timestamp and a purge time at least 180 days
-later. Incomplete or live operations do not expire merely because time passes.
+`COMPLETED` requires a freshly sampled completion timestamp after final storage
+truth and a purge time exactly 180 days later. Incomplete or live operations do
+not expire merely because time passes.
 The retained operation is minimal audit only; descriptive snapshots are
 forbidden. Exact storage child identity remains recoverable while needed and
 can be removed after completion.

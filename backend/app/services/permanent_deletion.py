@@ -67,6 +67,8 @@ class PermanentDeletionError(RuntimeError):
 
 
 LeaseClock = Callable[[], datetime]
+EventClock = Callable[[], datetime]
+StorageFactory = Callable[[], ExactVersionMinioAdapter]
 
 
 def _current_utc_time() -> datetime:
@@ -950,13 +952,19 @@ async def process_one_permanent_deletion(
     db: SQLModelAsyncSession,
     *,
     operation_id: int,
-    storage: ExactVersionMinioAdapter | None,
+    storage: ExactVersionMinioAdapter | None = None,
+    storage_factory: StorageFactory | None = None,
     now: datetime | None = None,
+    event_clock: EventClock | None = None,
     jitter_fraction: float = 0.0,
     lease_for: timedelta = timedelta(minutes=5),
     lease_clock: LeaseClock = _current_utc_time,
 ) -> PermanentDeletionStatus:
-    timestamp = now or datetime.now(UTC)
+    if storage is not None and storage_factory is not None:
+        raise ValueError("storage and storage_factory are mutually exclusive")
+    # `now` remains a deterministic compatibility clock for direct tests.
+    # Production callers omit it and receive a fresh value at each boundary.
+    clock = event_clock or ((lambda: now) if now is not None else _current_utc_time)
     current_status = await _operation_status(db, operation_id)
     if current_status in {
         PermanentDeletionStatus.COMPLETED,
@@ -964,11 +972,12 @@ async def process_one_permanent_deletion(
     }:
         return current_status
     lease_token = uuid.uuid4().hex
+    claim_time = clock()
     claimed = await claim_permanent_deletion(
         db,
         operation_id=operation_id,
         lease_token=lease_token,
-        now=timestamp,
+        now=claim_time,
         lease_for=lease_for,
     )
     if not claimed:
@@ -992,7 +1001,7 @@ async def process_one_permanent_deletion(
             operation_id=operation_id,
             lease_token=lease_token,
             code=getattr(exc, "code", "membership_revalidation_failed"),
-            now=timestamp,
+            now=clock(),
             lease_clock=lease_clock,
         )
     except StorageSafetyError as exc:
@@ -1002,7 +1011,7 @@ async def process_one_permanent_deletion(
             operation_id=operation_id,
             lease_token=lease_token,
             code=exc.code,
-            now=timestamp,
+            now=clock(),
             lease_clock=lease_clock,
         )
 
@@ -1013,14 +1022,43 @@ async def process_one_permanent_deletion(
         .order_by(PermanentDeletionObject.id),
     )
     if objects and storage is None:
-        return await _manual_review(
-            db,
-            operation_id=operation_id,
-            lease_token=lease_token,
-            code="storage_adapter_missing",
-            now=timestamp,
-            lease_clock=lease_clock,
-        )
+        if storage_factory is None:
+            return await _manual_review(
+                db,
+                operation_id=operation_id,
+                lease_token=lease_token,
+                code="storage_adapter_missing",
+                now=clock(),
+                lease_clock=lease_clock,
+            )
+        try:
+            await _owned_operation(
+                db,
+                operation_id,
+                lease_token,
+                lease_clock=lease_clock,
+            )
+            await db.commit()
+            initialized_storage = storage_factory()
+            if not isinstance(initialized_storage, ExactVersionMinioAdapter):
+                raise TypeError("storage factory returned an invalid adapter")
+            storage = initialized_storage
+        except PermanentDeletionError as exc:
+            await db.rollback()
+            if exc.code == "lease_lost":
+                return await _operation_status(db, operation_id)
+            raise
+        except Exception:  # noqa: BLE001 - external initialization boundary
+            await db.rollback()
+            return await _retryable(
+                db,
+                operation_id=operation_id,
+                lease_token=lease_token,
+                code="storage_initialization_failed",
+                now=clock(),
+                jitter_fraction=jitter_fraction,
+                lease_clock=lease_clock,
+            )
 
     for object_row in objects:
         object_id = int(object_row.id)
@@ -1050,7 +1088,7 @@ async def process_one_permanent_deletion(
                 operation_id=operation_id,
                 lease_token=lease_token,
                 code=getattr(exc, "code", "storage_revalidation_failed"),
-                now=timestamp,
+                now=clock(),
                 object_id=object_id,
                 lease_clock=lease_clock,
             )
@@ -1061,7 +1099,7 @@ async def process_one_permanent_deletion(
                 operation_id=operation_id,
                 lease_token=lease_token,
                 code=exc.code,
-                now=timestamp,
+                now=clock(),
                 object_id=object_id,
                 lease_clock=lease_clock,
             )
@@ -1074,13 +1112,14 @@ async def process_one_permanent_deletion(
                 operation_id=operation_id,
                 lease_token=lease_token,
                 code="storage_recovery_record_missing",
-                now=timestamp,
+                now=clock(),
                 lease_clock=lease_clock,
             )
-        current_object.last_verified_at = timestamp
+        verification_time = clock()
+        current_object.last_verified_at = verification_time
         if observation is ExactVersionState.VERIFIED_ABSENT:
             current_object.state = PermanentDeletionObjectState.VERIFIED_ABSENT
-            current_object.verified_absent_at = timestamp
+            current_object.verified_absent_at = verification_time
             current_object.result_code = "verified_absent"
             await db.commit()
             continue
@@ -1091,7 +1130,7 @@ async def process_one_permanent_deletion(
                 operation_id=operation_id,
                 lease_token=lease_token,
                 code="unknown_outcome_verified_present",
-                now=timestamp,
+                now=clock(),
                 jitter_fraction=jitter_fraction,
                 object_id=object_id,
                 lease_clock=lease_clock,
@@ -1109,11 +1148,12 @@ async def process_one_permanent_deletion(
             if exc.code == "lease_lost":
                 return await _operation_status(db, operation_id)
             raise
+        attempt_time = clock()
         if (
             operation.automatic_attempt_count >= 10
             or current_object.delete_attempt_count >= 10
             or operation.retry_deadline_at is None
-            or timestamp >= operation.retry_deadline_at
+            or attempt_time >= operation.retry_deadline_at
         ):
             await db.rollback()
             return await _manual_review(
@@ -1121,14 +1161,14 @@ async def process_one_permanent_deletion(
                 operation_id=operation_id,
                 lease_token=lease_token,
                 code="automatic_retry_budget_exhausted",
-                now=timestamp,
+                now=attempt_time,
                 object_id=object_id,
                 lease_clock=lease_clock,
             )
         operation.automatic_attempt_count += 1
-        operation.updated_at = timestamp
+        operation.updated_at = attempt_time
         current_object.delete_attempt_count += 1
-        current_object.last_delete_attempt_at = timestamp
+        current_object.last_delete_attempt_at = attempt_time
         current_object.state = PermanentDeletionObjectState.DELETE_IN_PROGRESS
         current_object.result_code = None
         await db.commit()
@@ -1166,14 +1206,15 @@ async def process_one_permanent_deletion(
                     return await _operation_status(db, operation_id)
                 raise
             current_object = await db.get(PermanentDeletionObject, object_row.id)
+            unknown_time = clock()
             current_object.state = PermanentDeletionObjectState.VERIFICATION_REQUIRED
-            current_object.last_unknown_outcome_at = timestamp
+            current_object.last_unknown_outcome_at = unknown_time
             current_object.result_code = exc.code
             operation.status = PermanentDeletionStatus.VERIFICATION_REQUIRED
             operation.result_code = exc.code
             operation.lease_token = None
             operation.lease_expires_at = None
-            operation.updated_at = timestamp
+            operation.updated_at = unknown_time
             await db.commit()
             return PermanentDeletionStatus.VERIFICATION_REQUIRED
         except RetryableStorageError as exc:
@@ -1182,7 +1223,7 @@ async def process_one_permanent_deletion(
                 operation_id=operation_id,
                 lease_token=lease_token,
                 code=exc.code,
-                now=timestamp,
+                now=clock(),
                 jitter_fraction=jitter_fraction,
                 object_id=object_id,
                 lease_clock=lease_clock,
@@ -1193,7 +1234,7 @@ async def process_one_permanent_deletion(
                 operation_id=operation_id,
                 lease_token=lease_token,
                 code=exc.code,
-                now=timestamp,
+                now=clock(),
                 object_id=object_id,
                 lease_clock=lease_clock,
             )
@@ -1203,7 +1244,7 @@ async def process_one_permanent_deletion(
                 operation_id=operation_id,
                 lease_token=lease_token,
                 code="delete_not_verified_absent",
-                now=timestamp,
+                now=clock(),
                 object_id=object_id,
                 lease_clock=lease_clock,
             )
@@ -1220,9 +1261,10 @@ async def process_one_permanent_deletion(
                 return await _operation_status(db, operation_id)
             raise
         current_object = await db.get(PermanentDeletionObject, object_row.id)
+        verification_time = clock()
         current_object.state = PermanentDeletionObjectState.VERIFIED_ABSENT
-        current_object.last_verified_at = timestamp
-        current_object.verified_absent_at = timestamp
+        current_object.last_verified_at = verification_time
+        current_object.verified_absent_at = verification_time
         current_object.result_code = "verified_absent"
         await db.commit()
 
@@ -1260,7 +1302,7 @@ async def process_one_permanent_deletion(
             operation_id=operation_id,
             lease_token=lease_token,
             code=getattr(exc, "code", "finalization_revalidation_failed"),
-            now=timestamp,
+            now=clock(),
             lease_clock=lease_clock,
         )
     except StorageSafetyError as exc:
@@ -1270,29 +1312,30 @@ async def process_one_permanent_deletion(
             operation_id=operation_id,
             lease_token=lease_token,
             code=exc.code,
-            now=timestamp,
+            now=clock(),
             lease_clock=lease_clock,
         )
 
     try:
-        await _finalize_plan(db, plan, now=timestamp)
+        await _finalize_plan(db, plan, now=clock())
         operation = await _owned_operation(
             db,
             operation_id,
             lease_token,
             lease_clock=lease_clock,
         )
+        completion_time = clock()
         operation.status = PermanentDeletionStatus.COMPLETED
-        operation.completed_at = timestamp
-        operation.audit_purge_after = timestamp + timedelta(days=180)
+        operation.completed_at = completion_time
+        operation.audit_purge_after = completion_time + timedelta(days=180)
         operation.result_code = "completed"
         operation.next_attempt_at = None
         operation.lease_token = None
         operation.lease_expires_at = None
-        operation.updated_at = timestamp
+        operation.updated_at = completion_time
         targets = await _stored_targets(db, operation_id)
         for target in targets:
-            target.reservation_released_at = timestamp
+            target.reservation_released_at = completion_time
         await db.execute(
             delete(PermanentDeletionObject).where(
                 PermanentDeletionObject.operation_id == operation_id
@@ -1309,7 +1352,7 @@ async def process_one_permanent_deletion(
             operation_id=operation_id,
             lease_token=lease_token,
             code="db_finalization_failed",
-            now=timestamp,
+            now=clock(),
             jitter_fraction=jitter_fraction,
             lease_clock=lease_clock,
         )
@@ -1320,7 +1363,7 @@ async def process_one_permanent_deletion(
             operation_id=operation_id,
             lease_token=lease_token,
             code="db_finalization_failed",
-            now=timestamp,
+            now=clock(),
             jitter_fraction=jitter_fraction,
             lease_clock=lease_clock,
         )
