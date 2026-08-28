@@ -16,7 +16,7 @@ from app.models.models import ArchiveSubmission, User
 
 
 def test_reviewed_manifest_registry_has_required_revisions() -> None:
-    assert HEAD_SCHEMA_REVISION == "f6b8d2c4a9e1"
+    assert HEAD_SCHEMA_REVISION == "a5f7c9d2e4b6"
     assert reviewed_manifest_revisions() == (
         "c4d8e2f1a6b9",
         "a4c7e9d2f6b1",
@@ -41,6 +41,7 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
         "d1f5a9c3e7b2",
         "e2c6a8f4b1d9",
         "f6b8d2c4a9e1",
+        "a5f7c9d2e4b6",
     )
     assert get_manifest_spec("d4b7e2a9c6f1").metadata_variant == (
         "pre_about_us_entries"
@@ -71,7 +72,10 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
     assert get_manifest_spec("e2c6a8f4b1d9").metadata_variant == (
         "pre_archive_submission_event_detachment"
     )
-    assert get_manifest_spec("f6b8d2c4a9e1").metadata_variant == "head"
+    assert get_manifest_spec("f6b8d2c4a9e1").metadata_variant == (
+        "pre_permanent_deletion_foundation"
+    )
+    assert get_manifest_spec("a5f7c9d2e4b6").metadata_variant == "head"
 
 
 def test_compound_partial_index_predicate_normalizes_postgresql_parentheses() -> None:
@@ -96,7 +100,8 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     column_name = "owner_self_delete_consumed"
     previous_status_column = "previous_status"
     constraint_name = "uq_archive_submissions_created_archive_id"
-    head = metadata_for_revision("f6b8d2c4a9e1")
+    head = metadata_for_revision("a5f7c9d2e4b6")
+    previous_permanent_deletion_head = metadata_for_revision("f6b8d2c4a9e1")
     previous_event_head = metadata_for_revision("e2c6a8f4b1d9")
     previous_slogan_head = metadata_for_revision("d1f5a9c3e7b2")
     previous_wish_report_head = metadata_for_revision("c8e4a1f7b2d9")
@@ -120,6 +125,11 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     a4 = metadata_for_revision("a4c7e9d2f6b1")
 
     assert head is not None
+    assert previous_permanent_deletion_head is not None
+    assert "permanent_deletion_operations" in head.tables
+    assert "permanent_deletion_targets" in head.tables
+    assert "permanent_deletion_objects" in head.tables
+    assert "permanent_deletion_operations" not in previous_permanent_deletion_head.tables
     assert previous_event_head is not None
     assert head.tables["archive_submission_events"].c.submission_id.nullable is True
     assert (
@@ -327,7 +337,7 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     )
 
     # Building older variants must never mutate current SQLModel metadata.
-    rebuilt_head = metadata_for_revision("f6b8d2c4a9e1")
+    rebuilt_head = metadata_for_revision("a5f7c9d2e4b6")
     assert rebuilt_head is not None
     assert column_name in rebuilt_head.tables["archive_submissions"].c
     assert previous_status_column in rebuilt_head.tables["archive_submissions"].c

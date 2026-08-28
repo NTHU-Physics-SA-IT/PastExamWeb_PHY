@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.api.services import trash
-from app.models.models import SubmissionStatus, TrashEntityType
+from app.models.models import PermanentDeletionStatus, SubmissionStatus, TrashEntityType
 
 
 @pytest.mark.parametrize("item_type", list(TrashEntityType))
@@ -75,3 +75,25 @@ async def test_course_trash_temporary_submission_is_not_independently_actionable
         "阻擋還原：請先還原原課程",
         "隨課程復原：課程復原後回到已通過",
     )
+
+
+def test_permanent_deletion_projection_separates_operation_from_lifecycle_status():
+    accepted_at = datetime(2026, 8, 28, tzinfo=UTC)
+    operation = SimpleNamespace(
+        id=27,
+        root_entity_type=TrashEntityType.ARCHIVE.value,
+        root_entity_id=9,
+        status=PermanentDeletionStatus.ACCEPTED,
+        accepted_at=accepted_at,
+        completed_at=None,
+        next_attempt_at=accepted_at,
+        result_code=None,
+    )
+
+    projection = trash._to_permanent_deletion_read(operation, now=accepted_at)
+
+    assert projection.operation_id == 27
+    assert projection.status == PermanentDeletionStatus.ACCEPTED
+    assert projection.can_retry is True
+    assert projection.can_inspect_reason is False
+    assert projection.restore_available is False

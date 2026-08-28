@@ -874,6 +874,23 @@ explicit action-authority booleans, present a missing Course link as valid
 detached history, and do not infer relink, recreation, or alternate lifecycle
 actions from status or relationship display data.
 
+## Permanent-deletion operation state
+
+The independent [permanent-deletion contract](permanent-deletion.md) defines
+the sealed operation namespace: `ACCEPTED`, `PROCESSING`,
+`VERIFICATION_REQUIRED`, `RETRYABLE_FAILED`, `MANUAL_REVIEW`, and `COMPLETED`.
+It does not extend or reuse `SubmissionStatus`; `PENDING` is not a
+permanent-deletion operation state. A later backend acceptance commit is the
+irreversibility point.
+
+Administrator Trash single-item deletion accepts and boundedly progresses this
+operation for every Trash root. A newly accepted or unfinished operation
+returns `202`; only `COMPLETED` returns `200`. The outcome-bounded bulk surface
+evaluates each selected item through the same transition authority and returns
+outer `200` with mutually exclusive per-item outcomes. Acceptance removes
+restore authority for every reserved logical target. No force-complete,
+cancel, resurrection, or operation-wide rollback transition exists.
+
 ## Authorization
 
 ### NTHU login policy
@@ -973,7 +990,7 @@ tests before centralization.
 | Missing entity | Not found/unavailable without side effects | Generally implemented |
 | Active uniqueness conflict | Explicit conflict and no duplicate row | Implemented for several report paths; soft-delete predicate has a gap |
 | Restore conflict | Explicitly block restore and retain trashed row | Required follow-up for pending reports and previous-state restoration |
-| Storage deletion failure | Do not report the single item as fully deleted; preserve retry evidence | Implementation gap; current cleanup may emit only a warning |
+| Storage deletion failure | Do not report the single item as fully deleted; preserve retry evidence | Implemented for administrator Trash permanent deletion through durable operation truth; storage failure or uncertainty remains unfinished and cannot be reported as completed. Upload and non-Trash legacy cleanup remain outside this contract. |
 
 This contract does not standardize the precise `401`/`403` authentication
 status. Future conformance work must coordinate the no-op response,

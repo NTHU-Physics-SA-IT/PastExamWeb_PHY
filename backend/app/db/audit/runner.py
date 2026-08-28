@@ -31,6 +31,7 @@ from app.db.audit.registry import (
     CATEGORY_STATE_PRESERVATION_REVISION,
     COURSE_SUBMISSION_LIFECYCLE_REVISION,
     HOMEPAGE_SLOGAN_REVISION,
+    PERMANENT_DELETION_FOUNDATION_REVISION,
     RETAINED_EVENT_REVISION,
     SIBLING_MERGE_REVISION,
     WISH_OPTIONAL_SEMESTER_REVISION,
@@ -143,6 +144,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_REPORT_TRASH_REVISION,
         HOMEPAGE_SLOGAN_REVISION,
         RETAINED_EVENT_REVISION,
+        PERMANENT_DELETION_FOUNDATION_REVISION,
     }
     owner_delete_column_condition = (
         """
@@ -187,6 +189,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_REPORT_TRASH_REVISION,
         HOMEPAGE_SLOGAN_REVISION,
         RETAINED_EVENT_REVISION,
+        PERMANENT_DELETION_FOUNDATION_REVISION,
     }
     previous_status_column_condition = (
         """
@@ -225,6 +228,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_REPORT_TRASH_REVISION,
         HOMEPAGE_SLOGAN_REVISION,
         RETAINED_EVENT_REVISION,
+        PERMANENT_DELETION_FOUNDATION_REVISION,
     }
     bilingual_catalog_condition = (
         """
@@ -272,6 +276,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_REPORT_TRASH_REVISION,
         HOMEPAGE_SLOGAN_REVISION,
         RETAINED_EVENT_REVISION,
+        PERMANENT_DELETION_FOUNDATION_REVISION,
     }
     bilingual_snapshot_condition = (
         """
@@ -314,6 +319,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_REPORT_TRASH_REVISION,
         HOMEPAGE_SLOGAN_REVISION,
         RETAINED_EVENT_REVISION,
+        PERMANENT_DELETION_FOUNDATION_REVISION,
     }
     category_state_snapshot_condition = (
         """
@@ -347,6 +353,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_REPORT_TRASH_REVISION,
         HOMEPAGE_SLOGAN_REVISION,
         RETAINED_EVENT_REVISION,
+        PERMANENT_DELETION_FOUNDATION_REVISION,
     }
     course_submission_lifecycle_condition = (
         """
@@ -391,6 +398,7 @@ def _continuity_cte(request: AuditRequest) -> str:
         WISH_REPORT_TRASH_REVISION,
         HOMEPAGE_SLOGAN_REVISION,
         RETAINED_EVENT_REVISION,
+        PERMANENT_DELETION_FOUNDATION_REVISION,
     }
     wish_year_nullability = (
         "YES"
@@ -402,6 +410,7 @@ def _continuity_cte(request: AuditRequest) -> str:
             WISH_REPORT_TRASH_REVISION,
             HOMEPAGE_SLOGAN_REVISION,
             RETAINED_EVENT_REVISION,
+            PERMANENT_DELETION_FOUNDATION_REVISION,
         }
         else "NO"
     )
@@ -462,6 +471,7 @@ def _continuity_cte(request: AuditRequest) -> str:
             WISH_REPORT_TRASH_REVISION,
             HOMEPAGE_SLOGAN_REVISION,
             RETAINED_EVENT_REVISION,
+            PERMANENT_DELETION_FOUNDATION_REVISION,
         }
         else """
         NOT EXISTS (
@@ -499,6 +509,7 @@ def _continuity_cte(request: AuditRequest) -> str:
             WISH_REPORT_TRASH_REVISION,
             HOMEPAGE_SLOGAN_REVISION,
             RETAINED_EVENT_REVISION,
+            PERMANENT_DELETION_FOUNDATION_REVISION,
         }
         else """
         NOT EXISTS (
@@ -525,7 +536,11 @@ def _continuity_cte(request: AuditRequest) -> str:
         )
         """
         if request.expected_ledger
-        in {HOMEPAGE_SLOGAN_REVISION, RETAINED_EVENT_REVISION}
+        in {
+            HOMEPAGE_SLOGAN_REVISION,
+            RETAINED_EVENT_REVISION,
+            PERMANENT_DELETION_FOUNDATION_REVISION,
+        }
         else """
         to_regclass('public.homepage_slogan_submissions') IS NULL
         """
