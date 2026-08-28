@@ -6,12 +6,16 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import delete, select
 
+from app.main import app
 from app.maintenance import permanent_deletion_reconciler as worker
 from app.models.models import (
+    Notification,
     PermanentDeletionOperation,
     PermanentDeletionStatus,
     PermanentDeletionTarget,
 )
+from app.services import permanent_deletion_reconciler as reconciler_service
+from app.services.permanent_deletion import accept_permanent_deletion
 from app.services.permanent_deletion_reconciler import (
     purge_completed_audits,
     reconcile_due_once,
@@ -254,7 +258,7 @@ async def test_completed_audit_purge_is_due_only_bounded_and_idempotent(
 
 
 @pytest.mark.asyncio
-async def test_worker_loop_waits_and_shutdown_prevents_another_pass() -> None:
+async def test_worker_shutdown_prevents_another_pass() -> None:
     stop = asyncio.Event()
     calls = 0
 
@@ -274,6 +278,39 @@ async def test_worker_loop_waits_and_shutdown_prevents_another_pass() -> None:
     assert calls == 1
 
 
+@pytest.mark.asyncio
+async def test_worker_waits_after_a_failed_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stop = asyncio.Event()
+    waits: list[float] = []
+
+    async def failed_pass(**_kwargs):
+        raise ConnectionError("database unavailable")
+
+    async def fake_wait_for(awaitable, *, timeout):
+        waits.append(timeout)
+        awaitable.close()
+        stop.set()
+
+    monkeypatch.setattr(worker.asyncio, "wait_for", fake_wait_for)
+    await worker.run_worker(
+        stop_event=stop,
+        poll_interval_seconds=30.0,
+        operation_batch_limit=10,
+        purge_batch_limit=10,
+        reconcile=failed_pass,
+    )
+
+    assert waits == [30.0]
+
+
+def test_fastapi_startup_does_not_register_reconciler() -> None:
+    assert all(
+        callback.__module__ != worker.__name__ for callback in app.router.on_startup
+    )
+
+
 def test_worker_configuration_rejects_non_positive_or_unbounded_values() -> None:
     with pytest.raises(SystemExit):
         worker.parse_args(["--poll-interval-seconds", "0"])
@@ -281,3 +318,91 @@ def test_worker_configuration_rejects_non_positive_or_unbounded_values() -> None
         worker.parse_args(["--operation-batch-limit", "1001"])
     with pytest.raises(SystemExit):
         worker.parse_args(["--purge-batch-limit", "-1"])
+
+
+@pytest.mark.asyncio
+async def test_purge_failure_does_not_undo_processed_candidate(
+    session_maker,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation = _operation(
+        "purge-independent",
+        status=PermanentDeletionStatus.ACCEPTED,
+        accepted_at=NOW - timedelta(minutes=1),
+        next_attempt_at=NOW - timedelta(minutes=1),
+    )
+    async with session_maker() as session:
+        session.add(operation)
+        await session.commit()
+        await session.refresh(operation)
+
+    async def processor(_db, **_kwargs):
+        return PermanentDeletionStatus.COMPLETED
+
+    async def failed_purge(*_args, **_kwargs):
+        raise RuntimeError("purge unavailable")
+
+    monkeypatch.setattr(reconciler_service, "purge_completed_audits", failed_purge)
+    summary = await reconcile_due_once(
+        session_maker=session_maker,
+        storage_factory=lambda: None,
+        now=NOW,
+        processor=processor,
+    )
+
+    assert summary.processed == 1
+    assert summary.completed == 1
+    assert summary.purge_errors == 1
+    async with session_maker() as session:
+        await session.execute(
+            delete(PermanentDeletionOperation).where(
+                PermanentDeletionOperation.id == operation.id
+            )
+        )
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_db_only_reconciler_completes_without_minio(
+    session_maker,
+    make_user,
+) -> None:
+    admin = await make_user(is_admin=True)
+    async with session_maker() as session:
+        bulletin = Notification(
+            title="Stage 5F-E DB-only reconciliation",
+            body="No storage dependency",
+            deleted_at=NOW - timedelta(minutes=5),
+            deleted_by_id=admin.id,
+        )
+        session.add(bulletin)
+        await session.commit()
+        await session.refresh(bulletin)
+        operation = await accept_permanent_deletion(
+            session,
+            root_entity_type="notification",
+            root_entity_id=int(bulletin.id),
+            idempotency_key=f"stage5fe:db-only:{bulletin.id}",
+            requested_by_user_id=admin.id,
+            storage=None,
+            now=NOW,
+        )
+        operation_id = int(operation.id)
+
+    def forbidden_storage_factory():
+        raise AssertionError("DB-only operation initialized MinIO")
+
+    summary = await reconcile_due_once(
+        session_maker=session_maker,
+        storage_factory=forbidden_storage_factory,
+        now=NOW,
+    )
+
+    assert summary.completed == 1
+    assert summary.errors == 0
+    async with session_maker() as session:
+        assert await session.get(Notification, bulletin.id) is None
+        stored = await session.get(PermanentDeletionOperation, operation_id)
+        assert stored.status == PermanentDeletionStatus.COMPLETED
+        await session.delete(stored)
+        await session.commit()
