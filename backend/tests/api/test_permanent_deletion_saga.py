@@ -368,7 +368,14 @@ async def test_concurrent_reconciler_passes_do_not_double_delete_exact_version(
     client = FakeVersionedMinio(archive.object_name, "stage5fe-concurrent-v1")
     storage = ExactVersionMinioAdapter(client, bucket_name="stage5fe-test")
     operation_id: int | None = None
+    factory_calls = 0
     now = datetime(2026, 8, 28, 4, 45, tzinfo=UTC)
+
+    def storage_factory():
+        nonlocal factory_calls
+        factory_calls += 1
+        return storage
+
     try:
         async with session_maker() as session:
             operation = await accept_permanent_deletion(
@@ -385,22 +392,146 @@ async def test_concurrent_reconciler_passes_do_not_double_delete_exact_version(
         await asyncio.gather(
             reconcile_due_once(
                 session_maker=session_maker,
-                storage_factory=lambda: storage,
+                storage_factory=storage_factory,
                 now=now,
             ),
             reconcile_due_once(
                 session_maker=session_maker,
-                storage_factory=lambda: storage,
+                storage_factory=storage_factory,
                 now=now,
             ),
         )
 
+        assert factory_calls == 1
         assert client.removals == [
             ("stage5fe-test", archive.object_name, "stage5fe-concurrent-v1")
         ]
         async with session_maker() as session:
             completed = await session.get(PermanentDeletionOperation, operation_id)
             assert completed.status == PermanentDeletionStatus.COMPLETED
+    finally:
+        await _cleanup_pair_and_operation(
+            session_maker,
+            operation_id=operation_id,
+            category_id=category.id,
+            course_id=course.id,
+            archive_id=archive.id,
+            submission_id=submission.id,
+            event_id=event.id,
+            notification_id=notification.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_fresh_attempt_time_blocks_delete_after_true_retry_deadline(
+    session_maker,
+    make_user,
+) -> None:
+    requester = await make_user()
+    category, course, archive, submission, event, notification = (
+        await _create_deleted_pair(session_maker, requester_id=requester.id)
+    )
+    client = FakeVersionedMinio(archive.object_name, "stage5fe-deadline-v1")
+    storage = ExactVersionMinioAdapter(client, bucket_name="stage5fe-test")
+    accepted_at = datetime(2026, 8, 27, 6, 0, tzinfo=UTC)
+    clock = MutableLeaseClock(accepted_at + timedelta(hours=24, seconds=-1))
+    operation_id: int | None = None
+
+    def cross_deadline() -> None:
+        clock.current = accepted_at + timedelta(hours=24)
+
+    client.on_history = cross_deadline
+    try:
+        async with session_maker() as session:
+            operation = await accept_permanent_deletion(
+                session,
+                root_entity_type=TrashEntityType.ARCHIVE,
+                root_entity_id=int(archive.id),
+                idempotency_key=f"stage5fe:deadline:{archive.id}",
+                requested_by_user_id=requester.id,
+                storage=storage,
+                now=accepted_at,
+            )
+            operation_id = int(operation.id)
+            result = await process_one_permanent_deletion(
+                session,
+                operation_id=operation_id,
+                storage=storage,
+                event_clock=clock,
+                lease_clock=MutableLeaseClock(
+                    accepted_at + timedelta(hours=24, seconds=-1)
+                ),
+            )
+            assert result == PermanentDeletionStatus.MANUAL_REVIEW
+            await session.refresh(operation)
+            assert operation.result_code == "automatic_retry_budget_exhausted"
+            assert operation.automatic_attempt_count == 0
+            assert client.removals == []
+    finally:
+        client.on_history = None
+        await _cleanup_pair_and_operation(
+            session_maker,
+            operation_id=operation_id,
+            category_id=category.id,
+            course_id=course.id,
+            archive_id=archive.id,
+            submission_id=submission.id,
+            event_id=event.id,
+            notification_id=notification.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_storage_factory_failure_after_claim_is_durable_and_redacted(
+    session_maker,
+    make_user,
+) -> None:
+    requester = await make_user()
+    category, course, archive, submission, event, notification = (
+        await _create_deleted_pair(session_maker, requester_id=requester.id)
+    )
+    storage = ExactVersionMinioAdapter(
+        FakeVersionedMinio(archive.object_name, "stage5fe-init-v1"),
+        bucket_name="stage5fe-test",
+    )
+    now = datetime(2026, 8, 28, 5, 0, tzinfo=UTC)
+    failure_time = now + timedelta(seconds=2)
+    clock = MutableLeaseClock(now + timedelta(seconds=1))
+    operation_id: int | None = None
+    factory_calls = 0
+
+    def failed_factory():
+        nonlocal factory_calls
+        factory_calls += 1
+        clock.current = failure_time
+        raise ConnectionError("secret endpoint and credential details")
+
+    try:
+        async with session_maker() as session:
+            operation = await accept_permanent_deletion(
+                session,
+                root_entity_type=TrashEntityType.ARCHIVE,
+                root_entity_id=int(archive.id),
+                idempotency_key=f"stage5fe:init:{archive.id}",
+                requested_by_user_id=requester.id,
+                storage=storage,
+                now=now,
+            )
+            operation_id = int(operation.id)
+            result = await process_one_permanent_deletion(
+                session,
+                operation_id=operation_id,
+                storage=None,
+                storage_factory=failed_factory,
+                event_clock=clock,
+                lease_clock=MutableLeaseClock(now + timedelta(seconds=1)),
+            )
+            assert result == PermanentDeletionStatus.RETRYABLE_FAILED
+            await session.refresh(operation)
+            assert operation.result_code == "storage_initialization_failed"
+            assert operation.updated_at == failure_time
+            assert operation.lease_token is None
+            assert factory_calls == 1
     finally:
         await _cleanup_pair_and_operation(
             session_maker,
