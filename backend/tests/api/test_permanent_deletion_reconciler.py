@@ -4,7 +4,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.maintenance import permanent_deletion_reconciler as worker
 from app.models.models import (
@@ -121,6 +121,15 @@ async def test_due_selector_enforces_state_time_lease_order_and_limit(
         rows["processing_expired"].id,
     ]
     assert all_due == selected + [rows["retry_due"].id]
+    async with session_maker() as session:
+        await session.execute(
+            delete(PermanentDeletionOperation).where(
+                PermanentDeletionOperation.id.in_(
+                    [int(row.id) for row in rows.values()]
+                )
+            )
+        )
+        await session.commit()
 
 
 @pytest.mark.asyncio
@@ -171,6 +180,13 @@ async def test_reconcile_due_once_is_item_independent_and_storage_lazy(
     assert summary.processed == 1
     assert summary.completed == 1
     assert summary.errors == 1
+    async with session_maker() as session:
+        await session.execute(
+            delete(PermanentDeletionOperation).where(
+                PermanentDeletionOperation.id.in_([int(first.id), int(second.id)])
+            )
+        )
+        await session.commit()
 
 
 @pytest.mark.asyncio
@@ -228,6 +244,13 @@ async def test_completed_audit_purge_is_due_only_bounded_and_idempotent(
             (await session.execute(select(PermanentDeletionOperation.id).where(PermanentDeletionOperation.id.in_(ids)))).scalars()
         )
     assert remaining == {retained_completed.id, unfinished_old.id}
+    async with session_maker() as session:
+        await session.execute(
+            delete(PermanentDeletionOperation).where(
+                PermanentDeletionOperation.id.in_(list(remaining))
+            )
+        )
+        await session.commit()
 
 
 @pytest.mark.asyncio
