@@ -449,10 +449,31 @@ edge/CDN remain an environment-level verification responsibility.
 
 Only a successful exchange issues the normal application bearer JWT in JSON,
 updates `last_login` and `last_seen_at`, creates/touches presence state, and
-commits those database effects together. Local login, logout, heartbeat, and
-their existing token owner remain unchanged. OAuth state is stored in the
+commits those database effects together. Logout, heartbeat, and their existing
+token owner remain unchanged. OAuth state is stored in the
 existing signed session and removed before validation, making success,
 mismatch, missing-state, and replay paths one-time.
+
+## Local login abuse admission
+
+`POST /auth/login` owns a Redis admission check before user lookup and password
+verification. The application uses only the SEC-02A-authorized ASGI client
+address and the exact submitted username. Domain-separated HMAC-SHA256
+identities keep both values out of Redis key names and security logs.
+
+One atomic Redis operation coordinates fixed principal and client-IP windows.
+The first 8 principal attempts and first 50 client-IP attempts in 10 minutes
+are admitted; the next applicable attempt creates a fixed, non-extending
+10-minute block and returns the same no-store 429 response for either bucket.
+Every admitted attempt counts. A successful local login clears only its
+principal count when no newer attempt or block exists; it never clears the IP
+budget. Every count and block is TTL-bound.
+
+Ordinary Redis connection and timeout failures fail open with privacy-safe
+degradation telemetry so limiter availability does not become a new login
+outage. Redis authentication, authorization, script/data, protocol, and
+programming failures remain visible failures. The limiter does not alter the
+existing database transaction, 401 response, bcrypt behavior, or OAuth paths.
 
 ### Intended invariant
 

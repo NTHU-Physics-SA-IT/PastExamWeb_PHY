@@ -12,6 +12,7 @@ from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from app.api.services.auth import get_login_rate_limiter
 from app.core.config import settings
 from app.db.test_database_guard import (
     validate_connected_test_database,
@@ -19,6 +20,7 @@ from app.db.test_database_guard import (
 )
 from app.main import app
 from app.models.models import Archive, User
+from app.services.login_rate_limiter import LoginAdmission
 from app.utils.auth import get_password_hash
 
 RUNTIME_DATABASE_URL = URL.create(
@@ -34,6 +36,23 @@ TEST_DATABASE_ALLOWED_HOSTS = os.getenv(
     "TEST_DATABASE_ALLOWED_HOSTS",
     "127.0.0.1,localhost,db",
 )
+
+
+class _AllowAllLoginRateLimiter:
+    async def admit(self, **_kwargs):
+        return LoginAdmission(admitted=True)
+
+    async def reset_principal(self, _token):
+        return None
+
+
+@pytest.fixture(autouse=True)
+def override_login_rate_limiter():
+    app.dependency_overrides[get_login_rate_limiter] = lambda: (
+        _AllowAllLoginRateLimiter()
+    )
+    yield
+    app.dependency_overrides.pop(get_login_rate_limiter, None)
 
 
 try:

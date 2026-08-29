@@ -6,6 +6,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.api.api import api_router
 from app.core.config import settings
 from app.db.init_db import init_db
+from app.services.login_rate_limiter import create_login_rate_limiter
 from app.services.nthu_dev_mock import validate_nthu_dev_mock_configuration
 from app.utils.access_log import install_oauth_access_log_filter
 
@@ -36,3 +37,11 @@ async def health():
 async def on_startup():
     validate_nthu_dev_mock_configuration()
     await init_db()
+    app.state.login_rate_limiter = create_login_rate_limiter()
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    limiter = getattr(app.state, "login_rate_limiter", None)
+    if limiter is not None:
+        await limiter.aclose()
