@@ -308,6 +308,15 @@ async def test_reconciler_recovers_unknown_exact_delete_without_second_delete(
     storage = ExactVersionMinioAdapter(client, bucket_name="stage5fe-test")
     operation_id: int | None = None
     now = datetime(2026, 8, 28, 4, 30, tzinfo=UTC)
+    clock = MutableLeaseClock(now)
+
+    async def processor(db, **kwargs):
+        return await process_one_permanent_deletion(
+            db,
+            lease_clock=clock,
+            **kwargs,
+        )
+
     try:
         async with session_maker() as session:
             operation = await accept_permanent_deletion(
@@ -325,16 +334,21 @@ async def test_reconciler_recovers_unknown_exact_delete_without_second_delete(
             session_maker=session_maker,
             storage_factory=lambda: storage,
             now=now,
+            event_clock=clock,
+            processor=processor,
         )
         assert first.pending == 1
         async with session_maker() as session:
             pending = await session.get(PermanentDeletionOperation, operation_id)
             assert pending.status == PermanentDeletionStatus.VERIFICATION_REQUIRED
 
+        clock.current = now + timedelta(seconds=1)
         second = await reconcile_due_once(
             session_maker=session_maker,
             storage_factory=lambda: storage,
             now=now + timedelta(seconds=1),
+            event_clock=clock,
+            processor=processor,
         )
         assert second.completed == 1
         assert client.removals == [
