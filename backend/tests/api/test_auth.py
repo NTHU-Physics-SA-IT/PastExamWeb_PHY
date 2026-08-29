@@ -1,15 +1,18 @@
 import uuid
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi import HTTPException
 from sqlmodel import select
+from starlette.requests import Request
 
 from app.api.services import auth as auth_service
 from app.core.config import settings
 from app.main import app
 from app.models.models import SystemSetting, User, UserPresenceSession, UserRoles
+from app.services.login_rate_limiter import LoginAdmission
 from app.services.nthu_oauth import NthuProfile
 from app.utils.auth import get_current_user
 
@@ -438,14 +441,20 @@ async def test_login_direct_returns_token(
         return "fake-token"
 
     monkeypatch.setattr("app.api.services.auth.jwt.encode", fake_encode)
+    limiter = AsyncMock()
+    limiter.admit.return_value = LoginAdmission(admitted=True)
 
     async with session_maker() as session:
         response = await auth_service.login(
+            request=Request(
+                {"type": "http", "client": ("127.0.0.1", 43123), "headers": []}
+            ),
             form_data=SimpleNamespace(
                 username=user.name,
                 password=user.password,
             ),
             db=session,
+            limiter=limiter,
         )
         assert response == {
             "access_token": "fake-token",
@@ -460,14 +469,20 @@ async def test_login_direct_returns_token(
 
 @pytest.mark.asyncio
 async def test_login_direct_rejects_unknown_user(session_maker):
+    limiter = AsyncMock()
+    limiter.admit.return_value = LoginAdmission(admitted=True)
     async with session_maker() as session:
         with pytest.raises(HTTPException) as exc:
             await auth_service.login(
+                request=Request(
+                    {"type": "http", "client": ("127.0.0.1", 43123), "headers": []}
+                ),
                 form_data=SimpleNamespace(
                     username="missing",
                     password="nope",
                 ),
                 db=session,
+                limiter=limiter,
             )
         assert exc.value.status_code == 401
 
