@@ -20,6 +20,9 @@
   - [ADR-0006](0006-coordination-postmerge-full-evidence-reuse.md), only for
     the exact final Case-B coordination postmerge push after both Source Full
     and formal PR Full evidence and all required provenance proofs succeed
+  - [ADR-0014](0014-protected-coordination-exact-state-postmerge-reuse.md), for
+    the current exact same-repository protected-integration final-Q route after
+    mandatory Source Full and PR Full
 
 ## Context
 
@@ -38,8 +41,9 @@ uses Full CI. Main never uses Equivalent evidence.
 An ordinary eligible pull request or merge involving the exact machine-resolved
 coordination branch may use the existing Equivalent provenance path only when
 current repository contracts permit it. Governance-sensitive coordination
-changes fall back to Full except for ADR-0006's exact final Case-B postmerge
-reuse after both Source Full and formal PR Full evidence and every topology,
+changes fall back to Full except for ADR-0014's exact final same-repository
+protected-integration postmerge reuse after both Source Full and formal PR Full
+evidence and every topology,
 freshness, content, and identity proof succeeds. Documentation-only source
 changes may use docs-only when the classifier's current path and event rules
 permit. Unknown, malformed, stale, unavailable, or otherwise unsafe evidence
@@ -87,8 +91,8 @@ missing or ambiguous evidence from silently weakening a formal gate.
 - Main never uses Equivalent evidence.
 - Coordination can use Equivalent only when the current machine contracts
   prove eligibility and exact provenance.
-- Governance-sensitive coordination falls back to Full except for ADR-0006's
-  exact dual-Full Case-B postmerge evidence-reuse contract.
+- Governance-sensitive coordination falls back to Full except for ADR-0014's
+  exact dual-Full protected-integration final-Q evidence-reuse contract.
 - Docs-only applies only when current classifier rules permit.
 - Unknown or unsafe evidence fails closed.
 - Source success never weakens a later formal gate.

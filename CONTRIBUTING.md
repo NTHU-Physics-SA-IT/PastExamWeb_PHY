@@ -58,7 +58,8 @@ directions, and coherent updates to affected operating documents or code.
 - A configured coordination branch is usable only when its exact ref was
   created by the protected lifecycle path, the integration ruleset remains
   active, branch-local governance names the exact branch, and current `main` is
-  its ancestor. Coordination is Full-only; use the
+  its ancestor. Coordination Source and pull-request gates remain Full; only
+  an exact final merge may reuse both through ADR-0014. Use the
   [protected coordination runbook](docs/runbooks/coordination.md).
 - Keep task branches developer-owned; a visible branch name does not grant
   project authority or make an external, bot, analytics, backup, or recovery
@@ -168,9 +169,11 @@ freshness, and pull request content are ready, push the exact candidate and
 promptly open its ready pull request to `main`; do not wait merely for candidate
 Source CI to finish. Selected Source and PR evidence may run independently and
 overlap, but all exact evidence required by the repository must be terminal
-successful before merge. [ADR-0006](docs/decisions/0006-coordination-postmerge-full-evidence-reuse.md)
-governs the narrower exact Case-B reconciliation, provenance, and fail-closed
-contract.
+successful before merge. Protected Source and pull-request workflows remain
+Full. A same-repository normal final merge uses the existing lightweight
+Equivalent path only when exact C/H/P/Q state, dual-Full evidence, live refs,
+and merged-PR identity all validate; every uncertainty remains Full under
+[ADR-0014](docs/decisions/0014-protected-coordination-exact-state-postmerge-reuse.md).
 
 Do not use no-op commits, extra pushes, workflow reruns, pull request
 close/reopen actions, or Draft/Ready transitions solely to manufacture overlap.
