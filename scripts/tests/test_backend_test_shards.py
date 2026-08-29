@@ -3,12 +3,11 @@ from __future__ import annotations
 import configparser
 import importlib
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
 import yaml
-
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 CI_SCRIPTS = REPOSITORY_ROOT / "scripts" / "ci"
@@ -125,9 +124,15 @@ def test_logging_sensitive_contracts_precede_integration_scenarios() -> None:
 
     # Alembic scenarios configure logging with disable_existing_loggers. Each
     # independent shard must exercise its caplog contracts before that state.
-    for shard, logging_contract in (
-        ("a", "tests/unit/test_archive_submission_links.py"),
-        ("b", "tests/unit/test_archive_submission_status.py"),
+    for shard, logging_contracts in (
+        ("a", ("tests/unit/test_archive_submission_links.py",)),
+        (
+            "b",
+            (
+                "tests/unit/test_archive_submission_status.py",
+                "tests/unit/test_login_rate_limiter.py",
+            ),
+        ),
     ):
         paths = manifest.paths_for_shard(shard)
         first_integration = next(
@@ -135,7 +140,10 @@ def test_logging_sensitive_contracts_precede_integration_scenarios() -> None:
             for index, path in enumerate(paths)
             if path.startswith("tests/integration/")
         )
-        assert paths.index(logging_contract) < first_integration
+        assert all(
+            paths.index(logging_contract) < first_integration
+            for logging_contract in logging_contracts
+        )
 
 
 def test_workflow_runs_independent_shards_and_parallel_coverage_combine() -> None:

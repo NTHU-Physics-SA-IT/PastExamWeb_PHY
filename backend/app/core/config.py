@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -37,6 +38,10 @@ class Settings(BaseSettings):
     EXTERNAL_ENDPOINT: str
 
     REDIS_URL: str
+    LOGIN_RATE_LIMIT_PRINCIPAL_ATTEMPTS: int = Field(default=8, gt=0)
+    LOGIN_RATE_LIMIT_IP_ATTEMPTS: int = Field(default=50, gt=0)
+    LOGIN_RATE_LIMIT_WINDOW_SECONDS: int = Field(default=600, gt=0)
+    LOGIN_RATE_LIMIT_COOLDOWN_SECONDS: int = Field(default=600, gt=0)
 
     DEFAULT_ADMIN_NAME: str
     DEFAULT_ADMIN_PASSWORD: str

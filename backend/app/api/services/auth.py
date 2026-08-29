@@ -25,6 +25,10 @@ from app.services.login_handoff import (
     consume_login_handoff,
     create_login_handoff,
 )
+from app.services.login_rate_limiter import (
+    LoginRateLimiter,
+    canonicalize_client_identity,
+)
 from app.services.nthu_dev_mock import (
     consume_nthu_dev_profile,
     create_nthu_dev_code,
@@ -46,10 +50,18 @@ from app.utils.jwt import jwt
 router = APIRouter()
 logger = logging.getLogger(__name__)
 NTHU_OAUTH_STATE_SESSION_KEY = "nthu_oauth_state"
+LOGIN_RATE_LIMIT_DETAIL = "Too many login attempts. Please try again later."
 
 
 class NthuExchangeRequest(BaseModel):
     code: str = Field(min_length=1, max_length=256)
+
+
+def get_login_rate_limiter(request: Request) -> LoginRateLimiter:
+    limiter = getattr(request.app.state, "login_rate_limiter", None)
+    if limiter is None:
+        raise RuntimeError("login rate limiter is not initialized")
+    return limiter
 
 
 def _ensure_timezone_aware(dt: datetime | None) -> datetime | None:
@@ -90,12 +102,30 @@ def _frontend_oauth_error(code: str) -> RedirectResponse:
 
 @router.post("/login")
 async def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_session),
+    limiter: LoginRateLimiter = Depends(get_login_rate_limiter),
 ):
     """
     Local login endpoint for users with password authentication
     """
+    client_host = request.client.host if request.client is not None else None
+    admission = await limiter.admit(
+        principal=form_data.username,
+        client_identity=canonicalize_client_identity(client_host),
+    )
+    if not admission.admitted:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=LOGIN_RATE_LIMIT_DETAIL,
+            headers={
+                "Retry-After": str(admission.retry_after_seconds),
+                "Cache-Control": "no-store",
+                "Pragma": "no-cache",
+            },
+        )
+
     user = await authenticate_user(form_data.username, form_data.password, db)
     if not user:
         raise HTTPException(
@@ -103,6 +133,8 @@ async def login(
             detail="Invalid credentials",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    await limiter.reset_principal(admission.principal_reset_token)
 
     # Update last login and heartbeat timestamps
     now_utc = datetime.now(UTC)
