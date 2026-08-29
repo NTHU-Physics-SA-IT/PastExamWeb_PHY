@@ -166,8 +166,8 @@ def test_proxy_rebuilds_a_single_authoritative_forwarded_identity() -> None:
     config = _config()
 
     assert "$proxy_add_x_forwarded_for" not in config
-    assert config.count("proxy_set_header X-Real-IP $remote_addr;") == 5
-    assert config.count("proxy_set_header X-Forwarded-For $remote_addr;") == 5
+    assert config.count("proxy_set_header X-Real-IP $remote_addr;") == 6
+    assert config.count("proxy_set_header X-Forwarded-For $remote_addr;") == 6
 
 
 def test_production_uvicorn_trust_matches_the_static_nginx_network_address() -> None:
@@ -201,3 +201,47 @@ def test_standalone_nginx_parser_resolves_the_trusted_backend_alias() -> None:
 
     assert "--network none" in validator
     assert "--add-host backend-trusted:127.0.0.1" in validator
+
+
+def _location_body(config: str, selector: str) -> str:
+    marker = f"        location {selector} {{"
+    start = config.find(marker)
+    assert start >= 0
+    next_location = config.find("\n        location ", start + len(marker))
+    end = next_location if next_location >= 0 else len(config)
+    return config[start:end]
+
+
+def test_api_request_body_limits_are_route_specific() -> None:
+    config = _config()
+    generic_api = _location_body(config, "/api/")
+    upload = _location_body(config, "= /api/archives/upload")
+    minio = _location_body(config, "/minio/")
+
+    assert "client_max_body_size 1M;" in generic_api
+    assert "client_max_body_size 21M;" in upload
+    assert "client_max_body_size 100M;" in minio
+
+
+def test_exact_upload_route_preserves_api_proxy_security_contract() -> None:
+    config = _config()
+    generic_api = _location_body(config, "/api/")
+    upload = _location_body(config, "= /api/archives/upload")
+
+    shared_directives = (
+        "proxy_http_version 1.1;",
+        "proxy_pass_request_headers on;",
+        "proxy_set_header Host $host;",
+        "proxy_set_header X-Real-IP $remote_addr;",
+        "proxy_set_header X-Forwarded-For $remote_addr;",
+        "proxy_set_header X-Forwarded-Proto $scheme;",
+        "proxy_set_header Authorization $http_authorization;",
+        "Access-Control-Allow-Credentials",
+        "Access-Control-Allow-Headers",
+    )
+    for directive in shared_directives:
+        assert directive in generic_api
+        assert directive in upload
+
+    assert "proxy_pass http://backend-trusted:8000/archives/upload;" in upload
+    assert "$proxy_add_x_forwarded_for" not in upload

@@ -1,4 +1,4 @@
-import io
+import asyncio
 import logging
 import os
 import re
@@ -29,6 +29,7 @@ from app.api.services.submission_statistics import (
     record_submission_event,
 )
 from app.core.config import settings
+from app.db import session as db_session
 from app.db.course_categories import (
     RESERVED_LEGACY_COURSE_CATEGORY_KEYS,
     canonicalize_course_category_key,
@@ -82,6 +83,7 @@ from app.services.archive_submission_status import (
     resolve_archive_submission_delete_source_status,
     take_down_archive_submission,
 )
+from app.services.pdf_security import PdfValidationError, validated_pdf_upload
 from app.services.wish_fulfillment import enqueue_new_wish_fulfillment_notifications
 from app.utils.auth import get_current_user
 from app.utils.course_text import (
@@ -720,6 +722,62 @@ async def _next_course_order_index(db: AsyncSession, category: str) -> int:
     return 0 if max_order is None else int(max_order) + 1
 
 
+async def _committed_upload_reference_count(object_name: str) -> int:
+    async with db_session.AsyncSessionLocal() as fresh_db:
+        archive_count = (
+            await fresh_db.execute(
+                select(func.count(Archive.id)).where(Archive.object_name == object_name)
+            )
+        ).scalar_one()
+        submission_count = (
+            await fresh_db.execute(
+                select(func.count(ArchiveSubmission.id)).where(
+                    ArchiveSubmission.object_name == object_name
+                )
+            )
+        ).scalar_one()
+        return int(archive_count) + int(submission_count)
+
+
+async def _compensate_failed_upload(object_name: str, minio_client) -> None:
+    try:
+        reference_count = await _committed_upload_reference_count(object_name)
+    except Exception as exc:  # noqa: BLE001 - uncertain authority must retain storage
+        logger.error(
+            "Archive upload compensation retained object: fresh database authority unavailable (%s)",
+            type(exc).__name__,
+        )
+        return
+
+    if reference_count != 0:
+        logger.info(
+            "Archive upload compensation retained object: committed reference exists"
+        )
+        return
+
+    try:
+        await asyncio.to_thread(
+            minio_client.remove_object,
+            settings.MINIO_BUCKET_NAME,
+            object_name,
+        )
+    except Exception as exc:  # noqa: BLE001 - cleanup is best-effort after failed commit
+        logger.error(
+            "Archive upload compensation could not remove unreferenced object (%s)",
+            type(exc).__name__,
+        )
+
+
+async def _rollback_failed_upload(db: AsyncSession) -> None:
+    try:
+        await db.rollback()
+    except Exception as exc:  # noqa: BLE001 - preserve original upload failure
+        logger.error(
+            "Archive upload rollback failed before compensation (%s)",
+            type(exc).__name__,
+        )
+
+
 @router.post("/upload")
 async def upload_archive(
     file: UploadFile,
@@ -897,74 +955,150 @@ async def upload_archive(
                 },
             )
 
-    course = None
-    if current_user.is_admin:
-        if request_new_category:
-            await _ensure_or_create_requested_category(
-                db,
-                requested_category_key,
-                requested_category_name,
-                requested_category_name_en,
-                requested_category_label,
-                requested_category_label_en,
-                requested_category_icon,
-                commit=True,
-            )
-        query = select(Course).where(
-            normalized_course_text_expr(Course.name)
-            == normalize_course_search_text(subject),
-            Course.category == category,
-            Course.deleted_at.is_(None),
-        )
-        result = await db.execute(query)
-        course = result.scalar_one_or_none()
-
-        if not course:
-            course = Course(
-                name=subject,
-                name_en=requested_course_name_en,
-                category=category,
-                order_index=await _next_course_order_index(db, category),
-            )
-            db.add(course)
-            await db.commit()
-            await db.refresh(course)
-
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF files are allowed"
-        )
-
-    file_content = await file.read()
-    file_size = len(file_content)
-
-    max_size = 20 * 1024 * 1024  # 20MB
-    if file_size > max_size:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File size exceeds 20MB limit",
-        )
-
-    _, file_extension = os.path.splitext(file.filename)
-    unique_filename = f"{uuid.uuid4()}{file_extension}"
-    if current_user.is_admin:
-        object_name = f"archives/{course.id}/{unique_filename}"
-    else:
-        object_name = f"archive-submissions/{current_user.user_id}/{unique_filename}"
-
+    object_name: str | None = None
+    object_written = False
+    minio_client = None
     try:
-        minio_client = get_minio_client()
-        file_data = io.BytesIO(file_content)
+        async with validated_pdf_upload(file) as staged:
+            course = None
+            if current_user.is_admin:
+                if request_new_category:
+                    await _ensure_or_create_requested_category(
+                        db,
+                        requested_category_key,
+                        requested_category_name,
+                        requested_category_name_en,
+                        requested_category_label,
+                        requested_category_label_en,
+                        requested_category_icon,
+                        commit=False,
+                    )
+                query = select(Course).where(
+                    normalized_course_text_expr(Course.name)
+                    == normalize_course_search_text(subject),
+                    Course.category == category,
+                    Course.deleted_at.is_(None),
+                )
+                result = await db.execute(query)
+                course = result.scalar_one_or_none()
 
-        minio_client.put_object(
-            bucket_name=settings.MINIO_BUCKET_NAME,
-            object_name=object_name,
-            data=file_data,
-            length=file_size,
-            content_type="application/pdf",
-        )
+                if not course:
+                    course = Course(
+                        name=subject,
+                        name_en=requested_course_name_en,
+                        category=category,
+                        order_index=await _next_course_order_index(db, category),
+                    )
+                    db.add(course)
+                    await db.flush()
+                    await db.refresh(course)
 
-        if not current_user.is_admin:
+            _, file_extension = os.path.splitext(file.filename or "")
+            unique_filename = f"{uuid.uuid4()}{file_extension}"
+            if current_user.is_admin:
+                object_name = f"archives/{course.id}/{unique_filename}"
+            else:
+                object_name = (
+                    f"archive-submissions/{current_user.user_id}/{unique_filename}"
+                )
+
+            minio_client = get_minio_client()
+            with staged.path.open("rb") as file_data:
+                put_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        minio_client.put_object,
+                        bucket_name=settings.MINIO_BUCKET_NAME,
+                        object_name=object_name,
+                        data=file_data,
+                        length=staged.size,
+                        content_type="application/pdf",
+                    )
+                )
+                try:
+                    await asyncio.shield(put_task)
+                except asyncio.CancelledError:
+                    # Establish whether the exact object completed before the
+                    # staged stream is closed and compensation is considered.
+                    try:
+                        await put_task
+                    except Exception as exc:  # noqa: BLE001 - cancellation remains primary
+                        logger.warning(
+                            "Archive upload cancelled while storage result was incomplete (%s)",
+                            type(exc).__name__,
+                        )
+                    else:
+                        object_written = True
+                    raise
+            object_written = True
+
+            if not current_user.is_admin:
+                submission = ArchiveSubmission(
+                    subject=subject,
+                    category=category,
+                    name=filename,
+                    professor=professor,
+                    archive_type=archive_type,
+                    has_answers=has_answers,
+                    object_name=object_name,
+                    academic_year=academic_year,
+                    requested_course_name=requested_course_name
+                    if request_new_course
+                    else None,
+                    requested_course_name_en=snapshot_course_name_en,
+                    requested_category_key=requested_category_key
+                    if request_new_category
+                    else None,
+                    requested_category_name=requested_category_name
+                    if request_new_category
+                    else None,
+                    requested_category_name_en=snapshot_category_name_en,
+                    requested_category_label=requested_category_label
+                    if request_new_category
+                    else None,
+                    requested_category_label_en=snapshot_category_label_en,
+                    requested_category_icon=requested_category_icon
+                    if request_new_category
+                    else None,
+                    requester_id=current_user.user_id,
+                    source_wish_id=source_wish_id,
+                )
+                db.add(submission)
+                await db.flush()
+                await record_submission_event(db, submission)
+                await db.commit()
+                await db.refresh(submission)
+
+                return {
+                    "success": True,
+                    "message": "File submitted for review",
+                    "is_admin_upload": False,
+                    "submission": {
+                        "id": submission.id,
+                        "name": submission.name,
+                        "professor": submission.professor,
+                        "archive_type": submission.archive_type,
+                        "has_answers": submission.has_answers,
+                        "status": submission.status,
+                        "created_at": submission.created_at,
+                        "file_size": staged.size,
+                        "is_admin_upload": False,
+                    },
+                }
+
+            archive = Archive(
+                course_id=course.id,
+                name=filename,
+                professor=professor,
+                archive_type=archive_type,
+                has_answers=has_answers,
+                object_name=object_name,
+                academic_year=academic_year,
+                uploader_id=current_user.user_id,
+            )
+            db.add(archive)
+            await db.flush()
+            await db.refresh(archive)
+
             submission = ArchiveSubmission(
                 subject=subject,
                 category=category,
@@ -992,19 +1126,38 @@ async def upload_archive(
                 requested_category_icon=requested_category_icon
                 if request_new_category
                 else None,
+                status=SubmissionStatus.APPROVED,
                 requester_id=current_user.user_id,
+                reviewer_id=current_user.user_id,
+                is_admin_upload=True,
+                created_archive_id=archive.id,
+                reviewed_at=datetime.now(UTC),
                 source_wish_id=source_wish_id,
             )
             db.add(submission)
             await db.flush()
             await record_submission_event(db, submission)
+            await enqueue_new_wish_fulfillment_notifications(
+                db,
+                archive=archive,
+                publisher_user_id=current_user.user_id,
+            )
             await db.commit()
             await db.refresh(submission)
 
             return {
                 "success": True,
-                "message": "File submitted for review",
-                "is_admin_upload": False,
+                "message": "File uploaded successfully",
+                "is_admin_upload": True,
+                "archive": {
+                    "id": archive.id,
+                    "name": archive.name,
+                    "professor": archive.professor,
+                    "archive_type": archive.archive_type,
+                    "has_answers": archive.has_answers,
+                    "created_at": archive.created_at,
+                    "file_size": staged.size,
+                },
                 "submission": {
                     "id": submission.id,
                     "name": submission.name,
@@ -1013,106 +1166,38 @@ async def upload_archive(
                     "has_answers": submission.has_answers,
                     "status": submission.status,
                     "created_at": submission.created_at,
-                    "file_size": file_size,
-                    "is_admin_upload": False,
+                    "file_size": staged.size,
+                    "is_admin_upload": True,
                 },
             }
-
-        archive = Archive(
-            course_id=course.id,
-            name=filename,
-            professor=professor,
-            archive_type=archive_type,
-            has_answers=has_answers,
-            object_name=object_name,
-            academic_year=academic_year,
-            uploader_id=current_user.user_id,
-        )
-        db.add(archive)
-        await db.flush()
-        await db.refresh(archive)
-
-        submission = ArchiveSubmission(
-            subject=subject,
-            category=category,
-            name=filename,
-            professor=professor,
-            archive_type=archive_type,
-            has_answers=has_answers,
-            object_name=object_name,
-            academic_year=academic_year,
-            requested_course_name=requested_course_name if request_new_course else None,
-            requested_course_name_en=snapshot_course_name_en,
-            requested_category_key=requested_category_key
-            if request_new_category
-            else None,
-            requested_category_name=requested_category_name
-            if request_new_category
-            else None,
-            requested_category_name_en=snapshot_category_name_en,
-            requested_category_label=requested_category_label
-            if request_new_category
-            else None,
-            requested_category_label_en=snapshot_category_label_en,
-            requested_category_icon=requested_category_icon
-            if request_new_category
-            else None,
-            status=SubmissionStatus.APPROVED,
-            requester_id=current_user.user_id,
-            reviewer_id=current_user.user_id,
-            is_admin_upload=True,
-            created_archive_id=archive.id,
-            reviewed_at=datetime.now(UTC),
-            source_wish_id=source_wish_id,
-        )
-        db.add(submission)
-        await db.flush()
-        await record_submission_event(db, submission)
-        await enqueue_new_wish_fulfillment_notifications(
-            db,
-            archive=archive,
-            publisher_user_id=current_user.user_id,
-        )
-        await db.commit()
-        await db.refresh(submission)
-
-        return {
-            "success": True,
-            "message": "File uploaded successfully",
-            "is_admin_upload": True,
-            "archive": {
-                "id": archive.id,
-                "name": archive.name,
-                "professor": archive.professor,
-                "archive_type": archive.archive_type,
-                "has_answers": archive.has_answers,
-                "created_at": archive.created_at,
-                "file_size": file_size,
-            },
-            "submission": {
-                "id": submission.id,
-                "name": submission.name,
-                "professor": submission.professor,
-                "archive_type": submission.archive_type,
-                "has_answers": submission.has_answers,
-                "status": submission.status,
-                "created_at": submission.created_at,
-                "file_size": file_size,
-                "is_admin_upload": True,
-            },
-        }
-
-    except HTTPException:
+    except PdfValidationError as exc:
+        await _rollback_failed_upload(db)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=exc.public_detail,
+        ) from exc
+    except asyncio.CancelledError:
+        await _rollback_failed_upload(db)
+        if object_written and object_name and minio_client is not None:
+            await _compensate_failed_upload(object_name, minio_client)
         raise
-    except Exception as e:
+    except HTTPException:
+        await _rollback_failed_upload(db)
+        if object_written and object_name and minio_client is not None:
+            await _compensate_failed_upload(object_name, minio_client)
+        raise
+    except Exception as exc:
+        await _rollback_failed_upload(db)
+        if object_written and object_name and minio_client is not None:
+            await _compensate_failed_upload(object_name, minio_client)
         logger.error(
             "Unexpected archive upload failure",
-            exc_info=redacted_exc_info(e),
+            exc_info=redacted_exc_info(exc),
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to upload file: {e!s}",
-        )
+            detail="Failed to upload file",
+        ) from exc
 
 
 @router.get("/submissions/me", response_model=list[ArchiveSubmissionRead])

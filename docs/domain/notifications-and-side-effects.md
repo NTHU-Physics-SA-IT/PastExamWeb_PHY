@@ -356,16 +356,27 @@ response rather than presenting a partial backup as complete.
 
 ### Current implementation
 
-Archive upload writes the MinIO object before all database work is committed.
-Some upload/approval paths contain multiple database commits. Administrator
-Trash permanent deletion instead captures exact object versions in PostgreSQL,
-verifies exact-version absence, and finalizes database deletion only through
-the durable operation.
+Archive upload stages at most 20 MiB in a root-local temporary file, validates
+the complete document with the production pikepdf/qpdf parser boundary, and
+only then performs upload-specific database or MinIO mutation. Administrator
+parent creation, Archive/Submission creation, notification enqueue, and the
+final database write share one caller-owned transaction. MinIO necessarily
+precedes that commit; if later database work fails, compensation removes the
+exact uploaded object only after a fresh database session proves that neither
+Archive nor ArchiveSubmission references it. Uncertain database authority or a
+committed reference retains the object for safe operator review. Administrator
+Trash permanent deletion separately captures exact object versions in
+PostgreSQL, verifies exact-version absence, and finalizes database deletion only
+through the durable operation.
 
 ### Remaining boundary
 
-Upload and any non-Trash legacy cleanup remain outside the durable deletion
-contract. For administrator Trash deletion, a storage failure cannot be
+Upload compensation is deliberately bounded to the exact object created by the
+failed request and is not an orphan scan or durable deletion workflow. Any
+historical orphan cleanup remains an explicit operator-controlled action and is
+never triggered automatically by upload handling. Non-Trash legacy cleanup
+remains outside the durable deletion contract. For
+administrator Trash deletion, a storage failure cannot be
 downgraded into database-deletion success: it remains explicit durable pending,
 retryable, verification-required, or manual-review truth. The dedicated
 Stage 5F-E reconciler can now advance those existing PostgreSQL operations
@@ -406,7 +417,7 @@ finalization cannot precede exact-version absence.
 
 | Operation | Current boundary | Risk/status |
 | --- | --- | --- |
-| Archive upload | MinIO put, then database work; admin/course/archive paths may commit in stages | Partial object/DB or partial DB state is possible |
+| Archive upload | Bounded strict PDF validation precedes all upload-specific mutation; parent/archive/submission database work commits once, and a failed post-MinIO commit removes only a freshly proven-unreferenced exact object | Invalid input leaves no upload-specific persistent state; uncertain compensation authority safely retains storage for review |
 | Submission approve | Category/Course/Archive work, submission review metadata, and notification enqueue share the approve caller's commit | PostgreSQL operation is caller-owned and protected by focused rollback tests |
 | Submission owner/admin delete | The route owns authorization, canonical parent-first locks, lifecycle mutation, and commit | Existing delete behavior remains silent; lock/revalidation failure commits no quota, status, Archive, notification, or event change |
 | Submission exact restore | The route owns canonical parent-first locks, occupancy validation, lifecycle mutation, and commit; conflict or integrity failure rolls back before returning | Restore remains silent, consumes exact prior-state provenance, falls back to pending when it is absent, and only republishes the retained exact Archive for an approved restore |
