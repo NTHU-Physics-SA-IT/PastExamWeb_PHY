@@ -16,7 +16,15 @@ def _script_command(action: str) -> list[str]:
     return [str(SCRIPT), action]
 
 
-def _environment(tmp_path: Path, *, audit_exit: int = 0) -> dict[str, str]:
+def _environment(
+    tmp_path: Path,
+    *,
+    audit_exit: int = 0,
+    actual_database: str = "archive_db",
+    actual_postgres_volume: str = "pastexam-postgres-data",
+    postgres_mount: str = "volume",
+) -> dict[str, str]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log = tmp_path / "docker.log"
@@ -34,7 +42,13 @@ elif [[ "$1" == "ps" ]]; then
   printf '%s\n' "${FAKE_DOCKER_WORKDIR:-$FAKE_REPO_ROOT/docker}"
 elif [[ "$1" == "inspect" ]]; then
   name="${@: -1}"
-  if [[ "$name" == "pastexam-dev-postgres" ]]; then
+  if [[ "$*" == *".Config.Env"* ]]; then
+    printf 'POSTGRES_DB=%s\n' "$FAKE_ACTUAL_DATABASE"
+  elif [[ "$*" == *".Mounts"* ]]; then
+    if [[ "$FAKE_POSTGRES_MOUNT" == "volume" ]]; then
+      printf 'volume|%s|/var/lib/postgresql/data\n' "$FAKE_POSTGRES_VOLUME"
+    fi
+  elif [[ "$name" == "pastexam-dev-postgres" ]]; then
     printf '/pastexam-dev-postgres|pastexam-dev|db|running|healthy\n'
   else
     current="$(cat "$FAKE_BACKEND_STATE")"
@@ -86,6 +100,9 @@ fi
             "FAKE_BACKEND_STATE": str(state),
             "FAKE_AUDIT_LOG": str(tmp_path / "audit.log"),
             "FAKE_REPO_ROOT": str(REPOSITORY_ROOT),
+            "FAKE_ACTUAL_DATABASE": actual_database,
+            "FAKE_POSTGRES_VOLUME": actual_postgres_volume,
+            "FAKE_POSTGRES_MOUNT": postgres_mount,
             "PASTEXAM_DEV_COMPOSE_ENV_FILE": str(env_file),
             "PASTEXAM_DEV_AUDIT_PYTHON": str(audit_python),
         }
@@ -113,6 +130,169 @@ def test_schema_status_uses_sealed_audit_without_compose_mutation(
     assert " stop " not in log
     assert " start " not in log
     assert " up " not in log
+    audit_log = Path(environment["FAKE_AUDIT_LOG"]).read_text(encoding="utf-8")
+    assert "--expected-database archive_db" in audit_log
+
+
+def test_preflight_distinguishes_declared_expected_and_actual_identity(
+    tmp_path: Path,
+) -> None:
+    environment = _environment(tmp_path)
+
+    process = subprocess.run(
+        _script_command("preflight"),
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+        env=environment,
+    )
+
+    assert process.returncode == 0
+    assert "declared_database=archive_db" in process.stdout
+    assert "expected_database=archive_db" in process.stdout
+    assert "actual_database=archive_db" in process.stdout
+    assert "declared_postgres_volume=pastexam-postgres-data" in process.stdout
+    assert "expected_postgres_volume=pastexam-postgres-data" in process.stdout
+    assert "actual_postgres_volume=pastexam-postgres-data" in process.stdout
+
+
+def test_schema_status_accepts_complete_matching_scoped_identity(
+    tmp_path: Path,
+) -> None:
+    environment = _environment(
+        tmp_path,
+        actual_database="archive_db_dev_ui",
+        actual_postgres_volume="pastexam-ui-postgres-data",
+    )
+
+    process = subprocess.run(
+        [
+            *_script_command("schema-status"),
+            "--expected-database",
+            "archive_db_dev_ui",
+            "--expected-postgres-volume",
+            "pastexam-ui-postgres-data",
+        ],
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+        env=environment,
+    )
+
+    assert process.returncode == 0, process.stderr
+    assert "declared_database=archive_db" in process.stdout
+    assert "expected_database=archive_db_dev_ui" in process.stdout
+    assert "actual_database=archive_db_dev_ui" in process.stdout
+    assert "declared_postgres_volume=pastexam-postgres-data" in process.stdout
+    assert "expected_postgres_volume=pastexam-ui-postgres-data" in process.stdout
+    assert "actual_postgres_volume=pastexam-ui-postgres-data" in process.stdout
+    audit_log = Path(environment["FAKE_AUDIT_LOG"]).read_text(encoding="utf-8")
+    assert "--expected-database archive_db_dev_ui" in audit_log
+
+
+def test_schema_status_rejects_scoped_database_mismatch_before_audit(
+    tmp_path: Path,
+) -> None:
+    environment = _environment(
+        tmp_path,
+        actual_database="archive_db_dev_ui",
+        actual_postgres_volume="pastexam-ui-postgres-data",
+    )
+
+    process = subprocess.run(
+        [
+            *_script_command("schema-status"),
+            "--expected-database",
+            "archive_db_wrong",
+            "--expected-postgres-volume",
+            "pastexam-ui-postgres-data",
+        ],
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+        env=environment,
+    )
+
+    assert process.returncode != 0
+    assert not Path(environment["FAKE_AUDIT_LOG"]).exists()
+
+
+def test_schema_status_rejects_scoped_volume_mismatch_before_audit(
+    tmp_path: Path,
+) -> None:
+    environment = _environment(
+        tmp_path,
+        actual_database="archive_db_dev_ui",
+        actual_postgres_volume="pastexam-ui-postgres-data",
+    )
+
+    process = subprocess.run(
+        [
+            *_script_command("schema-status"),
+            "--expected-database",
+            "archive_db_dev_ui",
+            "--expected-postgres-volume",
+            "wrong-volume",
+        ],
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+        env=environment,
+    )
+
+    assert process.returncode != 0
+    assert not Path(environment["FAKE_AUDIT_LOG"]).exists()
+
+
+def test_scoped_identity_rejects_partial_empty_and_unprovable_values(
+    tmp_path: Path,
+) -> None:
+    invocations = (
+        (
+            _environment(tmp_path / "partial"),
+            [
+                *_script_command("schema-status"),
+                "--expected-database",
+                "archive_db_dev_ui",
+            ],
+        ),
+        (
+            _environment(tmp_path / "empty"),
+            [
+                *_script_command("schema-status"),
+                "--expected-database",
+                "",
+                "--expected-postgres-volume",
+                "pastexam-ui-postgres-data",
+            ],
+        ),
+        (
+            _environment(tmp_path / "mount", postgres_mount="missing"),
+            [
+                *_script_command("schema-status"),
+                "--expected-database",
+                "archive_db",
+                "--expected-postgres-volume",
+                "pastexam-postgres-data",
+            ],
+        ),
+    )
+
+    for environment, invocation in invocations:
+        process = subprocess.run(
+            invocation,
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+            env=environment,
+        )
+        assert process.returncode != 0
+        assert not Path(environment["FAKE_AUDIT_LOG"]).exists()
 
 
 def test_schema_status_passes_exact_expected_ledger(tmp_path: Path) -> None:

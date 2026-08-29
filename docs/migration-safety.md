@@ -352,6 +352,17 @@ gate before starting an existing paused backend; it never creates a container
 or performs an upgrade. `backend-pause` and `backend-resume` are deliberate
 schema-branch controls, not general restart shortcuts.
 
+`schema-status` always passes its effective expected persistent database to the
+sealed adapter. The canonical default remains `archive_db`. A non-default
+existing local runtime requires the complete explicit pair
+`--expected-database` and `--expected-postgres-volume`; the wrapper separately
+proves the database from the running container environment and the named volume
+from its `/var/lib/postgresql/data` mount. Declaration, expectation, and actual
+runtime evidence are not interchangeable, and any mismatch or missing mount
+fails before the audit. These options are read-only assertions and never
+authorize a migration, database creation, volume replacement, or runtime
+restart.
+
 For isolated validation on a schema-changing branch only,
 `schema-status --expected-ledger <revision>` exposes the audit runner's existing
 read-only ledger selection. The isolated test runner first requires that the

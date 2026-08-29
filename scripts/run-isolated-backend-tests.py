@@ -27,15 +27,18 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 sys.path.insert(0, str(BACKEND_ROOT))
 
-from app.db.audit.registry import (
+from app.db.audit.registry import (  # noqa: E402
     ELIGIBILITY_AUDIT_ID,
     get_audit_adapter,
 )
-from app.db.migration_safety import (
+from app.db.migration_safety import (  # noqa: E402
     is_revision_ancestor,
     revision_graph,
 )
-from app.db.schema_manifests import HEAD_SCHEMA_REVISION, get_manifest_spec
+from app.db.schema_manifests import (  # noqa: E402
+    HEAD_SCHEMA_REVISION,
+    get_manifest_spec,
+)
 
 BACKEND_PYTHON = (
     BACKEND_ROOT / ".venv" / "Scripts" / "python.exe"
@@ -49,6 +52,10 @@ NAME_PREFIX = "pastexam-test-postgres-s5a-"
 ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SAFE_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 REVISION_PATTERN = re.compile(r"^[0-9a-f]{12}$")
+DATABASE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+VOLUME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+CANONICAL_PERSISTENT_DATABASE = "archive_db"
+CANONICAL_POSTGRES_VOLUME = "pastexam-postgres-data"
 
 
 class RunnerFailure(RuntimeError):
@@ -103,11 +110,17 @@ def dev_compose_command(
     *,
     canonical_authority_root: Path = REPOSITORY_ROOT,
     expected_ledger: str | None = None,
+    expected_database: str | None = None,
+    expected_postgres_volume: str | None = None,
 ) -> tuple[str, ...]:
     dev_compose = canonical_authority_root / "scripts" / "dev-compose.sh"
     arguments = (action,)
     if expected_ledger is not None:
         arguments += ("--expected-ledger", expected_ledger)
+    if expected_database is not None:
+        arguments += ("--expected-database", expected_database)
+    if expected_postgres_volume is not None:
+        arguments += ("--expected-postgres-volume", expected_postgres_volume)
     if os.name != "nt":
         return (str(dev_compose), *arguments)
 
@@ -132,6 +145,8 @@ class CanonicalSnapshot:
     backend_state: str
     backend_health: str
     backend_restart_count: int
+    database: str
+    postgres_volume: str
     alembic_head: str
     audit: str
     audit_status: str
@@ -154,10 +169,8 @@ class CanonicalSnapshot:
 
 @dataclass
 class Evidence:
-    schema_version: int = 2
-    generated_at: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
+    schema_version: int = 3
+    generated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     generated_resource_name: str | None = None
     image_identity: str | None = None
     allocated_port: int | None = None
@@ -165,6 +178,8 @@ class Evidence:
     migration_status: str = "not_started"
     migration_head: str | None = None
     canonical_expected_ledger: str | None = None
+    canonical_expected_database: str | None = None
+    canonical_expected_postgres_volume: str | None = None
     canonical_authority_root: str | None = None
     ephemeral_target_head: str = EPHEMERAL_TARGET_HEAD
     pytest_arguments: list[str] = field(default_factory=list)
@@ -199,6 +214,20 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--canonical-expected-database",
+        help=(
+            "Explicit persistent-local database identity for both sealed "
+            "canonical snapshots. Must be paired with the volume identity."
+        ),
+    )
+    parser.add_argument(
+        "--canonical-expected-postgres-volume",
+        help=(
+            "Explicit persistent-local PostgreSQL volume identity for both "
+            "sealed canonical snapshots. Must be paired with the database identity."
+        ),
+    )
+    parser.add_argument(
         "--canonical-expected-ledger",
         default=EPHEMERAL_TARGET_HEAD,
         help=(
@@ -216,6 +245,17 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     for value in (args.postgres_container_id, args.backend_container_id):
         if not ID_PATTERN.fullmatch(value):
             parser.error("container IDs must be exact 64-character lowercase hex IDs")
+    supplied_database = args.canonical_expected_database is not None
+    supplied_volume = args.canonical_expected_postgres_volume is not None
+    if supplied_database != supplied_volume:
+        parser.error("canonical scoped identity requires database and volume together")
+    if not supplied_database:
+        args.canonical_expected_database = CANONICAL_PERSISTENT_DATABASE
+        args.canonical_expected_postgres_volume = CANONICAL_POSTGRES_VOLUME
+    if not DATABASE_PATTERN.fullmatch(args.canonical_expected_database):
+        parser.error("canonical expected database is malformed")
+    if not VOLUME_PATTERN.fullmatch(args.canonical_expected_postgres_volume):
+        parser.error("canonical expected PostgreSQL volume is malformed")
     return args
 
 
@@ -334,7 +374,9 @@ def validate_canonical_authority_root(
         message="canonical authority must be on main",
     )
     if branch != "refs/heads/main":
-        raise RunnerFailure("canonical authority must be the registered main worktree", 20)
+        raise RunnerFailure(
+            "canonical authority must be the registered main worktree", 20
+        )
     authority_head = _git_output(
         executor,
         ("rev-parse", "HEAD"),
@@ -391,6 +433,10 @@ def parse_schema_status(output: str) -> dict[str, str]:
         "audit",
         "status",
         "expected_ledger",
+        "expected_database",
+        "actual_database",
+        "expected_postgres_volume",
+        "actual_postgres_volume",
         "explicit_rollback",
     }
     aggregate_required = {
@@ -414,6 +460,8 @@ def canonical_snapshot(
     postgres_id: str,
     backend_id: str,
     canonical_expected_ledger: str,
+    canonical_expected_database: str,
+    canonical_expected_postgres_volume: str,
     canonical_authority_root: Path = REPOSITORY_ROOT,
 ) -> CanonicalSnapshot:
     postgres = container_state(executor, postgres_id)
@@ -432,6 +480,8 @@ def canonical_snapshot(
                     "schema-status",
                     canonical_authority_root=canonical_authority_root,
                     expected_ledger=canonical_expected_ledger,
+                    expected_database=canonical_expected_database,
+                    expected_postgres_volume=canonical_expected_postgres_volume,
                 ),
                 timeout=60,
             ),
@@ -442,6 +492,10 @@ def canonical_snapshot(
     if (
         schema["status"] != "complete"
         or schema["expected_ledger"] != canonical_expected_ledger
+        or schema["expected_database"] != canonical_expected_database
+        or schema["actual_database"] != canonical_expected_database
+        or schema["expected_postgres_volume"] != canonical_expected_postgres_volume
+        or schema["actual_postgres_volume"] != canonical_expected_postgres_volume
         or schema["explicit_rollback"].lower() != "true"
     ):
         raise RunnerFailure("sealed schema baseline is not Green", 20)
@@ -454,6 +508,8 @@ def canonical_snapshot(
         backend_state=backend["state"],
         backend_health=backend["health"],
         backend_restart_count=backend["restart_count"],
+        database=schema["actual_database"],
+        postgres_volume=schema["actual_postgres_volume"],
         alembic_head=schema["expected_ledger"],
         audit=schema["audit"],
         audit_status=schema["status"],
@@ -480,6 +536,8 @@ def public_snapshot(snapshot: CanonicalSnapshot) -> dict[str, Any]:
         "backend_state": snapshot.backend_state,
         "backend_health": snapshot.backend_health,
         "backend_restart_count": snapshot.backend_restart_count,
+        "database": snapshot.database,
+        "postgres_volume": snapshot.postgres_volume,
         "alembic_head": snapshot.alembic_head,
         "audit": snapshot.audit,
         "audit_status": snapshot.audit_status,
@@ -798,6 +856,8 @@ class IsolatedPostgresRunner:
                     self.args.postgres_container_id,
                     self.args.backend_container_id,
                     self.args.canonical_expected_ledger,
+                    self.args.canonical_expected_database,
+                    self.args.canonical_expected_postgres_volume,
                     self.canonical_authority_root,
                 )
                 self.evidence.canonical_post = public_snapshot(post)
@@ -820,20 +880,26 @@ class IsolatedPostgresRunner:
                 self.executor,
                 self.args.canonical_authority_root,
             )
-            self.evidence.canonical_authority_root = str(
-                self.canonical_authority_root
-            )
+            self.evidence.canonical_authority_root = str(self.canonical_authority_root)
             self.args.canonical_expected_ledger = validate_canonical_expected_ledger(
                 self.args.canonical_expected_ledger
             )
             self.evidence.canonical_expected_ledger = (
                 self.args.canonical_expected_ledger
             )
+            self.evidence.canonical_expected_database = (
+                self.args.canonical_expected_database
+            )
+            self.evidence.canonical_expected_postgres_volume = (
+                self.args.canonical_expected_postgres_volume
+            )
             self.pre_snapshot = canonical_snapshot(
                 self.executor,
                 self.args.postgres_container_id,
                 self.args.backend_container_id,
                 self.args.canonical_expected_ledger,
+                self.args.canonical_expected_database,
+                self.args.canonical_expected_postgres_volume,
                 self.canonical_authority_root,
             )
             self.evidence.canonical_pre = public_snapshot(self.pre_snapshot)
@@ -1045,6 +1111,9 @@ def render_text(evidence: Evidence) -> str:
         f"Image: {evidence.image_identity or 'unknown'}",
         f"Port: {evidence.allocated_port or 'unallocated'}",
         f"Canonical expected ledger: {evidence.canonical_expected_ledger or 'unknown'}",
+        f"Canonical expected database: {evidence.canonical_expected_database or 'unknown'}",
+        "Canonical expected PostgreSQL volume: "
+        f"{evidence.canonical_expected_postgres_volume or 'unknown'}",
         f"Ephemeral target head: {evidence.ephemeral_target_head}",
         f"Migration: {evidence.migration_status}",
         f"Migration head: {evidence.migration_head or 'unknown'}",

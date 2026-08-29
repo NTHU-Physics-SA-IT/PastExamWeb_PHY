@@ -75,12 +75,20 @@ def schema_status(
     *,
     checksum: str = "state-checksum",
     expected_ledger: str = "d4b7e2a9c6f1",
+    expected_database: str = "archive_db",
+    expected_postgres_volume: str = "pastexam-postgres-data",
 ) -> str:
     return "\n".join(
         (
             "audit=archive-submission-self-delete-eligibility@4",
             "status=complete",
             f"expected_ledger={expected_ledger}",
+            "declared_database=archive_db",
+            f"expected_database={expected_database}",
+            f"actual_database={expected_database}",
+            "declared_postgres_volume=pastexam-postgres-data",
+            f"expected_postgres_volume={expected_postgres_volume}",
+            f"actual_postgres_volume={expected_postgres_volume}",
             "explicit_rollback=true",
             (
                 "aggregates=total:30,active:26,deleted:4,"
@@ -137,6 +145,8 @@ class FakeExecutor:
         post_checksum: str = "state-checksum",
         volume_mount: bool = False,
         schema_expected_ledger: str | None = None,
+        schema_actual_database: str | None = None,
+        schema_actual_postgres_volume: str | None = None,
         isolated_head: str | None = None,
         subject_dirty: bool = False,
     ) -> None:
@@ -149,6 +159,8 @@ class FakeExecutor:
         self.post_checksum = post_checksum
         self.volume_mount = volume_mount
         self.schema_expected_ledger = schema_expected_ledger
+        self.schema_actual_database = schema_actual_database
+        self.schema_actual_postgres_volume = schema_actual_postgres_volume
         self.isolated_head = isolated_head
         self.subject_dirty = subject_dirty
         self.commands: list[tuple[str, ...]] = []
@@ -188,11 +200,27 @@ class FakeExecutor:
                 if "--expected-ledger" in command
                 else runner_module.EPHEMERAL_TARGET_HEAD
             )
+            expected_database = (
+                command[command.index("--expected-database") + 1]
+                if "--expected-database" in command
+                else "archive_db"
+            )
+            expected_postgres_volume = (
+                command[command.index("--expected-postgres-volume") + 1]
+                if "--expected-postgres-volume" in command
+                else "pastexam-postgres-data"
+            )
             return runner_module.CommandResult(
                 0,
                 schema_status(
                     checksum=checksum,
                     expected_ledger=expected_ledger,
+                    expected_database=(
+                        self.schema_actual_database or expected_database
+                    ),
+                    expected_postgres_volume=(
+                        self.schema_actual_postgres_volume or expected_postgres_volume
+                    ),
                 ),
             )
         if command[:3] == ("docker", "image", "inspect"):
@@ -264,12 +292,16 @@ def args(
     *pytest_args: str,
     canonical_expected_ledger: str = "d4b7e2a9c6f1",
     canonical_authority_root: str | None = None,
+    canonical_expected_database: str = "archive_db",
+    canonical_expected_postgres_volume: str = "pastexam-postgres-data",
 ) -> argparse.Namespace:
     return argparse.Namespace(
         postgres_container_id=POSTGRES_ID,
         backend_container_id=BACKEND_ID,
         canonical_expected_ledger=canonical_expected_ledger,
         canonical_authority_root=canonical_authority_root,
+        canonical_expected_database=canonical_expected_database,
+        canonical_expected_postgres_volume=canonical_expected_postgres_volume,
         output="json",
         pytest_args=list(
             pytest_args or ("backend/tests/unit/test_submission_decision.py", "-q")
@@ -282,12 +314,16 @@ def run(
     *pytest_args: str,
     canonical_expected_ledger: str = "d4b7e2a9c6f1",
     canonical_authority_root: str | None = None,
+    canonical_expected_database: str = "archive_db",
+    canonical_expected_postgres_volume: str = "pastexam-postgres-data",
 ):
     runner = runner_module.IsolatedPostgresRunner(
         args(
             *pytest_args,
             canonical_expected_ledger=canonical_expected_ledger,
             canonical_authority_root=canonical_authority_root,
+            canonical_expected_database=canonical_expected_database,
+            canonical_expected_postgres_volume=canonical_expected_postgres_volume,
         ),
         executor=fake,
     )
@@ -317,7 +353,7 @@ def test_success_has_stable_json_and_complete_cleanup() -> None:
     runner = run(FakeExecutor())
     payload = json.loads(json.dumps(runner_module.asdict(runner.evidence)))
     assert runner.evidence.exit_code == 0
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["canonical_expected_ledger"] == "d4b7e2a9c6f1"
     assert payload["ephemeral_target_head"] == runner_module.HEAD_SCHEMA_REVISION
     assert payload["migration_head"] == runner_module.HEAD_SCHEMA_REVISION
@@ -347,6 +383,22 @@ def test_explicit_canonical_baseline_is_distinct_from_ephemeral_target() -> None
     assert parsed.canonical_expected_ledger == "c2a8e4f6b9d1"
     assert parsed.canonical_authority_root == "/canonical/main"
     assert runner_module.EPHEMERAL_TARGET_HEAD == runner_module.HEAD_SCHEMA_REVISION
+
+
+def test_scoped_identity_requires_database_and_volume_together() -> None:
+    with pytest.raises(SystemExit):
+        runner_module.parse_args(
+            [
+                "--postgres-container-id",
+                POSTGRES_ID,
+                "--backend-container-id",
+                BACKEND_ID,
+                "--canonical-expected-database",
+                "archive_db_dev_ui",
+                "--",
+                "backend/tests/unit/test_submission_decision.py",
+            ]
+        )
 
 
 def test_ephemeral_target_head_has_no_cli_override() -> None:
@@ -485,14 +537,69 @@ def test_dev_compose_command_matches_the_platform_execution_boundary() -> None:
 
 def test_dev_compose_command_passes_exact_canonical_baseline() -> None:
     command = runner_module.dev_compose_command(
-        "schema-status", expected_ledger="c2a8e4f6b9d1"
+        "schema-status",
+        expected_ledger="c2a8e4f6b9d1",
+        expected_database="archive_db_dev_ui",
+        expected_postgres_volume="pastexam-ui-postgres-data",
     )
 
-    assert command[-3:] == (
+    assert command[-7:] == (
         "schema-status",
         "--expected-ledger",
         "c2a8e4f6b9d1",
+        "--expected-database",
+        "archive_db_dev_ui",
+        "--expected-postgres-volume",
+        "pastexam-ui-postgres-data",
     )
+
+
+def test_runner_propagates_scoped_identity_to_pre_and_post_baselines() -> None:
+    fake = FakeExecutor()
+
+    runner = run(
+        fake,
+        canonical_expected_database="archive_db_dev_ui",
+        canonical_expected_postgres_volume="pastexam-ui-postgres-data",
+    )
+
+    schema_commands = [
+        command for command in fake.commands if "schema-status" in command
+    ]
+    assert runner.evidence.exit_code == 0
+    assert len(schema_commands) == 2
+    assert all(
+        (
+            "--expected-database",
+            "archive_db_dev_ui",
+            "--expected-postgres-volume",
+            "pastexam-ui-postgres-data",
+        )
+        == command[-4:]
+        for command in schema_commands
+    )
+
+
+@pytest.mark.parametrize(
+    "fake",
+    (
+        FakeExecutor(schema_actual_database="archive_db"),
+        FakeExecutor(schema_actual_postgres_volume="pastexam-postgres-data"),
+    ),
+)
+def test_runner_fails_closed_when_schema_status_reports_another_identity(
+    fake: FakeExecutor,
+) -> None:
+
+    runner = run(
+        fake,
+        canonical_expected_database="archive_db_dev_ui",
+        canonical_expected_postgres_volume="pastexam-ui-postgres-data",
+    )
+
+    assert runner.evidence.exit_code == 20
+    assert runner.evidence.generated_resource_name is None
+    assert not any(command[:2] == ("docker", "run") for command in fake.commands)
 
 
 def test_registered_clean_main_authority_is_accepted_and_selects_its_wrapper(

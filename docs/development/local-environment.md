@@ -75,6 +75,23 @@ canonical pre/post inspection calls only the authority checkout's existing
 without copying ignored environment files or treating a sibling checkout as
 the owner of `pastexam-dev`.
 
+Persistent-local identity has two fail-closed modes. Default mode retains the
+canonical `archive_db` database and `pastexam-postgres-data` PostgreSQL volume.
+An operator inspecting an already-existing non-default local runtime must pass
+both `--expected-database` and `--expected-postgres-volume`; either value alone,
+an invalid value, or an unprovable running mount is rejected. `preflight` and
+`schema-status` distinguish ignored-file declarations, explicit expected
+identity, and actual container environment/mount evidence. Scoped values are
+assertions only: they never rename or create a database, replace a volume, or
+reconcile Compose state.
+
+When revised tooling is verified from a separate registered worktree,
+`PASTEXAM_DEV_RUNTIME_ROOT` may explicitly name the registered worktree that
+owns the existing runtime and its ignored environment files. It must resolve
+to the same Git repository, and scoped verification remains read-only. This
+does not authorize lifecycle commands from the tooling worktree or make that
+worktree the runtime bind-mount owner.
+
 ## Environment responsibility matrix
 
 | Environment | Identity guards | Allowed purpose and operations | Forbidden use | Credentials and cleanup | Startup/shutdown owner and evidence |
@@ -128,6 +145,19 @@ cannot be proven.
   `logs`, `schema-status`, `backend-pause`, `backend-resume`, and `stop` for
   the normal local stack. The schema commands operate only on existing exact
   containers; they neither create a stack nor run a migration.
+- For an existing non-default persistent runtime, invoke the read-only identity
+  gate explicitly, for example:
+
+  ```bash
+  scripts/dev-compose.sh schema-status \
+    --expected-database archive_db_dev_example \
+    --expected-postgres-volume pastexam-example-postgres-data
+  ```
+
+  The same pair is required by the isolated runner as
+  `--canonical-expected-database` and
+  `--canonical-expected-postgres-volume`. Its dynamic `pastexam_test_*`
+  database remains separate and disposable.
 - Do not create a second, vaguely named Compose project merely to bypass a
   fault in the canonical stack.
 - An additional Compose environment is allowed only when the task explicitly
@@ -167,7 +197,7 @@ bucket, volume, or network as a verification shortcut.
 | --- | --- |
 | Frontend build-time | `frontend/.env.example` documents `VITE_*` values consumed by Vite, including API, site, timezone, and Umami settings |
 | Backend runtime | `backend/.env.example` documents database, authentication, MinIO, Redis, and bootstrap settings loaded by the backend |
-| Compose interpolation | `docker/.env.example` documents local Compose identities, ports, credentials, database, bucket, network, and volume names; `scripts/dev-compose.sh` defaults to `docker/.env` and supports `PASTEXAM_DEV_COMPOSE_ENV_FILE` |
+| Compose interpolation | `docker/.env.example` documents local Compose identities, ports, credentials, database, bucket, network, and volume names; `scripts/dev-compose.sh` defaults to the runtime owner's `docker/.env` and supports `PASTEXAM_DEV_COMPOSE_ENV_FILE`. Scoped expected database/volume flags are verification assertions, not Compose interpolation values. |
 | Production external configuration | `docker/docker-compose.prod.yml` reads the Compose environment and mounts separate backend runtime and migrator environment files under the production configuration path |
 
 Do not place secrets in documentation, commits, command output, or frontend
