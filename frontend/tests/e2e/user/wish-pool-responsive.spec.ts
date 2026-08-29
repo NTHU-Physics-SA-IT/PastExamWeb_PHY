@@ -71,7 +71,7 @@ test.describe('User › Wish Pool responsive Honeycomb', () => {
         })
         return
       }
-      if (request.method() === 'GET' && url.pathname === '/api/auth/heartbeat') {
+      if (request.method() === 'POST' && url.pathname === '/api/auth/heartbeat') {
         await route.fulfill({ status: 200, headers: JSON_HEADERS, body: '{}' })
         return
       }
