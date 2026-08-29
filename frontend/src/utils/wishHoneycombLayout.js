@@ -1,16 +1,21 @@
 export const WISH_CENTRALITY_GAMMA = 0.6
 export const WISH_ITEM_MAX_WIDTH_REM = 15
-export const WISH_ITEM_MAX_HEIGHT_REM = 9.5
+export const WISH_ITEM_MAX_HEIGHT_REM = 16.5
 export const WISH_CELL_HORIZONTAL_SPACING_REM = 15.6
-export const WISH_CELL_VERTICAL_SPACING_REM = 11.25
+export const WISH_CELL_VERTICAL_SPACING_REM = 19.5
 export const WISH_MOBILE_BREAKPOINT_PX = 768
 export const WISH_TABLET_MAX_WIDTH_PX = 1024
-export const WISH_MOBILE_ITEM_MAX_HEIGHT_REM = 8.5
-export const WISH_MOBILE_ROW_GAP_REM = 0.5
+export const WISH_NATIVE_MIN_GEOMETRY_SCALE = 0.72
+export const WISH_NATIVE_MIN_VERTICAL_SCALE = 0.86
+export const WISH_NATIVE_MIN_CENTER_ROW_CAPACITY = 3
 
-const WISH_FONT_SIZE_BASE_REM = 1.15
-const WISH_FONT_SIZE_GROWTH_REM = 0.11
-const WISH_FONT_SIZE_MAX_REM = 1.6
+export const WISH_FONT_SIZE_BASE_REM = 1.15
+export const WISH_FONT_SIZE_LOW_HEART_GROWTH_REM = 0.11
+export const WISH_FONT_SIZE_SQRT5_TARGET_REM = WISH_FONT_SIZE_BASE_REM * Math.sqrt(5)
+export const WISH_FONT_SIZE_MAX_REM = 3.45
+const WISH_FONT_SIZE_LOG_STAGE_MAX_HEARTS = 4
+const WISH_FONT_SIZE_SQRT5_STAGE_MAX_HEARTS = 18
+const WISH_FONT_SIZE_CAP_START_HEARTS = 30
 const WISH_LAYOUT_SAFE_MARGIN_REM = 1
 const RNG_EPSILON = 1e-7
 const UINT32_RANGE = 0x100000000
@@ -28,6 +33,11 @@ function normalizedCount(value) {
 function normalizedRootFontSize(value) {
   const numericValue = Number(value)
   return Number.isFinite(numericValue) && numericValue > 0 ? numericValue : 16
+}
+
+function smoothstep(value) {
+  const progress = Math.min(1, Math.max(0, value))
+  return 3 * progress ** 2 - 2 * progress ** 3
 }
 
 function normalizedViewport(viewport) {
@@ -111,6 +121,11 @@ function contiguousRowQValues(row, capacity, count, sessionSeed) {
   )
   const maxStart = capacity - count
   if (maxStart <= 0) return legalValues
+  if (row === 0) {
+    const centerIndex = legalValues.indexOf(0)
+    const centeredStart = Math.min(maxStart, Math.max(0, centerIndex - Math.floor((count - 1) / 2)))
+    return legalValues.slice(centeredStart, centeredStart + count)
+  }
   const centeredStart = maxStart / 2
   const bias = (seededUnit(sessionSeed, `row:${row}:horizontal-bias`) - 0.5) * Math.min(2, maxStart)
   const start = Math.min(maxStart, Math.max(0, Math.round(centeredStart + bias)))
@@ -142,28 +157,46 @@ function centerOutQValues(row, capacity) {
     .map(({ q }) => q)
 }
 
-function desktopCenterRowCapacity(viewportWidth, rootFontSize) {
-  const itemWidth = WISH_ITEM_MAX_WIDTH_REM * rootFontSize
-  const spacing = WISH_CELL_HORIZONTAL_SPACING_REM * rootFontSize
-  const safeWidth = Math.max(
-    itemWidth,
-    viewportWidth - WISH_LAYOUT_SAFE_MARGIN_REM * rootFontSize * 2
-  )
-  const rawCapacity = Math.max(1, Math.floor((safeWidth - itemWidth) / spacing) + 1)
-  return rawCapacity % 2 === 0 ? Math.max(1, rawCapacity - 1) : rawCapacity
+export function wishHoneycombGeometry(viewport, rootFontSize = 16) {
+  const normalizedSize = normalizedViewport(viewport)
+  const rootSize = normalizedRootFontSize(rootFontSize)
+  const nativeNavigation = normalizedSize.width <= WISH_TABLET_MAX_WIDTH_PX
+  const horizontalScale = nativeNavigation
+    ? Math.min(1, Math.max(WISH_NATIVE_MIN_GEOMETRY_SCALE, normalizedSize.width / 768))
+    : 1
+  const verticalScale = nativeNavigation
+    ? Math.max(WISH_NATIVE_MIN_VERTICAL_SCALE, horizontalScale)
+    : 1
+  return {
+    nativeNavigation,
+    horizontalScale,
+    verticalScale,
+    itemWidth: WISH_ITEM_MAX_WIDTH_REM * rootSize * horizontalScale,
+    itemHeight: WISH_ITEM_MAX_HEIGHT_REM * rootSize,
+    horizontalSpacing: WISH_CELL_HORIZONTAL_SPACING_REM * rootSize * horizontalScale,
+    verticalSpacing: WISH_CELL_VERTICAL_SPACING_REM * rootSize * verticalScale,
+    safeMargin: WISH_LAYOUT_SAFE_MARGIN_REM * rootSize,
+  }
 }
 
-function desktopCell(row, q, viewport, rootFontSize) {
-  const x = (q + row / 2) * WISH_CELL_HORIZONTAL_SPACING_REM * rootFontSize
-  const y = row * WISH_CELL_VERTICAL_SPACING_REM * rootFontSize
-  const safeMargin = WISH_LAYOUT_SAFE_MARGIN_REM * rootFontSize
+function honeycombCenterRowCapacity(viewportWidth, geometry) {
+  const { itemWidth, horizontalSpacing, nativeNavigation, safeMargin } = geometry
+  const safeWidth = Math.max(itemWidth, viewportWidth - safeMargin * 2)
+  const rawCapacity = Math.max(1, Math.floor((safeWidth - itemWidth) / horizontalSpacing) + 1)
+  const oddCapacity = rawCapacity % 2 === 0 ? Math.max(1, rawCapacity - 1) : rawCapacity
+  return nativeNavigation ? Math.max(WISH_NATIVE_MIN_CENTER_ROW_CAPACITY, oddCapacity) : oddCapacity
+}
+
+function honeycombCell(row, q, viewport, geometry) {
+  const x = (q + row / 2) * geometry.horizontalSpacing
+  const y = row * geometry.verticalSpacing
   const horizontalLimit = Math.max(
     0,
-    (viewport.width - WISH_ITEM_MAX_WIDTH_REM * rootFontSize) / 2 - safeMargin
+    (viewport.width - geometry.itemWidth) / 2 - geometry.safeMargin
   )
   const verticalLimit = Math.max(
     0,
-    (viewport.height - WISH_ITEM_MAX_HEIGHT_REM * rootFontSize) / 2 - safeMargin
+    (viewport.height - geometry.itemHeight) / 2 - geometry.safeMargin
   )
   return {
     mode: 'honeycomb',
@@ -173,14 +206,6 @@ function desktopCell(row, q, viewport, rootFontSize) {
     y,
     inInitialViewport: Math.abs(x) <= horizontalLimit && Math.abs(y) <= verticalLimit,
   }
-}
-
-function mobileRowSpacing(rootFontSize) {
-  return (WISH_MOBILE_ITEM_MAX_HEIGHT_REM + WISH_MOBILE_ROW_GAP_REM) * rootFontSize
-}
-
-function usesVerticalWishLayout(viewport) {
-  return viewport.width < WISH_MOBILE_BREAKPOINT_PX
 }
 
 export function wishInteractionMode(viewport) {
@@ -194,14 +219,11 @@ export function createWishWorldGeometry(
   positions,
   viewport,
   rootFontSize = 16,
-  { mobile = false, native2DOverflow = false } = {}
+  { native2DOverflow = false } = {}
 ) {
   const normalizedSize = normalizedViewport(viewport)
-  const rootSize = normalizedRootFontSize(rootFontSize)
-  const itemWidth = WISH_ITEM_MAX_WIDTH_REM * rootSize
-  const itemHeight =
-    (mobile ? WISH_MOBILE_ITEM_MAX_HEIGHT_REM : WISH_ITEM_MAX_HEIGHT_REM) * rootSize
-  const margin = WISH_LAYOUT_SAFE_MARGIN_REM * rootSize
+  const geometry = wishHoneycombGeometry(normalizedSize, rootFontSize)
+  const { itemWidth, itemHeight, safeMargin: margin } = geometry
   const positionList = Object.values(positions || {}).filter(
     ({ x, y }) => Number.isFinite(x) && Number.isFinite(y)
   )
@@ -221,8 +243,7 @@ export function createWishWorldGeometry(
   const contentWidth = Math.max(...xValues) - Math.min(...xValues) + itemWidth + margin * 2
   const contentHeight = Math.max(...yValues) - Math.min(...yValues) + itemHeight + margin * 2
   const width = Math.max(minimumWidth, contentWidth)
-  const minimumHeight =
-    normalizedSize.height * (mobile ? 1.5 : 1) + (native2DOverflow ? itemHeight : 0)
+  const minimumHeight = normalizedSize.height + (native2DOverflow ? itemHeight : 0)
   const height = Math.max(minimumHeight, contentHeight)
   const offsetX = (width - contentWidth) / 2 + margin + itemWidth / 2 - Math.min(...xValues)
   const offsetY = (height - contentHeight) / 2 + margin + itemHeight / 2 - Math.min(...yValues)
@@ -246,10 +267,6 @@ export function createSeededWishRng(seed, scope = 'default') {
   return () => seededUnit(seed, `${scope}:${index++}`)
 }
 
-export function wishHeartSide(wishId, sessionSeed = 0) {
-  return seededUnit(sessionSeed, `heart-side:${wishId}`) < 0.5 ? 'left' : 'right'
-}
-
 export function assignWishCentralityScores(wishes, rng = Math.random, existingScores = {}) {
   const scores = { ...existingScores }
   for (const wish of wishes) {
@@ -260,32 +277,37 @@ export function assignWishCentralityScores(wishes, rng = Math.random, existingSc
   return scores
 }
 
-export function selectMobileAnchorWishId(wishes, rng = Math.random) {
-  if (!wishes.length) return null
-  const highestHeartCount = Math.max(
-    ...wishes.map((wish) => Math.max(0, Number(wish?.heart_count) || 0))
-  )
-  const candidates = wishes.filter(
-    (wish) => Math.max(0, Number(wish?.heart_count) || 0) === highestHeartCount
-  )
-  const candidateIndex = Math.floor(normalizedRandom(rng) * candidates.length)
-  return candidates[candidateIndex]?.id ?? null
-}
-
 export function wishFontSizeRem(heartCount) {
   const hearts = Math.max(0, Number(heartCount) || 0)
-  return Math.min(
-    WISH_FONT_SIZE_MAX_REM,
-    WISH_FONT_SIZE_BASE_REM + WISH_FONT_SIZE_GROWTH_REM * Math.log2(hearts + 1)
-  )
+  if (hearts <= WISH_FONT_SIZE_LOG_STAGE_MAX_HEARTS) {
+    return WISH_FONT_SIZE_BASE_REM + WISH_FONT_SIZE_LOW_HEART_GROWTH_REM * Math.log2(hearts + 1)
+  }
+  if (hearts <= WISH_FONT_SIZE_SQRT5_STAGE_MAX_HEARTS) {
+    const progress = smoothstep(hearts / WISH_FONT_SIZE_SQRT5_STAGE_MAX_HEARTS)
+    return (
+      WISH_FONT_SIZE_BASE_REM +
+      (WISH_FONT_SIZE_SQRT5_TARGET_REM - WISH_FONT_SIZE_BASE_REM) * progress
+    )
+  }
+  if (hearts < WISH_FONT_SIZE_CAP_START_HEARTS) {
+    const progress = smoothstep(
+      (hearts - WISH_FONT_SIZE_SQRT5_STAGE_MAX_HEARTS) /
+        (WISH_FONT_SIZE_CAP_START_HEARTS - WISH_FONT_SIZE_SQRT5_STAGE_MAX_HEARTS)
+    )
+    return (
+      WISH_FONT_SIZE_SQRT5_TARGET_REM +
+      (WISH_FONT_SIZE_MAX_REM - WISH_FONT_SIZE_SQRT5_TARGET_REM) * progress
+    )
+  }
+  return WISH_FONT_SIZE_MAX_REM
 }
 
-export function generateDesktopHoneycombCells(count, viewport, rootFontSize = 16, sessionSeed = 0) {
+export function generateWishHoneycombCells(count, viewport, rootFontSize = 16, sessionSeed = 0) {
   const requestedCount = normalizedCount(count)
   if (!requestedCount) return []
   const normalizedSize = normalizedViewport(viewport)
-  const rootSize = normalizedRootFontSize(rootFontSize)
-  const centerCapacity = desktopCenterRowCapacity(normalizedSize.width, rootSize)
+  const geometry = wishHoneycombGeometry(normalizedSize, rootFontSize)
+  const centerCapacity = honeycombCenterRowCapacity(normalizedSize.width, geometry)
   const targetOccupancy = 0.68 + seededUnit(sessionSeed, 'row-occupancy') * 0.14
   const maximumRows = requestedCount
   const orderedRows = organicRowOrder(maximumRows, sessionSeed)
@@ -310,11 +332,11 @@ export function generateDesktopHoneycombCells(count, viewport, rootFontSize = 16
   const selectedCells = activeRows.flatMap((row) => {
     const capacityForRow = rowCapacity(row, centerCapacity)
     return contiguousRowQValues(row, capacityForRow, rowCounts[row], sessionSeed).map((q) =>
-      desktopCell(row, q, normalizedSize, rootSize)
+      honeycombCell(row, q, normalizedSize, geometry)
     )
   })
-  const horizontalScale = WISH_CELL_HORIZONTAL_SPACING_REM * rootSize
-  const verticalScale = WISH_CELL_VERTICAL_SPACING_REM * rootSize
+  const horizontalScale = geometry.horizontalSpacing
+  const verticalScale = geometry.verticalSpacing
   return selectedCells.sort((left, right) => {
     const leftDistance = Math.hypot(left.x / horizontalScale, left.y / verticalScale)
     const rightDistance = Math.hypot(right.x / horizontalScale, right.y / verticalScale)
@@ -326,14 +348,14 @@ export function generateDesktopHoneycombCells(count, viewport, rootFontSize = 16
   })
 }
 
-export function assignDesktopWishPositions(
+export function assignWishHoneycombPositions(
   wishes,
   scores,
   viewport,
   rootFontSize = 16,
   sessionSeed = 0
 ) {
-  const cells = generateDesktopHoneycombCells(wishes.length, viewport, rootFontSize, sessionSeed)
+  const cells = generateWishHoneycombCells(wishes.length, viewport, rootFontSize, sessionSeed)
   const positions = {}
   rankWishesBySessionScore(wishes, scores).forEach((wish, index) => {
     positions[wish.id] = { ...cells[index] }
@@ -341,126 +363,34 @@ export function assignDesktopWishPositions(
   return positions
 }
 
-export function generateMobileRowSlots(count, viewport, rootFontSize = 16) {
-  const requestedCount = normalizedCount(count)
-  if (!requestedCount) return []
+export function reprojectWishHoneycombPositions(positions, viewport, rootFontSize = 16) {
   const normalizedSize = normalizedViewport(viewport)
-  const rootSize = normalizedRootFontSize(rootFontSize)
-  const itemHeight = WISH_ITEM_MAX_HEIGHT_REM * rootSize
-  const safeMargin = WISH_LAYOUT_SAFE_MARGIN_REM * rootSize
-  const effectiveHeight = Math.max(normalizedSize.height, itemHeight + safeMargin * 2)
-  const safeTop = itemHeight / 2 + safeMargin
-  const safeBottom = effectiveHeight - itemHeight / 2 - safeMargin
-  const targetY = Math.min(safeBottom, Math.max(safeTop, effectiveHeight * 0.25))
-  const minimumSpacing = mobileRowSpacing(rootSize)
-  const visibleCapacity = Math.max(1, Math.floor((safeBottom - safeTop) / minimumSpacing) + 1)
-  const anchorRatio = targetY / effectiveHeight
-  const screenRows = [{ row: 0, screenY: targetY }]
-
-  if (requestedCount <= visibleCapacity) {
-    const remainingCount = requestedCount - 1
-    const capacityAbove = Math.floor((targetY - safeTop) / minimumSpacing)
-    const capacityBelow = Math.floor((safeBottom - targetY) / minimumSpacing)
-    let aboveCount = Math.min(capacityAbove, Math.floor(remainingCount * 0.25))
-    let belowCount = remainingCount - aboveCount
-    if (belowCount > capacityBelow) {
-      const shiftedAbove = Math.min(capacityAbove - aboveCount, belowCount - capacityBelow)
-      aboveCount += shiftedAbove
-      belowCount -= shiftedAbove
-    }
-
-    for (let index = 1; index <= belowCount; index += 1) {
-      screenRows.push({
-        row: index,
-        screenY: targetY + ((safeBottom - targetY) * index) / Math.max(1, belowCount),
-      })
-    }
-    for (let index = 1; index <= aboveCount; index += 1) {
-      screenRows.push({
-        row: -index,
-        screenY: targetY - ((targetY - safeTop) * index) / Math.max(1, aboveCount),
-      })
-    }
-  } else {
-    for (let distance = 1; screenRows.length < requestedCount; distance += 1) {
-      screenRows.push({ row: distance, screenY: targetY + distance * minimumSpacing })
-      if (screenRows.length === requestedCount) break
-      screenRows.push({ row: -distance, screenY: targetY - distance * minimumSpacing })
-    }
-  }
-
-  return screenRows
-    .sort(
-      (left, right) =>
-        Math.abs(left.screenY - targetY) - Math.abs(right.screenY - targetY) ||
-        right.screenY - left.screenY
-    )
-    .map(({ row, screenY }, index) => ({
-      mode: 'mobile',
-      row,
-      x: 0,
-      y: screenY - targetY,
-      screenY,
-      anchor: index === 0,
-      anchorRatio,
-      inInitialViewport: screenY >= safeTop && screenY <= safeBottom,
-    }))
-}
-
-export function assignMobileWishPositions(
-  wishes,
-  scores,
-  viewport,
-  anchorWishId,
-  rootFontSize = 16,
-  sessionSeed = 0
-) {
-  const slots = generateMobileRowSlots(wishes.length, viewport, rootFontSize)
-  const positions = {}
-  const anchorWish = wishes.find((wish) => wish.id === anchorWishId) || wishes[0]
-  if (!anchorWish || !slots.length) return positions
-
-  positions[anchorWish.id] = {
-    ...slots[0],
-    anchor: true,
-    heartSide: wishHeartSide(anchorWish.id, sessionSeed),
-  }
-  const remainingWishes = rankWishesBySessionScore(
-    wishes.filter((wish) => wish.id !== anchorWish.id),
-    scores
+  const geometry = wishHoneycombGeometry(normalizedSize, rootFontSize)
+  return Object.fromEntries(
+    Object.entries(positions || {}).map(([wishId, position]) => [
+      wishId,
+      honeycombCell(position.r, position.q, normalizedSize, geometry),
+    ])
   )
-  remainingWishes.forEach((wish, index) => {
-    positions[wish.id] = {
-      ...slots[index + 1],
-      anchor: false,
-      heartSide: wishHeartSide(wish.id, sessionSeed),
-    }
-  })
-  return positions
 }
 
 export function createResponsiveWishLayout(
   wishes,
   scores,
   viewport,
-  anchorWishId,
   rootFontSize = 16,
   sessionSeed = 0
 ) {
   const normalizedSize = normalizedViewport(viewport)
-  const mobile = usesVerticalWishLayout(normalizedSize)
-  const positions = mobile
-    ? assignMobileWishPositions(
-        wishes,
-        scores,
-        normalizedSize,
-        anchorWishId,
-        rootFontSize,
-        sessionSeed
-      )
-    : assignDesktopWishPositions(wishes, scores, normalizedSize, rootFontSize, sessionSeed)
+  const positions = assignWishHoneycombPositions(
+    wishes,
+    scores,
+    normalizedSize,
+    rootFontSize,
+    sessionSeed
+  )
   return {
-    mode: mobile ? 'mobile' : 'honeycomb',
+    mode: 'honeycomb',
     interactionMode: wishInteractionMode(normalizedSize),
     positions,
     camera: { x: 0, y: 0 },
@@ -472,43 +402,20 @@ export function appendResponsiveWishPositions(
   newWishes,
   scores,
   viewport,
-  anchorWishId,
   rootFontSize = 16,
   sessionSeed = 0
 ) {
   if (!newWishes.length) return { ...existingPositions }
   const rootSize = normalizedRootFontSize(rootFontSize)
   const normalizedSize = normalizedViewport(viewport)
-  const mobile = usesVerticalWishLayout(normalizedSize)
   const nextPositions = { ...existingPositions }
   const orderedWishes = rankWishesBySessionScore(newWishes, scores)
-
-  if (mobile) {
-    const existingRows = Object.values(existingPositions)
-    const lowestY = existingRows.length ? Math.max(...existingRows.map(({ y }) => y)) : 0
-    const highestRow = existingRows.length
-      ? Math.max(0, ...existingRows.map(({ row }) => Number(row) || 0))
-      : 0
-    orderedWishes.forEach((wish, index) => {
-      nextPositions[wish.id] = {
-        mode: 'mobile',
-        row: highestRow + index + 1,
-        x: 0,
-        y: lowestY + mobileRowSpacing(rootSize) * (index + 1),
-        anchor: false,
-        anchorRatio: nextPositions[anchorWishId]?.anchorRatio ?? 0.25,
-        heartSide: wishHeartSide(wish.id, sessionSeed),
-        inInitialViewport: false,
-      }
-    })
-    return nextPositions
-  }
 
   const usedCells = new Set(Object.values(existingPositions).map(({ q, r }) => `${q}:${r}`))
   let requestedCount = usedCells.size + orderedWishes.length
   let availableCells = []
   while (availableCells.length < orderedWishes.length) {
-    availableCells = generateDesktopHoneycombCells(
+    availableCells = generateWishHoneycombCells(
       requestedCount,
       normalizedSize,
       rootSize,
