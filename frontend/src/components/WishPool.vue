@@ -32,7 +32,6 @@
         class="wish-pool-stage"
         :class="{
           'is-panning': isPanning,
-          'is-mobile-layout': layoutMode === 'mobile',
           'is-native-scroll': navigationMode !== 'desktop',
           'is-tablet-scroll': navigationMode === 'tablet',
           'is-mobile-scroll': navigationMode === 'mobile',
@@ -58,18 +57,11 @@
             role="listitem"
             class="wish-node"
             :data-wish-id="wish.id"
+            :data-wish-q="positions[wish.id]?.q"
+            :data-wish-r="positions[wish.id]?.r"
             :style="wishPositionStyle(wish)"
           >
-            <div
-              class="wish-item"
-              :class="{
-                fulfilled: wish.fulfilled,
-                'is-heart-left':
-                  layoutMode === 'mobile' && positions[wish.id]?.heartSide === 'left',
-                'is-heart-right':
-                  layoutMode === 'mobile' && positions[wish.id]?.heartSide === 'right',
-              }"
-            >
+            <div class="wish-item" :class="{ fulfilled: wish.fulfilled }">
               <button
                 type="button"
                 class="wish-word"
@@ -102,17 +94,14 @@
       </div>
       <div class="wish-overlay-controls">
         <div v-if="showMoreHint" class="wish-navigation-hint" aria-hidden="true">
-          <i :class="navigationMode === 'mobile' ? 'pi pi-arrow-down' : 'pi pi-arrows-alt'" />
+          <i class="pi pi-arrows-alt" />
           <span>{{ $t(navigationHintText) }}</span>
         </div>
         <Button
           v-show="returnControlVisible"
           class="wish-return-button"
-          :class="{
-            'is-mobile-return': navigationMode === 'mobile',
-            'is-at-origin': returnControlAtOrigin,
-          }"
-          :icon="navigationMode === 'mobile' ? 'pi pi-arrow-up' : 'pi pi-arrows-alt'"
+          :class="{ 'is-at-origin': returnControlAtOrigin }"
+          icon="pi pi-arrows-alt"
           severity="secondary"
           text
           rounded
@@ -268,9 +257,8 @@ import {
   createResponsiveWishLayout,
   createWishLayoutSeed,
   createWishWorldGeometry,
-  selectMobileAnchorWishId,
-  WISH_MOBILE_ITEM_MAX_HEIGHT_REM,
   wishFontSizeRem,
+  wishHoneycombGeometry,
 } from '@/utils/wishHoneycombLayout'
 import InlineCommentReport from '@/components/InlineCommentReport.vue'
 
@@ -296,7 +284,6 @@ const viewportRef = ref(null)
 const viewportSize = ref({ width: 0, height: 0 })
 const positions = ref({})
 const sessionScores = ref({})
-const mobileAnchorWishId = ref(null)
 const layoutMode = ref('honeycomb')
 const navigationMode = ref('desktop')
 const worldGeometry = ref({ width: 0, height: 0, offsetX: 0, offsetY: 0 })
@@ -309,7 +296,6 @@ const showMoreHint = ref(false)
 const showReturnControl = ref(false)
 const sessionLayoutSeed = createWishLayoutSeed(Math.random)
 const sessionScoreRng = createSeededWishRng(sessionLayoutSeed, 'centrality')
-const sessionAnchorRng = createSeededWishRng(sessionLayoutSeed, 'mobile-anchor')
 const PAN_THRESHOLD = 7
 let resizeObserver
 let panStart = null
@@ -340,27 +326,22 @@ const reportTarget = computed(() => ({
   is_deleted: false,
 }))
 const worldStyle = computed(() => {
+  const geometry = wishHoneycombGeometry(viewportSize.value, rootFontSize())
+  const sharedStyle = { '--wish-item-max-width': `${geometry.itemWidth}px` }
   if (navigationMode.value === 'desktop') {
-    return { transform: `translate3d(${camera.x}px, ${camera.y}px, 0)` }
+    return { ...sharedStyle, transform: `translate3d(${camera.x}px, ${camera.y}px, 0)` }
   }
   return {
+    ...sharedStyle,
     width: `${worldGeometry.value.width}px`,
     height: `${worldGeometry.value.height}px`,
     transform: 'none',
   }
 })
-const navigationHintText = computed(() =>
-  navigationMode.value === 'mobile' ? '向下滑動以查看更多' : '拖曳以查看更多'
-)
-const returnControlText = computed(() =>
-  navigationMode.value === 'mobile' ? '回到頂部' : '回到中央'
-)
-const returnControlVisible = computed(
-  () => navigationMode.value !== 'mobile' || showReturnControl.value
-)
-const returnControlAtOrigin = computed(
-  () => navigationMode.value !== 'mobile' && !showReturnControl.value
-)
+const navigationHintText = computed(() => '拖曳以查看更多')
+const returnControlText = computed(() => '回到中央')
+const returnControlVisible = computed(() => Boolean(wishes.value.length))
+const returnControlAtOrigin = computed(() => !showReturnControl.value)
 
 function openSloganDialog() {
   sloganContent.value = ''
@@ -396,17 +377,6 @@ async function submitSlogan() {
     sloganSubmitting.value = false
   }
 }
-const mobileContentBottom = computed(() => {
-  const yValues = Object.values(positions.value)
-    .map(({ y }) => y)
-    .filter(Number.isFinite)
-  if (!yValues.length) return 0
-  return (
-    Math.max(...yValues) +
-    worldGeometry.value.offsetY +
-    (WISH_MOBILE_ITEM_MAX_HEIGHT_REM * rootFontSize()) / 2
-  )
-})
 function wishPositionStyle(wish) {
   const position = positions.value[wish.id]
   if (!position) return { visibility: 'hidden' }
@@ -492,16 +462,9 @@ function updateNavigationAffordances() {
     return
   }
   const threshold = navigationDistanceThreshold()
-  if (navigationMode.value === 'mobile') {
-    const currentTop = viewportRef.value.scrollTop
-    showMoreHint.value =
-      mobileContentBottom.value - (currentTop + viewportSize.value.height) > threshold
-    showReturnControl.value = navigationInteracted.value && currentTop > threshold
-    return
-  }
-  showMoreHint.value = hasWishesOutsideInitialViewport()
+  showMoreHint.value = !navigationInteracted.value && hasWishesOutsideInitialViewport()
   const currentPosition =
-    navigationMode.value === 'tablet'
+    navigationMode.value !== 'desktop'
       ? { x: viewportRef.value.scrollLeft, y: viewportRef.value.scrollTop }
       : camera
   showReturnControl.value =
@@ -529,10 +492,7 @@ function returnToExplorationOrigin() {
   navigationInteracted.value = false
   showReturnControl.value = false
   if (navigationMode.value !== 'desktop') {
-    const target =
-      navigationMode.value === 'mobile'
-        ? { left: 0, top: 0 }
-        : { left: explorationOrigin.x, top: explorationOrigin.y }
+    const target = { left: explorationOrigin.x, top: explorationOrigin.y }
     const options = {
       ...target,
       behavior: prefersReducedMotion() ? 'auto' : 'smooth',
@@ -559,8 +519,7 @@ function returnToExplorationOrigin() {
 }
 function captureNativeScroll() {
   if (navigationMode.value === 'desktop' || !viewportRef.value) return null
-  const horizontalRange = Math.max(0, worldGeometry.value.width - viewportSize.value.width)
-  const verticalRange = Math.max(0, worldGeometry.value.height - viewportSize.value.height)
+  const { horizontalRange, verticalRange } = nativeScrollRanges()
   return {
     left: viewportRef.value.scrollLeft,
     top: viewportRef.value.scrollTop,
@@ -568,20 +527,14 @@ function captureNativeScroll() {
     topRatio: verticalRange ? viewportRef.value.scrollTop / verticalRange : 0,
   }
 }
-function initialNativeScroll() {
-  const horizontalRange = Math.max(0, worldGeometry.value.width - viewportSize.value.width)
-  const verticalRange = Math.max(0, worldGeometry.value.height - viewportSize.value.height)
-  if (navigationMode.value === 'mobile') {
-    const anchor = positions.value[mobileAnchorWishId.value]
-    const anchorY = (anchor?.y || 0) + worldGeometry.value.offsetY
-    return {
-      left: 0,
-      top: Math.min(
-        verticalRange,
-        Math.max(0, anchorY - viewportSize.value.height * (anchor?.anchorRatio ?? 0.25))
-      ),
-    }
+function nativeScrollRanges() {
+  return {
+    horizontalRange: Math.max(0, worldGeometry.value.width - viewportSize.value.width),
+    verticalRange: Math.max(0, worldGeometry.value.height - viewportSize.value.height),
   }
+}
+function initialNativeScroll() {
+  const { horizontalRange, verticalRange } = nativeScrollRanges()
   return { left: horizontalRange / 2, top: verticalRange / 2 }
 }
 function scheduleNativeScroll(snapshot = null, preserveAbsolute = false) {
@@ -594,8 +547,7 @@ function scheduleNativeScroll(snapshot = null, preserveAbsolute = false) {
     ) {
       return
     }
-    const horizontalRange = Math.max(0, worldGeometry.value.width - viewportSize.value.width)
-    const verticalRange = Math.max(0, worldGeometry.value.height - viewportSize.value.height)
+    const { horizontalRange, verticalRange } = nativeScrollRanges()
     const target = snapshot
       ? {
           left: preserveAbsolute ? snapshot.left : snapshot.leftRatio * horizontalRange,
@@ -616,10 +568,7 @@ function updateWorldGeometry() {
     positions.value,
     viewportSize.value,
     rootFontSize(),
-    {
-      mobile: layoutMode.value === 'mobile',
-      native2DOverflow: navigationMode.value === 'tablet',
-    }
+    { native2DOverflow: true }
   )
 }
 function applyResponsiveLayout(scrollSnapshot = captureNativeScroll()) {
@@ -629,7 +578,6 @@ function applyResponsiveLayout(scrollSnapshot = captureNativeScroll()) {
     wishes.value,
     sessionScores.value,
     viewportSize.value,
-    mobileAnchorWishId.value,
     rootFontSize(),
     sessionLayoutSeed
   )
@@ -639,12 +587,7 @@ function applyResponsiveLayout(scrollSnapshot = captureNativeScroll()) {
   camera.x = layout.camera.x
   camera.y = layout.camera.y
   updateWorldGeometry()
-  const initialOrigin =
-    navigationMode.value === 'tablet'
-      ? initialNativeScroll()
-      : navigationMode.value === 'desktop'
-        ? layout.camera
-        : { left: 0, top: 0 }
+  const initialOrigin = navigationMode.value !== 'desktop' ? initialNativeScroll() : layout.camera
   explorationOrigin.x = initialOrigin.x ?? initialOrigin.left
   explorationOrigin.y = initialOrigin.y ?? initialOrigin.top
   if (previousNavigationMode !== navigationMode.value) navigationInteracted.value = false
@@ -686,7 +629,6 @@ async function load(reset = true) {
     if (reset) {
       wishes.value = incomingWishes
       sessionScores.value = assignWishCentralityScores(incomingWishes, sessionScoreRng)
-      mobileAnchorWishId.value = selectMobileAnchorWishId(incomingWishes, sessionAnchorRng)
       applyResponsiveLayout()
     } else {
       const scrollSnapshot = captureNativeScroll()
@@ -701,7 +643,6 @@ async function load(reset = true) {
         incomingWishes,
         sessionScores.value,
         viewportSize.value,
-        mobileAnchorWishId.value,
         rootFontSize(),
         sessionLayoutSeed
       )
@@ -929,16 +870,11 @@ onBeforeUnmount(() => {
   width: 0;
   height: 0;
 }
-.wish-pool-stage.is-tablet-scroll {
+.wish-pool-stage.is-tablet-scroll,
+.wish-pool-stage.is-mobile-scroll {
   cursor: default;
   overflow: auto;
   touch-action: auto;
-}
-.wish-pool-stage.is-mobile-scroll {
-  cursor: default;
-  overflow-x: hidden;
-  overflow-y: auto;
-  touch-action: pan-y;
 }
 .wish-pool-world {
   position: absolute;
@@ -1003,10 +939,6 @@ onBeforeUnmount(() => {
 :deep(.wish-return-button.is-at-origin.p-button:not(:hover):not(:focus-visible):not(:active)) {
   opacity: 0.58;
 }
-:deep(.wish-return-button.is-mobile-return.p-button) {
-  right: 0.75rem;
-  bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
-}
 @media (prefers-reduced-motion: reduce) {
   .wish-pool-world.is-returning {
     transition: none;
@@ -1021,7 +953,7 @@ onBeforeUnmount(() => {
 .wish-item {
   display: flex;
   width: max-content;
-  max-width: min(15rem, calc(100cqw - 2rem));
+  max-width: min(var(--wish-item-max-width, 15rem), calc(100cqw - 2rem));
   box-sizing: border-box;
   align-items: center;
   flex-direction: column;
@@ -1078,29 +1010,6 @@ onBeforeUnmount(() => {
 .wish-item.fulfilled .wish-word:hover,
 .wish-item.fulfilled .wish-word:focus-visible {
   color: var(--green-500);
-}
-.wish-pool-stage.is-mobile-layout .wish-item {
-  display: grid;
-  width: min(15rem, calc(100cqw - 2rem));
-  grid-template-columns: minmax(0, 1fr) auto;
-  column-gap: 0.5rem;
-}
-.wish-pool-stage.is-mobile-layout .wish-word {
-  grid-column: 1;
-  grid-row: 1;
-}
-.wish-pool-stage.is-mobile-layout :deep(.wish-inline-heart.p-button) {
-  grid-column: 2;
-  grid-row: 1;
-}
-.wish-pool-stage.is-mobile-layout .wish-item.is-heart-left {
-  grid-template-columns: auto minmax(0, 1fr);
-}
-.wish-pool-stage.is-mobile-layout .wish-item.is-heart-left .wish-word {
-  grid-column: 2;
-}
-.wish-pool-stage.is-mobile-layout .wish-item.is-heart-left :deep(.wish-inline-heart.p-button) {
-  grid-column: 1;
 }
 :deep(.wish-inline-heart.p-button) {
   min-width: 2.25rem;

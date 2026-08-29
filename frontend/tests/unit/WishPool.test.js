@@ -142,8 +142,10 @@ describe('Wish Pool focused interactions', () => {
     expect(wishPoolSource).toContain('@scroll.passive="handleNativeScroll"')
     expect(wishPoolSource).toContain('@wheel.passive="markNavigationInteraction"')
     expect(wishPoolSource).not.toContain('requestAnimationFrame')
-    expect(wishPoolSource).toContain("positions[wish.id]?.heartSide === 'left'")
-    expect(wishPoolSource).toContain("positions[wish.id]?.heartSide === 'right'")
+    expect(wishPoolSource).toContain(':data-wish-q="positions[wish.id]?.q"')
+    expect(wishPoolSource).toContain(':data-wish-r="positions[wish.id]?.r"')
+    expect(wishPoolSource).not.toContain('heartSide')
+    expect(wishPoolSource).not.toContain('wishMobileDistribution')
     expect(wishPoolSource).toContain("'is-tablet-scroll': navigationMode === 'tablet'")
     expect(wishPoolSource).toContain("'is-mobile-scroll': navigationMode === 'mobile'")
     expect(wishPoolSource).toMatch(
@@ -152,12 +154,8 @@ describe('Wish Pool focused interactions', () => {
     expect(wishPoolSource).toMatch(
       /\.wish-pool-stage\.is-native-scroll::-webkit-scrollbar\s*\{[^}]*display:\s*none;/
     )
-    expect(wishPoolSource).toMatch(/\.wish-pool-stage\.is-tablet-scroll\s*\{[^}]*overflow:\s*auto;/)
     expect(wishPoolSource).toMatch(
-      /\.wish-pool-stage\.is-mobile-scroll\s*\{[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;/
-    )
-    expect(wishPoolSource).toMatch(
-      /\.wish-pool-stage\.is-mobile-scroll\s*\{[^}]*touch-action:\s*pan-y;/
+      /\.wish-pool-stage\.is-tablet-scroll,\s*\.wish-pool-stage\.is-mobile-scroll\s*\{[^}]*overflow:\s*auto;[^}]*touch-action:\s*auto;/
     )
     expect(wishPoolSource).toMatch(
       /\.wish-navigation-hint\s*\{[^}]*position:\s*absolute;[^}]*pointer-events:\s*none;/
@@ -168,9 +166,7 @@ describe('Wish Pool focused interactions', () => {
     expect(wishPoolSource).toMatch(
       /\.wish-return-button\.p-button\)\s*\{[^}]*right:\s*1rem;[^}]*bottom:\s*calc\(3\.25rem[^;]*;[^}]*pointer-events:\s*auto;/
     )
-    expect(wishPoolSource).toContain(
-      ":icon=\"navigationMode === 'mobile' ? 'pi pi-arrow-up' : 'pi pi-arrows-alt'\""
-    )
+    expect(wishPoolSource).toContain('icon="pi pi-arrows-alt"')
     expect(wishPoolSource).not.toContain(':label="navigationMode')
     expect(wishPoolSource).toMatch(
       /\.wish-return-button\.p-button\)\s*\{[^}]*width:\s*2\.75rem;[^}]*height:\s*2\.75rem;[^}]*border-radius:\s*50%;/
@@ -179,10 +175,8 @@ describe('Wish Pool focused interactions', () => {
       /\.wish-return-button\.p-button\)\s*\{[^}]*border:\s*1px solid\s*color-mix\(in srgb, var\(--p-primary-color\) 38%, var\(--border-color\)\) !important;/
     )
     expect(wishPoolSource).toContain('v-show="returnControlVisible"')
-    expect(wishPoolSource).toContain("navigationMode.value !== 'mobile' || showReturnControl.value")
-    expect(wishPoolSource).toContain(
-      "navigationMode.value !== 'mobile' && !showReturnControl.value"
-    )
+    expect(wishPoolSource).toContain('Boolean(wishes.value.length)')
+    expect(wishPoolSource).toContain('!showReturnControl.value')
     expect(wishPoolSource).toContain('@click.stop="returnToExplorationOrigin"')
     expect(wishPoolSource).toContain("window.matchMedia?.('(prefers-reduced-motion: reduce)')")
     expect(wishPoolSource).toContain("'--wish-x':")
@@ -194,7 +188,9 @@ describe('Wish Pool focused interactions', () => {
   it('uses heart-scaled typography and clamps naturally wrapped titles to two lines', () => {
     expect(wishPoolSource).toContain('class="wish-word__title"')
     expect(wishPoolSource).toContain('wishFontSizeRem(wish.heart_count)')
-    expect(wishPoolSource).toMatch(/\.wish-item\s*\{[^}]*max-width:\s*min\(15rem,[^;]*;/)
+    expect(wishPoolSource).toMatch(
+      /\.wish-item\s*\{[^}]*max-width:\s*min\(var\(--wish-item-max-width, 15rem\),[^;]*;/
+    )
     expect(wishPoolSource).toMatch(
       /\.wish-word__title\s*\{[^}]*display:\s*-webkit-box;[^}]*overflow:\s*hidden;[^}]*overflow-wrap:\s*anywhere;[^}]*-webkit-line-clamp:\s*2;[^}]*white-space:\s*normal;/
     )
@@ -202,6 +198,7 @@ describe('Wish Pool focused interactions', () => {
     expect(wishPoolSource).not.toContain('densityFontBoost')
     expect(wishPoolSource).not.toContain('baseFontSize')
     expect(wishPoolSource).not.toContain('offsetWidth')
+    expect(wishPoolSource).not.toContain('getBoundingClientRect')
   })
 
   it('reuses discussion icon actions in the Wish detail header', () => {
@@ -241,7 +238,7 @@ describe('Wish Pool focused interactions', () => {
   })
 
   it('uses the existing fulfilled state for a theme-safe success treatment', () => {
-    expect(wishPoolSource).toMatch(/:class="\{[\s\S]*?fulfilled:\s*wish\.fulfilled,/)
+    expect(wishPoolSource).toContain(':class="{ fulfilled: wish.fulfilled }"')
     expect(wishPoolSource).toContain('v-if="wish.fulfilled" class="fulfilled-label"')
     expect(wishPoolSource).toMatch(
       /\.wish-item\.fulfilled\s*\{[^}]*color:\s*var\(--green-600\);[^}]*font-weight:\s*600/
@@ -358,40 +355,80 @@ describe('Wish Pool focused interactions', () => {
     await resizePool(wrapper, { width: 767, height: 840 })
     expect(wrapper.vm.positions).not.toBe(initialLayout)
     expect(wrapper.vm.sessionScores).toBe(initialScores)
-    expect(wrapper.vm.layoutMode).toBe('mobile')
+    expect(wrapper.vm.layoutMode).toBe('honeycomb')
     expect(wrapper.vm.viewportSize).toEqual({ width: 767, height: 840 })
-    expect(wrapper.get('.wish-pool-stage').classes()).toContain('is-mobile-layout')
+    expect(wrapper.get('.wish-pool-stage').classes()).toContain('is-mobile-scroll')
   })
 
-  it('uses the Archive mobile breakpoint and actual viewport height for the anchor', async () => {
+  it('updates only the voted title font at the 30-heart cap without moving the layout', async () => {
+    const highHeartWish = { ...sampleWish, heart_count: 29 }
+    const untouchedWish = { ...sampleWish, id: 8, title: '不應被改動的許願', heart_count: 12 }
+    wishServiceMock.list.mockReset().mockResolvedValue({
+      data: { items: [highHeartWish, untouchedWish], total: 2 },
+    })
+    wishServiceMock.toggleHeart.mockReset().mockResolvedValue({
+      data: { hearted: true, heart_count: 30 },
+    })
+    const wrapper = await mountPool({
+      selectWish: false,
+      viewport: { width: 820, height: 1180 },
+    })
+    const stage = wrapper.get('.wish-pool-stage').element
+    stage.scrollLeft = 72
+    stage.scrollTop = 64
+    const initialPositions = wrapper.vm.positions
+    const initialScores = wrapper.vm.sessionScores
+    const initialCamera = { ...wrapper.vm.camera }
+    const initialUntouchedWish = { ...wrapper.vm.wishes[1] }
+    const highHeartTitle = wrapper.get('[data-wish-id="7"] .wish-word')
+
+    expect(highHeartTitle.attributes('style')).not.toContain('font-size: 3.45rem')
+    await wrapper.get('[data-wish-id="7"] .wish-inline-heart').trigger('click')
+    await flushPromises()
+
+    expect(highHeartTitle.attributes('style')).toContain('font-size: 3.45rem')
+    expect(wrapper.vm.wishes[0]).toMatchObject({ heart_count: 30, hearted_by_me: true })
+    expect(wrapper.vm.wishes[1]).toEqual(initialUntouchedWish)
+    expect(wrapper.vm.positions).toBe(initialPositions)
+    expect(wrapper.vm.sessionScores).toBe(initialScores)
+    expect(wrapper.vm.camera).toEqual(initialCamera)
+    expect(stage.scrollLeft).toBe(72)
+    expect(stage.scrollTop).toBe(64)
+  })
+
+  it('keeps API DOM order while assigning unique Honeycomb cells on Mobile', async () => {
+    const mobileWishes = sampleWishes(6)
+    wishServiceMock.list.mockReset().mockResolvedValue({
+      data: { items: mobileWishes, total: mobileWishes.length },
+    })
     const wrapper = await mountPool({
       selectWish: false,
       viewport: { width: 390, height: 812 },
     })
-    const position = wrapper.vm.positions['7']
 
-    expect(wrapper.vm.layoutMode).toBe('mobile')
-    expect(position.mode).toBe('mobile')
-    expect(position.anchor).toBe(true)
-    expect(position.anchorRatio).toBeCloseTo(0.25, 1)
+    expect(wrapper.vm.layoutMode).toBe('honeycomb')
     expect(wrapper.vm.navigationMode).toBe('mobile')
     expect(wrapper.vm.camera).toEqual({ x: 0, y: 0 })
-    const stage = wrapper.get('.wish-pool-stage').element
-    expect(stage.scrollTop + 812 * position.anchorRatio).toBeCloseTo(
-      position.y + wrapper.vm.worldGeometry.offsetY
+    expect(wrapper.findAll('.wish-node').map((node) => node.attributes('data-wish-id'))).toEqual(
+      mobileWishes.map(({ id }) => String(id))
     )
+    const cells = Object.values(wrapper.vm.positions).map(({ q, r }) => `${q}:${r}`)
+    expect(new Set(cells).size).toBe(mobileWishes.length)
+    expect(new Set(Object.values(wrapper.vm.positions).map(({ x }) => x)).size).toBeGreaterThan(1)
+    expect(wrapper.get('.wish-pool-stage').classes()).not.toContain('is-vertical-distribution')
   })
 
-  it('uses Honeycomb without mobile heart placement for tablet portrait', async () => {
+  it('uses the same Honeycomb model with native 2D scroll for Tablet Portrait', async () => {
     const wrapper = await mountPool({
       selectWish: false,
       viewport: { width: 820, height: 1180 },
     })
     expect(wrapper.vm.layoutMode).toBe('honeycomb')
     expect(wrapper.vm.navigationMode).toBe('tablet')
-    expect(wrapper.vm.positions['7'].heartSide).toBeUndefined()
-    expect(wrapper.get('.wish-item').classes()).not.toContain('is-heart-left')
-    expect(wrapper.get('.wish-item').classes()).not.toContain('is-heart-right')
+    expect(wrapper.vm.positions['7']).toMatchObject({
+      q: expect.any(Number),
+      r: expect.any(Number),
+    })
     expect(wrapper.get('.wish-pool-stage').classes()).toContain('is-tablet-scroll')
     expect(wrapper.vm.worldGeometry.width).toBeGreaterThan(820)
     expect(wrapper.vm.worldGeometry.height).toBeGreaterThan(1180)
@@ -402,7 +439,69 @@ describe('Wish Pool focused interactions', () => {
     expect(wrapper.get('.wish-pool-world').find('.wish-return-button').exists()).toBe(false)
   })
 
-  it('shows the mobile hint only while actual Wish content remains below', async () => {
+  it.each([
+    [375, 812, 'honeycomb', 'mobile'],
+    [390, 844, 'honeycomb', 'mobile'],
+    [402, 874, 'honeycomb', 'mobile'],
+    [429, 869, 'honeycomb', 'mobile'],
+    [768, 1024, 'honeycomb', 'tablet'],
+    [834, 1210, 'honeycomb', 'tablet'],
+    [1024, 768, 'honeycomb', 'tablet'],
+    [1440, 900, 'honeycomb', 'desktop'],
+  ])(
+    'selects the intended responsive contract at %d×%d',
+    async (width, height, expectedLayout, expectedNavigation) => {
+      const wrapper = await mountPool({ selectWish: false, viewport: { width, height } })
+
+      expect(wrapper.vm.layoutMode).toBe(expectedLayout)
+      expect(wrapper.vm.navigationMode).toBe(expectedNavigation)
+      wrapper.unmount()
+    }
+  )
+
+  it('keeps Mobile cells and session scores stable through a heart toggle', async () => {
+    const mobileWishes = sampleWishes(6)
+    wishServiceMock.list.mockReset().mockResolvedValue({
+      data: { items: mobileWishes, total: mobileWishes.length },
+    })
+    const wrapper = await mountPool({
+      selectWish: false,
+      viewport: { width: 390, height: 844 },
+    })
+    const positions = wrapper.vm.positions
+    const scores = wrapper.vm.sessionScores
+    const domOrder = wrapper.findAll('.wish-node').map((node) => node.attributes('data-wish-id'))
+    const initialFontSize = wrapper.get('.wish-word').attributes('style')
+
+    await wrapper.get('.wish-inline-heart').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.wish-word').attributes('style')).not.toBe(initialFontSize)
+    expect(wrapper.vm.positions).toBe(positions)
+    expect(wrapper.vm.sessionScores).toBe(scores)
+    expect(wrapper.findAll('.wish-node').map((node) => node.attributes('data-wish-id'))).toEqual(
+      domOrder
+    )
+  })
+
+  it('keeps Mobile Honeycomb cells stable through Dialog, theme, and ordinary rerenders', async () => {
+    const wrapper = await mountPool({
+      selectWish: false,
+      viewport: { width: 402, height: 874 },
+    })
+    const positions = wrapper.vm.positions
+
+    await wrapper.get('.wish-word').trigger('click')
+    wrapper.vm.closeWishDetail()
+    document.documentElement.classList.add('app-dark')
+    wrapper.vm.$forceUpdate()
+    await flushPromises()
+    document.documentElement.classList.remove('app-dark')
+
+    expect(wrapper.vm.positions).toBe(positions)
+  })
+
+  it('shows the native-navigation hint until the user explores the Honeycomb world', async () => {
     const wrapperWithOneWish = await mountPool({
       selectWish: false,
       viewport: { width: 390, height: 812 },
@@ -419,17 +518,19 @@ describe('Wish Pool focused interactions', () => {
       viewport: { width: 390, height: 812 },
     })
 
-    expect(wrapper.get('.wish-navigation-hint').text()).toContain('向下滑動以查看更多')
+    expect(wrapper.get('.wish-navigation-hint').text()).toContain('拖曳以查看更多')
 
     const stage = wrapper.get('.wish-pool-stage').element
-    stage.scrollTop = wrapper.vm.mobileContentBottom
+    stage.scrollLeft = wrapper.vm.explorationOrigin.x + 80
+    stage.scrollTop = wrapper.vm.explorationOrigin.y + 80
+    dispatchPointer(stage, 'pointerdown', { pointerId: 6, pointerType: 'touch' })
     stage.dispatchEvent(new Event('scroll'))
     await flushPromises()
 
     expect(wrapper.find('.wish-navigation-hint').exists()).toBe(false)
   })
 
-  it('returns mobile native scroll to the top with motion preference respected', async () => {
+  it('returns Mobile native 2D scroll to its centered origin with motion preference respected', async () => {
     const manyWishes = sampleWishes(12)
     wishServiceMock.list.mockReset().mockResolvedValue({
       data: { items: manyWishes, total: manyWishes.length },
@@ -444,29 +545,40 @@ describe('Wish Pool focused interactions', () => {
       stage.scrollTop = top
     })
     stage.scrollTo = scrollTo
-    expect(wrapper.get('.wish-return-button').isVisible()).toBe(false)
-    stage.scrollTop = 180
+    const origin = { ...wrapper.vm.explorationOrigin }
+    expect(wrapper.get('.wish-return-button').isVisible()).toBe(true)
+    expect(wrapper.get('.wish-return-button').classes()).toContain('is-at-origin')
+    stage.scrollLeft = origin.x + 100
+    stage.scrollTop = origin.y + 100
     dispatchPointer(stage, 'pointerdown', { pointerId: 8, pointerType: 'touch' })
     stage.dispatchEvent(new Event('scroll'))
     await flushPromises()
 
     const returnButton = wrapper.get('.wish-return-button')
-    expect(returnButton.attributes('aria-label')).toBe('回到頂部')
-    expect(wishPoolSource).toContain("navigationMode === 'mobile' ? 'pi pi-arrow-up'")
+    expect(returnButton.attributes('aria-label')).toBe('回到中央')
     await returnButton.trigger('click')
-    expect(scrollTo).toHaveBeenLastCalledWith({ left: 0, top: 0, behavior: 'smooth' })
-    expect(returnButton.isVisible()).toBe(false)
+    expect(scrollTo).toHaveBeenLastCalledWith({
+      left: origin.x,
+      top: origin.y,
+      behavior: 'smooth',
+    })
+    expect(returnButton.classes()).toContain('is-at-origin')
 
     window.matchMedia.mockReturnValue({ matches: true })
-    stage.scrollTop = 180
+    stage.scrollLeft = origin.x + 100
+    stage.scrollTop = origin.y + 100
     dispatchPointer(stage, 'pointerdown', { pointerId: 9, pointerType: 'touch' })
     stage.dispatchEvent(new Event('scroll'))
     await flushPromises()
     await wrapper.get('.wish-return-button').trigger('click')
-    expect(scrollTo).toHaveBeenLastCalledWith({ left: 0, top: 0, behavior: 'auto' })
+    expect(scrollTo).toHaveBeenLastCalledWith({
+      left: origin.x,
+      top: origin.y,
+      behavior: 'auto',
+    })
   })
 
-  it('returns tablet native 2D scroll to its logical initial center without moving Wishes', async () => {
+  it('returns Tablet native 2D scroll to its centered origin without moving Wishes', async () => {
     const manyWishes = sampleWishes(20)
     wishServiceMock.list.mockReset().mockResolvedValue({
       data: { items: manyWishes, total: manyWishes.length },
@@ -477,21 +589,20 @@ describe('Wish Pool focused interactions', () => {
     })
     const stage = wrapper.get('.wish-pool-stage').element
     const initialPositions = wrapper.vm.positions
-    const origin = { ...wrapper.vm.explorationOrigin }
     const scrollTo = vi.fn(({ left, top }) => {
       stage.scrollLeft = left
       stage.scrollTop = top
     })
     stage.scrollTo = scrollTo
+    const origin = { ...wrapper.vm.explorationOrigin }
     stage.scrollLeft = origin.x + 90
-    stage.scrollTop = origin.y + 70
+    stage.scrollTop = origin.y + 90
     dispatchPointer(stage, 'pointerdown', { pointerId: 10, pointerType: 'touch' })
     stage.dispatchEvent(new Event('scroll'))
     await flushPromises()
 
     const returnButton = wrapper.get('.wish-return-button')
     expect(returnButton.attributes('aria-label')).toBe('回到中央')
-    expect(wishPoolSource).toContain(": 'pi pi-arrows-alt'")
     await returnButton.trigger('click')
 
     expect(scrollTo).toHaveBeenLastCalledWith({
@@ -500,12 +611,11 @@ describe('Wish Pool focused interactions', () => {
       behavior: 'smooth',
     })
     expect(wrapper.vm.positions).toBe(initialPositions)
-    expect(returnButton.isVisible()).toBe(true)
     expect(returnButton.classes()).toContain('is-at-origin')
 
     window.matchMedia.mockReturnValue({ matches: true })
     stage.scrollLeft = origin.x + 90
-    stage.scrollTop = origin.y + 70
+    stage.scrollTop = origin.y + 90
     dispatchPointer(stage, 'pointerdown', { pointerId: 12, pointerType: 'touch' })
     stage.dispatchEvent(new Event('scroll'))
     await flushPromises()
@@ -572,7 +682,7 @@ describe('Wish Pool focused interactions', () => {
     expect(stage.scrollTop).toBe(0)
   })
 
-  it('preserves the explored tablet region across portrait and landscape geometry', async () => {
+  it('restores the same seeded Honeycomb cells after Portrait to Landscape to Portrait', async () => {
     const manyWishes = Array.from({ length: 40 }, (_, index) => ({
       ...sampleWish,
       id: index + 1,
@@ -586,20 +696,18 @@ describe('Wish Pool focused interactions', () => {
       selectWish: false,
       viewport: { width: 820, height: 1180 },
     })
-    const stage = wrapper.get('.wish-pool-stage').element
-    const initialHorizontalRange = wrapper.vm.worldGeometry.width - 820
-    const initialVerticalRange = wrapper.vm.worldGeometry.height - 1180
-    stage.scrollLeft = initialHorizontalRange * 0.3
-    stage.scrollTop = initialVerticalRange * 0.4
+    const initialScores = wrapper.vm.sessionScores
+    const initialCells = JSON.parse(JSON.stringify(wrapper.vm.positions))
 
     await resizePool(wrapper, { width: 980, height: 720 })
-
-    const nextHorizontalRange = wrapper.vm.worldGeometry.width - 980
-    const nextVerticalRange = wrapper.vm.worldGeometry.height - 720
-    expect(stage.scrollLeft / nextHorizontalRange).toBeCloseTo(0.3)
-    expect(stage.scrollTop / nextVerticalRange).toBeCloseTo(0.4)
     expect(wrapper.vm.layoutMode).toBe('honeycomb')
     expect(wrapper.vm.navigationMode).toBe('tablet')
+    await resizePool(wrapper, { width: 834, height: 1210 })
+
+    expect(wrapper.vm.layoutMode).toBe('honeycomb')
+    expect(wrapper.vm.navigationMode).toBe('tablet')
+    expect(wrapper.vm.sessionScores).toBe(initialScores)
+    expect(wrapper.vm.positions).toEqual(initialCells)
   })
 
   it('votes from the inline heart without opening the Dialog or moving the camera or cell', async () => {
@@ -641,26 +749,30 @@ describe('Wish Pool focused interactions', () => {
     expect(wrapper.vm.wishes[0]).toMatchObject({ heart_count: 0, hearted_by_me: false })
   })
 
-  it('adds load-more wishes without moving tablet cells or native scroll position', async () => {
-    const nextWish = { ...sampleWish, id: 8, title: '電磁學考古題', heart_count: 18 }
+  it('adds load-more wishes without moving existing Tablet cells or scroll position', async () => {
+    const initialWishes = sampleWishes(12)
+    const nextWishes = [
+      { ...sampleWish, id: 13, title: '電磁學考古題', heart_count: 18 },
+      { ...sampleWish, id: 14, title: '熱統考古題', heart_count: 2 },
+    ]
     wishServiceMock.list
       .mockReset()
-      .mockResolvedValueOnce({ data: { items: [{ ...sampleWish }], total: 2 } })
-      .mockResolvedValueOnce({ data: { items: [nextWish], total: 2 } })
+      .mockResolvedValueOnce({ data: { items: initialWishes, total: 14 } })
+      .mockResolvedValueOnce({ data: { items: nextWishes, total: 14 } })
 
     const wrapper = await mountPool({ viewport: { width: 820, height: 1180 } })
     const stage = wrapper.get('.wish-pool-stage').element
-    stage.scrollLeft = 64
-    stage.scrollTop = 0
-    const originalPosition = { ...wrapper.vm.positions['7'] }
+    stage.scrollLeft = 0
+    stage.scrollTop = 64
+    const originalPosition = { ...wrapper.vm.positions['1'] }
     await wrapper.vm.loadMore()
     await flushPromises()
 
-    expect(wrapper.vm.positions['7']).toEqual(originalPosition)
-    expect(wrapper.vm.positions['8']).toBeDefined()
-    expect(wrapper.vm.positions['8']).not.toEqual(originalPosition)
-    expect(stage.scrollLeft).toBe(64)
-    expect(stage.scrollTop).toBe(0)
+    expect(wrapper.vm.positions['1']).toEqual(originalPosition)
+    expect(wrapper.vm.positions['13']).toBeDefined()
+    expect(wrapper.vm.positions['13']).not.toEqual(originalPosition)
+    expect(stage.scrollLeft).toBe(0)
+    expect(stage.scrollTop).toBe(64)
   })
 
   it('opens a Wish on click but suppresses the click produced by an intentional pan', async () => {
@@ -697,7 +809,7 @@ describe('Wish Pool focused interactions', () => {
     expect(wrapper.vm.camera).toEqual({ x: 40, y: 25 })
   })
 
-  it('leaves mobile movement to native vertical scrolling without camera updates', async () => {
+  it('leaves Mobile two-axis movement to native scrolling without camera updates', async () => {
     const wrapper = await mountPool({
       selectWish: false,
       viewport: { width: 390, height: 812 },
@@ -723,7 +835,7 @@ describe('Wish Pool focused interactions', () => {
     expect(wrapper.get('.wish-pool-stage').classes()).toContain('is-mobile-scroll')
   })
 
-  it('does not route tablet pointer movement through the custom desktop camera', async () => {
+  it('does not route Tablet pointer movement through the custom desktop camera', async () => {
     const wrapper = await mountPool({
       selectWish: false,
       viewport: { width: 820, height: 1180 },
