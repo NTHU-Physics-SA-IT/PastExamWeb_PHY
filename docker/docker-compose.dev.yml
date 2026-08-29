@@ -165,6 +165,10 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+    networks:
+      default:
+        aliases:
+          - backend-trusted
 
   frontend:
     container_name: pastexam-dev-frontend

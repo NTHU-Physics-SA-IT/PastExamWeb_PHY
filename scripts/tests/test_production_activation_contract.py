@@ -3,14 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 import pytest
-
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 ACTIVATION_SCRIPT = REPOSITORY_ROOT / "scripts" / "activate-production-release.sh"
@@ -100,20 +99,36 @@ def _compose_contract(
         "services": {
             "backend": {
                 "image": BACKEND_IMAGE,
-                "environment": {"MINIO_BUCKET_NAME": "exam-archive"},
+                "environment": {
+                    "MINIO_BUCKET_NAME": "exam-archive",
+                    "FORWARDED_ALLOW_IPS": "172.30.0.2",
+                },
+                "networks": {
+                    "app_network": {"aliases": ["backend"]},
+                    "trusted_proxy_network": {"aliases": ["backend-trusted"]},
+                },
             },
-            "frontend": {"image": FRONTEND_IMAGE},
-            "migrate": {"image": BACKEND_IMAGE},
+            "frontend": {"image": FRONTEND_IMAGE, "networks": {"app_network": {}}},
+            "migrate": {"image": BACKEND_IMAGE, "networks": {"app_network": {}}},
             "db": {
                 "container_name": "pastexam-postgres",
                 "environment": {
                     "POSTGRES_DB": "archive_db",
                     "POSTGRES_USER": "postgres_owner",
                 },
+                "networks": {"app_network": {}},
             },
-            "minio": {"container_name": "pastexam-minio"},
+            "minio": {
+                "container_name": "pastexam-minio",
+                "networks": {"app_network": {}},
+            },
+            "redis": {"networks": {"app_network": {}}},
             "nginx": {
                 "container_name": "pastexam-nginx",
+                "networks": {
+                    "app_network": {},
+                    "trusted_proxy_network": {"ipv4_address": "172.30.0.2"},
+                },
                 "ports": [
                     {
                         "host_ip": "0.0.0.0",
@@ -127,7 +142,27 @@ def _compose_contract(
                 ],
                 "volumes": nginx_volumes,
             },
-        }
+        },
+        "networks": {
+            "app_network": {
+                "name": "pastexam-network",
+                "driver": "bridge",
+            },
+            "trusted_proxy_network": {
+                "name": "pastexam-trusted-proxy-network",
+                "driver": "bridge",
+                "ipam": {
+                    "driver": "default",
+                    "config": [
+                        {
+                            "subnet": "172.30.0.0/28",
+                            "ip_range": "172.30.0.8/29",
+                            "gateway": "172.30.0.1",
+                        }
+                    ],
+                },
+            },
+        },
     }
 
 
@@ -389,12 +424,16 @@ def test_activation_supplies_all_backup_contract_inputs(tmp_path: Path) -> None:
     assert process.returncode == 0, process.stderr
     lines = backup_log.read_text(encoding="utf-8").splitlines()
     assert lines == [
-        "postgres:"
-        f"{environment['PRODUCTION_BACKUP_DIRECTORY']}:"
-        "pastexam-postgres:archive_db:postgres_owner",
-        "minio:"
-        f"{environment['PRODUCTION_BACKUP_DIRECTORY']}:"
-        "pastexam-minio:exam-archive",
+        (
+            "postgres:"
+            f"{environment['PRODUCTION_BACKUP_DIRECTORY']}:"
+            "pastexam-postgres:archive_db:postgres_owner"
+        ),
+        (
+            "minio:"
+            f"{environment['PRODUCTION_BACKUP_DIRECTORY']}:"
+            "pastexam-minio:exam-archive"
+        ),
     ]
 
 
@@ -443,6 +482,125 @@ def test_rendered_image_mismatch_fails_before_backup(
 
     assert process.returncode != 0
     assert "images disagree" in process.stderr
+    assert not backup_log.exists()
+    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("trusted_peer", "nginx_address"),
+    [
+        ("*", "172.30.0.2"),
+        ("172.30.0.0/24", "172.30.0.2"),
+        ("203.0.113.2", "203.0.113.2"),
+        ("172.30.0.3", "172.30.0.2"),
+    ],
+)
+def test_unsafe_or_mismatched_uvicorn_proxy_trust_fails_before_backup(
+    tmp_path: Path, trusted_peer: str, nginx_address: str
+) -> None:
+    release = tmp_path / RELEASE_SHA
+    contract = _compose_contract(
+        release,
+        tmp_path / "origin.pem",
+        tmp_path / "origin-key.pem",
+    )
+    contract["services"]["backend"]["environment"][
+        "FORWARDED_ALLOW_IPS"
+    ] = trusted_peer
+    contract["services"]["nginx"]["networks"]["trusted_proxy_network"][
+        "ipv4_address"
+    ] = nginx_address
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path,
+        compose_contract=contract,
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "proxy trust" in process.stderr.lower()
+    assert not backup_log.exists()
+    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "nginx_address",
+    ["172.30.0.0", "172.30.0.1", "172.30.0.9", "172.30.0.15", "172.30.1.2"],
+)
+def test_unreserved_nginx_proxy_address_fails_before_backup(
+    tmp_path: Path, nginx_address: str
+) -> None:
+    release = tmp_path / RELEASE_SHA
+    contract = _compose_contract(
+        release,
+        tmp_path / "origin.pem",
+        tmp_path / "origin-key.pem",
+    )
+    contract["services"]["backend"]["environment"][
+        "FORWARDED_ALLOW_IPS"
+    ] = nginx_address
+    contract["services"]["nginx"]["networks"]["trusted_proxy_network"][
+        "ipv4_address"
+    ] = nginx_address
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path,
+        compose_contract=contract,
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "proxy" in process.stderr.lower() or "ipam" in process.stderr.lower()
+    assert not backup_log.exists()
+    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+
+
+def test_dynamic_range_cannot_include_static_nginx_peer(tmp_path: Path) -> None:
+    release = tmp_path / RELEASE_SHA
+    contract = _compose_contract(
+        release,
+        tmp_path / "origin.pem",
+        tmp_path / "origin-key.pem",
+    )
+    contract["networks"]["trusted_proxy_network"]["ipam"]["config"][0][
+        "ip_range"
+    ] = "172.30.0.2/31"
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path,
+        compose_contract=contract,
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "reserved" in process.stderr.lower()
+    assert not backup_log.exists()
+    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "service", ["frontend", "migrate", "db", "minio", "redis", "future_worker"]
+)
+def test_unrelated_service_cannot_join_trusted_proxy_network(
+    tmp_path: Path, service: str
+) -> None:
+    release = tmp_path / RELEASE_SHA
+    contract = _compose_contract(
+        release,
+        tmp_path / "origin.pem",
+        tmp_path / "origin-key.pem",
+    )
+    contract["services"].setdefault(service, {"networks": {}})
+    contract["services"][service]["networks"]["trusted_proxy_network"] = {}
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path,
+        compose_contract=contract,
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "unrelated service" in process.stderr.lower()
     assert not backup_log.exists()
     assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
 

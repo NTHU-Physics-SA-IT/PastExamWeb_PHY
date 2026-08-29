@@ -41,6 +41,7 @@ python3 - \
   "$repository_root/proxy/nginx.conf" \
   "$repository_root/proxy/nginx.production-listeners.conf" \
   "$repository_root/proxy/nginx.development-listeners.conf" <<'PY'
+import ipaddress
 import json
 import re
 import sys
@@ -109,6 +110,56 @@ assert "listen 8443 ssl;" in production_listener_config
 assert "ssl_certificate /etc/nginx/certs/origin.pem;" in production_listener_config
 assert "ssl_certificate_key /etc/nginx/certs/origin-key.pem;" in production_listener_config
 
+trusted_proxy = production["services"]["backend"]["environment"][
+    "FORWARDED_ALLOW_IPS"
+]
+nginx_proxy_address = production["services"]["nginx"]["networks"][
+    "trusted_proxy_network"
+]["ipv4_address"]
+trusted_proxy_address = ipaddress.ip_address(trusted_proxy)
+assert trusted_proxy_address.version == 4
+assert any(
+    trusted_proxy_address in ipaddress.ip_network(network)
+    for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
+assert trusted_proxy_address == ipaddress.ip_address(nginx_proxy_address)
+
+assert production["networks"]["app_network"].get("ipam") in (None, {})
+trusted_network = production["networks"]["trusted_proxy_network"]
+assert trusted_network["name"] == "pastexam-trusted-proxy-network"
+assert trusted_network["driver"] == "bridge"
+trusted_ipam = trusted_network["ipam"]["config"]
+assert len(trusted_ipam) == 1
+trusted_subnet = ipaddress.ip_network(trusted_ipam[0]["subnet"])
+trusted_dynamic_range = ipaddress.ip_network(trusted_ipam[0]["ip_range"])
+trusted_gateway = ipaddress.ip_address(trusted_ipam[0]["gateway"])
+assert trusted_subnet == ipaddress.ip_network("172.30.0.0/28")
+assert trusted_dynamic_range == ipaddress.ip_network("172.30.0.8/29")
+assert trusted_dynamic_range.subnet_of(trusted_subnet)
+assert trusted_proxy_address in trusted_subnet
+assert trusted_proxy_address not in trusted_dynamic_range
+assert trusted_proxy_address not in {
+    trusted_subnet.network_address,
+    trusted_gateway,
+    trusted_subnet.broadcast_address,
+}
+
+backend_networks = production["services"]["backend"]["networks"]
+nginx_networks = production["services"]["nginx"]["networks"]
+assert backend_networks["trusted_proxy_network"]["aliases"] == ["backend-trusted"]
+assert "backend-trusted" not in backend_networks["app_network"]["aliases"]
+assert "trusted_proxy_network" in nginx_networks
+assert "app_network" in nginx_networks
+for service, definition in production["services"].items():
+    if service not in ("backend", "nginx"):
+        assert "trusted_proxy_network" not in definition["networks"]
+
+assert development["services"]["backend"]["networks"]["default"]["aliases"] == [
+    "backend-trusted"
+]
+assert nginx_config.count("proxy_pass http://backend-trusted:8000/") == 3
+assert "proxy_pass http://backend:8000/" not in nginx_config
+
 assert (
     production["services"]["backend"]["depends_on"]["migrate"]["condition"]
     == "service_completed_successfully"
@@ -134,5 +185,29 @@ assert (
     != development["services"]["backend"]["environment"]["DB_USER"]
 )
 PY
+
+for listener_config in \
+  "$repository_root/proxy/nginx.development-listeners.conf" \
+  "$repository_root/proxy/nginx.production-listeners.conf"; do
+  docker run --rm --network none \
+    --add-host frontend:127.0.0.1 \
+    --add-host backend:127.0.0.1 \
+    --add-host backend-trusted:127.0.0.1 \
+    --add-host minio:127.0.0.1 \
+    --mount \
+      "type=bind,source=$repository_root/proxy/nginx.conf,target=/etc/nginx/nginx.conf,readonly" \
+    --mount \
+      "type=bind,source=$listener_config,target=/etc/nginx/pastexam-listeners.conf,readonly" \
+    nginx:1.29.2 sh -eu -c '
+      if grep -q "ssl_certificate " /etc/nginx/pastexam-listeners.conf; then
+        mkdir -p /etc/nginx/certs
+        openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+          -subj /CN=localhost \
+          -keyout /etc/nginx/certs/origin-key.pem \
+          -out /etc/nginx/certs/origin.pem >/dev/null 2>&1
+      fi
+      nginx -t
+    '
+done
 
 echo "Compose migration safety validation passed."

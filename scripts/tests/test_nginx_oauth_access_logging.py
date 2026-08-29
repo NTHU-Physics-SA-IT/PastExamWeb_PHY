@@ -1,12 +1,41 @@
-from pathlib import Path
+import ipaddress
 import re
+from pathlib import Path
 from urllib.parse import urlsplit
-
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 NGINX_CONFIG = REPOSITORY_ROOT / "proxy" / "nginx.conf"
 DEVELOPMENT_LISTENERS = REPOSITORY_ROOT / "proxy" / "nginx.development-listeners.conf"
 PRODUCTION_LISTENERS = REPOSITORY_ROOT / "proxy" / "nginx.production-listeners.conf"
+PRODUCTION_COMPOSE = REPOSITORY_ROOT / "docker" / "docker-compose.prod.yml"
+PRODUCTION_ENV_EXAMPLE = REPOSITORY_ROOT / "docker" / ".env.production.example"
+BACKEND_DOCKERFILE = REPOSITORY_ROOT / "backend" / "Dockerfile"
+COMPOSE_SAFETY_VALIDATOR = REPOSITORY_ROOT / "scripts" / "validate-compose-safety.sh"
+
+OFFICIAL_CLOUDFLARE_NETWORKS = {
+    "173.245.48.0/20",
+    "103.21.244.0/22",
+    "103.22.200.0/22",
+    "103.31.4.0/22",
+    "141.101.64.0/18",
+    "108.162.192.0/18",
+    "190.93.240.0/20",
+    "188.114.96.0/20",
+    "197.234.240.0/22",
+    "198.41.128.0/17",
+    "162.158.0.0/15",
+    "104.16.0.0/13",
+    "104.24.0.0/14",
+    "172.64.0.0/13",
+    "131.0.72.0/22",
+    "2400:cb00::/32",
+    "2606:4700::/32",
+    "2803:f800::/32",
+    "2405:b500::/32",
+    "2405:8100::/32",
+    "2a06:98c0::/29",
+    "2c0f:f248::/32",
+}
 
 
 def _config() -> str:
@@ -52,8 +81,10 @@ def test_ordinary_routes_keep_access_logging_enabled() -> None:
     }
     assert _access_log_enabled("/")
     assert _access_log_enabled("/api/health")
+    assert "log_format proxy_peer_combined '$realip_remote_addr" in config
     assert (
-        "access_log /var/log/nginx/access.log combined if=$access_loggable;" in config
+        "access_log /var/log/nginx/access.log proxy_peer_combined "
+        "if=$access_loggable;" in config
     )
 
 
@@ -72,9 +103,9 @@ def test_public_seo_routes_and_spa_robots_policy_remain_at_the_proxy() -> None:
     config = _config()
 
     assert "location = /sitemap.xml" in config
-    assert "proxy_pass http://backend:8000/seo/sitemap.xml;" in config
+    assert "proxy_pass http://backend-trusted:8000/seo/sitemap.xml;" in config
     assert "location = /robots.txt" in config
-    assert "proxy_pass http://backend:8000/seo/robots.txt;" in config
+    assert "proxy_pass http://backend-trusted:8000/seo/robots.txt;" in config
     assert "map $uri $spa_robots_tag" in config
     assert "add_header X-Robots-Tag $spa_robots_tag always;" in config
 
@@ -91,3 +122,82 @@ def test_development_and_production_listener_contracts_are_separate() -> None:
     assert "listen 8443 ssl;" in production
     assert "ssl_certificate /etc/nginx/certs/origin.pem;" in production
     assert "ssl_certificate_key /etc/nginx/certs/origin-key.pem;" in production
+
+
+def _trusted_cloudflare_networks() -> set[str]:
+    production = PRODUCTION_LISTENERS.read_text(encoding="utf-8")
+    return set(re.findall(r"^set_real_ip_from\s+(\S+);$", production, re.MULTILINE))
+
+
+def _normalized_address(peer: str, cloudflare_header: str) -> str:
+    peer_address = ipaddress.ip_address(peer)
+    trusted = any(
+        peer_address in ipaddress.ip_network(network)
+        for network in _trusted_cloudflare_networks()
+    )
+    return cloudflare_header if trusted else peer
+
+
+def test_production_real_ip_trusts_exact_current_cloudflare_ranges_only() -> None:
+    production = PRODUCTION_LISTENERS.read_text(encoding="utf-8")
+
+    assert "real_ip_header CF-Connecting-IP;" in production
+    assert "real_ip_recursive off;" in production
+    assert _trusted_cloudflare_networks() == OFFICIAL_CLOUDFLARE_NETWORKS
+    assert "set_real_ip_from 0.0.0.0/0;" not in production
+    assert "set_real_ip_from ::/0;" not in production
+
+
+def test_cloudflare_real_ip_semantics_cover_trusted_and_untrusted_ipv4_ipv6() -> None:
+    assert _normalized_address("173.245.48.5", "203.0.113.40") == "203.0.113.40"
+    assert _normalized_address("2606:4700::1234", "2001:db8::40") == "2001:db8::40"
+    assert _normalized_address("192.0.2.15", "203.0.113.99") == "192.0.2.15"
+    assert _normalized_address("2001:db8::15", "2001:db8::99") == "2001:db8::15"
+
+
+def test_development_does_not_trust_cloudflare_visitor_headers() -> None:
+    development = DEVELOPMENT_LISTENERS.read_text(encoding="utf-8")
+
+    assert "real_ip_header" not in development
+    assert "set_real_ip_from" not in development
+
+
+def test_proxy_rebuilds_a_single_authoritative_forwarded_identity() -> None:
+    config = _config()
+
+    assert "$proxy_add_x_forwarded_for" not in config
+    assert config.count("proxy_set_header X-Real-IP $remote_addr;") == 5
+    assert config.count("proxy_set_header X-Forwarded-For $remote_addr;") == 5
+
+
+def test_production_uvicorn_trust_matches_the_static_nginx_network_address() -> None:
+    compose = PRODUCTION_COMPOSE.read_text(encoding="utf-8")
+    environment = PRODUCTION_ENV_EXAMPLE.read_text(encoding="utf-8")
+    dockerfile = BACKEND_DOCKERFILE.read_text(encoding="utf-8")
+
+    required_reference = "${PRODUCTION_NGINX_PROXY_IP:?Set PRODUCTION_NGINX_PROXY_IP}"
+    assert f"FORWARDED_ALLOW_IPS: {required_reference}" in compose
+    assert f"ipv4_address: {required_reference}" in compose
+    assert "name: pastexam-trusted-proxy-network" in compose
+    assert "subnet: 172.30.0.0/28" in compose
+    assert "ip_range: 172.30.0.8/29" in compose
+    assert "gateway: 172.30.0.1" in compose
+    assert "backend-trusted" in compose
+    assert "proxy_pass http://backend-trusted:8000/;" in _config()
+
+    match = re.search(r"^PRODUCTION_NGINX_PROXY_IP=(\S+)$", environment, re.MULTILINE)
+    assert match is not None
+    address = ipaddress.ip_address(match.group(1))
+    assert any(
+        address in ipaddress.ip_network(network)
+        for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+    )
+    assert '"--proxy-headers"' in dockerfile
+    assert '"--forwarded-allow-ips", "*"' not in dockerfile
+
+
+def test_standalone_nginx_parser_resolves_the_trusted_backend_alias() -> None:
+    validator = COMPOSE_SAFETY_VALIDATOR.read_text(encoding="utf-8")
+
+    assert "--network none" in validator
+    assert "--add-host backend-trusted:127.0.0.1" in validator

@@ -6,11 +6,10 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
-from pathlib import Path
 import re
 import sys
+from pathlib import Path
 from typing import Any
-
 
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9_.:-]+$")
@@ -24,6 +23,14 @@ NGINX_CONFIG_TARGET = "/etc/nginx/nginx.conf"
 NGINX_LISTENER_TARGET = "/etc/nginx/pastexam-listeners.conf"
 TLS_CERTIFICATE_TARGET = "/etc/nginx/certs/origin.pem"
 TLS_KEY_TARGET = "/etc/nginx/certs/origin-key.pem"
+RFC1918_NETWORKS = tuple(
+    ipaddress.ip_network(network)
+    for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
+APP_NETWORK = "app_network"
+TRUSTED_PROXY_NETWORK = "trusted_proxy_network"
+TRUSTED_PROXY_NETWORK_NAME = "pastexam-trusted-proxy-network"
+TRUSTED_BACKEND_ALIAS = "backend-trusted"
 
 
 class ContractError(ValueError):
@@ -54,10 +61,148 @@ def _required_string(mapping: dict[str, Any], key: str, label: str) -> str:
     return value
 
 
+def _verify_proxy_trust(compose: dict[str, Any]) -> None:
+    backend = _service(compose, "backend")
+    nginx = _service(compose, "nginx")
+    backend_environment = backend.get("environment")
+    backend_networks = backend.get("networks")
+    nginx_networks = nginx.get("networks")
+    if not isinstance(backend_environment, dict) or not isinstance(
+        backend_networks, dict
+    ) or not isinstance(nginx_networks, dict):
+        raise ContractError("Rendered client-IP proxy trust contract is incomplete.")
+
+    networks = compose.get("networks")
+    if not isinstance(networks, dict):
+        raise ContractError("Rendered client-IP proxy trust networks are incomplete.")
+    app_network = networks.get(APP_NETWORK)
+    trusted_network = networks.get(TRUSTED_PROXY_NETWORK)
+    if not isinstance(app_network, dict) or not isinstance(trusted_network, dict):
+        raise ContractError("Rendered client-IP proxy trust networks are incomplete.")
+    if app_network.get("ipam") not in (None, {}):
+        raise ContractError("Rendered shared application network must not define IPAM.")
+    if (
+        trusted_network.get("name") != TRUSTED_PROXY_NETWORK_NAME
+        or trusted_network.get("driver") != "bridge"
+    ):
+        raise ContractError("Rendered client-IP proxy trust network identity is unsafe.")
+
+    ipam = trusted_network.get("ipam")
+    configurations = ipam.get("config") if isinstance(ipam, dict) else None
+    if not isinstance(configurations, list) or len(configurations) != 1:
+        raise ContractError("Rendered client-IP proxy trust IPAM is incomplete.")
+    configuration = configurations[0]
+    if not isinstance(configuration, dict):
+        raise ContractError("Rendered client-IP proxy trust IPAM is incomplete.")
+
+    try:
+        trusted_subnet = ipaddress.ip_network(
+            _required_string(configuration, "subnet", "trusted proxy subnet"),
+            strict=True,
+        )
+        dynamic_range = ipaddress.ip_network(
+            _required_string(configuration, "ip_range", "trusted proxy dynamic range"),
+            strict=True,
+        )
+        gateway = ipaddress.ip_address(
+            _required_string(configuration, "gateway", "trusted proxy gateway")
+        )
+    except ValueError as error:
+        raise ContractError("Rendered client-IP proxy trust IPAM is invalid.") from error
+    if (
+        trusted_subnet.version != 4
+        or not any(trusted_subnet.subnet_of(network) for network in RFC1918_NETWORKS)
+        or dynamic_range.version != 4
+        or not dynamic_range.subnet_of(trusted_subnet)
+        or gateway.version != 4
+        or gateway not in trusted_subnet
+        or gateway in (trusted_subnet.network_address, trusted_subnet.broadcast_address)
+        or gateway in dynamic_range
+    ):
+        raise ContractError("Rendered client-IP proxy trust IPAM is unsafe.")
+
+    backend_trusted_attachment = backend_networks.get(TRUSTED_PROXY_NETWORK)
+    nginx_trusted_attachment = nginx_networks.get(TRUSTED_PROXY_NETWORK)
+    if not isinstance(backend_trusted_attachment, dict) or not isinstance(
+        nginx_trusted_attachment, dict
+    ):
+        raise ContractError("Rendered trusted proxy peers are not both attached.")
+    aliases = backend_trusted_attachment.get("aliases")
+    if not isinstance(aliases, list) or aliases != [TRUSTED_BACKEND_ALIAS]:
+        raise ContractError("Rendered trusted backend alias is not network-scoped.")
+    app_attachment = backend_networks.get(APP_NETWORK)
+    app_aliases = (
+        app_attachment.get("aliases", [])
+        if isinstance(app_attachment, dict)
+        else None
+    )
+    if (
+        not isinstance(app_aliases, list)
+        or TRUSTED_BACKEND_ALIAS in app_aliases
+        or APP_NETWORK not in nginx_networks
+    ):
+        raise ContractError("Rendered trusted backend alias leaks to the shared network.")
+
+    services = compose.get("services")
+    if not isinstance(services, dict):
+        raise ContractError("Rendered client-IP proxy trust services are incomplete.")
+    for service_name, service in services.items():
+        if service_name in ("backend", "nginx"):
+            continue
+        service_networks = (
+            service.get("networks", {}) if isinstance(service, dict) else None
+        )
+        if (
+            not isinstance(service_networks, dict)
+            or TRUSTED_PROXY_NETWORK in service_networks
+        ):
+            raise ContractError("Rendered trusted proxy network has an unrelated service.")
+
+    trusted_peer = _required_string(
+        backend_environment,
+        "FORWARDED_ALLOW_IPS",
+        "Uvicorn trusted proxy address",
+    )
+    nginx_address = _required_string(
+        nginx_trusted_attachment,
+        "ipv4_address",
+        "stable nginx trusted-proxy address",
+    )
+
+    try:
+        trusted_address = ipaddress.ip_address(trusted_peer)
+        assigned_address = ipaddress.ip_address(nginx_address)
+    except ValueError as error:
+        raise ContractError(
+            "Rendered client-IP proxy trust must use one exact IP address."
+        ) from error
+    if trusted_address.version != 4 or not any(
+        trusted_address in network for network in RFC1918_NETWORKS
+    ):
+        raise ContractError(
+            "Rendered Uvicorn proxy trust must use one private IPv4 address."
+        )
+    if trusted_address != assigned_address:
+        raise ContractError(
+            "Rendered Uvicorn proxy trust does not match nginx's assigned address."
+        )
+    if (
+        assigned_address not in trusted_subnet
+        or assigned_address in dynamic_range
+        or assigned_address
+        in (trusted_subnet.network_address, gateway, trusted_subnet.broadcast_address)
+    ):
+        raise ContractError(
+            "Rendered nginx trusted proxy address is not safely reserved by IPAM."
+        )
+
+
 def _compose_values(compose_path: Path) -> None:
     compose = _load_json(compose_path)
     if not isinstance(compose, dict):
         raise ContractError("Rendered Compose root must be an object.")
+
+    _verify_proxy_trust(compose)
 
     database = _service(compose, "db")
     minio = _service(compose, "minio")

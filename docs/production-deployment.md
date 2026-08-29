@@ -49,6 +49,23 @@ and private-key paths with `PRODUCTION_TLS_CERT_FILE` and
 root-owned with mode `0600`. Certificate and key contents remain outside Git
 and outside every immutable release.
 
+The external Compose environment also sets `PRODUCTION_NGINX_PROXY_IP` to the
+nginx address reserved outside the dynamic allocation range of the dedicated
+`pastexam-trusted-proxy-network`. That network is an explicit `172.30.0.0/28`
+bridge: `172.30.0.1` is its gateway, nginx uses `172.30.0.2`, and dynamic
+backend allocation is restricted to `172.30.0.8/29`. Compose passes the same
+single nginx address to Uvicorn as `FORWARDED_ALLOW_IPS`; do not replace it
+with `*` or a whole network.
+
+Only backend and nginx join the trusted-proxy network. The network-scoped
+`backend-trusted` alias forces nginx API, sitemap, and robots traffic across
+that bridge, so the backend sees nginx's reserved address as its immediate
+peer. Both services remain on `pastexam-network` for their existing application
+dependencies; that shared network retains Docker-selected IPAM and must not be
+recreated merely to activate this trust boundary. Development supplies the
+same backend alias on its existing default network without production IPAM or
+Cloudflare trust.
+
 `docker/.env.production.example` documents the Compose variable contract. A
 release is rendered explicitly with the production definition, external
 configuration, and its later immutable image override:
@@ -72,7 +89,8 @@ The supported DigitalOcean edge terminates Cloudflare Origin TLS inside
 Ownership is deliberately split. `proxy/nginx.conf` owns repository-reviewed
 application routing, headers, OAuth callback log suppression, and SEO routes.
 `proxy/nginx.production-listeners.conf` owns the repository-reviewed `8080`
-and `8443 ssl` listener directives and the container certificate paths.
+and `8443 ssl` listener directives, the container certificate paths, and the
+official Cloudflare source networks trusted for `CF-Connecting-IP`.
 `docker/docker-compose.prod.yml` mounts both immutable files. The external
 `/etc/pastexam/docker-compose.edge.yml` owns host-specific published ports and
 binds the host-managed certificate material to those exact container paths.
@@ -86,6 +104,14 @@ either repository nginx configuration mount. Activation derives the actual
 mounted sources from rendered Compose and requires them to be the immutable
 release files, so the configuration checked is exactly the configuration
 started by Docker.
+
+This client-IP contract is safe only while public origin ingress remains
+Cloudflare-only. Cloudflare CIDR changes must be applied together to the
+DigitalOcean Cloud Firewall and the `set_real_ip_from` list before either side
+is treated as current. nginx rebuilds both `X-Real-IP` and `X-Forwarded-For`
+from its normalized `$remote_addr`; applications must not trust arbitrary
+incoming forwarding headers directly. The access log intentionally retains
+the immediate peer address rather than adding raw visitor-IP logging.
 
 Before backup, activation renders the combined Compose configuration without
 printing it and derives the PostgreSQL container, database and role plus the
