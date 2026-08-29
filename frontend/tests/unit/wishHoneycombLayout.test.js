@@ -291,7 +291,7 @@ describe('Wish Pool probabilistic centrality and stability', () => {
     expect(new Set(keys).size).toBe(4)
   })
 
-  it('reprojects a height-only resize without changing allocated cells', () => {
+  it('reprojects viewport changes without changing allocated cells', () => {
     const initial = assignWishHoneycombPositions(
       wishes,
       { 1: 1, 2: 2, 3: 3, 4: 4 },
@@ -299,12 +299,14 @@ describe('Wish Pool probabilistic centrality and stability', () => {
       16,
       2718
     )
-    const resized = reprojectWishHoneycombPositions(initial, { width: 390, height: 1000 }, 16)
+    const resizedHeight = reprojectWishHoneycombPositions(initial, { width: 390, height: 1000 }, 16)
+    const resizedWidth = reprojectWishHoneycombPositions(initial, { width: 834, height: 1000 }, 16)
+    const cells = (positions) =>
+      Object.fromEntries(Object.entries(positions).map(([id, { q, r }]) => [id, { q, r }]))
 
-    expect(
-      Object.fromEntries(Object.entries(resized).map(([id, { q, r }]) => [id, { q, r }]))
-    ).toEqual(Object.fromEntries(Object.entries(initial).map(([id, { q, r }]) => [id, { q, r }])))
-    expect(Object.values(resized).map(({ x, y }) => ({ x, y }))).toEqual(
+    expect(cells(resizedHeight)).toEqual(cells(initial))
+    expect(cells(resizedWidth)).toEqual(cells(initial))
+    expect(Object.values(resizedHeight).map(({ x, y }) => ({ x, y }))).toEqual(
       Object.values(initial).map(({ x, y }) => ({ x, y }))
     )
   })

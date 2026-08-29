@@ -331,6 +331,9 @@ describe('Wish Pool focused interactions', () => {
     const wrapper = await mountPool()
     const initialLayout = wrapper.vm.positions
     const initialScores = wrapper.vm.sessionScores
+    const initialCells = Object.fromEntries(
+      Object.entries(initialLayout).map(([id, { q, r }]) => [id, { q, r }])
+    )
 
     wrapper.vm.$forceUpdate()
     await flushPromises()
@@ -354,6 +357,11 @@ describe('Wish Pool focused interactions', () => {
 
     await resizePool(wrapper, { width: 767, height: 840 })
     expect(wrapper.vm.positions).not.toBe(initialLayout)
+    expect(
+      Object.fromEntries(
+        Object.entries(wrapper.vm.positions).map(([id, { q, r }]) => [id, { q, r }])
+      )
+    ).toEqual(initialCells)
     expect(wrapper.vm.sessionScores).toBe(initialScores)
     expect(wrapper.vm.layoutMode).toBe('honeycomb')
     expect(wrapper.vm.viewportSize).toEqual({ width: 767, height: 840 })

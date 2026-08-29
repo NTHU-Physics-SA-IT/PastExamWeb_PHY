@@ -260,6 +260,7 @@ import {
   reprojectWishHoneycombPositions,
   wishFontSizeRem,
   wishHoneycombGeometry,
+  wishInteractionMode,
 } from '@/utils/wishHoneycombLayout'
 import InlineCommentReport from '@/components/InlineCommentReport.vue'
 
@@ -610,22 +611,31 @@ function measureViewport(entry) {
   const scrollSnapshot = captureNativeScroll()
   const widthChanged = viewportSize.value.width !== width
   viewportSize.value = { width, height }
-  if (!widthChanged && Object.keys(positions.value).length) {
+  if (Object.keys(positions.value).length) {
+    const previousNavigationMode = navigationMode.value
     positions.value = reprojectWishHoneycombPositions(
       positions.value,
       viewportSize.value,
       rootFontSize()
     )
+    navigationMode.value = wishInteractionMode(viewportSize.value)
+    camera.x = 0
+    camera.y = 0
     updateWorldGeometry()
     const refreshedOrigin = navigationMode.value === 'desktop' ? camera : initialNativeScroll()
-    if (!navigationInteracted.value) {
+    const navigationModeChanged = previousNavigationMode !== navigationMode.value
+    if (navigationModeChanged) {
+      navigationInteracted.value = false
+      nativeNavigationIntent = false
+    }
+    if (navigationModeChanged || !navigationInteracted.value) {
       explorationOrigin.x = refreshedOrigin.x ?? refreshedOrigin.left
       explorationOrigin.y = refreshedOrigin.y ?? refreshedOrigin.top
     }
     if (navigationMode.value === 'desktop') {
       updateNavigationAffordances()
     } else {
-      scheduleNativeScroll(scrollSnapshot, true)
+      scheduleNativeScroll(navigationModeChanged ? null : scrollSnapshot, !widthChanged)
     }
     return
   }
