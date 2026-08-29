@@ -773,6 +773,14 @@ describe('Wish Pool focused interactions', () => {
     expect(wrapper.vm.positions['13']).not.toEqual(originalPosition)
     expect(stage.scrollLeft).toBe(0)
     expect(stage.scrollTop).toBe(64)
+
+    await resizePool(wrapper, { width: 820, height: 1260 })
+    expect(wrapper.vm.positions['1']).toMatchObject({
+      q: originalPosition.q,
+      r: originalPosition.r,
+    })
+    expect(stage.scrollLeft).toBe(0)
+    expect(stage.scrollTop).toBe(64)
   })
 
   it('opens a Wish on click but suppresses the click produced by an intentional pan', async () => {

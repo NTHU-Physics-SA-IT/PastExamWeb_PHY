@@ -363,6 +363,17 @@ export function assignWishHoneycombPositions(
   return positions
 }
 
+export function reprojectWishHoneycombPositions(positions, viewport, rootFontSize = 16) {
+  const normalizedSize = normalizedViewport(viewport)
+  const geometry = wishHoneycombGeometry(normalizedSize, rootFontSize)
+  return Object.fromEntries(
+    Object.entries(positions || {}).map(([wishId, position]) => [
+      wishId,
+      honeycombCell(position.r, position.q, normalizedSize, geometry),
+    ])
+  )
+}
+
 export function createResponsiveWishLayout(
   wishes,
   scores,

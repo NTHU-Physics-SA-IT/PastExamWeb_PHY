@@ -20,6 +20,7 @@ import {
   createWishLayoutSeed,
   createWishWorldGeometry,
   generateWishHoneycombCells,
+  reprojectWishHoneycombPositions,
   wishCentralityScore,
   wishFontSizeRem,
   wishHoneycombGeometry,
@@ -288,6 +289,24 @@ describe('Wish Pool probabilistic centrality and stability', () => {
     expect(appended[1]).toEqual(initial[1])
     expect(appended[2]).toEqual(initial[2])
     expect(new Set(keys).size).toBe(4)
+  })
+
+  it('reprojects a height-only resize without changing allocated cells', () => {
+    const initial = assignWishHoneycombPositions(
+      wishes,
+      { 1: 1, 2: 2, 3: 3, 4: 4 },
+      { width: 390, height: 640 },
+      16,
+      2718
+    )
+    const resized = reprojectWishHoneycombPositions(initial, { width: 390, height: 1000 }, 16)
+
+    expect(
+      Object.fromEntries(Object.entries(resized).map(([id, { q, r }]) => [id, { q, r }]))
+    ).toEqual(Object.fromEntries(Object.entries(initial).map(([id, { q, r }]) => [id, { q, r }])))
+    expect(Object.values(resized).map(({ x, y }) => ({ x, y }))).toEqual(
+      Object.values(initial).map(({ x, y }) => ({ x, y }))
+    )
   })
 
   it('creates a stable session seed from an injectable RNG', () => {

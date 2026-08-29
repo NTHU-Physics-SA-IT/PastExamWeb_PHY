@@ -257,6 +257,7 @@ import {
   createResponsiveWishLayout,
   createWishLayoutSeed,
   createWishWorldGeometry,
+  reprojectWishHoneycombPositions,
   wishFontSizeRem,
   wishHoneycombGeometry,
 } from '@/utils/wishHoneycombLayout'
@@ -607,7 +608,27 @@ function measureViewport(entry) {
   if (!width || !height) return
   if (viewportSize.value.width === width && viewportSize.value.height === height) return
   const scrollSnapshot = captureNativeScroll()
+  const widthChanged = viewportSize.value.width !== width
   viewportSize.value = { width, height }
+  if (!widthChanged && Object.keys(positions.value).length) {
+    positions.value = reprojectWishHoneycombPositions(
+      positions.value,
+      viewportSize.value,
+      rootFontSize()
+    )
+    updateWorldGeometry()
+    const refreshedOrigin = navigationMode.value === 'desktop' ? camera : initialNativeScroll()
+    if (!navigationInteracted.value) {
+      explorationOrigin.x = refreshedOrigin.x ?? refreshedOrigin.left
+      explorationOrigin.y = refreshedOrigin.y ?? refreshedOrigin.top
+    }
+    if (navigationMode.value === 'desktop') {
+      updateNavigationAffordances()
+    } else {
+      scheduleNativeScroll(scrollSnapshot, true)
+    }
+    return
+  }
   applyResponsiveLayout(scrollSnapshot)
 }
 function observeViewport() {
