@@ -2,6 +2,7 @@ import io
 import uuid
 from datetime import UTC, datetime
 
+import pikepdf
 import pytest
 import pytest_asyncio
 from fastapi import HTTPException
@@ -26,7 +27,19 @@ from app.models.models import (
     User,
     UserRoles,
 )
+from app.services import pdf_security
 from app.utils.auth import get_current_user
+
+
+def _build_valid_pdf_bytes() -> bytes:
+    payload = io.BytesIO()
+    pdf = pikepdf.Pdf.new()
+    pdf.add_blank_page()
+    pdf.save(payload)
+    return payload.getvalue()
+
+
+VALID_PDF_BYTES = _build_valid_pdf_bytes()
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -881,7 +894,7 @@ async def test_upload_archive_creates_course_and_archive(
 
     app.dependency_overrides[get_current_user] = fake_get_current_user
 
-    fake_pdf = io.BytesIO(b"%PDF-1.4 test content")
+    fake_pdf = io.BytesIO(VALID_PDF_BYTES)
     unique_course = f"Test Course {unique}"
     unique_course_en = f"Test Course English {unique}"
 
@@ -970,7 +983,7 @@ async def test_upload_archive_returns_404_when_user_missing(
             files={
                 "file": (
                     "sample.pdf",
-                    io.BytesIO(b"%PDF-1.4"),
+                    io.BytesIO(VALID_PDF_BYTES),
                     "application/pdf",
                 )
             },
@@ -1026,7 +1039,7 @@ async def test_upload_archive_reuses_existing_course(
             files={
                 "file": (
                     "sample.pdf",
-                    io.BytesIO(b"%PDF-1.4 reuse"),
+                    io.BytesIO(VALID_PDF_BYTES),
                     "application/pdf",
                 )
             },
@@ -1126,7 +1139,7 @@ async def test_help_upload_preserves_source_wish_and_rejects_target_mismatch(
         response = await client.post(
             "/archives/upload",
             files={
-                "file": ("wish.pdf", io.BytesIO(b"%PDF-1.4 wish"), "application/pdf")
+                "file": ("wish.pdf", io.BytesIO(VALID_PDF_BYTES), "application/pdf")
             },
             data=common_data,
         )
@@ -1142,7 +1155,7 @@ async def test_help_upload_preserves_source_wish_and_rejects_target_mismatch(
             files={
                 "file": (
                     "mismatch.pdf",
-                    io.BytesIO(b"%PDF-1.4 mismatch"),
+                    io.BytesIO(VALID_PDF_BYTES),
                     "application/pdf",
                 )
             },
@@ -1191,7 +1204,7 @@ async def test_upload_archive_rejects_category_only_request_before_storage(
             files={
                 "file": (
                     "category-only.pdf",
-                    io.BytesIO(b"%PDF-1.4 category-only"),
+                    io.BytesIO(VALID_PDF_BYTES),
                     "application/pdf",
                 )
             },
@@ -1320,6 +1333,142 @@ async def test_upload_archive_rejects_large_file(
 
 
 @pytest.mark.asyncio
+async def test_invalid_pdf_precedes_admin_parent_and_storage_mutation(
+    client: AsyncClient,
+    make_user,
+    session_maker,
+    monkeypatch,
+):
+    admin = await make_user(is_admin=True)
+    unique = uuid.uuid4().hex[:8]
+    category_key = f"pdf-security-{unique}"
+    course_name = f"PDF Security Course {unique}"
+
+    async def fake_get_current_user():
+        return UserRoles(user_id=admin.id, is_admin=True)
+
+    class UnexpectedMinio:
+        def put_object(self, **_kwargs):
+            raise AssertionError("PDF validation must precede MinIO")
+
+    app.dependency_overrides[get_current_user] = fake_get_current_user
+    monkeypatch.setattr(
+        "app.api.services.archives.get_minio_client", lambda: UnexpectedMinio()
+    )
+    try:
+        response = await client.post(
+            "/archives/upload",
+            files={
+                "file": (
+                    "invalid.pdf",
+                    io.BytesIO(b"%PDF-not-structurally-valid"),
+                    "application/pdf",
+                )
+            },
+            data={
+                "subject": course_name,
+                "category": category_key,
+                "professor": "PDF Security Professor",
+                "archive_type": "final",
+                "has_answers": "false",
+                "filename": "Security Boundary",
+                "academic_year": 2026,
+                "request_new_course": "true",
+                "request_new_category": "true",
+                "requested_course_name": course_name,
+                "requested_course_name_en": f"{course_name} English",
+                "requested_category_key": category_key,
+                "requested_category_name": f"PDF Security {unique}",
+                "requested_category_name_en": f"PDF Security EN {unique}",
+                "requested_category_label": f"Security {unique}",
+                "requested_category_label_en": f"Security EN {unique}",
+                "requested_category_icon": "pi pi-file-pdf",
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Invalid or unsupported PDF file"
+
+        async with session_maker() as session:
+            category = (
+                await session.execute(
+                    select(CourseCategoryConfig).where(
+                        CourseCategoryConfig.key == category_key
+                    )
+                )
+            ).scalar_one_or_none()
+            course = (
+                await session.execute(select(Course).where(Course.name == course_name))
+            ).scalar_one_or_none()
+            assert category is None
+            assert course is None
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.mark.asyncio
+async def test_invalid_pdf_uses_shared_validator_for_normal_upload(
+    client: AsyncClient,
+    make_user,
+    session_maker,
+    monkeypatch,
+):
+    user = await make_user()
+    unique_subject = f"Invalid normal PDF {uuid.uuid4().hex}"
+
+    async def fake_get_current_user():
+        return UserRoles(user_id=user.id, is_admin=False)
+
+    class UnexpectedMinio:
+        def put_object(self, **_kwargs):
+            raise AssertionError("shared PDF validation must precede MinIO")
+
+    app.dependency_overrides[get_current_user] = fake_get_current_user
+    monkeypatch.setattr(
+        "app.api.services.archives.get_minio_client", lambda: UnexpectedMinio()
+    )
+    try:
+        response = await client.post(
+            "/archives/upload",
+            files={
+                "file": (
+                    "invalid.pdf",
+                    io.BytesIO(b"%PDF-not-structurally-valid"),
+                    "application/pdf",
+                )
+            },
+            data={
+                "subject": unique_subject,
+                "category": CourseCategory.FRESHMAN.value,
+                "professor": "PDF Security Professor",
+                "archive_type": "final",
+                "has_answers": "false",
+                "filename": "Security Boundary",
+                "academic_year": 2026,
+                "request_new_course": "true",
+                "requested_course_name": unique_subject,
+                "requested_course_name_en": f"{unique_subject} English",
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Invalid or unsupported PDF file"
+        async with session_maker() as session:
+            count = (
+                await session.execute(
+                    select(func.count(ArchiveSubmission.id)).where(
+                        ArchiveSubmission.subject == unique_subject
+                    )
+                )
+            ).scalar_one()
+            assert count == 0
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_authoritative_backend_pdf_size_limit_remains_20_mib() -> None:
+    assert pdf_security.MAX_PDF_BYTES == 20 * 1024 * 1024
+
+
+@pytest.mark.asyncio
 async def test_upload_archive_handles_storage_failure(
     client: AsyncClient,
     make_user,
@@ -1352,7 +1501,7 @@ async def test_upload_archive_handles_storage_failure(
             files={
                 "file": (
                     "sample.pdf",
-                    io.BytesIO(b"%PDF-1.4 fake"),
+                    io.BytesIO(VALID_PDF_BYTES),
                     "application/pdf",
                 )
             },
@@ -1374,6 +1523,164 @@ async def test_upload_archive_handles_storage_failure(
         async with session_maker() as session:
             await session.execute(delete(Course).where(Course.name == "Fail Course"))
             await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_post_minio_database_failure_removes_exact_unreferenced_object(
+    client: AsyncClient,
+    make_user,
+    session_maker,
+    monkeypatch,
+):
+    user = await make_user()
+    course = await _create_upload_course(
+        session_maker,
+        name=f"Compensation zero refs {uuid.uuid4().hex}",
+    )
+
+    async def fake_get_current_user():
+        return UserRoles(user_id=user.id, is_admin=False)
+
+    class RecordingMinio:
+        def __init__(self):
+            self.put_names: list[str] = []
+            self.removed_names: list[str] = []
+
+        def put_object(self, **kwargs):
+            self.put_names.append(kwargs["object_name"])
+
+        def remove_object(self, _bucket: str, object_name: str):
+            self.removed_names.append(object_name)
+
+    minio = RecordingMinio()
+    app.dependency_overrides[get_current_user] = fake_get_current_user
+    try:
+        with monkeypatch.context() as patcher:
+            patcher.setattr(
+                "app.api.services.archives.get_minio_client", lambda: minio
+            )
+
+            async def fail_commit(_session):
+                raise RuntimeError("synthetic final commit failure")
+
+            patcher.setattr(AsyncSession, "commit", fail_commit)
+            response = await client.post(
+                "/archives/upload",
+                files={
+                    "file": (
+                        "compensate.pdf",
+                        io.BytesIO(VALID_PDF_BYTES),
+                        "application/pdf",
+                    )
+                },
+                data={
+                    "subject": course.name,
+                    "category": course.category,
+                    "professor": "Compensation Professor",
+                    "archive_type": "final",
+                    "has_answers": "false",
+                    "filename": "Compensation",
+                    "academic_year": 2026,
+                    "course_id": str(course.id),
+                },
+            )
+
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Failed to upload file"
+        assert len(minio.put_names) == 1
+        assert minio.removed_names == minio.put_names
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(delete(Course).where(Course.id == course.id))
+            await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_post_commit_refresh_failure_retains_referenced_object(
+    client: AsyncClient,
+    make_user,
+    session_maker,
+    monkeypatch,
+):
+    user = await make_user()
+    course = await _create_upload_course(
+        session_maker,
+        name=f"Compensation committed ref {uuid.uuid4().hex}",
+    )
+
+    async def fake_get_current_user():
+        return UserRoles(user_id=user.id, is_admin=False)
+
+    class RecordingMinio:
+        def __init__(self):
+            self.put_names: list[str] = []
+            self.removed_names: list[str] = []
+
+        def put_object(self, **kwargs):
+            self.put_names.append(kwargs["object_name"])
+
+        def remove_object(self, _bucket: str, object_name: str):
+            self.removed_names.append(object_name)
+
+    minio = RecordingMinio()
+    original_refresh = AsyncSession.refresh
+    app.dependency_overrides[get_current_user] = fake_get_current_user
+    try:
+        with monkeypatch.context() as patcher:
+            patcher.setattr(
+                "app.api.services.archives.get_minio_client", lambda: minio
+            )
+
+            async def fail_submission_refresh(session, instance, *args, **kwargs):
+                if isinstance(instance, ArchiveSubmission):
+                    raise OSError("synthetic response refresh failure")
+                return await original_refresh(session, instance, *args, **kwargs)
+
+            patcher.setattr(AsyncSession, "refresh", fail_submission_refresh)
+            response = await client.post(
+                "/archives/upload",
+                files={
+                    "file": (
+                        "retain.pdf",
+                        io.BytesIO(VALID_PDF_BYTES),
+                        "application/pdf",
+                    )
+                },
+                data={
+                    "subject": course.name,
+                    "category": course.category,
+                    "professor": "Compensation Professor",
+                    "archive_type": "final",
+                    "has_answers": "false",
+                    "filename": "Retain committed object",
+                    "academic_year": 2026,
+                    "course_id": str(course.id),
+                },
+            )
+
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Failed to upload file"
+        assert len(minio.put_names) == 1
+        assert minio.removed_names == []
+        async with session_maker() as session:
+            reference_count = (
+                await session.execute(
+                    select(func.count(ArchiveSubmission.id)).where(
+                        ArchiveSubmission.object_name == minio.put_names[0]
+                    )
+                )
+            ).scalar_one()
+            assert reference_count == 1
+            await session.execute(
+                delete(ArchiveSubmission).where(
+                    ArchiveSubmission.object_name == minio.put_names[0]
+                )
+            )
+            await session.execute(delete(Course).where(Course.id == course.id))
+            await session.commit()
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.mark.asyncio
@@ -1412,7 +1719,7 @@ async def test_upload_archive_function_covers_creation_and_reuse(
         ):
             upload = UploadFile(
                 filename=filename,
-                file=io.BytesIO(b"%PDF-1.4 direct test"),
+                file=io.BytesIO(VALID_PDF_BYTES),
             )
             uploads.append(upload)
             return await upload_archive(
@@ -1504,7 +1811,7 @@ async def test_admin_upload_persists_requested_category_caller_transaction(
             files={
                 "file": (
                     "admin-upload.pdf",
-                    io.BytesIO(b"%PDF-1.4 admin upload"),
+                    io.BytesIO(VALID_PDF_BYTES),
                     "application/pdf",
                 )
             },
@@ -2280,7 +2587,7 @@ async def test_upload_archive_function_user_missing(
 
     upload = UploadFile(
         filename="missing.pdf",
-        file=io.BytesIO(b"%PDF missing user"),
+        file=io.BytesIO(VALID_PDF_BYTES),
     )
 
     async with session_maker() as session:
@@ -2346,7 +2653,7 @@ async def test_upload_archive_function_handles_storage_error(
         lambda: FailingMinio(),
     )
 
-    upload = UploadFile(filename="fail.pdf", file=io.BytesIO(b"%PDF fail"))
+    upload = UploadFile(filename="fail.pdf", file=io.BytesIO(VALID_PDF_BYTES))
 
     async with session_maker() as session:
         with pytest.raises(HTTPException) as exc:

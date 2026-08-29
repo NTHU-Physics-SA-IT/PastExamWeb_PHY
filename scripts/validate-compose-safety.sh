@@ -157,7 +157,7 @@ for service, definition in production["services"].items():
 assert development["services"]["backend"]["networks"]["default"]["aliases"] == [
     "backend-trusted"
 ]
-assert nginx_config.count("proxy_pass http://backend-trusted:8000/") == 3
+assert nginx_config.count("proxy_pass http://backend-trusted:8000/") == 4
 assert "proxy_pass http://backend:8000/" not in nginx_config
 
 assert (

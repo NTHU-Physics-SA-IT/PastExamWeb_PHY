@@ -48,6 +48,7 @@
     ],
     "b": [
       "tests/unit/test_archive_submission_status.py",
+      "tests/unit/test_archive_upload_compensation.py",
       "tests/unit/test_login_rate_limiter.py",
       "tests/api/test_about_us.py",
       "tests/api/test_archive_backups.py",
@@ -88,6 +89,7 @@
       "tests/unit/test_login_rate_limiter_api.py",
       "tests/unit/test_migration_safety_predicates.py",
       "tests/unit/test_permanent_deletion_storage.py",
+      "tests/unit/test_pdf_security.py",
       "tests/unit/test_submission_decision.py",
       "tests/unit/test_user_online_duration.py",
       "tests/utils/test_storage_utils.py"

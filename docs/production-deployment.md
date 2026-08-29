@@ -180,6 +180,29 @@ must not be dispatched until production revision discovery, role creation,
 external configuration, backup destinations, and approval rules have been
 reviewed in a separately authorized production change.
 
+## Upload and PDF request boundary
+
+Production nginx limits ordinary `/api/` requests to `1M`. The exact
+`POST /api/archives/upload` route has a `21M` transport allowance so multipart
+overhead can carry the backend's authoritative 20 MiB PDF limit; `/minio/`
+retains its separate `100M` object-serving contract. The exact upload location
+must preserve the same trusted-client forwarding, authorization, CORS, and
+backend routing directives as the generic API location.
+
+The backend stages an upload with a hard byte cap before parsing and uses the
+pinned pikepdf/qpdf stack in a bounded helper process. Validation rejects
+encrypted, recovery-dependent, over-limit, embedded-file, form/XFA,
+JavaScript, launch-action, additional-action, and file-attachment documents.
+Production Linux constrains parser address space and serializes parsing across
+Uvicorn workers. Each worker admits at most one helper; with the production
+four-worker command there can be at most four helper processes (a 1 GiB sum of
+hard address-space ceilings), while the container-wide advisory lock permits
+only one helper to import pikepdf and parse at a time. Waiting helpers remain
+before the parser import. Deployment validation must continue to build the
+production backend image and run nginx syntax checks for both development and
+production configurations. Historical orphan cleanup remains a separate,
+operator-controlled operation and is never triggered by this request path.
+
 ## Production schema comparison contract
 
 Production schema readiness is a three-way comparison:
