@@ -384,6 +384,9 @@ without an administrator page interaction, while reusing the same exact-version,
 lease, verification, retry-budget, and finalization authority. It performs no
 orphan/storage scan and creates no operation. Its code is deployable, but
 production activation remains a separately Owner-authorized operations task.
+The orphan audit/cleanup also uses a separately supplied operator MinIO
+credential; its bucket-wide listing authority is not granted to normal backend
+request runtime or the permanent-deletion reconciler.
 
 ## Bulk permanent delete
 

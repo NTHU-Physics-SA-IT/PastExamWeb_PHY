@@ -15,6 +15,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 ACTIVATION_SCRIPT = REPOSITORY_ROOT / "scripts" / "activate-production-release.sh"
 BACKUP_SCRIPT = REPOSITORY_ROOT / "scripts" / "postgres-logical-backup.sh"
 CONTRACT_HELPER = REPOSITORY_ROOT / "scripts" / "production-activation-contract.py"
+STORAGE_PREFLIGHT = REPOSITORY_ROOT / "scripts" / "minio-storage-preflight.sh"
 TEST_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "test.yml"
 RELEASE_SHA = "19782580b710924d8ccdb939600be72ecd44d303"
 FRONTEND_IMAGE = f"ghcr.io/example/pastexam:frontend-{RELEASE_SHA}@sha256:{'1' * 64}"
@@ -101,6 +102,8 @@ def _compose_contract(
                 "image": BACKEND_IMAGE,
                 "environment": {
                     "MINIO_BUCKET_NAME": "exam-archive",
+                    "MINIO_ACCESS_KEY": "scoped-application-access",
+                    "MINIO_SECRET_KEY": "scoped-application-secret",
                     "FORWARDED_ALLOW_IPS": "172.30.0.2",
                 },
                 "networks": {
@@ -172,6 +175,7 @@ def _activation_environment(
     compose_contract: dict | None = None,
     current_ports: dict | None = None,
     postgres_exit: int = 0,
+    storage_preflight_exit: int = 0,
     source_sha: str = RELEASE_SHA,
     edge_mode: str = "600",
     config_owner: str = "0",
@@ -238,6 +242,14 @@ def _activation_environment(
         f"printf 'minio:%s:%s:%s\\n' \"$BACKUP_DIRECTORY\" "
         f'"$MINIO_CONTAINER" "$MINIO_BUCKET_NAME" '
         f">>'{_bash_path(backup_log)}'\n",
+    )
+    _write_executable(
+        scripts / STORAGE_PREFLIGHT.name,
+        "#!/usr/bin/env bash\n"
+        "set -eu\n"
+        f"printf 'preflight:%s:%s\n' \"$MINIO_CONTAINER\" "
+        f"\"$MINIO_BUCKET_NAME\" >>'{_bash_path(backup_log)}'\n"
+        f"exit {storage_preflight_exit}\n",
     )
 
     compose_json = tmp_path / "compose.json"
@@ -424,6 +436,7 @@ def test_activation_supplies_all_backup_contract_inputs(tmp_path: Path) -> None:
     assert process.returncode == 0, process.stderr
     lines = backup_log.read_text(encoding="utf-8").splitlines()
     assert lines == [
+        "preflight:pastexam-minio:exam-archive",
         (
             "postgres:"
             f"{environment['PRODUCTION_BACKUP_DIRECTORY']}:"
@@ -435,6 +448,46 @@ def test_activation_supplies_all_backup_contract_inputs(tmp_path: Path) -> None:
             "pastexam-minio:exam-archive"
         ),
     ]
+
+
+@pytest.mark.parametrize("legacy_name", ["MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD"])
+def test_activation_rejects_legacy_backend_minio_contract(
+    tmp_path: Path, legacy_name: str
+) -> None:
+    release = tmp_path / RELEASE_SHA
+    certificate = tmp_path / "origin.pem"
+    certificate_key = tmp_path / "origin-key.pem"
+    contract = _compose_contract(release, certificate, certificate_key)
+    contract["services"]["backend"]["environment"][legacy_name] = "forbidden"
+    environment, backup_log, _ = _activation_environment(
+        tmp_path, compose_contract=contract
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "root-named contract" in process.stderr
+    assert not backup_log.exists()
+
+
+@pytest.mark.parametrize("required_name", ["MINIO_ACCESS_KEY", "MINIO_SECRET_KEY"])
+def test_activation_requires_scoped_backend_minio_contract(
+    tmp_path: Path, required_name: str
+) -> None:
+    release = tmp_path / RELEASE_SHA
+    certificate = tmp_path / "origin.pem"
+    certificate_key = tmp_path / "origin-key.pem"
+    contract = _compose_contract(release, certificate, certificate_key)
+    del contract["services"]["backend"]["environment"][required_name]
+    environment, backup_log, _ = _activation_environment(
+        tmp_path, compose_contract=contract
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert required_name in process.stderr
+    assert not backup_log.exists()
 
 
 def test_release_metadata_disagreement_fails_before_backup(tmp_path: Path) -> None:
@@ -463,6 +516,22 @@ def test_activation_uses_candidate_compose_environment(tmp_path: Path) -> None:
     assert external in commands
     assert candidate in commands
     assert commands.index(external) < commands.index(candidate)
+
+
+def test_storage_preflight_failure_stops_before_backup_or_migration(
+    tmp_path: Path,
+) -> None:
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path, storage_preflight_exit=2
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert backup_log.read_text(encoding="utf-8").splitlines() == [
+        "preflight:pastexam-minio:exam-archive"
+    ]
+    assert "run --rm migrate" not in docker_log.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("service", ["frontend", "backend", "migrate"])

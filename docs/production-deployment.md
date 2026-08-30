@@ -43,6 +43,14 @@ All four files must be root-owned deployment inputs with mode `0600`. Secrets
 are neither copied into an immutable release nor printed. Runtime and migrator
 credentials must be different.
 
+The backend runtime uses only `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` for a
+child access key under the dedicated non-root application identity. The
+backend environment must not contain `MINIO_ROOT_USER` or
+`MINIO_ROOT_PASSWORD`; those names remain valid only for the MinIO server's
+separate infrastructure configuration. Bucket-wide orphan maintenance receives
+explicit operator credentials outside normal backend runtime. See the
+[MinIO application identity runbook](runbooks/minio-application-identity.md).
+
 The Compose environment names the host-managed Cloudflare Origin certificate
 and private-key paths with `PRODUCTION_TLS_CERT_FILE` and
 `PRODUCTION_TLS_KEY_FILE`. Both files must exist before activation and must be
@@ -155,13 +163,19 @@ It then acquires a host deployment lock and performs:
 4. nginx ingress preservation preflight against the currently published
    `pastexam-nginx` bindings, exact immutable config-mount verification,
    required TLS directives, and Compose-target/listener consistency;
-5. logical PostgreSQL custom-format backup plus validation;
-6. read-only MinIO manifest;
-7. migration preflight;
-8. one-shot safe migration and postflight;
-9. backend/frontend/nginx start;
-10. internal and external health checks;
-11. an activation marker written only after success.
+5. read-only verification that the application bucket exists and versioning is
+   `Enabled`;
+6. logical PostgreSQL custom-format backup plus validation;
+7. read-only MinIO manifest;
+8. migration preflight;
+9. one-shot safe migration and postflight;
+10. backend/frontend/nginx start;
+11. internal and external health checks;
+12. an activation marker written only after success.
+
+The storage preflight never creates a bucket or changes versioning. Production
+activation is blocked until a separately authorized operational gate enables
+versioning on the existing bucket.
 
 There is no automatic database rollback. Any failure stops the sequence and
 does not mark the release activated. Missing or malformed external files,

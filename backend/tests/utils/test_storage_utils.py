@@ -4,16 +4,6 @@ from app.utils import storage
 
 
 class FakeMinio:
-    def __init__(self, *, exists=False):
-        self.exists = exists
-        self.called_make_bucket = False
-
-    def bucket_exists(self, bucket):
-        return self.exists
-
-    def make_bucket(self, bucket):
-        self.called_make_bucket = True
-
     def presigned_get_object(self, bucket_name, object_name, expires):
         return (
             f"http://{storage.settings.MINIO_ENDPOINT}/{bucket_name}/"
@@ -21,18 +11,31 @@ class FakeMinio:
         )
 
 
-def test_get_minio_client_creates_bucket(monkeypatch):
+def test_get_minio_client_uses_scoped_credentials_without_provisioning(monkeypatch):
     fake = FakeMinio()
+    captured = {}
     monkeypatch.setattr(storage, "_minio_client", None)
-    monkeypatch.setattr(storage, "Minio", lambda *args, **kwargs: fake)
+
+    def construct(*args, **kwargs):
+        captured.update(kwargs)
+        return fake
+
+    monkeypatch.setattr(storage, "Minio", construct)
 
     client = storage.get_minio_client()
     assert client is fake
-    assert fake.called_make_bucket is True
+    assert captured == {
+        "endpoint": storage.settings.MINIO_ENDPOINT,
+        "access_key": storage.settings.MINIO_ACCESS_KEY,
+        "secret_key": storage.settings.MINIO_SECRET_KEY,
+        "secure": False,
+    }
+    assert not hasattr(fake, "bucket_exists")
+    assert not hasattr(fake, "make_bucket")
 
 
 def test_presigned_get_url_rewrites_endpoint(monkeypatch):
-    fake = FakeMinio(exists=True)
+    fake = FakeMinio()
     monkeypatch.setattr(storage, "_minio_client", fake)
 
     url = storage.presigned_get_url(

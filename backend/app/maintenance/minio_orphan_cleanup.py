@@ -6,11 +6,13 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from minio import Minio
 from minio.error import S3Error
 from sqlalchemy import select
 
@@ -19,12 +21,25 @@ from app.db.init_db import validate_database_ready
 from app.db.session import AsyncSessionLocal
 from app.models.models import Archive, ArchiveSubmission, SubmissionStatus
 from app.utils.exception_logging import redacted_exc_info
-from app.utils.storage import get_minio_client
 
 logger = logging.getLogger(__name__)
 
 KNOWN_PREFIXES = ("archives/", "archive-submissions/")
 SIZE_1GB = 1024 * 1024 * 1024
+
+
+def get_operator_minio_client() -> Minio:
+    """Build the explicitly authorized client for bucket-wide maintenance."""
+    access_key = os.getenv("MINIO_OPERATOR_ACCESS_KEY")
+    secret_key = os.getenv("MINIO_OPERATOR_SECRET_KEY")
+    if not access_key or not secret_key:
+        raise RuntimeError("Explicit MinIO operator credentials are required")
+    return Minio(
+        endpoint=settings.MINIO_ENDPOINT,
+        access_key=access_key,
+        secret_key=secret_key,
+        secure=False,
+    )
 
 
 def _utcnow() -> str:
@@ -84,7 +99,7 @@ async def run_audit() -> dict[str, Any]:
     db_refs = await _collect_db_refs()
     object_to_refs = db_refs
 
-    client = get_minio_client()
+    client = get_operator_minio_client()
     objects = list(client.list_objects(settings.MINIO_BUCKET_NAME, recursive=True))
 
     referenced_active = []
@@ -230,7 +245,7 @@ async def run_cleanup(
         )
         return manifest
 
-    client = get_minio_client()
+    client = get_operator_minio_client()
     deleted = 0
     deleted_size = 0
     for item in candidate:

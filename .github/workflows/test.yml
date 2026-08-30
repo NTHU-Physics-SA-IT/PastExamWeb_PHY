@@ -42,8 +42,8 @@ jobs:
       SECRET_KEY: migration-test-secret
       FRONTEND_URL: http://localhost
       MINIO_ENDPOINT: localhost:9000
-      MINIO_ROOT_USER: test
-      MINIO_ROOT_PASSWORD: test-password
+      MINIO_ACCESS_KEY: test
+      MINIO_SECRET_KEY: test-password
       MINIO_BUCKET_NAME: test
       EXTERNAL_ENDPOINT: http://localhost:9000
       REDIS_URL: redis://localhost:6379/0
@@ -119,10 +119,16 @@ jobs:
             ../scripts/tests/test_backend_runtime_health.py \
             ../scripts/tests/test_dev_compose_schema_controls.py \
             ../scripts/tests/test_nginx_oauth_access_logging.py \
+            ../scripts/tests/test_minio_least_privilege_contract.py \
+            ../scripts/tests/test_minio_least_privilege_integration.py \
+            ../scripts/tests/test_minio_storage_preflight.py \
             ../scripts/tests/test_postgres_test_bootstrap_contract.py \
             ../scripts/tests/test_production_activation_contract.py \
             ../scripts/tests/test_release_workflow_contract.py \
             --confcutdir=../scripts/tests
+
+      - name: Run exact-version MinIO least-privilege contract
+        run: ./scripts/run-minio-least-privilege-contract.sh
 
       - name: Validate Compose safety contract
         run: ./scripts/validate-compose-safety.sh

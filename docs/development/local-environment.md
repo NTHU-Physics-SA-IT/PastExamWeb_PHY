@@ -34,7 +34,7 @@ The canonical development project name is `pastexam-dev`. The default stack is:
 | FastAPI backend | `backend` | Serves `/api` and `/health` |
 | PostgreSQL | `db` | Stores application data in the configured development database |
 | Redis | `redis` | Supports runtime Redis-backed features |
-| MinIO | `minio`, `minio-init` | Stores archive objects and initializes the configured bucket |
+| MinIO | `minio`, `minio-init` | Stores archive objects; the explicit init service creates/version-enables the local bucket and provisions the scoped local application identity |
 | Alembic runner | `migrate` | Runs the guarded migration CLI before backend startup |
 | Nginx | `nginx` | Exposes the development site on `127.0.0.1:8080` by default |
 
@@ -169,6 +169,10 @@ bucket, volume, or network as a verification shortcut.
 | Backend runtime | `backend/.env.example` documents database, authentication, MinIO, Redis, and bootstrap settings loaded by the backend |
 | Compose interpolation | `docker/.env.example` documents local Compose identities, ports, credentials, database, bucket, network, and volume names; `scripts/dev-compose.sh` defaults to `docker/.env` and supports `PASTEXAM_DEV_COMPOSE_ENV_FILE` |
 | Production external configuration | `docker/docker-compose.prod.yml` reads the Compose environment and mounts separate backend runtime and migrator environment files under the production configuration path |
+
+Local MinIO root variables belong only to the server and `minio-init` bootstrap.
+The backend receives the separate generic application access key/secret. Normal
+backend runtime never creates the bucket or provisions MinIO identity.
 
 Do not place secrets in documentation, commits, command output, or frontend
 build-time variables. A `VITE_*` value is delivered to the browser and is not

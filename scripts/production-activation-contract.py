@@ -61,6 +61,20 @@ def _required_string(mapping: dict[str, Any], key: str, label: str) -> str:
     return value
 
 
+def _verify_backend_storage_credentials(environment: dict[str, Any]) -> None:
+    for key in ("MINIO_ACCESS_KEY", "MINIO_SECRET_KEY"):
+        _required_string(environment, key, f"backend {key}")
+    forbidden = [
+        key
+        for key in ("MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD")
+        if key in environment
+    ]
+    if forbidden:
+        raise ContractError(
+            "Rendered backend environment retains the legacy MinIO root-named contract."
+        )
+
+
 def _verify_proxy_trust(compose: dict[str, Any]) -> None:
     backend = _service(compose, "backend")
     nginx = _service(compose, "nginx")
@@ -214,6 +228,7 @@ def _compose_values(compose_path: Path) -> None:
         backend_environment, dict
     ):
         raise ContractError("Rendered Compose environments are incomplete.")
+    _verify_backend_storage_credentials(backend_environment)
 
     values_and_patterns = (
         (
