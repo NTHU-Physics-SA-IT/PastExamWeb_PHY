@@ -893,6 +893,10 @@ async def test_get_archive_preview_url_returns_presigned_link(
         )
         assert response.status_code == 200
         assert response.json() == {"url": preview_url}
+
+        async with session_maker() as session:
+            refreshed = await session.get(Archive, archive.id)
+            assert refreshed.download_count == 0
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
