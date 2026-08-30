@@ -1,5 +1,6 @@
 import { userTest as test, expect } from '../support/userTest'
 import { JSON_HEADERS } from '../support/constants'
+import type { Page } from '@playwright/test'
 
 const initialWishes = Array.from({ length: 12 }, (_, index) => ({
   id: index + 1,
@@ -23,7 +24,198 @@ const appendedWishes = [
   { ...initialWishes[1], id: 14, title: '追加許願 14', heart_count: 1 },
 ]
 
+async function installEmptyWishPoolRoutes(page: Page) {
+  await page.route('**/api/**', async (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    if (request.method() === 'GET' && url.pathname === '/api/wishes') {
+      await route.fulfill({
+        status: 200,
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ items: [], total: 0 }),
+      })
+      return
+    }
+    if (request.method() === 'GET' && url.pathname === '/api/courses/categories') {
+      await route.fulfill({ status: 200, headers: JSON_HEADERS, body: '[]' })
+      return
+    }
+    if (request.method() === 'GET' && url.pathname === '/api/courses') {
+      await route.fulfill({ status: 200, headers: JSON_HEADERS, body: '{}' })
+      return
+    }
+    if (request.method() === 'GET' && url.pathname === '/api/users/me') {
+      await route.fulfill({
+        status: 200,
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ id: 2, name: '一般使用者', nickname: '' }),
+      })
+      return
+    }
+    if (
+      request.method() === 'GET' &&
+      ['/api/notifications/active', '/api/notifications/unread-summary'].includes(url.pathname)
+    ) {
+      await route.fulfill({
+        status: 200,
+        headers: JSON_HEADERS,
+        body:
+          url.pathname === '/api/notifications/active'
+            ? '[]'
+            : JSON.stringify({
+                announcements: [],
+                personal_notifications: [],
+                counts: { announcements: 0, personal_notifications: 0, total: 0 },
+              }),
+      })
+      return
+    }
+    if (request.method() === 'POST' && url.pathname === '/api/auth/heartbeat') {
+      await route.fulfill({ status: 200, headers: JSON_HEADERS, body: '{}' })
+      return
+    }
+    await route.continue()
+  })
+}
+
 test.describe('User › Wish Pool responsive Honeycomb', () => {
+  test('centers the successful empty state without creating a scrollable Honeycomb world', async ({
+    page,
+  }) => {
+    await installEmptyWishPoolRoutes(page)
+    const viewports = [
+      { width: 375, height: 812 },
+      { width: 390, height: 844 },
+      { width: 402, height: 874 },
+      { width: 429, height: 869 },
+      { width: 766, height: 1024 },
+      { width: 767, height: 1024 },
+      { width: 768, height: 1024 },
+      { width: 834, height: 1210 },
+      { width: 1024, height: 768 },
+      { width: 1440, height: 900 },
+    ]
+
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/archive')
+
+    const archiveIcon = page.locator('i.pi-book.text-6xl')
+    const archiveMessage = page.getByText('請從左側選單選擇課程', { exact: true })
+    await expect(archiveIcon).toBeVisible()
+    await expect(archiveMessage).toBeVisible()
+
+    const archiveReference = await archiveMessage.evaluate((messageElement) => {
+      const iconElement = document.querySelector('i.pi-book.text-6xl')!
+      const iconStyle = getComputedStyle(iconElement)
+      const messageStyle = getComputedStyle(messageElement)
+      return {
+        iconFontSize: iconStyle.fontSize,
+        iconWidth: iconElement.getBoundingClientRect().width,
+        messageColor: messageStyle.color,
+        messageFontSize: messageStyle.fontSize,
+        messageFontWeight: messageStyle.fontWeight,
+        messageLineHeight: messageStyle.lineHeight,
+      }
+    })
+
+    await page.getByRole('button', { name: '考古許願池', exact: true }).click()
+
+    const emptyState = page.locator('.wish-empty-state')
+    const icon = emptyState.locator('.wish-empty-state__icon')
+    const message = emptyState.getByText('池水靜靜地等著，等一個願望落下第一圈漣漪。', {
+      exact: true,
+    })
+
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport)
+      await expect(emptyState).toBeVisible()
+      await expect(icon).toBeVisible()
+      await expect(message).toBeVisible()
+      await expect(page.locator('.wish-pool-stage')).toHaveCount(0)
+      await expect(page.locator('.wish-pool-world')).toHaveCount(0)
+
+      const visualMatch = await emptyState.evaluate((element) => {
+        const iconElement = element.querySelector('.wish-empty-state__icon')!
+        const messageElement = element.querySelector('p')!
+        const messageLeadElement = element.querySelector('.wish-empty-state__message-lead')!
+        const messageContinuationElement = element.querySelector(
+          '.wish-empty-state__message-continuation'
+        )!
+        const mobileBreakElement = element.querySelector('.wish-empty-state__mobile-break')!
+        const iconStyle = getComputedStyle(iconElement)
+        const messageStyle = getComputedStyle(messageElement)
+        const transform = new DOMMatrixReadOnly(iconStyle.transform)
+        return {
+          iconFontSize: iconStyle.fontSize,
+          iconScaleX: transform.a,
+          iconScaleY: transform.d,
+          iconWidth: iconElement.getBoundingClientRect().width,
+          messageColor: messageStyle.color,
+          messageFontSize: messageStyle.fontSize,
+          messageFontWeight: messageStyle.fontWeight,
+          messageLineHeight: messageStyle.lineHeight,
+          messageLeadTop: messageLeadElement.getBoundingClientRect().top,
+          messageContinuationTop: messageContinuationElement.getBoundingClientRect().top,
+          mobileBreakDisplay: getComputedStyle(mobileBreakElement).display,
+        }
+      })
+
+      expect(visualMatch.iconFontSize).toBe(archiveReference.iconFontSize)
+      expect(visualMatch.iconScaleX).toBeCloseTo(0.93, 2)
+      expect(visualMatch.iconScaleY).toBeCloseTo(1, 2)
+      expect(visualMatch.iconWidth / archiveReference.iconWidth).toBeCloseTo(0.93, 2)
+      expect(visualMatch.messageColor).toBe(archiveReference.messageColor)
+      expect(visualMatch.messageFontSize).toBe(archiveReference.messageFontSize)
+      expect(visualMatch.messageFontWeight).toBe(archiveReference.messageFontWeight)
+      expect(visualMatch.messageLineHeight).toBe(archiveReference.messageLineHeight)
+      if (viewport.width <= 767) {
+        expect(visualMatch.mobileBreakDisplay).toBe('inline')
+        expect(visualMatch.messageContinuationTop).toBeGreaterThan(visualMatch.messageLeadTop)
+      } else {
+        expect(visualMatch.mobileBreakDisplay).toBe('none')
+        expect(
+          Math.abs(visualMatch.messageContinuationTop - visualMatch.messageLeadTop)
+        ).toBeLessThan(1)
+      }
+
+      const metrics = await emptyState.evaluate((element) => {
+        const stateRect = element.getBoundingClientRect()
+        const iconRect = element.querySelector('.wish-empty-state__icon')!.getBoundingClientRect()
+        const messageRect = element.querySelector('p')!.getBoundingClientRect()
+        const headerRect = element.previousElementSibling!.getBoundingClientRect()
+        return {
+          stateLeft: stateRect.left,
+          stateRight: stateRect.right,
+          stateCenterX: stateRect.left + stateRect.width / 2,
+          iconLeft: iconRect.left,
+          iconRight: iconRect.right,
+          iconTop: iconRect.top,
+          iconCenterX: iconRect.left + iconRect.width / 2,
+          messageLeft: messageRect.left,
+          messageRight: messageRect.right,
+          messageCenterX: messageRect.left + messageRect.width / 2,
+          headerBottom: headerRect.bottom,
+          documentScrollWidth: document.documentElement.scrollWidth,
+          viewportWidth: window.innerWidth,
+          stateScrollWidth: element.scrollWidth,
+          stateClientWidth: element.clientWidth,
+        }
+      })
+
+      expect(metrics.stateLeft).toBeGreaterThanOrEqual(0)
+      expect(metrics.stateRight).toBeLessThanOrEqual(metrics.viewportWidth)
+      expect(metrics.iconLeft).toBeGreaterThanOrEqual(metrics.stateLeft)
+      expect(metrics.iconRight).toBeLessThanOrEqual(metrics.stateRight)
+      expect(metrics.messageLeft).toBeGreaterThanOrEqual(metrics.stateLeft)
+      expect(metrics.messageRight).toBeLessThanOrEqual(metrics.stateRight)
+      expect(metrics.iconTop).toBeGreaterThanOrEqual(metrics.headerBottom)
+      expect(Math.abs(metrics.iconCenterX - metrics.stateCenterX)).toBeLessThan(1)
+      expect(Math.abs(metrics.messageCenterX - metrics.stateCenterX)).toBeLessThan(1)
+      expect(metrics.stateScrollWidth).toBeLessThanOrEqual(metrics.stateClientWidth)
+      expect(metrics.documentScrollWidth).toBeLessThanOrEqual(metrics.viewportWidth)
+    }
+  })
+
   test('shares stable Honeycomb cells across Mobile, Tablet, and Desktop', async ({ page }) => {
     let wishRequestCount = 0
     await page.route('**/api/**', async (route) => {
@@ -124,12 +316,20 @@ test.describe('User › Wish Pool responsive Honeycomb', () => {
     }
 
     await assertHoneycomb()
+    const desktopCells = await readCells()
+    const desktopRows = [...new Set(desktopCells.map(({ r }) => r))].sort(
+      (left, right) => left - right
+    )
 
     await page.setViewportSize({ width: 390, height: 844 })
     await expect(stage).toHaveClass(/is-mobile-scroll/)
     await expect(stage).not.toHaveClass(/is-vertical-distribution/)
     await assertHoneycomb()
     const initialMobileCells = await readCells()
+    expect(initialMobileCells).toEqual(desktopCells)
+    expect(
+      [...new Set(initialMobileCells.map(({ r }) => r))].sort((left, right) => left - right)
+    ).toEqual(desktopRows)
     const nativeWorld = await stage.evaluate((element) => ({
       scrollWidth: element.scrollWidth,
       clientWidth: element.clientWidth,
@@ -142,6 +342,40 @@ test.describe('User › Wish Pool responsive Honeycomb', () => {
     expect(nativeWorld.scrollHeight).toBeGreaterThan(nativeWorld.clientHeight)
     expect(nativeWorld.documentScrollWidth).toBeLessThanOrEqual(nativeWorld.viewportWidth)
 
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await stage.dispatchEvent('pointerdown', {
+      pointerId: 27,
+      pointerType: 'touch',
+      isPrimary: true,
+      clientX: 100,
+      clientY: 100,
+    })
+    const exploredPosition = await stage.evaluate((element) => {
+      element.scrollLeft = element.scrollWidth
+      element.scrollTop = element.scrollHeight
+      element.dispatchEvent(new Event('scroll'))
+      return { left: element.scrollLeft, top: element.scrollTop }
+    })
+    expect(exploredPosition.left).toBeGreaterThan(0)
+    expect(exploredPosition.top).toBeGreaterThan(0)
+    const returnButton = page.getByRole('button', { name: '回到中央' })
+    await expect(returnButton).not.toHaveClass(/is-at-origin/)
+    await returnButton.click()
+    await expect
+      .poll(async () => {
+        const centeredPosition = await stage.evaluate((element) => ({
+          left: element.scrollLeft,
+          top: element.scrollTop,
+          expectedLeft: (element.scrollWidth - element.clientWidth) / 2,
+          expectedTop: (element.scrollHeight - element.clientHeight) / 2,
+        }))
+        return (
+          Math.abs(centeredPosition.left - centeredPosition.expectedLeft) < 1 &&
+          Math.abs(centeredPosition.top - centeredPosition.expectedTop) < 1
+        )
+      })
+      .toBe(true)
+
     await page.getByRole('button', { name: '載入更多' }).click()
     await expect(nodes).toHaveCount(14)
     expect(await readCells()).toEqual(initialMobileCells)
@@ -152,6 +386,15 @@ test.describe('User › Wish Pool responsive Honeycomb', () => {
     await expect(stage).toHaveClass(/is-tablet-scroll/)
     await expect(stage).not.toHaveClass(/is-mobile-scroll/)
     await assertHoneycomb()
+    expect(await readCells()).toEqual(desktopCells)
+    const tabletWorld = await stage.evaluate((element) => ({
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    }))
+    expect(tabletWorld.scrollWidth).toBeGreaterThan(tabletWorld.clientWidth)
+    expect(tabletWorld.scrollHeight).toBeGreaterThan(tabletWorld.clientHeight)
 
     await page.setViewportSize({ width: 390, height: 844 })
     expect(await readCells()).toEqual(initialMobileCells)
@@ -159,5 +402,6 @@ test.describe('User › Wish Pool responsive Honeycomb', () => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await expect(stage).not.toHaveClass(/is-native-scroll/)
     await assertHoneycomb()
+    expect(await readCells()).toEqual(desktopCells)
   })
 })

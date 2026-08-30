@@ -26,7 +26,17 @@
     </header>
     <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
     <ProgressSpinner v-if="loading" class="wish-spinner" />
-    <div v-else class="wish-pool-stage-shell">
+    <div v-else-if="!error && wishes.length === 0" class="wish-empty-state">
+      <i class="pi pi-send text-6xl wish-empty-state__icon" aria-hidden="true"></i>
+      <p class="text-xl font-medium wish-empty-state__message">
+        <span class="wish-empty-state__message-lead"> {{ $t('池水靜靜地等著，等一個願望') }}</span
+        ><br class="wish-empty-state__mobile-break" aria-hidden="true" /><span
+          class="wish-empty-state__message-continuation"
+          >{{ $t('落下第一圈漣漪。') }}</span
+        >
+      </p>
+    </div>
+    <div v-else-if="!error" class="wish-pool-stage-shell">
       <div
         ref="viewportRef"
         class="wish-pool-stage"
@@ -260,6 +270,7 @@ import {
   reprojectWishHoneycombPositions,
   wishFontSizeRem,
   wishHoneycombGeometry,
+  wishHoneycombLayoutMetrics,
   wishInteractionMode,
 } from '@/utils/wishHoneycombLayout'
 import InlineCommentReport from '@/components/InlineCommentReport.vue'
@@ -285,6 +296,7 @@ const sloganSubmitting = ref(false)
 const viewportRef = ref(null)
 const viewportSize = ref({ width: 0, height: 0 })
 const positions = ref({})
+const layoutMetrics = ref(wishHoneycombLayoutMetrics())
 const sessionScores = ref({})
 const layoutMode = ref('honeycomb')
 const navigationMode = ref('desktop')
@@ -328,7 +340,7 @@ const reportTarget = computed(() => ({
   is_deleted: false,
 }))
 const worldStyle = computed(() => {
-  const geometry = wishHoneycombGeometry(viewportSize.value, rootFontSize())
+  const geometry = wishHoneycombGeometry(viewportSize.value, rootFontSize(), layoutMetrics.value)
   const sharedStyle = { '--wish-item-max-width': `${geometry.itemWidth}px` }
   if (navigationMode.value === 'desktop') {
     return { ...sharedStyle, transform: `translate3d(${camera.x}px, ${camera.y}px, 0)` }
@@ -570,7 +582,7 @@ function updateWorldGeometry() {
     positions.value,
     viewportSize.value,
     rootFontSize(),
-    { native2DOverflow: true }
+    { native2DOverflow: true, layoutMetrics: layoutMetrics.value }
   )
 }
 function applyResponsiveLayout(scrollSnapshot = captureNativeScroll()) {
@@ -581,7 +593,8 @@ function applyResponsiveLayout(scrollSnapshot = captureNativeScroll()) {
     sessionScores.value,
     viewportSize.value,
     rootFontSize(),
-    sessionLayoutSeed
+    sessionLayoutSeed,
+    layoutMetrics.value
   )
   positions.value = layout.positions
   layoutMode.value = layout.mode
@@ -616,7 +629,8 @@ function measureViewport(entry) {
     positions.value = reprojectWishHoneycombPositions(
       positions.value,
       viewportSize.value,
-      rootFontSize()
+      rootFontSize(),
+      layoutMetrics.value
     )
     navigationMode.value = wishInteractionMode(viewportSize.value)
     camera.x = 0
@@ -658,6 +672,7 @@ async function load(reset = true) {
     const { data } = await wishService.list({ limit: 60, offset: reset ? 0 : wishes.value.length })
     const incomingWishes = data.items || []
     if (reset) {
+      layoutMetrics.value = wishHoneycombLayoutMetrics(incomingWishes)
       wishes.value = incomingWishes
       sessionScores.value = assignWishCentralityScores(incomingWishes, sessionScoreRng)
       applyResponsiveLayout()
@@ -675,7 +690,8 @@ async function load(reset = true) {
         sessionScores.value,
         viewportSize.value,
         rootFontSize(),
-        sessionLayoutSeed
+        sessionLayoutSeed,
+        layoutMetrics.value
       )
       updateWorldGeometry()
       if (navigationMode.value !== 'desktop') {
@@ -874,6 +890,31 @@ onBeforeUnmount(() => {
   min-height: 0;
   flex: 1 1 auto;
   margin-top: 1.25rem;
+}
+.wish-empty-state {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 1rem;
+  color: var(--text-secondary);
+  padding: clamp(1.5rem, 5vw, 3rem) 1rem;
+  text-align: center;
+}
+.wish-empty-state__icon {
+  flex: 0 0 auto;
+  /* PrimeIcons' send glyph is wider than book at the same font size. */
+  transform: scaleX(0.93);
+}
+.wish-empty-state__message {
+  max-width: 32rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.wish-empty-state__mobile-break {
+  display: none;
 }
 .wish-pool-stage {
   position: relative;
@@ -1109,6 +1150,11 @@ onBeforeUnmount(() => {
   }
   .wish-header__actions {
     width: 100%;
+  }
+}
+@media (max-width: 767px) {
+  .wish-empty-state__mobile-break {
+    display: inline;
   }
 }
 </style>
