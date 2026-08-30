@@ -96,6 +96,8 @@ def test_compose_keeps_root_only_on_server_and_scoped_backend_contract() -> None
     assert "MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}" in production
     assert "MINIO_ACCESS_KEY" in development
     assert "MINIO_SECRET_KEY" in development
+    assert "sed " not in development
+    assert "policy_line//<bucket>" in development
 
 
 def test_rollback_policy_grants_only_legacy_head_bucket() -> None:

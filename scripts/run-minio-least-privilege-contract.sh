@@ -11,7 +11,6 @@ if [ -x "$repository_root/backend/.venv/bin/python" ]; then
 else
   python="$repository_root/backend/.venv/Scripts/python.exe"
 fi
-lab_directory="$(mktemp -d)"
 container="pastexam-sec04-minio-$RANDOM-$$"
 root_user="sec04-root-$RANDOM"
 root_secret="sec04-root-secret-$RANDOM-$$"
@@ -24,16 +23,8 @@ unrelated_bucket="sec04-unrelated-$RANDOM"
 
 cleanup() {
   docker rm -f "$container" >/dev/null 2>&1 || true
-  rm -rf -- "$lab_directory"
 }
 trap cleanup EXIT HUP INT TERM
-
-sed "s/<bucket>/$bucket/g" \
-  "$repository_root/docker/minio/application-policy.template.json" \
-  >"$lab_directory/application-policy.json"
-sed "s/<bucket>/$bucket/g" \
-  "$repository_root/docker/minio/rollback-list-bucket-policy.template.json" \
-  >"$lab_directory/rollback-policy.json"
 
 docker run -d --rm \
   --name "$container" \
@@ -62,8 +53,14 @@ printf 'unrelated' | docker exec -i "$container" \
 env MINIO_CONTAINER="$container" MINIO_BUCKET_NAME="$bucket" \
   PYTHON_BIN="$python" \
   "$repository_root/scripts/minio-storage-preflight.sh" >/dev/null
-docker exec -i "$container" sh -c 'cat >/tmp/application-policy.json' \
-  <"$lab_directory/application-policy.json"
+docker exec -i "$container" sh -c \
+  'cat >/tmp/application-policy.template.json' \
+  <"$repository_root/docker/minio/application-policy.template.json"
+docker exec -e MINIO_BUCKET_NAME="$bucket" "$container" sh -eu -c '
+  while IFS= read -r policy_line || [ -n "$policy_line" ]; do
+    printf "%s\n" "${policy_line//<bucket>/$MINIO_BUCKET_NAME}"
+  done </tmp/application-policy.template.json >/tmp/application-policy.json
+'
 docker exec "$container" mc admin policy create local pastexam-sec04-app \
   /tmp/application-policy.json >/dev/null
 docker exec "$container" mc admin user add local "$parent_user" \
@@ -98,8 +95,14 @@ env \
   -k 'not temporary_list_bucket' \
   --confcutdir="$confcutdir"
 
-docker exec -i "$container" sh -c 'cat >/tmp/rollback-policy.json' \
-  <"$lab_directory/rollback-policy.json"
+docker exec -i "$container" sh -c \
+  'cat >/tmp/rollback-policy.template.json' \
+  <"$repository_root/docker/minio/rollback-list-bucket-policy.template.json"
+docker exec -e MINIO_BUCKET_NAME="$bucket" "$container" sh -eu -c '
+  while IFS= read -r policy_line || [ -n "$policy_line" ]; do
+    printf "%s\n" "${policy_line//<bucket>/$MINIO_BUCKET_NAME}"
+  done </tmp/rollback-policy.template.json >/tmp/rollback-policy.json
+'
 docker exec "$container" mc admin policy create local pastexam-sec04-rollback \
   /tmp/rollback-policy.json >/dev/null
 docker exec "$container" mc admin policy attach local pastexam-sec04-rollback \

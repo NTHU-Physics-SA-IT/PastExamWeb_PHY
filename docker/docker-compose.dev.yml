@@ -95,8 +95,10 @@ services:
         "$$MINIO_ROOT_PASSWORD" >/dev/null &&
         mc mb --ignore-existing "local/$$MINIO_BUCKET_NAME" &&
         mc version enable "local/$$MINIO_BUCKET_NAME" &&
-        sed "s/<bucket>/$$MINIO_BUCKET_NAME/g"
-        /policies/application-policy.template.json >/tmp/application-policy.json &&
+        while IFS= read -r policy_line || [ -n "$$policy_line" ]; do
+        printf '%s\n' "$${policy_line//<bucket>/$$MINIO_BUCKET_NAME}";
+        done </policies/application-policy.template.json
+        >/tmp/application-policy.json &&
         mc admin policy create local pastexam-application
         /tmp/application-policy.json &&
         mc admin user add local "$$MINIO_ACCESS_KEY" "$$MINIO_SECRET_KEY" &&
