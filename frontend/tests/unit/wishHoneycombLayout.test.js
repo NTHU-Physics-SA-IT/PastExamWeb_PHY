@@ -2,16 +2,16 @@ import { describe, expect, it } from 'vitest'
 
 import {
   WISH_CELL_HORIZONTAL_SPACING_REM,
+  WISH_CELL_VERTICAL_BASE_SPACING_REM,
   WISH_CELL_VERTICAL_SPACING_REM,
   WISH_FONT_SIZE_BASE_REM,
   WISH_FONT_SIZE_MAX_REM,
   WISH_FONT_SIZE_SQRT5_TARGET_REM,
+  WISH_ITEM_BASE_HEIGHT_REM,
   WISH_ITEM_MAX_HEIGHT_REM,
   WISH_ITEM_MAX_WIDTH_REM,
   WISH_MOBILE_BREAKPOINT_PX,
-  WISH_NATIVE_MIN_CENTER_ROW_CAPACITY,
-  WISH_NATIVE_MIN_GEOMETRY_SCALE,
-  WISH_NATIVE_MIN_VERTICAL_SCALE,
+  WISH_NATIVE_DENSITY_CENTER_ROW_CAPACITY,
   WISH_TABLET_MAX_WIDTH_PX,
   appendResponsiveWishPositions,
   assignWishCentralityScores,
@@ -23,7 +23,11 @@ import {
   reprojectWishHoneycombPositions,
   wishCentralityScore,
   wishFontSizeRem,
+  wishHoneycombCenterRowCapacity,
   wishHoneycombGeometry,
+  wishHoneycombLayoutMetrics,
+  wishHoneycombLogicalDensityWidth,
+  wishHoneycombRequiredWidthForCapacity,
   wishInteractionMode,
 } from '@/utils/wishHoneycombLayout'
 
@@ -45,6 +49,17 @@ const wishes = [
   { id: 3, heart_count: 25 },
   { id: 4, heart_count: 400 },
 ]
+
+const densityWishes = [0, 1, 5, 6, 8, 9, 10, 15, 30, 2, 3, 4, 12, 18, 20, 25].map(
+  (heart_count, index) => ({
+    id: index + 1,
+    heart_count,
+    fulfilled: heart_count === 30,
+  })
+)
+const densityScores = Object.fromEntries(
+  densityWishes.map(({ id }, index) => [id, densityWishes.length - index])
+)
 
 const responsiveViewports = [
   { width: 375, height: 812, interactionMode: 'mobile' },
@@ -136,14 +151,17 @@ describe('Wish Pool shared honeycomb geometry', () => {
     }
   })
 
-  it('preserves desktop constants and responsively scales native geometry only', () => {
+  it('uses the shared desktop lattice geometry in native and desktop navigation', () => {
     const phone = wishHoneycombGeometry({ width: 375, height: 812 }, 16)
     const desktop = wishHoneycombGeometry({ width: 1440, height: 900 }, 16)
 
     expect(phone.nativeNavigation).toBe(true)
-    expect(phone.horizontalScale).toBe(WISH_NATIVE_MIN_GEOMETRY_SCALE)
-    expect(phone.verticalScale).toBe(WISH_NATIVE_MIN_VERTICAL_SCALE)
-    expect(phone.itemWidth).toBe(WISH_ITEM_MAX_WIDTH_REM * 16 * WISH_NATIVE_MIN_GEOMETRY_SCALE)
+    expect(phone.horizontalScale).toBe(1)
+    expect(phone.verticalScale).toBe(1)
+    expect(phone.itemWidth).toBe(WISH_ITEM_MAX_WIDTH_REM * 16)
+    expect(phone.itemHeight).toBe(desktop.itemHeight)
+    expect(phone.horizontalSpacing).toBe(desktop.horizontalSpacing)
+    expect(phone.verticalSpacing).toBe(desktop.verticalSpacing)
     expect(desktop.nativeNavigation).toBe(false)
     expect(desktop.horizontalScale).toBe(1)
     expect(desktop.verticalScale).toBe(1)
@@ -151,18 +169,113 @@ describe('Wish Pool shared honeycomb geometry', () => {
     expect(desktop.itemHeight).toBe(WISH_ITEM_MAX_HEIGHT_REM * 16)
     expect(desktop.horizontalSpacing).toBe(WISH_CELL_HORIZONTAL_SPACING_REM * 16)
     expect(desktop.verticalSpacing).toBe(WISH_CELL_VERTICAL_SPACING_REM * 16)
-    expect(WISH_NATIVE_MIN_CENTER_ROW_CAPACITY).toBe(3)
   })
 
-  it('derives wider desktop row capacity from the content viewport', () => {
+  it('derives the native desktop-density width and center capacity from shared geometry', () => {
+    for (const viewport of responsiveViewports.filter(
+      ({ width }) => width <= WISH_TABLET_MAX_WIDTH_PX
+    )) {
+      const geometry = wishHoneycombGeometry(viewport, 16)
+      const requiredWidth = wishHoneycombRequiredWidthForCapacity(
+        WISH_NATIVE_DENSITY_CENTER_ROW_CAPACITY,
+        geometry
+      )
+
+      expect(requiredWidth).toBe(
+        geometry.itemWidth +
+          (WISH_NATIVE_DENSITY_CENTER_ROW_CAPACITY - 1) * geometry.horizontalSpacing +
+          geometry.safeMargin * 2
+      )
+      expect(wishHoneycombLogicalDensityWidth(viewport.width, geometry)).toBeGreaterThanOrEqual(
+        requiredWidth
+      )
+      expect(wishHoneycombCenterRowCapacity(viewport.width, geometry)).toBe(
+        WISH_NATIVE_DENSITY_CENTER_ROW_CAPACITY
+      )
+    }
+  })
+
+  it('keeps the same desktop-density topology across fresh native and desktop layouts', () => {
+    const layoutMetrics = wishHoneycombLayoutMetrics(densityWishes)
+    const viewports = [
+      { width: 390, height: 844 },
+      { width: 768, height: 1024 },
+      { width: 834, height: 1210 },
+      { width: 1440, height: 900 },
+    ]
+    const layouts = viewports.map((viewport) =>
+      createResponsiveWishLayout(
+        densityWishes,
+        densityScores,
+        viewport,
+        16,
+        20260830,
+        layoutMetrics
+      )
+    )
+    const topology = ({ positions }) =>
+      Object.fromEntries(Object.entries(positions).map(([id, { q, r }]) => [id, { q, r }]))
+    const activeRows = ({ positions }) =>
+      [...new Set(Object.values(positions).map(({ r }) => r))].sort((left, right) => left - right)
+    const desktopTopology = topology(layouts.at(-1))
+    const desktopRows = activeRows(layouts.at(-1))
+
+    expect(desktopRows).toEqual([-2, -1, 0, 1, 2])
+    for (const layout of layouts.slice(0, -1)) {
+      expect(topology(layout)).toEqual(desktopTopology)
+      expect(activeRows(layout)).toEqual(desktopRows)
+    }
+  })
+
+  it('projects the shared topology into a wider reachable native world without extra rows', () => {
+    const layoutMetrics = wishHoneycombLayoutMetrics(densityWishes)
+    const mobileViewport = { width: 390, height: 844 }
+    const desktopViewport = { width: 1440, height: 900 }
+    const mobileLayout = createResponsiveWishLayout(
+      densityWishes,
+      densityScores,
+      mobileViewport,
+      16,
+      20260830,
+      layoutMetrics
+    )
+    const desktopLayout = createResponsiveWishLayout(
+      densityWishes,
+      densityScores,
+      desktopViewport,
+      16,
+      20260830,
+      layoutMetrics
+    )
+    const mobileGeometry = wishHoneycombGeometry(mobileViewport, 16, layoutMetrics)
+    const mobileWorld = createWishWorldGeometry(mobileLayout.positions, mobileViewport, 16, {
+      native2DOverflow: true,
+      layoutMetrics,
+    })
+    const desktopWorld = createWishWorldGeometry(desktopLayout.positions, desktopViewport, 16, {
+      layoutMetrics,
+    })
+
+    expect(mobileWorld.width).toBeGreaterThan(mobileViewport.width)
+    expect(mobileWorld.height).toBeGreaterThan(mobileViewport.height)
+    expect(mobileWorld.height).toBeCloseTo(desktopWorld.height, 10)
+    for (const position of Object.values(mobileLayout.positions)) {
+      const centerX = position.x + mobileWorld.offsetX
+      const centerY = position.y + mobileWorld.offsetY
+      expect(centerX).toBeGreaterThanOrEqual(mobileGeometry.itemWidth / 2)
+      expect(centerX).toBeLessThanOrEqual(mobileWorld.width - mobileGeometry.itemWidth / 2)
+      expect(centerY).toBeGreaterThanOrEqual(mobileGeometry.itemHeight / 2)
+      expect(centerY).toBeLessThanOrEqual(mobileWorld.height - mobileGeometry.itemHeight / 2)
+    }
+  })
+
+  it('keeps a native viewport on the same density profile as a matching wide desktop', () => {
     const wideCells = generateWishHoneycombCells(5, { width: 1600, height: 720 }, 16, 41)
     const tabletCells = generateWishHoneycombCells(5, { width: 900, height: 720 }, 16, 41)
 
-    expect(Math.max(...wideCells.map(({ x }) => Math.abs(x)))).toBeGreaterThan(
-      Math.max(...tabletCells.map(({ x }) => Math.abs(x)))
-    )
+    expect(cellSignature(tabletCells)).toBe(cellSignature(wideCells))
     expect(wideCells.every(({ r }) => Math.abs(r) <= 1)).toBe(true)
-    expect(tabletCells.some(({ r }) => Math.abs(r) > 0)).toBe(true)
+    expect(tabletCells.every(({ r }) => Math.abs(r) <= 1)).toBe(true)
   })
 
   it('keeps one session stable while different sessions can vary organic row allocation', () => {
@@ -230,6 +343,28 @@ describe('Wish Pool shared honeycomb geometry', () => {
 })
 
 describe('Wish Pool probabilistic centrality and stability', () => {
+  it('uses the compact desktop baseline until visible title emphasis needs more room', () => {
+    const compact = wishHoneycombLayoutMetrics([
+      { id: 1, heart_count: 0, fulfilled: false },
+      { id: 2, heart_count: 1, fulfilled: false },
+    ])
+    const emphasized = wishHoneycombLayoutMetrics([{ id: 3, heart_count: 30, fulfilled: true }])
+
+    expect(compact).toEqual({
+      itemHeightRem: WISH_ITEM_BASE_HEIGHT_REM,
+      verticalSpacingRem: WISH_CELL_VERTICAL_BASE_SPACING_REM,
+    })
+    expect(wishHoneycombGeometry({ width: 1440, height: 900 }, 16, compact)).toMatchObject({
+      itemHeight: WISH_ITEM_BASE_HEIGHT_REM * 16,
+      verticalSpacing: WISH_CELL_VERTICAL_BASE_SPACING_REM * 16,
+    })
+    expect(emphasized.itemHeightRem).toBeGreaterThan(compact.itemHeightRem)
+    expect(emphasized.verticalSpacingRem).toBeGreaterThan(compact.verticalSpacingRem)
+    expect(emphasized.verticalSpacingRem).toBeGreaterThan(emphasized.itemHeightRem)
+    expect(emphasized.itemHeightRem).toBeLessThanOrEqual(WISH_ITEM_MAX_HEIGHT_REM)
+    expect(emphasized.verticalSpacingRem).toBeLessThanOrEqual(WISH_CELL_VERTICAL_SPACING_REM)
+  })
+
   it('keeps Gumbel scoring finite and gives higher hearts an equal-noise advantage', () => {
     expect(Number.isFinite(wishCentralityScore(0, () => 0))).toBe(true)
     expect(Number.isFinite(wishCentralityScore(0, () => 1))).toBe(true)

@@ -260,7 +260,7 @@ describe('Wish Pool focused interactions', () => {
     return wrapper
   }
 
-  async function mountPool({ selectWish = true, viewport = { width: 1200, height: 720 } } = {}) {
+  async function mountPoolState({ settle = true } = {}) {
     const WishPool = (await import('@/components/WishPool.vue')).default
     const wrapper = mount(WishPool, {
       props: { coursesList: {}, courseCategories: [] },
@@ -272,7 +272,12 @@ describe('Wish Pool focused interactions', () => {
         },
       },
     })
-    await flushPromises()
+    if (settle) await flushPromises()
+    return wrapper
+  }
+
+  async function mountPool({ selectWish = true, viewport = { width: 1200, height: 720 } } = {}) {
+    const wrapper = await mountPoolState()
     expect(resizeObserverTarget).toBe(wrapper.get('.wish-pool-stage').element)
     await resizePool(wrapper, viewport)
     if (selectWish) {
@@ -281,6 +286,74 @@ describe('Wish Pool focused interactions', () => {
     }
     return wrapper
   }
+
+  it('keeps the Wish Pool empty message hidden while the initial request is unresolved', async () => {
+    wishServiceMock.list.mockReset().mockReturnValue(new Promise(() => {}))
+
+    const wrapper = await mountPoolState({ settle: false })
+
+    expect(wrapper.find('.wish-spinner').exists()).toBe(true)
+    expect(wrapper.find('.wish-empty-state').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('池水靜靜地等著，等一個願望落下第一圈漣漪。')
+    wrapper.unmount()
+  })
+
+  it('shows an accessible Send empty state only after a successful empty response', async () => {
+    wishServiceMock.list.mockReset().mockResolvedValue({ data: { items: [], total: 0 } })
+
+    const wrapper = await mountPoolState()
+    const emptyState = wrapper.get('.wish-empty-state')
+    const icon = emptyState.get('.wish-empty-state__icon')
+    const message = emptyState.get('.wish-empty-state__message')
+    const messageLead = message.get('.wish-empty-state__message-lead')
+    const messageContinuation = message.get('.wish-empty-state__message-continuation')
+    const mobileBreak = message.get('.wish-empty-state__mobile-break')
+
+    expect(emptyState.text()).toBe('池水靜靜地等著，等一個願望落下第一圈漣漪。')
+    expect(message.text()).toBe('池水靜靜地等著，等一個願望落下第一圈漣漪。')
+    expect(messageLead.text()).toBe('池水靜靜地等著，等一個願望')
+    expect(messageContinuation.text()).toBe('落下第一圈漣漪。')
+    expect(mobileBreak.attributes('aria-hidden')).toBe('true')
+    expect(icon.classes()).toEqual(expect.arrayContaining(['pi', 'pi-send', 'text-6xl']))
+    expect(icon.attributes('aria-hidden')).toBe('true')
+    expect(message.classes()).toEqual(expect.arrayContaining(['text-xl', 'font-medium']))
+    expect(wrapper.find('.wish-pool-stage').exists()).toBe(false)
+    expect(wrapper.find('.wish-pool-world').exists()).toBe(false)
+    expect(wrapper.vm.positions).toEqual({})
+    expect(resizeObserverTarget).toBeNull()
+  })
+
+  it('keeps the existing load error separate from the Wish Pool empty state', async () => {
+    wishServiceMock.list.mockReset().mockRejectedValue(new Error('network unavailable'))
+
+    const wrapper = await mountPoolState()
+
+    expect(wrapper.text()).toContain('許願池載入失敗，請稍後再試。')
+    expect(wrapper.find('.wish-empty-state').exists()).toBe(false)
+    expect(wrapper.find('.wish-pool-stage').exists()).toBe(false)
+  })
+
+  it('does not render the empty state when the successful response contains a Wish', async () => {
+    const wrapper = await mountPool({ selectWish: false })
+
+    expect(wrapper.find('.wish-empty-state').exists()).toBe(false)
+    expect(wrapper.findAll('.wish-node')).toHaveLength(1)
+  })
+
+  it('keeps existing Wishes visible when load more succeeds without adding items', async () => {
+    wishServiceMock.list
+      .mockReset()
+      .mockResolvedValueOnce({ data: { items: [sampleWish], total: 2 } })
+      .mockResolvedValueOnce({ data: { items: [], total: 2 } })
+    const wrapper = await mountPool({ selectWish: false })
+
+    await wrapper.vm.loadMore()
+    await flushPromises()
+
+    expect(wrapper.find('.wish-empty-state').exists()).toBe(false)
+    expect(wrapper.findAll('.wish-node')).toHaveLength(1)
+    expect(wrapper.vm.wishes).toEqual([sampleWish])
+  })
 
   it('uses the shared report form and canonical confirmation service', async () => {
     const wrapper = await mountPool()
@@ -705,7 +778,11 @@ describe('Wish Pool focused interactions', () => {
       viewport: { width: 820, height: 1180 },
     })
     const initialScores = wrapper.vm.sessionScores
-    const initialCells = JSON.parse(JSON.stringify(wrapper.vm.positions))
+    const cellCoordinates = (positions) =>
+      Object.fromEntries(
+        Object.entries(positions).map(([id, { q, r, x, y }]) => [id, { q, r, x, y }])
+      )
+    const initialCells = cellCoordinates(wrapper.vm.positions)
 
     await resizePool(wrapper, { width: 980, height: 720 })
     expect(wrapper.vm.layoutMode).toBe('honeycomb')
@@ -715,7 +792,7 @@ describe('Wish Pool focused interactions', () => {
     expect(wrapper.vm.layoutMode).toBe('honeycomb')
     expect(wrapper.vm.navigationMode).toBe('tablet')
     expect(wrapper.vm.sessionScores).toBe(initialScores)
-    expect(wrapper.vm.positions).toEqual(initialCells)
+    expect(cellCoordinates(wrapper.vm.positions)).toEqual(initialCells)
   })
 
   it('votes from the inline heart without opening the Dialog or moving the camera or cell', async () => {

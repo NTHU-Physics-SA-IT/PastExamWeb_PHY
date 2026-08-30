@@ -511,6 +511,8 @@ const en = {
   考古許願池: 'Past Exam Wish Pool',
   '點選許願可按愛心、回報問題或協助上傳。':
     'Select a wish to heart it, report a problem, or help upload the exam.',
+  '池水靜靜地等著，等一個願望': 'The still pool waits for a wish',
+  '落下第一圈漣漪。': ' to make the first ripple.',
   新增許願: 'Add Wish',
   '投稿首頁 slogan': 'Submit a Homepage Slogan',
   '許願者：{name}': 'Wisher: {name}',
