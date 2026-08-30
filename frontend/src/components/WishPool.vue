@@ -1152,7 +1152,7 @@ onBeforeUnmount(() => {
     width: 100%;
   }
 }
-@container (max-width:767px) {
+@media (max-width: 767px) {
   .wish-empty-state__mobile-break {
     display: inline;
   }
