@@ -84,6 +84,20 @@ def test_application_settings_and_client_have_no_legacy_root_fallback() -> None:
     assert ".make_bucket(" not in storage_source
 
 
+def test_nginx_minio_proxy_preserves_native_range_contract() -> None:
+    proxy_source = (REPOSITORY_ROOT / "proxy" / "nginx.conf").read_text(
+        encoding="utf-8"
+    )
+    minio_location = proxy_source.split("location /minio/ {", 1)[1].split(
+        "\n        }", 1
+    )[0]
+
+    assert "proxy_pass http://minio:9000/;" in minio_location
+    assert "proxy_pass_request_headers on;" in minio_location
+    assert "proxy_set_header Range \"\";" not in minio_location
+    assert "Content-Length,Content-Range" in minio_location
+
+
 def test_compose_keeps_root_only_on_server_and_scoped_backend_contract() -> None:
     production = (
         REPOSITORY_ROOT / "docker" / "docker-compose.prod.yml"

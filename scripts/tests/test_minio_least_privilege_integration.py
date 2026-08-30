@@ -71,6 +71,17 @@ def test_scoped_identity_runtime_and_negative_contract() -> None:
     with urllib.request.urlopen(signed, timeout=5) as signed_response:
         assert signed_response.read() == small
 
+    range_request = urllib.request.Request(
+        signed,
+        headers={"Range": "bytes=0-7"},
+    )
+    with urllib.request.urlopen(range_request, timeout=5) as range_response:
+        assert range_response.status == 206
+        assert range_response.headers["Content-Range"] == f"bytes 0-7/{len(small)}"
+        assert range_response.headers["Content-Length"] == "8"
+        assert range_response.headers["Accept-Ranges"] == "bytes"
+        assert range_response.read() == small[:8]
+
     versions = list(
         client.list_objects(
             bucket,
