@@ -323,11 +323,12 @@ if "--images" in args:
                     package_checksum,
                     files_checksum,
                 ],
-                check=True,
+                check=False,
                 capture_output=True,
                 env=env,
                 text=True,
             )
+            assert result.returncode == 0, result.stderr
             return json.loads(result.stdout)
         finally:
             upload.unlink(missing_ok=True)

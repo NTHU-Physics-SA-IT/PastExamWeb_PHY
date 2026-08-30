@@ -213,6 +213,8 @@ prepare_candidate() {
     verify_candidate "$release_root" "$release_sha" "$frontend_digest" \
       "$backend_digest" "$source_archive_checksum" "$release_files_checksum"
     cat "$release_root/$receipt_name"
+    cleanup_run_artifacts
+    trap - EXIT HUP INT TERM
     return
   fi
   [ ! -e "$staging_root" ] || die "Run-specific staging path already exists."
@@ -310,6 +312,8 @@ PY
   verify_candidate "$release_root" "$release_sha" "$frontend_digest" \
     "$backend_digest" "$source_archive_checksum" "$release_files_checksum"
   cat "$release_root/$receipt_name"
+  cleanup_run_artifacts
+  trap - EXIT HUP INT TERM
 }
 
 upload_candidate() {
