@@ -554,6 +554,16 @@ For a NTHU OAuth User, provider-synchronized `name` and `email` remain provider-
 - Authentication must reject access before object storage is read. Existing
   API authentication semantics may return `401` or `403`; this contract does
   not standardize those two statuses in this stage.
+- Normal Archive preview uses the authenticated backend as its control plane:
+  the backend resolves the effective-public Archive and authoritative object
+  key, verifies object existence, and returns a 30-minute presigned GET URL.
+  The browser passes that URL directly to its native PDF viewer; preview does
+  not increment `download_count`.
+- Normal Archive download also resolves the effective-public Archive and
+  authoritative object key on the backend, verifies object existence,
+  increments `download_count` once, and returns a one-hour presigned GET URL
+  for browser-native download. The client never supplies or derives an object
+  key, and neither path makes the bucket or object public.
 - Every effective approved submission can be public independently.
 - One logical exam group can show several approved PDFs.
 - Pending, rejected, takedown, or deleted siblings do not hide an approved PDF.

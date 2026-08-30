@@ -21,6 +21,7 @@ const listCategoriesMock = vi.hoisted(() => vi.fn())
 const getCourseArchivesMock = vi.hoisted(() => vi.fn())
 const getArchiveDownloadUrlMock = vi.hoisted(() => vi.fn())
 const getArchivePreviewUrlMock = vi.hoisted(() => vi.fn())
+const getArchivePreviewFileMock = vi.hoisted(() => vi.fn())
 const deleteArchiveMock = vi.hoisted(() => vi.fn())
 const updateArchiveMock = vi.hoisted(() => vi.fn())
 const updateArchiveCourseMock = vi.hoisted(() => vi.fn())
@@ -34,6 +35,7 @@ let originalCreateObjectURL
 let originalRevokeObjectURL
 let originalFetch
 let consoleErrorSpy
+let anchorClickSpy
 
 const sampleCourses = {
   fundamental: [
@@ -93,7 +95,7 @@ vi.mock('@/api', () => ({
   archiveService: {
     getArchiveDownloadUrl: getArchiveDownloadUrlMock,
     getArchivePreviewUrl: getArchivePreviewUrlMock,
-    getArchivePreviewFile: getArchivePreviewUrlMock,
+    getArchivePreviewFile: getArchivePreviewFileMock,
     deleteArchive: deleteArchiveMock,
     updateArchive: updateArchiveMock,
     updateArchiveCourse: updateArchiveCourseMock,
@@ -197,6 +199,7 @@ describe('ArchiveView', () => {
     getArchivePreviewUrlMock.mockResolvedValue({
       data: { url: 'https://example.com/preview.pdf' },
     })
+    getArchivePreviewFileMock.mockResolvedValue({ data: new Blob(['dummy']) })
     deleteArchiveMock.mockResolvedValue()
     updateArchiveMock.mockResolvedValue()
     updateArchiveCourseMock.mockResolvedValue()
@@ -216,6 +219,7 @@ describe('ArchiveView', () => {
     )
     window.URL.createObjectURL = vi.fn(() => 'blob:url')
     window.URL.revokeObjectURL = vi.fn()
+    anchorClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     window.innerWidth = 1024
   })
 
@@ -227,6 +231,7 @@ describe('ArchiveView', () => {
     globalThis.fetch = originalFetch
     window.URL.createObjectURL = originalCreateObjectURL
     window.URL.revokeObjectURL = originalRevokeObjectURL
+    anchorClickSpy.mockRestore()
   })
 
   it('renders each archive when exam metadata matches but ids differ', async () => {
@@ -260,12 +265,7 @@ describe('ArchiveView', () => {
     getArchivePreviewUrlMock.mockImplementation((_courseId, archiveId) =>
       Promise.resolve({ data: `${archiveId}-preview` })
     )
-    globalThis.fetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        blob: () => Promise.resolve(new Blob(['dummy'])),
-      })
-    )
+    globalThis.fetch = vi.fn()
     const wrapper = mount(ArchiveView, {
       global: {
         provide: {
@@ -298,8 +298,16 @@ describe('ArchiveView', () => {
 
     expect(getArchiveDownloadUrlMock).toHaveBeenNthCalledWith(1, 'c1', 'matching-a')
     expect(getArchiveDownloadUrlMock).toHaveBeenNthCalledWith(2, 'c1', 'matching-b')
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(1, 'https://example.com/matching-a.pdf')
-    expect(globalThis.fetch).toHaveBeenNthCalledWith(2, 'https://example.com/matching-b.pdf')
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+    expect(anchorClickSpy).toHaveBeenCalledTimes(2)
+    expect(anchorClickSpy.mock.instances.map((link) => link.href)).toEqual([
+      'https://example.com/matching-a.pdf',
+      'https://example.com/matching-b.pdf',
+    ])
+    expect(anchorClickSpy.mock.instances.map((link) => link.download)).toEqual([
+      '20231_Calculus I_Prof. Chen_Midterm.pdf',
+      '20231_Calculus I_Prof. Chen_Midterm.pdf',
+    ])
 
     await wrapper.vm.previewArchive(wrapper.vm.groupedArchives[0].list[0])
     await wrapper.vm.previewArchive(wrapper.vm.groupedArchives[0].list[1])
@@ -307,9 +315,60 @@ describe('ArchiveView', () => {
 
     expect(getArchivePreviewUrlMock).toHaveBeenNthCalledWith(1, 'c1', 'matching-a')
     expect(getArchivePreviewUrlMock).toHaveBeenNthCalledWith(2, 'c1', 'matching-b')
+    expect(getArchivePreviewFileMock).not.toHaveBeenCalled()
+    expect(window.URL.createObjectURL).not.toHaveBeenCalled()
     expect(wrapper.vm.selectedArchive.id).toBe('matching-b')
 
     vi.runAllTimers()
+    wrapper.unmount()
+  })
+
+  it('keeps the newest signed preview when requests resolve out of order', async () => {
+    const wrapper = mount(ArchiveView, {
+      global: {
+        provide: {
+          toast: { add: toastAddMock },
+          confirm: { require: confirmRequireMock },
+          sidebarVisible: ref(true),
+        },
+        stubs: componentStubs,
+      },
+    })
+
+    await flushPromises()
+    wrapper.vm.filterBySubject({ label: 'Calculus I', id: 'c1' })
+    await flushPromises()
+
+    let resolveFirst
+    let resolveSecond
+    getArchivePreviewUrlMock.mockReset()
+    getArchivePreviewUrlMock
+      .mockImplementationOnce(
+        () => new Promise((resolve) => {
+          resolveFirst = resolve
+        })
+      )
+      .mockImplementationOnce(
+        () => new Promise((resolve) => {
+          resolveSecond = resolve
+        })
+      )
+
+    const [firstArchive, secondArchive] = wrapper.vm.groupedArchives.flatMap((group) => group.list)
+    const firstPreview = wrapper.vm.previewArchive(firstArchive)
+    const secondPreview = wrapper.vm.previewArchive(secondArchive)
+
+    resolveSecond({ data: { url: 'https://example.com/newest.pdf' } })
+    await secondPreview
+    expect(wrapper.vm.selectedArchive.id).toBe('a2')
+    expect(wrapper.vm.selectedArchive.previewUrl).toBe('https://example.com/newest.pdf')
+
+    resolveFirst({ data: { url: 'https://example.com/stale.pdf' } })
+    await firstPreview
+    expect(wrapper.vm.selectedArchive.id).toBe('a2')
+    expect(wrapper.vm.selectedArchive.previewUrl).toBe('https://example.com/newest.pdf')
+    expect(wrapper.vm.previewLoading).toBe(false)
+
     wrapper.unmount()
   })
 
@@ -403,7 +462,7 @@ describe('ArchiveView', () => {
     await vm.previewArchive(archiveItem)
     await flushPromises()
     expect(vm.showPreview).toBe(true)
-    expect(vm.selectedArchive.previewUrl).toBe('blob:url')
+    expect(vm.selectedArchive.previewUrl).toBe('https://example.com/preview.pdf')
 
     const issueContextAfterPreview = JSON.parse(sessionStorage.getItem('pastexam-issue-context'))
     expect(issueContextAfterPreview.preview).toEqual(

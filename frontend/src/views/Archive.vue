@@ -1698,31 +1698,24 @@ async function syncArchiveDownloadCount(archiveId) {
   }
 }
 
+function startNativeDownload(url, fileName) {
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  link.style.display = 'none'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}
+
 async function downloadArchive(archive) {
   try {
     downloadingId.value = archive.id
 
     const { data } = await archiveService.getArchiveDownloadUrl(selectedCourse.value, archive.id)
 
-    const response = await fetch(data.url)
-    if (!response.ok) {
-      throw new Error(`Download failed with status ${response.status}`)
-    }
-    const blob = await response.blob()
-    const url = window.URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-
     const fileName = `${archive.year}_${selectedSubject.value}_${archive.professor}_${archive.name}.pdf`
-    link.download = fileName
-    link.style.display = 'none'
-
-    document.body.appendChild(link)
-    link.click()
-    setTimeout(() => {
-      window.URL.revokeObjectURL(url)
-      link.remove()
-    }, 100)
+    startNativeDownload(data.url, fileName)
 
     trackEvent(EVENTS.DOWNLOAD_ARCHIVE, {
       archiveName: archive.name,
@@ -1761,20 +1754,26 @@ async function downloadArchive(archive) {
 const previewLoading = ref(false)
 const previewError = ref(false)
 const previewErrorMessage = ref(t('無法載入預覽'))
+let previewRequestId = 0
 
 async function previewArchive(archive) {
+  const requestId = ++previewRequestId
   try {
     previewLoading.value = true
     previewError.value = false
     previewErrorMessage.value = t('無法載入預覽')
     showPreview.value = true
+    selectedArchive.value = {
+      ...archive,
+      previewUrl: '',
+    }
 
-    const { data } = await archiveService.getArchivePreviewFile(selectedCourse.value, archive.id)
-    const previewUrl = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }))
+    const { data } = await archiveService.getArchivePreviewUrl(selectedCourse.value, archive.id)
+    if (requestId !== previewRequestId || !showPreview.value) return
 
     selectedArchive.value = {
       ...archive,
-      previewUrl,
+      previewUrl: data.url,
     }
 
     trackEvent(EVENTS.PREVIEW_ARCHIVE, {
@@ -1785,6 +1784,7 @@ async function previewArchive(archive) {
       courseName: selectedSubject.value,
     })
   } catch (error) {
+    if (requestId !== previewRequestId) return
     console.error('Preview error:', error)
     previewError.value = true
     const isMissingFile = error.response?.status === 404
@@ -1799,7 +1799,9 @@ async function previewArchive(archive) {
       life: 3000,
     })
   } finally {
-    previewLoading.value = false
+    if (requestId === previewRequestId) {
+      previewLoading.value = false
+    }
   }
 }
 
@@ -1808,9 +1810,7 @@ function handlePreviewError() {
 }
 
 function closePreview() {
-  if (selectedArchive.value?.previewUrl?.startsWith('blob:')) {
-    URL.revokeObjectURL(selectedArchive.value.previewUrl)
-  }
+  previewRequestId += 1
   showPreview.value = false
   selectedArchive.value = null
   previewError.value = false
@@ -2188,25 +2188,8 @@ async function handlePreviewDownload(onComplete) {
       selectedArchive.value.id
     )
 
-    const response = await fetch(data.url)
-    if (!response.ok) {
-      throw new Error(`Download failed with status ${response.status}`)
-    }
-    const blob = await response.blob()
-    const url = window.URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-
     const fileName = `${selectedArchive.value.year}_${selectedSubject.value}_${selectedArchive.value.professor}_${selectedArchive.value.name}.pdf`
-    link.download = fileName
-    link.style.display = 'none'
-
-    document.body.appendChild(link)
-    link.click()
-    setTimeout(() => {
-      window.URL.revokeObjectURL(url)
-      link.remove()
-    }, 100)
+    startNativeDownload(data.url, fileName)
 
     trackEvent(EVENTS.DOWNLOAD_ARCHIVE, {
       archiveName: selectedArchive.value.name,

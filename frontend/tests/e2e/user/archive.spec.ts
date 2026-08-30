@@ -20,6 +20,7 @@ test.describe('User › Archive browsing', () => {
 
     let archiveDownloadCount = 3
     let previewRouteCallCount = 0
+    let previewFileRouteCallCount = 0
     const consoleErrors = createConsoleErrorCollector(page)
     const pageErrors: string[] = []
     page.on('pageerror', (error) => pageErrors.push(error.message))
@@ -82,11 +83,22 @@ test.describe('User › Archive browsing', () => {
       })
     })
 
-    await page.route('**/api/courses/101/archives/201/preview-file', async (route) => {
+    await page.route('**/api/courses/101/archives/201/preview', async (route) => {
       previewRouteCallCount += 1
       await route.fulfill({
         status: 200,
-        headers: { 'content-type': 'application/pdf' },
+        headers: JSON_HEADERS,
+        body: JSON.stringify({
+          url: `${new URL(route.request().url()).origin}/minio/archives/201.pdf?X-Amz-Signature=preview`,
+        }),
+      })
+    })
+
+    await page.route('**/minio/archives/201.pdf?X-Amz-Signature=preview', async (route) => {
+      previewFileRouteCallCount += 1
+      await route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'application/pdf', 'accept-ranges': 'bytes' },
         body: pdfBody,
       })
     })
@@ -106,7 +118,9 @@ test.describe('User › Archive browsing', () => {
       await route.fulfill({
         status: 200,
         headers: JSON_HEADERS,
-        body: JSON.stringify({ url: 'https://example.com/download.pdf' }),
+        body: JSON.stringify({
+          url: `${new URL(route.request().url()).origin}/minio/archives/201.pdf?X-Amz-Signature=download`,
+        }),
       })
     })
 
@@ -118,7 +132,7 @@ test.describe('User › Archive browsing', () => {
       })
     })
 
-    await page.route('https://example.com/download.pdf', async (route) => {
+    await page.route('**/minio/archives/201.pdf?X-Amz-Signature=download', async (route) => {
       await route.fulfill({
         status: 200,
         headers: { 'content-type': 'application/pdf' },
@@ -217,12 +231,12 @@ test.describe('User › Archive browsing', () => {
     const previewRequestPromise = page.waitForRequest(
       (request) =>
         request.method() === 'GET' &&
-        new URL(request.url()).pathname === '/api/courses/101/archives/201/preview-file'
+        new URL(request.url()).pathname === '/api/courses/101/archives/201/preview'
     )
     const previewResponsePromise = page.waitForResponse(
       (response) =>
         response.request().method() === 'GET' &&
-        new URL(response.url()).pathname === '/api/courses/101/archives/201/preview-file'
+        new URL(response.url()).pathname === '/api/courses/101/archives/201/preview'
     )
     await clickWhenVisible(archiveCard.getByRole('button', { name: '預覽' }))
     const [previewRequest, previewResponse] = await Promise.all([
@@ -232,17 +246,21 @@ test.describe('User › Archive browsing', () => {
 
     expect(previewRequest.method()).toBe('GET')
     expect(previewResponse.status()).toBe(200)
-    expect(previewResponse.headers()['content-type']).toContain('application/pdf')
+    expect(previewResponse.headers()['content-type']).toContain('application/json')
     expect(previewRouteCallCount).toBe(1)
+    await expect.poll(() => previewFileRouteCallCount).toBeGreaterThan(0)
 
     const previewDialog = page.getByRole('dialog', { name: /期末考/ })
     await expect(previewDialog).toBeVisible()
     await expect(previewDialog).toContainText('期末考')
     expect(await consoleErrors.errors()).toEqual([])
     expect(pageErrors).toEqual([])
+    const downloadPromise = page.waitForEvent('download')
     await clickWhenVisible(previewDialog.getByRole('button', { name: '下載' }))
+    const download = await downloadPromise
 
     await expect.poll(() => downloadEndpointCalled).toBeTruthy()
+    expect(download.suggestedFilename()).toBe('2024_普通物理(一)_王教授_期末考.pdf')
 
     await clickWhenVisible(previewDialog.getByRole('button', { name: 'Close' }))
     await expect(previewDialog).toBeHidden()
