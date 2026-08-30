@@ -138,6 +138,10 @@ Stage 5F-B's internal adapter reads live bucket versioning, captures and uses
 only the recorded exact Version ID, and verifies exact-version absence. It
 never changes bucket versioning, deletes by key alone, substitutes a content
 fingerprint, or treats a key-level delete marker as completion evidence.
+Its scoped application identity may read versioning state, enumerate versions
+only under `archives/` and `archive-submissions/`, and perform the corresponding
+object operations. It has no bucket provisioning, bucket-wide listing,
+versioning mutation, or MinIO administration authority.
 
 ## Retry, reconciliation, and manual review
 

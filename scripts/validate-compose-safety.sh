@@ -168,6 +168,14 @@ assert (
     production["services"]["backend"]["environment"]["DB_USER"]
     != production["services"]["migrate"]["environment"]["DB_USER"]
 )
+production_backend_environment = production["services"]["backend"]["environment"]
+assert production_backend_environment["MINIO_ACCESS_KEY"]
+assert production_backend_environment["MINIO_SECRET_KEY"]
+assert "MINIO_ROOT_USER" not in production_backend_environment
+assert "MINIO_ROOT_PASSWORD" not in production_backend_environment
+production_minio_environment = production["services"]["minio"]["environment"]
+assert production_minio_environment["MINIO_ROOT_USER"]
+assert production_minio_environment["MINIO_ROOT_PASSWORD"]
 assert development["services"]["bootstrap"]["profiles"] == ["bootstrap"]
 assert (
     development["services"]["backend"]["depends_on"]["migrate"]["condition"]
@@ -177,6 +185,11 @@ assert (
     development["services"]["backend"]["environment"]["DB_USER"]
     != development["services"]["migrate"]["environment"]["DB_USER"]
 )
+development_backend_environment = development["services"]["backend"]["environment"]
+assert development_backend_environment["MINIO_ACCESS_KEY"]
+assert development_backend_environment["MINIO_SECRET_KEY"]
+assert "MINIO_ROOT_USER" not in development_backend_environment
+assert "MINIO_ROOT_PASSWORD" not in development_backend_environment
 development_db_environment = development["services"]["db"]["environment"]
 assert development_db_environment["TEST_DB_USER"].startswith("pastexam_test_")
 assert development_db_environment["TEST_DATABASE_NAME"].startswith("pastexam_test_")

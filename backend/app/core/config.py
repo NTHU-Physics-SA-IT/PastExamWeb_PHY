@@ -32,8 +32,8 @@ class Settings(BaseSettings):
     PRODUCT_TIMEZONE: str = "Asia/Taipei"
 
     MINIO_ENDPOINT: str
-    MINIO_ROOT_USER: str
-    MINIO_ROOT_PASSWORD: str
+    MINIO_ACCESS_KEY: str = Field(min_length=1)
+    MINIO_SECRET_KEY: str = Field(min_length=1)
     MINIO_BUCKET_NAME: str
     EXTERNAL_ENDPOINT: str
 

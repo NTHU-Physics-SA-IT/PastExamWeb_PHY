@@ -7,6 +7,39 @@ import pytest
 from app.maintenance import minio_orphan_cleanup
 
 
+def test_operator_client_requires_separate_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MINIO_OPERATOR_ACCESS_KEY", raising=False)
+    monkeypatch.delenv("MINIO_OPERATOR_SECRET_KEY", raising=False)
+
+    with pytest.raises(RuntimeError, match="operator credentials"):
+        minio_orphan_cleanup.get_operator_minio_client()
+
+
+def test_operator_client_uses_only_explicit_operator_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = {}
+    sentinel = object()
+    monkeypatch.setenv("MINIO_OPERATOR_ACCESS_KEY", "operator-access")
+    monkeypatch.setenv("MINIO_OPERATOR_SECRET_KEY", "operator-secret")
+
+    def construct(**kwargs):
+        captured.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(minio_orphan_cleanup, "Minio", construct)
+
+    assert minio_orphan_cleanup.get_operator_minio_client() is sentinel
+    assert captured == {
+        "endpoint": minio_orphan_cleanup.settings.MINIO_ENDPOINT,
+        "access_key": "operator-access",
+        "secret_key": "operator-secret",
+        "secure": False,
+    }
+
+
 @pytest.mark.asyncio
 async def test_cleanup_apply_requires_exact_database_and_bucket(
     monkeypatch: pytest.MonkeyPatch,

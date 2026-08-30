@@ -1,0 +1,42 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BucketRegionAndVersioningState",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketLocation",
+        "s3:GetBucketVersioning"
+      ],
+      "Resource": "arn:aws:s3:::<bucket>"
+    },
+    {
+      "Sid": "ApprovedPrefixVersionEnumeration",
+      "Effect": "Allow",
+      "Action": "s3:ListBucketVersions",
+      "Resource": "arn:aws:s3:::<bucket>",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "archives/*",
+            "archive-submissions/*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ApplicationObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": [
+        "arn:aws:s3:::<bucket>/archives/*",
+        "arn:aws:s3:::<bucket>/archive-submissions/*"
+      ]
+    }
+  ]
+}
