@@ -4,17 +4,34 @@ on:
   workflow_call:
     inputs:
       release_sha:
-        description: Commit SHA to prepare as an isolated production candidate
+        description: Exact main commit to prepare
         required: true
         type: string
       frontend_image_digest:
-        description: Immutable digest published for the frontend release image
+        description: Immutable frontend image digest
         required: true
         type: string
       backend_image_digest:
-        description: Immutable digest published for the backend release image
+        description: Immutable backend image digest
         required: true
         type: string
+      source_ci_run_id:
+        description: Authoritative successful Full CI run
+        required: true
+        type: string
+      source_ci_run_attempt:
+        description: Attempt of the authoritative Full CI run
+        required: true
+        type: string
+    secrets:
+      candidate_ssh_private_key:
+        required: true
+      candidate_known_hosts:
+        required: true
+      candidate_host:
+        required: true
+      candidate_user:
+        required: true
 
 permissions:
   contents: read
@@ -24,42 +41,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  prepare:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: production
-
+    environment: production-candidate
     steps:
-      - name: Checkout release commit
+      - name: Checkout exact release commit
         uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           ref: ${{ inputs.release_sha }}
 
-      - name: Validate release commit
+      - name: Validate immutable preparation inputs
         shell: bash
         env:
           RELEASE_SHA: ${{ inputs.release_sha }}
           FRONTEND_IMAGE_DIGEST: ${{ inputs.frontend_image_digest }}
           BACKEND_IMAGE_DIGEST: ${{ inputs.backend_image_digest }}
+          SOURCE_CI_RUN_ID: ${{ inputs.source_ci_run_id }}
+          SOURCE_CI_RUN_ATTEMPT: ${{ inputs.source_ci_run_attempt }}
         run: |
           set -euo pipefail
-
-          checked_out_sha="$(git rev-parse HEAD)"
-          if [ "$checked_out_sha" != "$RELEASE_SHA" ]; then
-            echo "Checked out $checked_out_sha instead of $RELEASE_SHA" >&2
-            exit 1
-          fi
-
-          if [[ ! "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "Release SHA is not a full lowercase commit SHA." >&2
-            exit 1
-          fi
-
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$SOURCE_CI_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$SOURCE_CI_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           for digest in "$FRONTEND_IMAGE_DIGEST" "$BACKEND_IMAGE_DIGEST"; do
-            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-              echo "Build did not provide an immutable image digest." >&2
-              exit 1
-            fi
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           done
 
       - name: Validate production Compose safety contract
@@ -74,120 +82,106 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-
           output_archive="$RUNNER_TEMP/pastexam-$RELEASE_SHA-$RUN_ID.tar.gz"
-          OUTPUT_ARCHIVE="$output_archive" \
-            ./scripts/package-production-candidate.sh
+          OUTPUT_ARCHIVE="$output_archive" ./scripts/package-production-candidate.sh
+          echo "source_archive_sha256=$(sha256sum "$output_archive" | cut -d ' ' -f 1)" >>"$GITHUB_OUTPUT"
+          echo "release_files_sha256=$(tar -xOzf "$output_archive" .release-files.sha256 | sha256sum | cut -d ' ' -f 1)" >>"$GITHUB_OUTPUT"
 
-          source_archive_sha256="$(
-            sha256sum "$output_archive" |
-              cut -d ' ' -f 1
-          )"
-          release_files_sha256="$(
-            tar -xOzf "$output_archive" .release-files.sha256 |
-              sha256sum |
-              cut -d ' ' -f 1
-          )"
-
-          echo "source_archive_sha256=$source_archive_sha256" \
-            >>"$GITHUB_OUTPUT"
-          echo "release_files_sha256=$release_files_sha256" \
-            >>"$GITHUB_OUTPUT"
-
-      - name: Configure strict SSH host verification
+      - name: Configure candidate-only SSH authority
         id: ssh_setup
         shell: bash
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.DO_SSH_PRIVATE_KEY }}
-          KNOWN_HOSTS: ${{ secrets.DO_KNOWN_HOSTS }}
+          SSH_PRIVATE_KEY: ${{ secrets.candidate_ssh_private_key }}
+          KNOWN_HOSTS: ${{ secrets.candidate_known_hosts }}
         run: |
           set -euo pipefail
-
           test -n "$SSH_PRIVATE_KEY"
           test -n "$KNOWN_HOSTS"
-
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_PRIVATE_KEY" >~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s\n' "$KNOWN_HOSTS" >~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
-      - name: Upload isolated candidate archive
+      - name: Fail-closed host capacity preflight
         shell: bash
         env:
-          DO_HOST: ${{ secrets.DO_HOST }}
-          DO_USER: ${{ secrets.DO_USER }}
-          RELEASE_SHA: ${{ inputs.release_sha }}
-          RUN_ID: ${{ github.run_id }}
+          CANDIDATE_HOST: ${{ secrets.candidate_host }}
+          CANDIDATE_USER: ${{ secrets.candidate_user }}
         run: |
           set -euo pipefail
+          test -n "$CANDIDATE_HOST"
+          test -n "$CANDIDATE_USER"
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes "$CANDIDATE_USER@$CANDIDATE_HOST" \
+            /usr/local/sbin/pastexam-prepare-candidate preflight
 
-          test -n "$DO_HOST"
-          test -n "$DO_USER"
-
-          scp \
-            -i ~/.ssh/id_ed25519 \
-            -o IdentitiesOnly=yes \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes \
-            "$RUNNER_TEMP/pastexam-$RELEASE_SHA-$RUN_ID.tar.gz" \
-            "$DO_USER@$DO_HOST:/tmp/pastexam-$RELEASE_SHA-$RUN_ID.tar.gz"
-
-      - name: Prepare and validate isolated candidate
+      - name: Upload through fixed candidate entrypoint
         shell: bash
         env:
-          DO_HOST: ${{ secrets.DO_HOST }}
-          DO_USER: ${{ secrets.DO_USER }}
+          CANDIDATE_HOST: ${{ secrets.candidate_host }}
+          CANDIDATE_USER: ${{ secrets.candidate_user }}
           RELEASE_SHA: ${{ inputs.release_sha }}
           RUN_ID: ${{ github.run_id }}
+          SOURCE_ARCHIVE_SHA256: ${{ steps.package.outputs.source_archive_sha256 }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes "$CANDIDATE_USER@$CANDIDATE_HOST" \
+            /usr/local/sbin/pastexam-prepare-candidate upload \
+            "$RELEASE_SHA" "$RUN_ID" "$SOURCE_ARCHIVE_SHA256" \
+            <"$RUNNER_TEMP/pastexam-$RELEASE_SHA-$RUN_ID.tar.gz"
+
+      - name: Prepare and verify immutable candidate
+        shell: bash
+        env:
+          CANDIDATE_HOST: ${{ secrets.candidate_host }}
+          CANDIDATE_USER: ${{ secrets.candidate_user }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SOURCE_CI_RUN_ID: ${{ inputs.source_ci_run_id }}
+          SOURCE_CI_RUN_ATTEMPT: ${{ inputs.source_ci_run_attempt }}
           FRONTEND_IMAGE_DIGEST: ${{ inputs.frontend_image_digest }}
           BACKEND_IMAGE_DIGEST: ${{ inputs.backend_image_digest }}
           SOURCE_ARCHIVE_SHA256: ${{ steps.package.outputs.source_archive_sha256 }}
           RELEASE_FILES_SHA256: ${{ steps.package.outputs.release_files_sha256 }}
         run: |
           set -euo pipefail
+          receipt="$RUNNER_TEMP/candidate-receipt.json"
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes "$CANDIDATE_USER@$CANDIDATE_HOST" \
+            /usr/local/sbin/pastexam-prepare-candidate prepare \
+            "$RELEASE_SHA" "$RUN_ID" "$RUN_ATTEMPT" \
+            "$SOURCE_CI_RUN_ID" "$SOURCE_CI_RUN_ATTEMPT" \
+            "$FRONTEND_IMAGE_DIGEST" "$BACKEND_IMAGE_DIGEST" \
+            "$SOURCE_ARCHIVE_SHA256" "$RELEASE_FILES_SHA256" >"$receipt"
+          python3 scripts/ci/validate_candidate_receipt.py \
+            --receipt "$receipt" --release-sha "$RELEASE_SHA" \
+            --frontend-digest "$FRONTEND_IMAGE_DIGEST" \
+            --backend-digest "$BACKEND_IMAGE_DIGEST" \
+            --source-archive-sha256 "$SOURCE_ARCHIVE_SHA256" \
+            --release-files-sha256 "$RELEASE_FILES_SHA256"
 
-          ssh \
-            -i ~/.ssh/id_ed25519 \
-            -o IdentitiesOnly=yes \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes \
-            "$DO_USER@$DO_HOST" \
-            "RELEASE_SHA='$RELEASE_SHA' \
-            RUN_ID='$RUN_ID' \
-            FRONTEND_IMAGE_DIGEST='$FRONTEND_IMAGE_DIGEST' \
-            BACKEND_IMAGE_DIGEST='$BACKEND_IMAGE_DIGEST' \
-            SOURCE_ARCHIVE_SHA256='$SOURCE_ARCHIVE_SHA256' \
-            RELEASE_FILES_SHA256='$RELEASE_FILES_SHA256' \
-            ARCHIVE_PATH='/tmp/pastexam-$RELEASE_SHA-$RUN_ID.tar.gz' \
-            bash -s" \
-            <scripts/prepare-production-candidate.sh
+      - name: Upload durable candidate receipt
+        uses: actions/upload-artifact@v6
+        with:
+          name: production-candidate-receipt-${{ inputs.release_sha }}
+          path: ${{ runner.temp }}/candidate-receipt.json
+          if-no-files-found: error
+          retention-days: 90
 
-      - name: Clean up run-specific remote files
+      - name: Clean up run-specific remote residue
         if: ${{ always() && steps.ssh_setup.outcome == 'success' }}
         shell: bash
         env:
-          DO_HOST: ${{ secrets.DO_HOST }}
-          DO_USER: ${{ secrets.DO_USER }}
+          CANDIDATE_HOST: ${{ secrets.candidate_host }}
+          CANDIDATE_USER: ${{ secrets.candidate_user }}
           RELEASE_SHA: ${{ inputs.release_sha }}
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-
-          test -n "$DO_HOST"
-          test -n "$DO_USER"
-
-          ssh \
-            -i ~/.ssh/id_ed25519 \
-            -o IdentitiesOnly=yes \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes \
-            "$DO_USER@$DO_HOST" \
-            "rm -f -- \
-              '/tmp/pastexam-$RELEASE_SHA-$RUN_ID.tar.gz'; \
-            if [ -e \
-              '/opt/pastexam-releases/$RELEASE_SHA.staging-$RUN_ID' \
-            ]; then \
-              rm -rf -- \
-                '/opt/pastexam-releases/$RELEASE_SHA.staging-$RUN_ID'; \
-            fi"
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes "$CANDIDATE_USER@$CANDIDATE_HOST" \
+            /usr/local/sbin/pastexam-prepare-candidate cleanup \
+            "$RELEASE_SHA" "$RUN_ID"

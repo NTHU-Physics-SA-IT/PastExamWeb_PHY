@@ -1,189 +1,263 @@
 #!/usr/bin/env bash
 
+# Canonical source for the root-owned host command installed as
+# /usr/local/sbin/pastexam-prepare-candidate. The candidate SSH principal may
+# invoke only its fixed preflight, prepare, and run-scoped cleanup interface.
 set -euo pipefail
 umask 077
 
-release_sha="${RELEASE_SHA:?Set RELEASE_SHA}"
-run_id="${RUN_ID:?Set RUN_ID}"
-frontend_digest="${FRONTEND_IMAGE_DIGEST:?Set FRONTEND_IMAGE_DIGEST}"
-backend_digest="${BACKEND_IMAGE_DIGEST:?Set BACKEND_IMAGE_DIGEST}"
-source_archive_checksum="${SOURCE_ARCHIVE_SHA256:?Set SOURCE_ARCHIVE_SHA256}"
-release_files_checksum="${RELEASE_FILES_SHA256:?Set RELEASE_FILES_SHA256}"
-archive="${ARCHIVE_PATH:?Set ARCHIVE_PATH}"
+minimum_available_bytes=$((10 * 1024 * 1024 * 1024))
+minimum_available_percent=20
+minimum_available_inodes=100000
+minimum_inode_percent=10
+maximum_archive_bytes=$((256 * 1024 * 1024))
 
-releases_root="${RELEASES_ROOT:-/opt/pastexam-releases}"
-production_compose_env="${PRODUCTION_COMPOSE_ENV_FILE:-/etc/pastexam/compose.prod.env}"
-frontend_repository="${FRONTEND_IMAGE_REPOSITORY:-ghcr.io/nthu-physics-sa-it/pastexam}"
-backend_repository="${BACKEND_IMAGE_REPOSITORY:-ghcr.io/nthu-physics-sa-it/pastexam}"
+if [ "${PASTEXAM_CANDIDATE_TEST_MODE:-}" = "1" ] && [ "$(id -u)" -ne 0 ]; then
+  releases_root="${PASTEXAM_CANDIDATE_TEST_RELEASES_ROOT:?Set test releases root}"
+  production_compose_env="${PASTEXAM_CANDIDATE_TEST_COMPOSE_ENV:?Set test Compose env}"
+  preparation_lock="$releases_root/.candidate-preparation.lock"
+else
+  releases_root=/opt/pastexam-releases
+  production_compose_env=/etc/pastexam/compose.prod.env
+  preparation_lock=/run/lock/pastexam-candidate-preparation.lock
+fi
+
+frontend_repository=ghcr.io/nthu-physics-sa-it/pastexam
+backend_repository=ghcr.io/nthu-physics-sa-it/pastexam
+manifest_name=release-manifest.env
+receipt_name=candidate-receipt.json
+receipt_checksum_name=candidate-receipt.sha256
+
+die() {
+  printf '%s\n' "$1" >&2
+  exit 1
+}
+
+require_sha() {
+  [[ "$1" =~ ^[0-9a-f]{40}$ ]] || die "Release SHA must be a full lowercase commit SHA."
+}
+
+require_integer() {
+  [[ "$1" =~ ^[1-9][0-9]*$ ]] || die "$2 must be a positive decimal integer."
+}
+
+require_digest() {
+  [[ "$1" =~ ^sha256:[0-9a-f]{64}$ ]] || die "Image digest is malformed."
+}
+
+require_checksum() {
+  [[ "$1" =~ ^[0-9a-f]{64}$ ]] || die "Candidate checksum is malformed."
+}
 
 if command -v sha256sum >/dev/null 2>&1; then
   checksum_command=(env LC_ALL=C LANG=C sha256sum)
   checksum_check_command=(env LC_ALL=C LANG=C sha256sum --check --quiet)
-elif command -v shasum >/dev/null 2>&1; then
-  checksum_command=(env LC_ALL=C LANG=C shasum -a 256)
-  checksum_check_command=(env LC_ALL=C LANG=C shasum -a 256 --check --status)
 else
-  echo "A SHA-256 checksum utility is required." >&2
-  exit 1
+  die "sha256sum is required."
 fi
 
-if [[ ! "$release_sha" =~ ^[0-9a-f]{40}$ ]]; then
-  echo "RELEASE_SHA must be a full lowercase Git commit SHA." >&2
-  exit 1
-fi
-
-if [[ ! "$run_id" =~ ^[0-9]+$ ]]; then
-  echo "RUN_ID must contain only decimal digits." >&2
-  exit 1
-fi
-
-for digest in "$frontend_digest" "$backend_digest"; do
-  if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-    echo "Image digests must be immutable sha256 references." >&2
-    exit 1
-  fi
-done
-
-for checksum in "$source_archive_checksum" "$release_files_checksum"; do
-  if [[ ! "$checksum" =~ ^[0-9a-f]{64}$ ]]; then
-    echo "Candidate checksums must be lowercase SHA-256 values." >&2
-    exit 1
-  fi
-done
-
-release_root="$releases_root/$release_sha"
-staging_root="$release_root.staging-$run_id"
-manifest_name="release-manifest.env"
-
-frontend_image="$frontend_repository:frontend-$release_sha@$frontend_digest"
-backend_image="$backend_repository:backend-$release_sha@$backend_digest"
-
-cleanup_run_artifacts() {
-  rm -f -- "$archive"
-  if [ -e "$staging_root" ]; then
-    rm -rf -- "$staging_root"
-  fi
+capacity_preflight() {
+  [ -d "$releases_root" ] || die "Candidate release root is unavailable."
+  local disk_metrics inode_metrics
+  disk_metrics="$(LC_ALL=C df -Pk -- "$releases_root" | awk 'NR == 2 {print $2, $4, $5}')"
+  inode_metrics="$(LC_ALL=C df -Pi -- "$releases_root" | awk 'NR == 2 {print $2, $4, $5}')"
+  local total_blocks available_blocks disk_used extra
+  local total_inodes available_inodes inode_used
+  read -r total_blocks available_blocks disk_used extra <<<"$disk_metrics"
+  [ -z "${extra:-}" ] || die "Filesystem capacity metrics are malformed."
+  read -r total_inodes available_inodes inode_used extra <<<"$inode_metrics"
+  [ -z "${extra:-}" ] || die "Filesystem inode metrics are malformed."
+  [[ "$total_blocks" =~ ^[1-9][0-9]*$ ]] || die "Filesystem capacity metrics are unavailable."
+  [[ "$available_blocks" =~ ^[0-9]+$ ]] || die "Filesystem capacity metrics are unavailable."
+  [[ "$disk_used" =~ ^[0-9]+%$ ]] || die "Filesystem capacity metrics are unavailable."
+  [[ "$total_inodes" =~ ^[1-9][0-9]*$ ]] || die "Filesystem inode metrics are unavailable."
+  [[ "$available_inodes" =~ ^[0-9]+$ ]] || die "Filesystem inode metrics are unavailable."
+  [[ "$inode_used" =~ ^[0-9]+%$ ]] || die "Filesystem inode metrics are unavailable."
+  [ "$available_blocks" -le "$total_blocks" ] || \
+    die "Filesystem capacity metrics are malformed."
+  [ "$available_inodes" -le "$total_inodes" ] || \
+    die "Filesystem inode metrics are malformed."
+  local available_bytes disk_available_percent inode_available_percent
+  available_bytes=$((available_blocks * 1024))
+  disk_available_percent=$((100 - ${disk_used%\%}))
+  inode_available_percent=$((100 - ${inode_used%\%}))
+  [ "$disk_available_percent" -ge 0 ] && [ "$disk_available_percent" -le 100 ] || \
+    die "Filesystem capacity metrics are malformed."
+  [ "$inode_available_percent" -ge 0 ] && [ "$inode_available_percent" -le 100 ] || \
+    die "Filesystem inode metrics are malformed."
+  [ "$available_bytes" -ge "$minimum_available_bytes" ] && \
+    [ "$disk_available_percent" -ge "$minimum_available_percent" ] || \
+    die "Candidate disk capacity is below the fail-closed threshold."
+  [ "$available_inodes" -ge "$minimum_available_inodes" ] && \
+    [ "$inode_available_percent" -ge "$minimum_inode_percent" ] || \
+    die "Candidate inode capacity is below the fail-closed threshold."
+  printf '{"available_bytes":%s,"available_inodes":%s,"disk_available_percent":%s,"inode_available_percent":%s,"outcome":"capacity-verified","schema_version":1}\n' \
+    "$available_bytes" "$available_inodes" "$disk_available_percent" \
+    "$inode_available_percent"
 }
 
-trap cleanup_run_artifacts EXIT
-trap 'exit 130' HUP INT TERM
-
 manifest_value() {
-  local manifest="$1"
-  local key="$2"
-
-  sed -n "s/^${key}=//p" "$manifest" | tail -n 1
+  sed -n "s/^${2}=//p" "$1" | tail -n 1
 }
 
 verify_candidate() {
   local candidate_root="$1"
+  local release_sha="$2"
+  local frontend_digest="$3"
+  local backend_digest="$4"
+  local source_archive_checksum="$5"
+  local release_files_checksum="$6"
   local manifest="$candidate_root/$manifest_name"
+  local receipt="$candidate_root/$receipt_name"
   local candidate_compose_env="$candidate_root/compose.prod.env"
+  local frontend_image="$frontend_repository:frontend-$release_sha@$frontend_digest"
+  local backend_image="$backend_repository:backend-$release_sha@$backend_digest"
 
   test -d "$candidate_root"
   test -f "$manifest"
+  test -f "$receipt"
+  test -f "$candidate_root/$receipt_checksum_name"
   test -f "$candidate_root/.release-source-sha"
   test -f "$candidate_root/.release-files.sha256"
   test "$(cat "$candidate_root/.release-source-sha")" = "$release_sha"
-  test "$("${checksum_command[@]}" "$candidate_root/.release-files.sha256" |
-    cut -d ' ' -f 1)" = \
-    "$release_files_checksum"
-
-  (
-    cd "$candidate_root"
-    "${checksum_check_command[@]}" .release-files.sha256
-  )
+  test "$("${checksum_command[@]}" "$candidate_root/.release-files.sha256" | cut -d ' ' -f 1)" = "$release_files_checksum"
+  (cd "$candidate_root" && "${checksum_check_command[@]}" .release-files.sha256)
+  (cd "$candidate_root" && "${checksum_check_command[@]}" "$receipt_checksum_name")
 
   test "$(manifest_value "$manifest" release_sha)" = "$release_sha"
-  test -n "$(manifest_value "$manifest" workflow_run_id)"
-  test -n "$(manifest_value "$manifest" created_at)"
-  test "$(manifest_value "$manifest" source_archive_sha256)" = \
-    "$source_archive_checksum"
-  test "$(manifest_value "$manifest" release_files_sha256)" = \
-    "$release_files_checksum"
-  test "$(manifest_value "$manifest" frontend_image)" = "$frontend_image"
-  test "$(manifest_value "$manifest" frontend_image_digest)" = \
-    "$frontend_digest"
-  test "$(manifest_value "$manifest" backend_image)" = "$backend_image"
-  test "$(manifest_value "$manifest" backend_image_digest)" = \
-    "$backend_digest"
+  test "$(manifest_value "$manifest" source_archive_sha256)" = "$source_archive_checksum"
+  test "$(manifest_value "$manifest" release_files_sha256)" = "$release_files_checksum"
+  test "$(manifest_value "$manifest" frontend_image_digest)" = "$frontend_digest"
+  test "$(manifest_value "$manifest" backend_image_digest)" = "$backend_digest"
+  local manifest_checksum
+  manifest_checksum="$("${checksum_command[@]}" "$manifest" | cut -d ' ' -f 1)"
 
-  configured_images="$(
-    docker compose \
-      --env-file "$production_compose_env" \
-      --env-file "$candidate_compose_env" \
-      --file "$candidate_root/docker/docker-compose.prod.yml" \
-      config --images
-  )"
+  python3 - "$receipt" "$release_sha" "$frontend_digest" "$backend_digest" \
+    "$source_archive_checksum" "$release_files_checksum" "$manifest_checksum" <<'PY'
+import json
+import pathlib
+import re
+import sys
 
+path = pathlib.Path(sys.argv[1])
+data = json.loads(path.read_text(encoding="utf-8"))
+sha, frontend, backend, package, files, manifest = sys.argv[2:]
+expected = {
+    "schema_version": 1,
+    "kind": "production-candidate-preparation",
+    "source_sha": sha,
+    "image_digests": {"frontend": frontend, "backend": backend},
+    "package_sha256": package,
+    "release_files_sha256": files,
+    "release_manifest_sha256": manifest,
+    "release_id": sha,
+    "release_path": f"releases/{sha}",
+    "outcome": "verified",
+}
+for key, value in expected.items():
+    if data.get(key) != value:
+        raise SystemExit(f"Candidate receipt field {key} does not match.")
+for key in ("workflow_run_id", "workflow_run_attempt", "source_ci_run_id", "source_ci_run_attempt"):
+    if not isinstance(data.get(key), int) or data[key] < 1:
+        raise SystemExit(f"Candidate receipt field {key} is invalid.")
+if not isinstance(data.get("prepared_at"), str) or not re.fullmatch(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", data["prepared_at"]
+):
+    raise SystemExit("Candidate receipt timestamp is invalid.")
+PY
+
+  local configured_images
+  configured_images="$(docker compose --env-file "$production_compose_env" \
+    --env-file "$candidate_compose_env" \
+    --file "$candidate_root/docker/docker-compose.prod.yml" config --images)"
   printf '%s\n' "$configured_images" | grep -Fxq "$frontend_image"
   printf '%s\n' "$configured_images" | grep -Fxq "$backend_image"
 }
 
-test -f "$archive"
-test "$("${checksum_command[@]}" "$archive" | cut -d ' ' -f 1)" = \
-  "$source_archive_checksum"
+prepare_candidate() {
+  [ "$#" -eq 9 ] || die "Prepare requires exactly nine fixed arguments."
+  local release_sha="$1" run_id="$2" run_attempt="$3"
+  local source_ci_run_id="$4" source_ci_run_attempt="$5"
+  local frontend_digest="$6" backend_digest="$7"
+  local source_archive_checksum="$8" release_files_checksum="$9"
+  require_sha "$release_sha"
+  require_integer "$run_id" "Run ID"
+  require_integer "$run_attempt" "Run attempt"
+  require_integer "$source_ci_run_id" "Source CI run ID"
+  require_integer "$source_ci_run_attempt" "Source CI run attempt"
+  require_digest "$frontend_digest"
+  require_digest "$backend_digest"
+  require_checksum "$source_archive_checksum"
+  require_checksum "$release_files_checksum"
+  command -v flock >/dev/null 2>&1 || die "flock is required."
+  exec 9>"$preparation_lock"
+  flock -n 9 || die "Another candidate preparation is active."
+  capacity_preflight >/dev/null
 
-if [ -e "$release_root" ]; then
-  verify_candidate "$release_root"
-  echo "Existing candidate matches immutable release inputs: $release_root"
-  exit 0
-fi
+  local archive="/tmp/pastexam-$release_sha-$run_id.tar.gz"
+  local release_root="$releases_root/$release_sha"
+  local staging_root="$releases_root/$release_sha.staging-$run_id"
+  local frontend_image="$frontend_repository:frontend-$release_sha@$frontend_digest"
+  local backend_image="$backend_repository:backend-$release_sha@$backend_digest"
 
-if [ -e "$staging_root" ]; then
-  echo "Run-specific staging path already exists: $staging_root" >&2
-  exit 1
-fi
+  cleanup_run_artifacts() {
+    rm -f -- "$archive"
+    if [ -e "$staging_root" ]; then rm -rf -- "$staging_root"; fi
+  }
+  trap cleanup_run_artifacts EXIT
+  trap 'exit 130' HUP INT TERM
 
-root_env="$production_compose_env"
+  test -f "$archive"
+  test "$("${checksum_command[@]}" "$archive" | cut -d ' ' -f 1)" = "$source_archive_checksum"
+  if [ -e "$release_root" ]; then
+    verify_candidate "$release_root" "$release_sha" "$frontend_digest" \
+      "$backend_digest" "$source_archive_checksum" "$release_files_checksum"
+    cat "$release_root/$receipt_name"
+    cleanup_run_artifacts
+    trap - EXIT HUP INT TERM
+    return
+  fi
+  [ ! -e "$staging_root" ] || die "Run-specific staging path already exists."
+  [ -f "$production_compose_env" ] || die "Production Compose authority is unavailable."
+  python3 - "$archive" <<'PY'
+import pathlib
+import sys
+import tarfile
 
-if [ ! -f "$root_env" ]; then
-  echo "Required production configuration files are unavailable." >&2
-  exit 1
-fi
+with tarfile.open(sys.argv[1], mode="r:gz") as archive:
+    for member in archive.getmembers():
+        path = pathlib.PurePosixPath(member.name)
+        if (
+            path.is_absolute()
+            or ".." in path.parts
+            or member.issym()
+            or member.islnk()
+            or not (member.isfile() or member.isdir())
+        ):
+            raise SystemExit("Candidate archive member is unsafe.")
+PY
+  install -d -m 700 "$staging_root"
+  tar -xzf "$archive" -C "$staging_root"
+  test "$(cat "$staging_root/.release-source-sha")" = "$release_sha"
+  test "$("${checksum_command[@]}" "$staging_root/.release-files.sha256" | cut -d ' ' -f 1)" = "$release_files_checksum"
+  (cd "$staging_root" && "${checksum_check_command[@]}" .release-files.sha256)
 
-install -d -m 700 "$releases_root"
-install -d -m 700 "$staging_root"
-tar -xzf "$archive" -C "$staging_root"
-
-test "$(cat "$staging_root/.release-source-sha")" = "$release_sha"
-test "$("${checksum_command[@]}" "$staging_root/.release-files.sha256" |
-  cut -d ' ' -f 1)" = \
-  "$release_files_checksum"
-
-(
-  cd "$staging_root"
-  "${checksum_check_command[@]}" .release-files.sha256
-)
-
-{
-  printf '# Immutable images for release %s\n' "$release_sha"
-  printf 'FRONTEND_IMAGE=%s\n' "$frontend_image"
-  printf 'BACKEND_IMAGE=%s\n' "$backend_image"
-} >"$staging_root/compose.prod.env"
-chmod 600 "$staging_root/compose.prod.env"
-
-docker compose \
-  --env-file "$root_env" \
-  --env-file "$staging_root/compose.prod.env" \
-  --file "$staging_root/docker/docker-compose.prod.yml" \
-  config --quiet
-
-configured_images="$(
-  docker compose \
-    --env-file "$root_env" \
+  printf '# Immutable images for release %s\nFRONTEND_IMAGE=%s\nBACKEND_IMAGE=%s\n' \
+    "$release_sha" "$frontend_image" "$backend_image" >"$staging_root/compose.prod.env"
+  chmod 600 "$staging_root/compose.prod.env"
+  docker compose --env-file "$production_compose_env" \
     --env-file "$staging_root/compose.prod.env" \
-    --file "$staging_root/docker/docker-compose.prod.yml" \
-    config --images
-)"
+    --file "$staging_root/docker/docker-compose.prod.yml" config --quiet
 
-printf '%s\n' "$configured_images" | grep -Fxq "$frontend_image"
-printf '%s\n' "$configured_images" | grep -Fxq "$backend_image"
-
-created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-cat >"$staging_root/$manifest_name" <<EOF
+  local created_at manifest manifest_checksum
+  created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  manifest="$staging_root/$manifest_name"
+  cat >"$manifest" <<EOF
 release_sha=$release_sha
 workflow_run_id=$run_id
+workflow_run_attempt=$run_attempt
+source_ci_run_id=$source_ci_run_id
+source_ci_run_attempt=$source_ci_run_attempt
 frontend_image=$frontend_image
 frontend_image_digest=$frontend_digest
 backend_image=$backend_image
@@ -192,16 +266,107 @@ created_at=$created_at
 source_archive_sha256=$source_archive_checksum
 release_files_sha256=$release_files_checksum
 EOF
-chmod 600 "$staging_root/$manifest_name"
+  chmod 600 "$manifest"
+  manifest_checksum="$("${checksum_command[@]}" "$manifest" | cut -d ' ' -f 1)"
 
-verify_candidate "$staging_root"
+  python3 - "$staging_root/$receipt_name" "$release_sha" "$run_id" \
+    "$run_attempt" "$source_ci_run_id" "$source_ci_run_attempt" \
+    "$created_at" "$frontend_digest" "$backend_digest" \
+    "$source_archive_checksum" "$release_files_checksum" "$manifest_checksum" <<'PY'
+import json
+import pathlib
+import sys
 
-if [ -e "$release_root" ]; then
-  echo "Candidate appeared while staging; refusing to overwrite it." >&2
-  exit 1
-fi
+(path, sha, run_id, run_attempt, source_run, source_attempt, prepared_at,
+ frontend, backend, package, files, manifest) = sys.argv[1:]
+receipt = {
+    "schema_version": 1,
+    "kind": "production-candidate-preparation",
+    "source_sha": sha,
+    "workflow_run_id": int(run_id),
+    "workflow_run_attempt": int(run_attempt),
+    "source_ci_run_id": int(source_run),
+    "source_ci_run_attempt": int(source_attempt),
+    "prepared_at": prepared_at,
+    "image_digests": {"frontend": frontend, "backend": backend},
+    "package_sha256": package,
+    "release_files_sha256": files,
+    "release_manifest_sha256": manifest,
+    "release_id": sha,
+    "release_path": f"releases/{sha}",
+    "outcome": "verified",
+}
+pathlib.Path(path).write_text(
+    json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n",
+    encoding="utf-8",
+)
+PY
+  chmod 600 "$staging_root/$receipt_name"
+  (cd "$staging_root" && "${checksum_command[@]}" "$receipt_name" >"$receipt_checksum_name")
+  chmod 600 "$staging_root/$receipt_checksum_name"
 
-mv "$staging_root" "$release_root"
-verify_candidate "$release_root"
+  verify_candidate "$staging_root" "$release_sha" "$frontend_digest" \
+    "$backend_digest" "$source_archive_checksum" "$release_files_checksum"
+  [ ! -e "$release_root" ] || die "Candidate appeared while staging."
+  mv "$staging_root" "$release_root"
+  verify_candidate "$release_root" "$release_sha" "$frontend_digest" \
+    "$backend_digest" "$source_archive_checksum" "$release_files_checksum"
+  cat "$release_root/$receipt_name"
+  cleanup_run_artifacts
+  trap - EXIT HUP INT TERM
+}
 
-echo "Candidate prepared without switching production: $release_root"
+upload_candidate() {
+  [ "$#" -eq 3 ] || die "Upload requires release SHA, run ID, and checksum."
+  require_sha "$1"
+  require_integer "$2" "Run ID"
+  require_checksum "$3"
+  capacity_preflight >/dev/null
+  local archive="/tmp/pastexam-$1-$2.tar.gz"
+  local partial="$archive.partial"
+  [ ! -e "$archive" ] && [ ! -e "$partial" ] || \
+    die "Run-specific upload path already exists."
+  trap 'rm -f -- "$partial"' EXIT HUP INT TERM
+  (set -o noclobber; head -c "$((maximum_archive_bytes + 1))" >"$partial") || \
+    die "Run-specific upload path could not be created safely."
+  [ "$(wc -c <"$partial")" -le "$maximum_archive_bytes" ] || \
+    die "Candidate archive exceeds the fixed upload limit."
+  test "$("${checksum_command[@]}" "$partial" | cut -d ' ' -f 1)" = "$3" || \
+    die "Uploaded candidate checksum does not match."
+  mv "$partial" "$archive"
+  trap - EXIT HUP INT TERM
+  printf '{"outcome":"upload-verified","schema_version":1}\n'
+}
+
+cleanup_candidate() {
+  [ "$#" -eq 2 ] || die "Cleanup requires release SHA and run ID."
+  require_sha "$1"
+  require_integer "$2" "Run ID"
+  rm -f -- "/tmp/pastexam-$1-$2.tar.gz"
+  rm -f -- "/tmp/pastexam-$1-$2.tar.gz.partial"
+  if [ -e "$releases_root/$1.staging-$2" ]; then
+    rm -rf -- "$releases_root/$1.staging-$2"
+  fi
+}
+
+case "${1:-}" in
+  preflight)
+    [ "$#" -eq 1 ] || die "Preflight accepts no arguments."
+    capacity_preflight
+    ;;
+  prepare)
+    shift
+    prepare_candidate "$@"
+    ;;
+  upload)
+    shift
+    upload_candidate "$@"
+    ;;
+  cleanup)
+    shift
+    cleanup_candidate "$@"
+    ;;
+  *)
+    die "Usage: pastexam-prepare-candidate <preflight|upload|prepare|cleanup>"
+    ;;
+esac

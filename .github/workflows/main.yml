@@ -405,8 +405,44 @@ jobs:
       release_sha: ${{ github.sha }}
     secrets: inherit
 
-  deploy:
-    needs: [ci_mode, lint, test, build, ci_gate]
+  image_authority:
+    name: Publish production image authority
+    needs: [ci_mode, build]
+    if: >-
+      needs.ci_mode.outputs.ci_mode == 'full' &&
+      needs.build.result == 'success' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Record exact-SHA immutable image digests
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          FRONTEND_IMAGE_DIGEST: ${{ needs.build.outputs.frontend_digest }}
+          BACKEND_IMAGE_DIGEST: ${{ needs.build.outputs.backend_digest }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          for digest in "$FRONTEND_IMAGE_DIGEST" "$BACKEND_IMAGE_DIGEST"; do
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          done
+          authority="$RUNNER_TEMP/production-image-authority.env"
+          printf 'source_sha=%s\nfrontend_digest=%s\nbackend_digest=%s\n' \
+            "$RELEASE_SHA" "$FRONTEND_IMAGE_DIGEST" \
+            "$BACKEND_IMAGE_DIGEST" >"$authority"
+      - name: Retain exact-SHA image authority
+        uses: actions/upload-artifact@v6
+        with:
+          name: production-image-authority-${{ github.sha }}
+          path: ${{ runner.temp }}/production-image-authority.env
+          if-no-files-found: error
+          retention-days: 90
+
+  prepare_production_candidate:
+    name: Prepare immutable production candidate
+    needs: [ci_mode, lint, test, build, ci_gate, image_authority]
     if: >-
       always() &&
       needs.ci_mode.outputs.ci_mode == 'full' &&
@@ -414,12 +450,21 @@ jobs:
       needs.test.result == 'success' &&
       needs.build.result == 'success' &&
       needs.ci_gate.result == 'success' &&
+      needs.image_authority.result == 'success' &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
-      vars.PRODUCTION_DEPLOY_ENABLED == 'true'
+      vars.AUTO_PREPARE_PRODUCTION_CANDIDATE == 'true'
     uses: ./.github/workflows/deploy.yml
     with:
       release_sha: ${{ github.sha }}
       frontend_image_digest: ${{ needs.build.outputs.frontend_digest }}
       backend_image_digest: ${{ needs.build.outputs.backend_digest }}
-    secrets: inherit
+      source_ci_run_id: ${{ github.run_id }}
+      source_ci_run_attempt: ${{ github.run_attempt }}
+    secrets:
+      candidate_ssh_private_key: >-
+        ${{ secrets.PRODUCTION_CANDIDATE_SSH_PRIVATE_KEY }}
+      candidate_known_hosts: >-
+        ${{ secrets.PRODUCTION_CANDIDATE_KNOWN_HOSTS }}
+      candidate_host: ${{ secrets.PRODUCTION_CANDIDATE_HOST }}
+      candidate_user: ${{ secrets.PRODUCTION_CANDIDATE_USER }}
