@@ -3,7 +3,6 @@ from pathlib import Path
 
 import yaml
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MAIN_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "main.yml"
 RELEASE_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "release.yml"
@@ -99,14 +98,18 @@ def test_main_calls_release_only_after_successful_full_ci_gate() -> None:
     }
 
     assert workflow["jobs"]["ci_gate"]["name"] == "CI Gate"
-    assert workflow["jobs"]["deploy"]["needs"] == [
+    candidate = workflow["jobs"]["prepare_production_candidate"]
+    assert candidate["needs"] == [
         "ci_mode",
         "lint",
         "test",
         "build",
         "ci_gate",
+        "image_authority",
     ]
-    assert "vars.PRODUCTION_DEPLOY_ENABLED == 'true'" in source
+    assert "vars.AUTO_PREPARE_PRODUCTION_CANDIDATE == 'true'" in source
+    assert "vars.PRODUCTION_DEPLOY_ENABLED" not in candidate["if"]
+    assert candidate["secrets"] != "inherit"
 
 
 def test_governance_documentation_is_main_first_and_branch_decoupled() -> None:
@@ -114,7 +117,7 @@ def test_governance_documentation_is_main_first_and_branch_decoupled() -> None:
     validation = VALIDATION.read_text(encoding="utf-8")
     feature_workflow = FEATURE_WORKFLOW.read_text(encoding="utf-8")
     agents = AGENTS.read_text(encoding="utf-8")
-    combined = "\n".join((contributing, validation, feature_workflow, agents))
+    combined = f"{contributing}\n{validation}\n{feature_workflow}\n{agents}"
     config_source = PROJECT_GOVERNANCE.read_text(encoding="utf-8")
     config = json.loads(config_source)
     coordination_branch = config["coordination_branch"]

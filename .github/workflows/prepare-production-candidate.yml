@@ -1,0 +1,98 @@
+name: Prepare Exact Production Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Full main SHA with successful authoritative Full CI
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  packages: read
+
+jobs:
+  authority:
+    runs-on: ubuntu-latest
+    outputs:
+      release_sha: ${{ steps.authority.outputs.release_sha }}
+      source_ci_run_id: ${{ steps.authority.outputs.source_ci_run_id }}
+      source_ci_run_attempt: ${{ steps.authority.outputs.source_ci_run_attempt }}
+      frontend_digest: ${{ steps.images.outputs.frontend_digest }}
+      backend_digest: ${{ steps.images.outputs.backend_digest }}
+    steps:
+      - name: Checkout exact requested source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.release_sha }}
+
+      - name: Validate main ancestry and authoritative Full CI
+        id: authority
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$WORKFLOW_REF" = "refs/heads/main"
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = "$WORKFLOW_SHA"
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main
+          python3 scripts/ci/validate_candidate_source_run.py \
+            --repository "$GITHUB_REPOSITORY" --release-sha "$RELEASE_SHA" \
+            --output "$GITHUB_OUTPUT"
+
+      - name: Download exact Full image authority
+        uses: actions/download-artifact@v7
+        with:
+          name: production-image-authority-${{ inputs.release_sha }}
+          path: ${{ runner.temp }}/production-image-authority
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.authority.outputs.source_ci_run_id }}
+
+      - name: Verify immutable exact-SHA image authority
+        id: images
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          set -euo pipefail
+          authority="$RUNNER_TEMP/production-image-authority/production-image-authority.env"
+          test -f "$authority"
+          source_sha="$(sed -n 's/^source_sha=//p' "$authority")"
+          frontend_digest="$(sed -n 's/^frontend_digest=//p' "$authority")"
+          backend_digest="$(sed -n 's/^backend_digest=//p' "$authority")"
+          test "$source_sha" = "$RELEASE_SHA"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          repository=ghcr.io/nthu-physics-sa-it/pastexam
+          for component in frontend backend; do
+            reference="$repository:$component-$RELEASE_SHA"
+            observed="sha256:$(docker buildx imagetools inspect "$reference" --raw | sha256sum | cut -d ' ' -f 1)"
+            expected_name="${component}_digest"
+            expected="${!expected_name}"
+            [[ "$expected" =~ ^sha256:[0-9a-f]{64}$ ]]
+            test "$observed" = "$expected"
+            echo "${component}_digest=$expected" >>"$GITHUB_OUTPUT"
+          done
+
+  prepare:
+    needs: authority
+    uses: ./.github/workflows/deploy.yml
+    with:
+      release_sha: ${{ needs.authority.outputs.release_sha }}
+      frontend_image_digest: ${{ needs.authority.outputs.frontend_digest }}
+      backend_image_digest: ${{ needs.authority.outputs.backend_digest }}
+      source_ci_run_id: ${{ needs.authority.outputs.source_ci_run_id }}
+      source_ci_run_attempt: ${{ needs.authority.outputs.source_ci_run_attempt }}
+    secrets:
+      candidate_ssh_private_key: >-
+        ${{ secrets.PRODUCTION_CANDIDATE_SSH_PRIVATE_KEY }}
+      candidate_known_hosts: >-
+        ${{ secrets.PRODUCTION_CANDIDATE_KNOWN_HOSTS }}
+      candidate_host: ${{ secrets.PRODUCTION_CANDIDATE_HOST }}
+      candidate_user: ${{ secrets.PRODUCTION_CANDIDATE_USER }}

@@ -17,9 +17,12 @@ manifest, every tracked source file, the immutable image references, and the
 rendered Compose images. Matching candidates are reused; mismatches fail
 without overwriting either candidate.
 
-The `PRODUCTION_DEPLOY_ENABLED` repository variable must remain unset or false
-until candidate evidence has been reviewed. Candidate preparation never runs
-`docker compose pull`, `docker compose up`, or a traffic switch.
+Automatic candidate preparation is governed only by
+`AUTO_PREPARE_PRODUCTION_CANDIDATE`; activation authority remains separate.
+Candidate preparation never runs `docker compose pull`, `docker compose up`,
+or a traffic switch. See the
+[candidate preparation runbook](runbooks/production-candidate-preparation.md)
+for the fixed-command, capacity, receipt, and retention contracts.
 
 ## Production configuration boundary
 
