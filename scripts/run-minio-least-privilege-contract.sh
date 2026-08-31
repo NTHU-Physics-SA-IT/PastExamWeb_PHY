@@ -50,9 +50,6 @@ docker exec "$container" mc mb "local/$unrelated_bucket" >/dev/null
 docker exec "$container" mc version enable "local/$bucket" >/dev/null
 printf 'unrelated' | docker exec -i "$container" \
   mc pipe "local/$unrelated_bucket/existing-object" >/dev/null
-env MINIO_CONTAINER="$container" MINIO_BUCKET_NAME="$bucket" \
-  PYTHON_BIN="$python" \
-  "$repository_root/scripts/minio-storage-preflight.sh" >/dev/null
 docker exec -i "$container" sh -c \
   'cat >/tmp/application-policy.template.json' \
   <"$repository_root/docker/minio/application-policy.template.json"
@@ -71,6 +68,23 @@ docker exec "$container" mc admin user svcacct add \
   --access-key "$app_key" \
   --secret-key "$app_secret" \
   local "$parent_user" >/dev/null
+
+# Production preflight must not depend on mutable container-local alias state.
+docker exec "$container" mc alias set local http://127.0.0.1:9000 \
+  "$app_key" "$app_secret" >/dev/null
+if docker exec "$container" mc stat "local/$bucket" >/dev/null 2>&1; then
+  echo "Scoped persistent MinIO alias unexpectedly retained bucket stat access." >&2
+  exit 1
+fi
+env MINIO_CONTAINER="$container" MINIO_BUCKET_NAME="$bucket" \
+  PYTHON_BIN="$python" \
+  "$repository_root/scripts/minio-storage-preflight.sh" >/dev/null
+docker exec "$container" sh -eu -c '
+  set -- /tmp/pastexam-minio-preflight.*
+  [ ! -e "$1" ]
+'
+docker exec "$container" mc alias set local http://127.0.0.1:9000 \
+  "$root_user" "$root_secret" >/dev/null
 
 port="$(
   docker inspect --format '{{(index (index .NetworkSettings.Ports "9000/tcp") 0).HostPort}}' \
