@@ -1,5 +1,6 @@
 import { api, bindUnauthorizedWebSocket, buildWebSocketUrl } from './client'
-import { STORAGE_KEYS, getSessionItem, getLocalItem } from '../../utils/storage'
+
+const WS_TICKET_PATTERN = /^[A-Za-z0-9_-]{43,256}$/
 
 export const discussionService = {
   listArchiveMessages(courseId, archiveId, { limit = 50, beforeId } = {}) {
@@ -39,13 +40,14 @@ export const discussionService = {
     )
   },
 
-  openArchiveDiscussionWebSocket(courseId, archiveId, { token } = {}) {
-    const authToken =
-      token ??
-      getSessionItem(STORAGE_KEYS.session.AUTH_TOKEN) ??
-      getLocalItem(STORAGE_KEYS.local.AUTH_TOKEN)
+  async openArchiveDiscussionWebSocket(courseId, archiveId) {
+    const response = await api.post(
+      `/courses/${courseId}/archives/${archiveId}/discussion/ws-ticket`
+    )
+    const ticket = response?.data?.ticket
+    if (typeof ticket !== 'string' || !WS_TICKET_PATTERN.test(ticket)) return null
     const url = buildWebSocketUrl(`/courses/${courseId}/archives/${archiveId}/discussion/ws`, {
-      queryParams: authToken ? { token: authToken } : {},
+      queryParams: { ticket },
     })
     if (!url) return null
     return bindUnauthorizedWebSocket(new WebSocket(url))

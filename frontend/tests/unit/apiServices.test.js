@@ -31,7 +31,11 @@ vi.mock('@/api/services/client', () => ({
     defaults: { baseURL: '/api' },
   },
   bindUnauthorizedWebSocket: (ws) => ws,
-  buildWebSocketUrl: (path) => `ws://localhost${path}`,
+  buildWebSocketUrl: (path, { queryParams } = {}) => {
+    const url = new URL(`ws://localhost${path}`)
+    for (const [key, value] of Object.entries(queryParams || {})) url.searchParams.set(key, value)
+    return url.toString()
+  },
 }))
 
 describe('API service wrappers', () => {
@@ -251,7 +255,9 @@ describe('API service wrappers', () => {
     await expect(statisticsService.getSystemStatistics()).rejects.toThrow('fail')
   })
 
-  it('discussion service proxies', () => {
+  it('discussion service proxies and exchanges REST auth for a WebSocket ticket', async () => {
+    const firstTicket = 'a'.repeat(43)
+    const secondTicket = 'b'.repeat(43)
     discussionService.listArchiveMessages('course-1', 'arch-1')
     expect(getMock).toHaveBeenCalledWith('/courses/course-1/archives/arch-1/discussion/messages', {
       params: { limit: 50, before_id: undefined },
@@ -272,11 +278,31 @@ describe('API service wrappers', () => {
     })
     globalThis.WebSocket = webSocketMock
 
-    const ws = discussionService.openArchiveDiscussionWebSocket('course-1', 'arch-1')
+    postMock.mockResolvedValueOnce({ data: { ticket: firstTicket, expires_in: 30 } })
+    const ws = await discussionService.openArchiveDiscussionWebSocket('course-1', 'arch-1')
+    expect(postMock).toHaveBeenCalledWith('/courses/course-1/archives/arch-1/discussion/ws-ticket')
     expect(webSocketMock).toHaveBeenCalledWith(
       expect.stringContaining('/courses/course-1/archives/arch-1/discussion/ws')
     )
     expect(ws.url).toContain('/courses/course-1/archives/arch-1/discussion/ws')
+    expect(ws.url).toContain(`ticket=${firstTicket}`)
+    expect(ws.url).not.toContain('token=')
+
+    postMock.mockResolvedValueOnce({ data: { ticket: secondTicket, expires_in: 30 } })
+    const secondWs = await discussionService.openArchiveDiscussionWebSocket('course-1', 'arch-1')
+    expect(secondWs.url).toContain(`ticket=${secondTicket}`)
+    expect(secondWs.url).not.toContain(firstTicket)
+
+    postMock.mockResolvedValueOnce({ data: { ticket: 'header.payload.signature' } })
+    await expect(
+      discussionService.openArchiveDiscussionWebSocket('course-1', 'arch-1')
+    ).resolves.toBeNull()
+
+    postMock.mockRejectedValueOnce(new Error('ticket unavailable'))
+    await expect(
+      discussionService.openArchiveDiscussionWebSocket('course-1', 'arch-1')
+    ).rejects.toThrow('ticket unavailable')
+    expect(webSocketMock).toHaveBeenCalledTimes(2)
 
     globalThis.WebSocket = originalWebSocket
   })

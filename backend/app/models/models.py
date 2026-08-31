@@ -2056,6 +2056,7 @@ class UserNicknameUpdate(BaseModel):
 class UserRoles(BaseModel):
     user_id: int
     is_admin: bool = False
+    token_expires_at: int | None = None
 
     class Config:
         from_attributes = True
