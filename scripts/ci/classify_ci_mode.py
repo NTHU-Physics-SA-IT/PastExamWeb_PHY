@@ -81,6 +81,10 @@ GOVERNANCE_EXACT_PATHS = frozenset(
         "scripts/package-production-candidate.sh",
         "scripts/prepare-production-candidate.sh",
         "scripts/activate-production-release.sh",
+        "scripts/install-production-activation-framework.sh",
+        "scripts/pastexam-activate-ssh-wrapper.sh",
+        "scripts/production-activation-contract.py",
+        "scripts/production-deployment-control.py",
         "scripts/minio-readonly-manifest.sh",
         "scripts/dev-compose.sh",
         "frontend/package.json",
@@ -1817,7 +1821,9 @@ def validate_protected_coordination_exact_state_reuse(
     if event.event_name != "push":
         raise ClassificationFailure("protected exact-state reuse requires a push")
     if event.ref != f"refs/heads/{coordination_branch}":
-        raise ClassificationFailure("protected exact-state reuse requires the exact ref")
+        raise ClassificationFailure(
+            "protected exact-state reuse requires the exact ref"
+        )
     if not event.repository or event.repository_id < 1:
         raise ClassificationFailure("repository identity is malformed")
     if not SHA_PATTERN.fullmatch(event.before_sha) or event.before_sha == ZERO_SHA:
@@ -1832,7 +1838,9 @@ def validate_protected_coordination_exact_state_reuse(
         raise ClassificationFailure("final Q is not a normal two-parent merge")
     base_sha, source_sha = parents
     if base_sha != event.before_sha:
-        raise ClassificationFailure("final Q first parent does not equal push before SHA")
+        raise ClassificationFailure(
+            "final Q first parent does not equal push before SHA"
+        )
     if git.first_parent_count(base_sha, event.current_sha) != 1:
         raise ClassificationFailure("push contains multiple first-parent commits")
     if not git.is_ancestor(base_sha, source_sha):
