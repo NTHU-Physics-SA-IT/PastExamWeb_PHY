@@ -33,6 +33,11 @@ are authoritative while host configuration and secrets remain outside the
 release. The rendered frontend, backend, and migrator images must exactly match
 the checksummed release manifest before backup begins.
 
+The base production Compose definition also pins nginx 1.29.2 by registry
+digest. Candidate manifests and receipts record that digest alongside the two
+application image digests, and activation requires all three rendered images to
+match. A mutable nginx tag is not valid candidate authority.
+
 The production Compose contract reads host-specific configuration outside the
 release checkout:
 
@@ -139,16 +144,22 @@ completion and therefore cannot start after a failed preflight, migration, or
 postflight. Runtime credentials have DML and sequence access but no schema
 ownership or DDL privilege.
 
-Production activation runs migrations only. The production Compose definition
-has no bootstrap profile or `seed_db.py` command, and backend startup performs
-only its read-only schema readiness check. Consequently,
+The first GitHub-driven activation framework supports only migration Class 0:
+the production database must already be at the exact single repository head
+and pass the complete schema comparison. `migrate.py require-head --json` is a
+read-only, advisory-lock-protected gate. Any non-zero delta fails before backup
+or application mutation; this framework never runs `migrate.py upgrade`.
+
+The production Compose definition has no bootstrap profile or `seed_db.py`
+command, and backend startup performs only its read-only schema readiness
+check. Consequently,
 `DEFAULT_ADMIN_PASSWORD` is never consumed to create, restore, or reset an
 account during a production update. Category display metadata and custom
 categories remain managed data; deployment does not synchronize them to
 application defaults.
 
-The activation skeleton is deliberately disabled unless all of the following
-are supplied outside Git:
+The root-owned activation engine remains fail-closed unless all of the
+following are supplied by the reviewed controller:
 
 - `PRODUCTION_DEPLOY_ENABLED=true`;
 - the exact activation confirmation phrase;
@@ -166,15 +177,19 @@ It then acquires a host deployment lock and performs:
 4. nginx ingress preservation preflight against the currently published
    `pastexam-nginx` bindings, exact immutable config-mount verification,
    required TLS directives, and Compose-target/listener consistency;
-5. read-only verification that the application bucket exists and versioning is
+5. read-only verification that the existing PostgreSQL, Redis, and MinIO
+   containers are already running and healthy; migration probes use
+   `docker compose run --no-deps` so preflight cannot start a missing service;
+6. read-only verification that the application bucket exists and versioning is
    `Enabled`;
-6. logical PostgreSQL custom-format backup plus validation;
-7. read-only MinIO manifest;
-8. migration preflight;
-9. one-shot safe migration and postflight;
-10. backend/frontend/nginx start;
-11. internal and external health checks;
-12. an activation marker written only after success.
+7. logical PostgreSQL custom-format backup plus validation;
+8. read-only MinIO manifest;
+9. exact-head, zero-delta migration verification before and after backup;
+10. exact backend/frontend/nginx start with dependency traversal disabled;
+11. immediate internal and external health checks;
+12. three bounded observation snapshots covering health, Redis, storage, and
+    restart-count stability; and
+13. activation evidence and a marker written only after success.
 
 The storage preflight never creates a bucket or changes versioning. Production
 activation is blocked until a separately authorized operational gate enables
@@ -199,11 +214,42 @@ traffic switching. An intentional ingress change therefore requires a
 separately reviewed edge-topology change; it cannot be smuggled through
 ordinary activation.
 
-The workflow file exposing this skeleton is manual-only, uses the protected
-`production` environment, and also requires a repository-variable gate. It
-must not be dispatched until production revision discovery, role creation,
-external configuration, backup destinations, and approval rules have been
-reviewed in a separately authorized production change.
+## GitHub activation and durable state
+
+`.github/workflows/activate-production.yml` is manual `workflow_dispatch`
+only. Before approval it binds the requested exact current-main SHA to one
+authoritative successful Main Full run, immutable image authority, and the
+candidate receipt. The mutation-capable job uses the protected `production`
+Environment and exactly its four activation SSH secrets. After approval it
+rechecks current main and the same Main Full authority before contacting the
+restricted host identity. Workflow concurrency never cancels an in-progress
+production mutation.
+
+The host controller stores canonical active authority at
+`/var/lib/pastexam-deployments/active.json`, durable request state under
+`requests/`, and checksummed receipts under `receipts/`. It verifies the
+ledger, running images, Compose working directory, release evidence,
+`/opt/pastexam-current`, and `/opt/pastexam-current-release.env` before a
+mutation. After the engine, health, observation, and receipt gates succeed, the
+controller commits the canonical ledger first and then atomically updates both
+compatibility views. If the process stops between those writes, the next
+worker invocation verifies the committed ledger, runtime, marker, and receipt,
+repairs only the compatibility views, and completes the original request
+without rerunning backup or activation. A repeated identical request is a
+status lookup; conflicting reuse is rejected. A systemd-owned worker continues
+after SSH/runner disconnect, and a receipt-finalization retry uses existing
+engine evidence without rerunning backup or activation.
+
+Rollback is a separate manual protected workflow. It accepts only the
+canonical previous exact SHA, requires the database revision to remain
+unchanged, performs no Alembic downgrade, and never runs automatically in
+response to a generic assertion failure.
+
+`PRODUCTION_DEPLOY_ENABLED=false` remains the repository governance setting;
+it does not expose or authorize the host controller. Actual authority is the
+protected Environment plus the forced-command, digest-bound host entrypoint.
+Do not dispatch either production workflow until a separate first-deployment
+gate explicitly authorizes it.
 
 ## Upload and PDF request boundary
 

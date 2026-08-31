@@ -14,6 +14,7 @@ Run from `backend/`:
 ```bash
 uv run python migrate.py preflight
 uv run python migrate.py preflight --json
+uv run python migrate.py require-head --json
 uv run python migrate.py upgrade
 uv run python migrate.py reconcile --check
 uv run python migrate.py reconcile --check --json
@@ -31,6 +32,13 @@ holds a PostgreSQL advisory lock across preflight, upgrade, and postflight,
 and verifies that every phase targets the same database. A concurrent
 migration fails without entering Alembic. This repository provides no stamp
 or repair command.
+
+`require-head --json` is the deployment-automation Class 0 gate. It acquires
+the same advisory lock and succeeds only when there is exactly one repository
+head, the production ledger already equals that head, and the complete schema
+comparison passes. It never upgrades, stamps, reconciles, or writes data. The
+first GitHub activation framework treats any non-zero delta as an explicit
+human-review stop before backup or application mutation.
 
 `upgrade` is allowed only when:
 

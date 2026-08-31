@@ -6,12 +6,16 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import os
 import re
 import sys
+import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+IMAGE_PATTERN = re.compile(r"^[A-Za-z0-9./_-]+:[A-Za-z0-9_.-]+@sha256:[0-9a-f]{64}$")
 SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9_.:-]+$")
 SAFE_CONTAINER = re.compile(r"^[A-Za-z0-9_.-]+$")
 SAFE_BUCKET = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -23,6 +27,14 @@ NGINX_CONFIG_TARGET = "/etc/nginx/nginx.conf"
 NGINX_LISTENER_TARGET = "/etc/nginx/pastexam-listeners.conf"
 TLS_CERTIFICATE_TARGET = "/etc/nginx/certs/origin.pem"
 TLS_KEY_TARGET = "/etc/nginx/certs/origin-key.pem"
+NGINX_MOUNT_TARGETS = frozenset(
+    {
+        NGINX_CONFIG_TARGET,
+        NGINX_LISTENER_TARGET,
+        TLS_CERTIFICATE_TARGET,
+        TLS_KEY_TARGET,
+    }
+)
 RFC1918_NETWORKS = tuple(
     ipaddress.ip_network(network)
     for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
@@ -31,6 +43,9 @@ APP_NETWORK = "app_network"
 TRUSTED_PROXY_NETWORK = "trusted_proxy_network"
 TRUSTED_PROXY_NETWORK_NAME = "pastexam-trusted-proxy-network"
 TRUSTED_BACKEND_ALIAS = "backend-trusted"
+EXPECTED_SERVICES = frozenset(
+    {"frontend", "backend", "migrate", "db", "minio", "redis", "nginx"}
+)
 
 
 class ContractError(ValueError):
@@ -65,9 +80,7 @@ def _verify_backend_storage_credentials(environment: dict[str, Any]) -> None:
     for key in ("MINIO_ACCESS_KEY", "MINIO_SECRET_KEY"):
         _required_string(environment, key, f"backend {key}")
     forbidden = [
-        key
-        for key in ("MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD")
-        if key in environment
+        key for key in ("MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD") if key in environment
     ]
     if forbidden:
         raise ContractError(
@@ -81,9 +94,11 @@ def _verify_proxy_trust(compose: dict[str, Any]) -> None:
     backend_environment = backend.get("environment")
     backend_networks = backend.get("networks")
     nginx_networks = nginx.get("networks")
-    if not isinstance(backend_environment, dict) or not isinstance(
-        backend_networks, dict
-    ) or not isinstance(nginx_networks, dict):
+    if (
+        not isinstance(backend_environment, dict)
+        or not isinstance(backend_networks, dict)
+        or not isinstance(nginx_networks, dict)
+    ):
         raise ContractError("Rendered client-IP proxy trust contract is incomplete.")
 
     networks = compose.get("networks")
@@ -99,7 +114,9 @@ def _verify_proxy_trust(compose: dict[str, Any]) -> None:
         trusted_network.get("name") != TRUSTED_PROXY_NETWORK_NAME
         or trusted_network.get("driver") != "bridge"
     ):
-        raise ContractError("Rendered client-IP proxy trust network identity is unsafe.")
+        raise ContractError(
+            "Rendered client-IP proxy trust network identity is unsafe."
+        )
 
     ipam = trusted_network.get("ipam")
     configurations = ipam.get("config") if isinstance(ipam, dict) else None
@@ -122,7 +139,9 @@ def _verify_proxy_trust(compose: dict[str, Any]) -> None:
             _required_string(configuration, "gateway", "trusted proxy gateway")
         )
     except ValueError as error:
-        raise ContractError("Rendered client-IP proxy trust IPAM is invalid.") from error
+        raise ContractError(
+            "Rendered client-IP proxy trust IPAM is invalid."
+        ) from error
     if (
         trusted_subnet.version != 4
         or not any(trusted_subnet.subnet_of(network) for network in RFC1918_NETWORKS)
@@ -146,16 +165,16 @@ def _verify_proxy_trust(compose: dict[str, Any]) -> None:
         raise ContractError("Rendered trusted backend alias is not network-scoped.")
     app_attachment = backend_networks.get(APP_NETWORK)
     app_aliases = (
-        app_attachment.get("aliases", [])
-        if isinstance(app_attachment, dict)
-        else None
+        app_attachment.get("aliases", []) if isinstance(app_attachment, dict) else None
     )
     if (
         not isinstance(app_aliases, list)
         or TRUSTED_BACKEND_ALIAS in app_aliases
         or APP_NETWORK not in nginx_networks
     ):
-        raise ContractError("Rendered trusted backend alias leaks to the shared network.")
+        raise ContractError(
+            "Rendered trusted backend alias leaks to the shared network."
+        )
 
     services = compose.get("services")
     if not isinstance(services, dict):
@@ -170,7 +189,9 @@ def _verify_proxy_trust(compose: dict[str, Any]) -> None:
             not isinstance(service_networks, dict)
             or TRUSTED_PROXY_NETWORK in service_networks
         ):
-            raise ContractError("Rendered trusted proxy network has an unrelated service.")
+            raise ContractError(
+                "Rendered trusted proxy network has an unrelated service."
+            )
 
     trusted_peer = _required_string(
         backend_environment,
@@ -211,15 +232,137 @@ def _verify_proxy_trust(compose: dict[str, Any]) -> None:
         )
 
 
+def _verify_no_privilege_expansion(compose: dict[str, Any]) -> None:
+    services = compose.get("services")
+    if not isinstance(services, dict) or set(services) != EXPECTED_SERVICES:
+        raise ContractError(
+            "Rendered Compose service set is not the reviewed production set."
+        )
+    forbidden_keys = {
+        "privileged",
+        "network_mode",
+        "pid",
+        "ipc",
+        "userns_mode",
+        "user",
+        "devices",
+        "cap_add",
+        "group_add",
+        "cgroup_parent",
+        "device_cgroup_rules",
+        "volumes_from",
+        "configs",
+        "secrets",
+        "sysctls",
+        "runtime",
+        "build",
+    }
+    for name, service in services.items():
+        if not isinstance(service, dict):
+            raise ContractError("Rendered Compose service contract is malformed.")
+        present = [
+            key
+            for key in forbidden_keys
+            if service.get(key) not in (None, False, [], {})
+        ]
+        if present:
+            raise ContractError(
+                f"Rendered Compose service {name!r} expands host privilege."
+            )
+        if service.get("entrypoint") not in (None, [], ""):
+            raise ContractError(
+                f"Rendered Compose service {name!r} overrides its entrypoint."
+            )
+        security_options = service.get("security_opt", [])
+        if not isinstance(security_options, list) or any(
+            not isinstance(option, str) or option != "no-new-privileges:true"
+            for option in security_options
+        ):
+            raise ContractError(
+                f"Rendered Compose service {name!r} has unsafe security options."
+            )
+        volumes = service.get("volumes", [])
+        if not isinstance(volumes, list):
+            raise ContractError(
+                f"Rendered Compose service {name!r} has malformed mounts."
+            )
+        if name == "nginx" and (
+            len(volumes) != len(NGINX_MOUNT_TARGETS)
+            or {volume.get("target") for volume in volumes if isinstance(volume, dict)}
+            != NGINX_MOUNT_TARGETS
+            or any(
+                not isinstance(volume, dict)
+                or volume.get("type") != "bind"
+                or volume.get("read_only") is not True
+                for volume in volumes
+            )
+        ):
+            raise ContractError(
+                "Rendered nginx mounts are not the exact reviewed read-only set."
+            )
+        if name != "nginx" and any(
+            isinstance(volume, dict) and volume.get("type") == "bind"
+            for volume in volumes
+        ):
+            raise ContractError(
+                f"Rendered Compose service {name!r} has an unreviewed host bind mount."
+            )
+        if name != "nginx" and any(
+            not isinstance(volume, dict)
+            or volume.get("type") != "volume"
+            or not isinstance(volume.get("source"), str)
+            or not volume.get("source")
+            for volume in volumes
+        ):
+            raise ContractError(
+                f"Rendered Compose service {name!r} has an unsafe volume contract."
+            )
+        if name not in {"migrate", "minio"} and service.get("command") not in (
+            None,
+            [],
+            "",
+        ):
+            raise ContractError(
+                f"Rendered Compose service {name!r} overrides its command."
+            )
+    for top_level in ("configs", "secrets"):
+        if compose.get(top_level) not in (None, {}):
+            raise ContractError(
+                f"Rendered Compose has unreviewed top-level {top_level}."
+            )
+    volumes = compose.get("volumes", {})
+    if not isinstance(volumes, dict) or any(
+        not isinstance(definition, dict)
+        or definition.get("driver_opts") not in (None, {})
+        for definition in volumes.values()
+    ):
+        raise ContractError(
+            "Rendered Compose volume definitions can escape Docker storage."
+        )
+    migrate_command = services["migrate"].get("command")
+    if migrate_command != ["python", "migrate.py", "upgrade"]:
+        raise ContractError(
+            "Rendered migration command is not the reviewed fixed command."
+        )
+    minio_command = services["minio"].get("command")
+    if minio_command not in (
+        ["server", "/data", "--console-address", ":9001"],
+        "server /data --console-address :9001",
+    ):
+        raise ContractError("Rendered MinIO command is not the reviewed fixed command.")
+
+
 def _compose_values(compose_path: Path) -> None:
     compose = _load_json(compose_path)
     if not isinstance(compose, dict):
         raise ContractError("Rendered Compose root must be an object.")
 
+    _verify_no_privilege_expansion(compose)
     _verify_proxy_trust(compose)
 
     database = _service(compose, "db")
     minio = _service(compose, "minio")
+    redis = _service(compose, "redis")
     backend = _service(compose, "backend")
     nginx = _service(compose, "nginx")
     database_environment = database.get("environment")
@@ -253,6 +396,10 @@ def _compose_values(compose_path: Path) -> None:
         ),
         (
             _required_string(nginx, "container_name", "nginx container identity"),
+            SAFE_CONTAINER,
+        ),
+        (
+            _required_string(redis, "container_name", "Redis container identity"),
             SAFE_CONTAINER,
         ),
     )
@@ -336,16 +483,32 @@ def _manifest_value(path: Path, key: str) -> str:
     return values[0]
 
 
+def _optional_manifest_value(path: Path, key: str) -> str | None:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise ContractError("Cannot read the release manifest.") from error
+    prefix = f"{key}="
+    values = [line.removeprefix(prefix) for line in lines if line.startswith(prefix)]
+    if len(values) > 1 or any(not value for value in values):
+        raise ContractError(f"Release manifest has an ambiguous {key} value.")
+    return values[0] if values else None
+
+
 def _verify_images(compose_path: Path, manifest: Path) -> None:
     compose = _load_json(compose_path)
     if not isinstance(compose, dict):
         raise ContractError("Rendered Compose root must be an object.")
     expected_frontend = _manifest_value(manifest, "frontend_image")
     expected_backend = _manifest_value(manifest, "backend_image")
+    expected_nginx = _optional_manifest_value(manifest, "nginx_image") or (
+        "nginx:1.29.2@sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903"
+    )
     expected = {
         "frontend": expected_frontend,
         "backend": expected_backend,
         "migrate": expected_backend,
+        "nginx": expected_nginx,
     }
     mismatches = [
         name
@@ -358,6 +521,116 @@ def _verify_images(compose_path: Path, manifest: Path) -> None:
             "Rendered Compose images disagree with the immutable release manifest: "
             + ", ".join(mismatches)
         )
+
+
+def _runtime_image_values(compose_path: Path) -> None:
+    compose = _load_json(compose_path)
+    if not isinstance(compose, dict):
+        raise ContractError("Rendered Compose root must be an object.")
+    for service, container in (
+        ("nginx", "pastexam-nginx"),
+        ("backend", "pastexam-backend"),
+        ("frontend", "pastexam-frontend"),
+    ):
+        image = _required_string(
+            _service(compose, service), "image", f"{service} image"
+        )
+        if IMAGE_PATTERN.fullmatch(image) is None:
+            raise ContractError(f"{service} runtime image is not digest-pinned.")
+        print(f"{container}={image}")
+
+
+def _verify_class_zero(report_path: Path) -> None:
+    report = _load_json(report_path)
+    if not isinstance(report, dict):
+        raise ContractError("Migration report root must be an object.")
+    heads = report.get("repository_heads")
+    current = report.get("current_revision")
+    errors = report.get("errors")
+    if (
+        report.get("database_connected") is not True
+        or report.get("current_revision_known") is not True
+        or report.get("multiple_heads") is not False
+        or not isinstance(heads, list)
+        or len(heads) != 1
+        or not isinstance(current, str)
+        or current != heads[0]
+        or report.get("schema_matches_head") is not True
+        or report.get("upgrade_allowed") is not True
+        or not isinstance(errors, list)
+        or errors
+    ):
+        raise ContractError(
+            "Production migration delta is non-zero or database head authority is incomplete."
+        )
+    if SAFE_IDENTIFIER.fullmatch(current) is None:
+        raise ContractError("Production database revision is malformed.")
+    print(current)
+
+
+def _write_engine_evidence(
+    output: Path,
+    target_sha: str,
+    database_revision_before: str,
+    database_revision_after: str,
+    postgres_metadata: Path,
+    postgres_checksum: Path,
+    minio_manifest: Path,
+    observation_snapshots: int,
+    critical_error_count: int,
+    started_at: str,
+) -> None:
+    if not output.is_absolute() or FULL_SHA.fullmatch(target_sha) is None:
+        raise ContractError("Engine evidence target is malformed.")
+    if (
+        SAFE_IDENTIFIER.fullmatch(database_revision_before) is None
+        or database_revision_before != database_revision_after
+    ):
+        raise ContractError("Engine evidence database revision disagrees.")
+    if observation_snapshots < 1:
+        raise ContractError("Engine observation evidence is malformed.")
+    if critical_error_count != 0:
+        raise ContractError("Engine critical-error evidence is not clean.")
+    for path, label in (
+        (postgres_metadata, "PostgreSQL backup metadata"),
+        (postgres_checksum, "PostgreSQL backup checksum"),
+        (minio_manifest, "MinIO manifest"),
+    ):
+        if not path.is_absolute() or not path.is_file():
+            raise ContractError(f"{label} evidence is unavailable.")
+    payload = {
+        "schema_version": 1,
+        "target_sha": target_sha,
+        "started_at": started_at,
+        "completed_at": datetime.now(UTC)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z"),
+        "database_revision_before": database_revision_before,
+        "database_revision_after": database_revision_after,
+        "postgres_backup_metadata": str(postgres_metadata),
+        "postgres_backup_checksum": str(postgres_checksum),
+        "minio_manifest": str(minio_manifest),
+        "observation_snapshots": observation_snapshots,
+        "critical_error_count": critical_error_count,
+        "health_outcome": "green",
+        "restart_stability": "stable",
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{output.name}.partial-", dir=output.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            json.dump(payload, stream, sort_keys=True, separators=(",", ":"))
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, output)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _verify_release(
@@ -574,10 +847,26 @@ def _parser() -> argparse.ArgumentParser:
     images.add_argument("--compose-json", type=Path, required=True)
     images.add_argument("--manifest", type=Path, required=True)
 
+    runtime_images = subparsers.add_parser("runtime-image-values")
+    runtime_images.add_argument("--compose-json", type=Path, required=True)
+
     ingress = subparsers.add_parser("verify-ingress")
     ingress.add_argument("--compose-json", type=Path, required=True)
     ingress.add_argument("--current-ports-json", type=Path, required=True)
     ingress.add_argument("--release-directory", type=Path, required=True)
+    class_zero = subparsers.add_parser("verify-class-zero")
+    class_zero.add_argument("--report", type=Path, required=True)
+    evidence = subparsers.add_parser("write-engine-evidence")
+    evidence.add_argument("--output", type=Path, required=True)
+    evidence.add_argument("--target-sha", required=True)
+    evidence.add_argument("--database-revision-before", required=True)
+    evidence.add_argument("--database-revision-after", required=True)
+    evidence.add_argument("--postgres-metadata", type=Path, required=True)
+    evidence.add_argument("--postgres-checksum", type=Path, required=True)
+    evidence.add_argument("--minio-manifest", type=Path, required=True)
+    evidence.add_argument("--observation-snapshots", type=int, required=True)
+    evidence.add_argument("--critical-error-count", type=int, required=True)
+    evidence.add_argument("--started-at", required=True)
     return parser
 
 
@@ -594,9 +883,26 @@ def main() -> int:
             _verify_release(args.manifest, args.source_sha, args.release_directory)
         elif args.command == "verify-images":
             _verify_images(args.compose_json, args.manifest)
-        else:
+        elif args.command == "runtime-image-values":
+            _runtime_image_values(args.compose_json)
+        elif args.command == "verify-ingress":
             _verify_ingress(
                 args.compose_json, args.current_ports_json, args.release_directory
+            )
+        elif args.command == "verify-class-zero":
+            _verify_class_zero(args.report)
+        else:
+            _write_engine_evidence(
+                args.output,
+                args.target_sha,
+                args.database_revision_before,
+                args.database_revision_after,
+                args.postgres_metadata,
+                args.postgres_checksum,
+                args.minio_manifest,
+                args.observation_snapshots,
+                args.critical_error_count,
+                args.started_at,
             )
     except ContractError as error:
         print(f"Production activation contract failed: {error}", file=sys.stderr)

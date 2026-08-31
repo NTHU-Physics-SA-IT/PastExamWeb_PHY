@@ -7,9 +7,9 @@ import argparse
 import json
 import sys
 
-from alembic import command
 from sqlalchemy import create_engine
 
+from alembic import command
 from app.db.migration_safety import (
     MigrationReport,
     alembic_config,
@@ -40,6 +40,9 @@ def parser() -> argparse.ArgumentParser:
     preflight = subcommands.add_parser("preflight")
     preflight.add_argument("--json", action="store_true")
 
+    require_head = subcommands.add_parser("require-head")
+    require_head.add_argument("--json", action="store_true")
+
     reconcile = subcommands.add_parser("reconcile")
     reconcile.add_argument(
         "--check",
@@ -66,28 +69,18 @@ def print_report(report: MigrationReport, *, json_output: bool) -> None:
     print(f"Database name: {report.database_name or 'UNKNOWN'}")
     print(f"Database empty: {empty}")
     print(
-        "Alembic ledger: "
-        f"{'PRESENT' if report.alembic_version_exists else 'MISSING'}"
+        f"Alembic ledger: {'PRESENT' if report.alembic_version_exists else 'MISSING'}"
     )
     print(f"Alembic revisions: {report.alembic_versions}")
     print(f"Current revision known: {'YES' if report.current_revision_known else 'NO'}")
     print(f"Repository heads: {report.repository_heads}")
     print(f"Reviewed manifests: {report.reviewed_manifest_revisions}")
     print(f"Multiple repository heads: {'YES' if report.multiple_heads else 'NO'}")
-    print(
-        "Head schema candidate: "
-        f"{report.schema_candidate_revision or 'NONE'}"
-    )
+    print(f"Head schema candidate: {report.schema_candidate_revision or 'NONE'}")
     passed_checks = sum(check.passed for check in report.schema_checks)
-    print(
-        "Schema checks: "
-        f"{passed_checks}/{len(report.schema_checks)} passed"
-    )
+    print(f"Schema checks: {passed_checks}/{len(report.schema_checks)} passed")
     for check in (item for item in report.schema_checks if not item.passed):
-        print(
-            f"Schema [{check.name}]: "
-            f"FAIL - {redact_text(check.message)}"
-        )
+        print(f"Schema [{check.name}]: FAIL - {redact_text(check.message)}")
     print(f"Schema matches head: {'YES' if report.schema_matches_head else 'NO'}")
     print(f"Upgrade allowed: {'YES' if report.upgrade_allowed else 'NO'}")
     for warning in report.warnings:
@@ -137,13 +130,38 @@ def main(argv: list[str] | None = None) -> int:
             command.current(config, verbose=True)
         elif args.command == "history":
             command.history(config, verbose=True)
+        elif args.command == "require-head":
+            engine = create_engine(database_url(), pool_pre_ping=True)
+            try:
+                with migration_advisory_lock(engine) as locked_database:
+                    report = inspect_database(engine)
+                    print_report(report, json_output=args.json)
+                    if report.database_name != locked_database:
+                        raise RuntimeError(
+                            "Migration lock and head check targeted different databases"
+                        )
+                    if (
+                        not report.upgrade_allowed
+                        or report.multiple_heads
+                        or len(report.repository_heads) != 1
+                        or report.current_revision != report.repository_heads[0]
+                        or not report.current_revision_known
+                        or not report.schema_matches_head
+                    ):
+                        print(
+                            "Production Class 0 requires the database to match the exact repository head",
+                            file=sys.stderr,
+                        )
+                        return 2
+            finally:
+                engine.dispose()
         elif args.command in {"preflight", "reconcile"}:
             report = inspect_database()
             print_report(report, json_output=args.json)
             # A missing ledger remains a failure even when the schema has a
             # structural head candidate. This command never stamps or repairs.
             return 0 if report.upgrade_allowed else 2
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - CLI boundary must fail closed.
         print(f"Migration command failed: {safe_error(exc)}", file=sys.stderr)
         return 2
     return 0
