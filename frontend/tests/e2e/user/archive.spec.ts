@@ -246,16 +246,6 @@ test.describe('User › Archive browsing', () => {
     await expect(archiveCard.getByRole('button', { name: '編輯' })).toHaveCount(0)
     await expect(archiveCard.getByRole('button', { name: '刪除' })).toHaveCount(0)
 
-    await expect.poll(() => wsTicketRequestCount).toBeGreaterThan(0)
-    const discussionWsUrl = await page.evaluate(() => {
-      const testWindow = window as Window & { __discussionWsUrls: string[] }
-      return testWindow.__discussionWsUrls.at(-1)
-    })
-    expect(discussionWsUrl).toBeTruthy()
-    const discussionWsSearch = new URL(discussionWsUrl).searchParams
-    expect(discussionWsSearch.get('ticket')).toBe('w'.repeat(43))
-    expect(discussionWsSearch.has('token')).toBe(false)
-
     const previewRequestPromise = page.waitForRequest(
       (request) =>
         request.method() === 'GET' &&
@@ -281,6 +271,17 @@ test.describe('User › Archive browsing', () => {
     const previewDialog = page.getByRole('dialog', { name: /期末考/ })
     await expect(previewDialog).toBeVisible()
     await expect(previewDialog).toContainText('期末考')
+
+    await expect.poll(() => wsTicketRequestCount).toBeGreaterThan(0)
+    const discussionWsUrl = await page.evaluate(() => {
+      const testWindow = window as Window & { __discussionWsUrls: string[] }
+      return testWindow.__discussionWsUrls.at(-1)
+    })
+    expect(discussionWsUrl).toBeTruthy()
+    const discussionWsSearch = new URL(discussionWsUrl).searchParams
+    expect(discussionWsSearch.get('ticket')).toBe('w'.repeat(43))
+    expect(discussionWsSearch.has('token')).toBe(false)
+
     expect(await consoleErrors.errors()).toEqual([])
     expect(pageErrors).toEqual([])
     const downloadPromise = page.waitForEvent('download')

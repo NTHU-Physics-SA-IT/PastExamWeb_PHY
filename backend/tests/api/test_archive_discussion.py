@@ -19,6 +19,7 @@ from app.models.models import (
     CourseCategory,
     PersonalNotification,
     SubmissionStatus,
+    User,
     UserRoles,
 )
 from app.services.ws_ticket import (
@@ -207,7 +208,7 @@ async def test_ws_ticket_issuance_is_target_bound_and_redis_failure_is_closed(
         assert exc_info.value.code == 1008
 
         async with session_maker() as session:
-            stored_user = await session.get(type(user), user.id)
+            stored_user = await session.get(User, user.id)
             stored_user.deleted_at = datetime.now(UTC)
             await session.commit()
         with (
