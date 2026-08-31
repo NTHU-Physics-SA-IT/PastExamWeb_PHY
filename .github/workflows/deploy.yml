@@ -58,6 +58,7 @@ jobs:
           RELEASE_SHA: ${{ inputs.release_sha }}
           FRONTEND_IMAGE_DIGEST: ${{ inputs.frontend_image_digest }}
           BACKEND_IMAGE_DIGEST: ${{ inputs.backend_image_digest }}
+          NGINX_IMAGE_DIGEST: sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903
           SOURCE_CI_RUN_ID: ${{ inputs.source_ci_run_id }}
           SOURCE_CI_RUN_ATTEMPT: ${{ inputs.source_ci_run_attempt }}
         run: |
@@ -160,6 +161,7 @@ jobs:
             --receipt "$receipt" --release-sha "$RELEASE_SHA" \
             --frontend-digest "$FRONTEND_IMAGE_DIGEST" \
             --backend-digest "$BACKEND_IMAGE_DIGEST" \
+            --nginx-digest "$NGINX_IMAGE_DIGEST" \
             --source-archive-sha256 "$SOURCE_ARCHIVE_SHA256" \
             --release-files-sha256 "$RELEASE_FILES_SHA256"
 

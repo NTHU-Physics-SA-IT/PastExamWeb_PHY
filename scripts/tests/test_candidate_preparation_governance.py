@@ -65,9 +65,8 @@ def test_candidate_workflow_has_candidate_only_boundary() -> None:
     assert set(workflow["on"]) == {"workflow_call"}
     assert job["environment"] == "production-candidate"
     activation_jobs = _yaml(ACTIVATE)["jobs"]
-    assert {value.get("environment") for value in activation_jobs.values()} == {
-        "production"
-    }
+    assert activation_jobs["authority"].get("environment") is None
+    assert activation_jobs["activate"]["environment"] == "production"
     assert names.index("Fail-closed host capacity preflight") < names.index(
         "Upload through fixed candidate entrypoint"
     )
@@ -91,12 +90,15 @@ def test_legacy_generic_ssh_and_broad_secret_inheritance_are_absent() -> None:
             assert secret_name not in source
 
 
-def test_activation_stub_has_no_ssh_or_host_activation_authority() -> None:
+def test_activation_workflow_keeps_mutation_behind_production_environment() -> None:
     source = ACTIVATE.read_text(encoding="utf-8")
-    assert "vars.PRODUCTION_DEPLOY_ENABLED == 'true'" in source
     assert "environment: production" in source
-    assert "ssh " not in source
-    assert "Host activation is intentionally not performed" in source
+    assert "workflow_dispatch:" in source
+    assert "pastexam-production-deployment-control" not in source
+    assert "pastexam-activate-production-release" not in source
+    assert "docker compose" not in source
+    assert "ssh " in source
+    assert " start " in source
 
 
 def test_candidate_source_has_no_active_service_or_data_mutation() -> None:
@@ -377,6 +379,7 @@ def _receipt() -> tuple[dict, dict[str, str]]:
         "release_sha": sha,
         "frontend_digest": digest,
         "backend_digest": digest,
+        "nginx_digest": "sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903",
         "source_archive_sha256": checksum,
         "release_files_sha256": checksum,
     }
@@ -389,7 +392,11 @@ def _receipt() -> tuple[dict, dict[str, str]]:
         "source_ci_run_id": 2,
         "source_ci_run_attempt": 1,
         "prepared_at": "2026-08-31T00:00:00Z",
-        "image_digests": {"frontend": digest, "backend": digest},
+        "image_digests": {
+            "frontend": digest,
+            "backend": digest,
+            "nginx": expected["nginx_digest"],
+        },
         "package_sha256": checksum,
         "release_files_sha256": checksum,
         "release_manifest_sha256": checksum,
