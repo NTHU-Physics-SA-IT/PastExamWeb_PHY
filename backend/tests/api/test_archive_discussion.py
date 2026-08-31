@@ -21,12 +21,20 @@ from app.models.models import (
     SubmissionStatus,
     UserRoles,
 )
+from app.services.ws_ticket import (
+    ArchiveDiscussionTicketAuthority,
+    WsTicketUnavailable,
+)
 from app.utils.auth import get_current_user
 
 
 def _override_user(user_id: int, *, is_admin: bool = False):
     async def _get_current_user():
-        return UserRoles(user_id=user_id, is_admin=is_admin)
+        return UserRoles(
+            user_id=user_id,
+            is_admin=is_admin,
+            token_expires_at=4102444800,
+        )
 
     return _get_current_user
 
@@ -38,12 +46,185 @@ def test_discussion_ws_rejects_unauthenticated_connection(monkeypatch):
         TestClient(app) as ws_client,
         pytest.raises(WebSocketDisconnect) as exc_info,
         ws_client.websocket_connect(
-            "/courses/1/archives/1/discussion/ws"
+            "/courses/1/archives/1/discussion/ws?token=legacy-bearer-sentinel"
+        ) as websocket,
+    ):
+        websocket.receive_text()
+
+    assert exc_info.value.code == 4403
+
+
+def test_discussion_ws_rejects_expired_ticket_authority(monkeypatch):
+    monkeypatch.setattr("app.main.init_db", AsyncMock())
+    monkeypatch.setattr(
+        "app.api.services.courses.consume_archive_discussion_ticket",
+        lambda *args, **kwargs: ArchiveDiscussionTicketAuthority(1, 1),
+    )
+
+    with (
+        TestClient(app) as ws_client,
+        pytest.raises(WebSocketDisconnect) as exc_info,
+        ws_client.websocket_connect(
+            "/courses/1/archives/1/discussion/ws?ticket=test-ticket"
         ) as websocket,
     ):
         websocket.receive_text()
 
     assert exc_info.value.code == 4401
+
+
+def test_discussion_ws_redis_failure_fails_closed(monkeypatch):
+    monkeypatch.setattr("app.main.init_db", AsyncMock())
+
+    def fail_consume(*args, **kwargs):
+        raise WsTicketUnavailable("unavailable")
+
+    monkeypatch.setattr(
+        "app.api.services.courses.consume_archive_discussion_ticket",
+        fail_consume,
+    )
+
+    with (
+        TestClient(app) as ws_client,
+        pytest.raises(WebSocketDisconnect) as exc_info,
+        ws_client.websocket_connect(
+            "/courses/1/archives/1/discussion/ws?ticket=test-ticket"
+        ) as websocket,
+    ):
+        websocket.receive_text()
+
+    assert exc_info.value.code == 1011
+
+
+@pytest.mark.asyncio
+async def test_ws_ticket_issuance_is_target_bound_and_redis_failure_is_closed(
+    client, session_maker, make_user, monkeypatch
+):
+    user = await make_user(name="ticket-user")
+    async with session_maker() as session:
+        course = Course(name="Ticket Course", category=CourseCategory.FRESHMAN)
+        session.add(course)
+        await session.commit()
+        await session.refresh(course)
+        archive = Archive(
+            name="Ticket Exam",
+            academic_year=2024,
+            archive_type=ArchiveType.FINAL,
+            professor="Prof",
+            has_answers=False,
+            object_name="ticket.pdf",
+            uploader_id=user.id,
+            course_id=course.id,
+        )
+        session.add(archive)
+        await session.commit()
+        await session.refresh(archive)
+
+    captured = {}
+
+    def fake_create_ticket(**authority):
+        captured.update(authority)
+        return "opaque-ticket-sentinel"
+
+    response = await client.post(
+        f"/courses/{course.id}/archives/{archive.id}/discussion/ws-ticket"
+    )
+    assert response.status_code in {401, 403}
+
+    app.dependency_overrides[get_current_user] = _override_user(user.id)
+    monkeypatch.setattr(
+        "app.api.services.courses.create_archive_discussion_ticket",
+        fake_create_ticket,
+    )
+    try:
+        response = await client.post(
+            f"/courses/{course.id}/archives/{archive.id}/discussion/ws-ticket"
+        )
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-store"
+        assert response.json() == {
+            "ticket": "opaque-ticket-sentinel",
+            "expires_in": 30,
+        }
+        assert captured == {
+            "user_id": user.id,
+            "course_id": course.id,
+            "archive_id": archive.id,
+            "session_expires_at": 4102444800,
+        }
+
+        app.dependency_overrides.pop(get_current_user, None)
+        monkeypatch.setattr("app.utils.auth.is_token_blacklisted", lambda token: False)
+        response = await client.post(
+            f"/courses/{course.id}/archives/{archive.id}/discussion/ws-ticket",
+            headers={"Authorization": "Bearer opaque-ticket-sentinel"},
+        )
+        assert response.status_code == 401
+        app.dependency_overrides[get_current_user] = _override_user(user.id)
+
+        def fail_ticket(**authority):
+            raise WsTicketUnavailable("unavailable")
+
+        monkeypatch.setattr(
+            "app.api.services.courses.create_archive_discussion_ticket",
+            fail_ticket,
+        )
+        response = await client.post(
+            f"/courses/{course.id}/archives/{archive.id}/discussion/ws-ticket"
+        )
+        assert response.status_code == 503
+        assert "opaque-ticket-sentinel" not in response.text
+
+        async with session_maker() as session:
+            stored_archive = await session.get(Archive, archive.id)
+            stored_archive.deleted_at = datetime.now(UTC)
+            await session.commit()
+        captured.clear()
+        monkeypatch.setattr(
+            "app.api.services.courses.create_archive_discussion_ticket",
+            fake_create_ticket,
+        )
+        response = await client.post(
+            f"/courses/{course.id}/archives/{archive.id}/discussion/ws-ticket"
+        )
+        assert response.status_code == 404
+        assert captured == {}
+
+        monkeypatch.setattr(
+            "app.api.services.courses.consume_archive_discussion_ticket",
+            lambda *args, **kwargs: ArchiveDiscussionTicketAuthority(
+                user.id, 4102444800
+            ),
+        )
+        with (
+            TestClient(app) as ws_client,
+            pytest.raises(WebSocketDisconnect) as exc_info,
+            ws_client.websocket_connect(
+                f"/courses/{course.id}/archives/{archive.id}/discussion/ws?ticket=test-ticket"
+            ) as websocket,
+        ):
+            websocket.receive_text()
+        assert exc_info.value.code == 1008
+
+        async with session_maker() as session:
+            stored_user = await session.get(type(user), user.id)
+            stored_user.deleted_at = datetime.now(UTC)
+            await session.commit()
+        with (
+            TestClient(app) as ws_client,
+            pytest.raises(WebSocketDisconnect) as exc_info,
+            ws_client.websocket_connect(
+                f"/courses/{course.id}/archives/{archive.id}/discussion/ws?ticket=test-ticket"
+            ) as websocket,
+        ):
+            websocket.receive_text()
+        assert exc_info.value.code == 4403
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        async with session_maker() as session:
+            await session.execute(delete(Archive).where(Archive.id == archive.id))
+            await session.execute(delete(Course).where(Course.id == course.id))
+            await session.commit()
 
 
 @pytest.mark.asyncio
@@ -158,15 +339,13 @@ async def test_discussion_ws_sends_history_and_ignores_blank(
         archive_id = archive.id
         course_id = course.id
 
-    async def fake_ws_payload(websocket):
-        return {"uid": user.id, "exp": 4102444800}
-
     monkeypatch.setattr(
-        "app.api.services.courses.get_ws_token_payload", fake_ws_payload
+        "app.api.services.courses.consume_archive_discussion_ticket",
+        lambda *args, **kwargs: ArchiveDiscussionTicketAuthority(user.id, 4102444800),
     )
 
     with TestClient(app) as ws_client, ws_client.websocket_connect(
-        f"/courses/{course_id}/archives/{archive_id}/discussion/ws"
+        f"/courses/{course_id}/archives/{archive_id}/discussion/ws?ticket=test-ticket"
     ) as ws:
         first = ws.receive_json()
         assert first["type"] == "history"
@@ -212,18 +391,16 @@ async def test_discussion_ws_accepts_padded_message_within_limit(
         archive_id = archive.id
         course_id = course.id
 
-    async def fake_ws_payload(websocket):
-        return {"uid": user.id, "exp": 4102444800}
-
     monkeypatch.setattr(
-        "app.api.services.courses.get_ws_token_payload", fake_ws_payload
+        "app.api.services.courses.consume_archive_discussion_ticket",
+        lambda *args, **kwargs: ArchiveDiscussionTicketAuthority(user.id, 4102444800),
     )
 
     content = "a" * 200
     raw = f"  {content}  "
 
     with TestClient(app) as ws_client, ws_client.websocket_connect(
-        f"/courses/{course_id}/archives/{archive_id}/discussion/ws"
+        f"/courses/{course_id}/archives/{archive_id}/discussion/ws?ticket=test-ticket"
     ) as ws:
         ws.receive_json()  # history
         ws.send_text("{")
@@ -274,15 +451,13 @@ async def test_discussion_ws_rejects_message_too_long(
         archive_id = archive.id
         course_id = course.id
 
-    async def fake_ws_payload(websocket):
-        return {"uid": user.id, "exp": 4102444800}
-
     monkeypatch.setattr(
-        "app.api.services.courses.get_ws_token_payload", fake_ws_payload
+        "app.api.services.courses.consume_archive_discussion_ticket",
+        lambda *args, **kwargs: ArchiveDiscussionTicketAuthority(user.id, 4102444800),
     )
 
     with TestClient(app) as ws_client, ws_client.websocket_connect(
-        f"/courses/{course_id}/archives/{archive_id}/discussion/ws"
+        f"/courses/{course_id}/archives/{archive_id}/discussion/ws?ticket=test-ticket"
     ) as ws:
         ws.receive_json()  # history
         ws.send_text(json.dumps({"type": "send", "content": "a" * 201}))
@@ -650,14 +825,12 @@ async def test_discussion_reply_is_threaded_and_cross_archive_reply_is_rejected(
         await session.refresh(root)
         await session.refresh(foreign_root)
 
-    async def fake_ws_payload(websocket):
-        return {"uid": replier.id, "exp": 4102444800}
-
     monkeypatch.setattr(
-        "app.api.services.courses.get_ws_token_payload", fake_ws_payload
+        "app.api.services.courses.consume_archive_discussion_ticket",
+        lambda *args, **kwargs: ArchiveDiscussionTicketAuthority(replier.id, 4102444800),
     )
     with TestClient(app) as ws_client, ws_client.websocket_connect(
-        f"/courses/{course.id}/archives/{first_archive.id}/discussion/ws"
+        f"/courses/{course.id}/archives/{first_archive.id}/discussion/ws?ticket=test-ticket"
     ) as ws:
         ws.receive_json()
         ws.send_text(
@@ -682,14 +855,12 @@ async def test_discussion_reply_is_threaded_and_cross_archive_reply_is_rejected(
         assert error_event["type"] == "error"
         assert error_event["code"] == "invalid_reply_target"
 
-    async def fake_self_ws_payload(websocket):
-        return {"uid": user.id, "exp": 4102444800}
-
     monkeypatch.setattr(
-        "app.api.services.courses.get_ws_token_payload", fake_self_ws_payload
+        "app.api.services.courses.consume_archive_discussion_ticket",
+        lambda *args, **kwargs: ArchiveDiscussionTicketAuthority(user.id, 4102444800),
     )
     with TestClient(app) as ws_client, ws_client.websocket_connect(
-        f"/courses/{course.id}/archives/{first_archive.id}/discussion/ws"
+        f"/courses/{course.id}/archives/{first_archive.id}/discussion/ws?ticket=test-ticket"
     ) as ws:
         ws.receive_json()
         ws.send_text(

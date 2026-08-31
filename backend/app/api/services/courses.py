@@ -8,6 +8,7 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
+    Response,
     WebSocket,
     WebSocketDisconnect,
     status,
@@ -93,8 +94,13 @@ from app.services.archive_visibility import (
 from app.services.course_lifecycle_locks import CourseLifecycleOperation
 from app.services.discussions import soft_delete_discussion_message
 from app.services.personal_notifications import enqueue_personal_notification
+from app.services.ws_ticket import (
+    WS_TICKET_TTL_SECONDS,
+    WsTicketUnavailable,
+    consume_archive_discussion_ticket,
+    create_archive_discussion_ticket,
+)
 from app.utils.auth import get_current_user
-from app.utils.auth_ws import get_ws_token_payload
 from app.utils.course_text import (
     format_course_display_name,
     normalize_course_search_text,
@@ -1355,6 +1361,36 @@ async def list_archive_discussion_messages(
     )
 
 
+@router.post("/{course_id}/archives/{archive_id}/discussion/ws-ticket")
+async def issue_archive_discussion_ws_ticket(
+    course_id: int,
+    archive_id: int,
+    response: Response,
+    current_user: UserRoles = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    await _ensure_archive_exists_for_discussion(course_id, archive_id, db)
+    if current_user.token_expires_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Cannot validate credentials",
+        )
+    try:
+        ticket = create_archive_discussion_ticket(
+            user_id=current_user.user_id,
+            course_id=course_id,
+            archive_id=archive_id,
+            session_expires_at=current_user.token_expires_at,
+        )
+    except WsTicketUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="WebSocket authentication is temporarily unavailable",
+        ) from exc
+    response.headers["Cache-Control"] = "no-store"
+    return {"ticket": ticket, "expires_in": WS_TICKET_TTL_SECONDS}
+
+
 @router.websocket("/{course_id}/archives/{archive_id}/discussion/ws")
 async def archive_discussion_ws(
     websocket: WebSocket,
@@ -1362,27 +1398,33 @@ async def archive_discussion_ws(
     archive_id: int,
     db: AsyncSession = Depends(get_session),
 ):
-    await websocket.accept()
-
-    payload = await get_ws_token_payload(websocket)
-    if not payload:
-        await websocket.close(code=4401)
+    ticket_values = websocket.query_params.getlist("ticket")
+    if len(ticket_values) != 1:
+        await websocket.close(code=4403)
         return
 
-    user_id = payload.get("uid")
-    if not user_id:
+    try:
+        authority = consume_archive_discussion_ticket(
+            ticket_values[0],
+            course_id=course_id,
+            archive_id=archive_id,
+        )
+    except WsTicketUnavailable:
+        await websocket.close(code=1011)
+        return
+    if authority is None:
+        await websocket.close(code=4403)
+        return
+    if authority.session_expires_at < datetime.now(UTC).timestamp():
         await websocket.close(code=4401)
         return
 
     user = await db.scalar(
-        select(User).where(User.id == user_id, User.deleted_at.is_(None))
+        select(User).where(User.id == authority.user_id, User.deleted_at.is_(None))
     )
     if not user:
-        await websocket.close(code=4401)
+        await websocket.close(code=4403)
         return
-
-    exp = payload.get("exp")
-    exp_ts = float(exp) if exp is not None else None
 
     try:
         await _ensure_archive_exists_for_discussion(course_id, archive_id, db)
@@ -1390,6 +1432,8 @@ async def archive_discussion_ws(
         await websocket.close(code=1008)
         return
 
+    await websocket.accept()
+    exp_ts = float(authority.session_expires_at)
     sockets = _discussion_connections_by_archive.setdefault(archive_id, set())
     sockets.add(websocket)
 

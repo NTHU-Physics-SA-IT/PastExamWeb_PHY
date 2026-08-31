@@ -437,6 +437,7 @@ finalization cannot precede exact-version absence.
 | Outcome-bounded Trash bulk delete | Each item reuses the single-item durable authority; there is no global batch transaction or rollback | Cross-item partial outcomes are explicit and independently durable |
 | Dedicated permanent-deletion reconciliation | Each bounded candidate uses its own existing process-one transaction/lease lifecycle; completed-audit purge is a separate bounded transaction | Existing operations progress automatically only while the dedicated process is intentionally running; production activation is deferred |
 | WebSocket discussion update | Database commit precedes broadcast | Durable write succeeds even if live delivery fails |
+| WebSocket discussion authentication | An authenticated target-authorized REST request issues one Redis-backed target-bound ticket; the WebSocket handshake atomically consumes it before live user and target checks | 30-second, single-use, fail-closed authority; reconnects and multiple tabs obtain independent tickets |
 | Redis | Used primarily for authentication token blacklist/state | Not part of archive lifecycle atomicity |
 | About Us create/update | Route-authorized single PostgreSQL commit | No notification, receipt, storage, Redis, or WebSocket side effect |
 | Homepage slogan submit/review/delete | Route-authorized single PostgreSQL commit; review locks the exact row and updates latest decision provenance only when status changes | Silent and database-only; direct permanent deletion is terminal and bypasses Trash |
@@ -468,6 +469,30 @@ commits those database effects together. Logout, heartbeat, and their existing
 token owner remain unchanged. OAuth state is stored in the
 existing signed session and removed before validation, making success,
 mismatch, missing-state, and replay paths one-time.
+
+## WebSocket discussion ticket
+
+Browser WebSocket URLs must never contain the reusable application bearer.
+The browser uses its normal authenticated REST client to request a discussion
+ticket bound to the exact User, `archive-discussion-ws` purpose, Course, and
+Archive. The ticket contains at least 32 random bytes of entropy and expires
+after 30 seconds. Redis keys contain only a SHA-256 digest of the ticket; the
+bounded stored authority contains no application bearer.
+
+Issuance uses `SET NX EX`, consumption uses atomic `GETDEL`, and any unknown,
+expired, malformed, replayed, purpose-mismatched, target-mismatched, or Redis
+failure path fails closed. Consumption remains irreversible if the subsequent
+live non-deleted-User or effective-public-Archive check fails. Every initial
+connection, reconnect, and independent browser tab obtains a fresh ticket.
+Neither a legacy `token` query nor an Authorization header authenticates this
+WebSocket route; normal JWT authentication remains confined to the REST ticket
+request. Nginx and Uvicorn retain the WebSocket path while stripping its full
+query string from repository-controlled request logs. Because nginx error-log
+formatting cannot redact request targets, the exact WebSocket proxy location
+suppresses its own error stream while ordinary nginx error logging remains
+unchanged. External edge/CDN logs
+remain an environment-level verification responsibility. This contract does
+not introduce cookie authentication or a general session redesign.
 
 ## Local login abuse admission
 

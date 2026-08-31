@@ -21,6 +21,7 @@ test.describe('User › Archive browsing', () => {
     let archiveDownloadCount = 3
     let previewRouteCallCount = 0
     let previewFileRouteCallCount = 0
+    let wsTicketRequestCount = 0
     const consoleErrors = createConsoleErrorCollector(page)
     const pageErrors: string[] = []
     page.on('pageerror', (error) => pageErrors.push(error.message))
@@ -111,6 +112,20 @@ test.describe('User › Archive browsing', () => {
       })
     })
 
+    await page.route(
+      '**/api/courses/101/archives/201/discussion/ws-ticket',
+      async (route) => {
+        wsTicketRequestCount += 1
+        expect(route.request().method()).toBe('POST')
+        expect(route.request().headers().authorization).toMatch(/^Bearer /)
+        await route.fulfill({
+          status: 200,
+          headers: JSON_HEADERS,
+          body: JSON.stringify({ ticket: 'w'.repeat(43), expires_in: 30 }),
+        })
+      }
+    )
+
     let downloadEndpointCalled = false
     await page.route('**/api/courses/101/archives/201/download', async (route) => {
       downloadEndpointCalled = true
@@ -142,6 +157,8 @@ test.describe('User › Archive browsing', () => {
 
     await page.addInitScript(() => {
       const OriginalWebSocket = window.WebSocket
+      const testWindow = window as Window & { __discussionWsUrls: string[] }
+      testWindow.__discussionWsUrls = []
 
       class FakeDiscussionWebSocket {
         static OPEN = 1
@@ -202,6 +219,7 @@ test.describe('User › Archive browsing', () => {
       window.WebSocket = class PatchedWebSocket {
         constructor(url, protocols) {
           if (typeof url === 'string' && url.includes('/discussion/ws')) {
+            testWindow.__discussionWsUrls.push(url)
             return new FakeDiscussionWebSocket(url)
           }
           return new OriginalWebSocket(url, protocols)
@@ -227,6 +245,16 @@ test.describe('User › Archive browsing', () => {
     await expect(archiveCard).toBeVisible()
     await expect(archiveCard.getByRole('button', { name: '編輯' })).toHaveCount(0)
     await expect(archiveCard.getByRole('button', { name: '刪除' })).toHaveCount(0)
+
+    await expect.poll(() => wsTicketRequestCount).toBeGreaterThan(0)
+    const discussionWsUrl = await page.evaluate(() => {
+      const testWindow = window as Window & { __discussionWsUrls: string[] }
+      return testWindow.__discussionWsUrls.at(-1)
+    })
+    expect(discussionWsUrl).toBeTruthy()
+    const discussionWsSearch = new URL(discussionWsUrl).searchParams
+    expect(discussionWsSearch.get('ticket')).toBe('w'.repeat(43))
+    expect(discussionWsSearch.has('token')).toBe(false)
 
     const previewRequestPromise = page.waitForRequest(
       (request) =>
