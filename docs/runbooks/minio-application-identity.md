@@ -25,7 +25,10 @@ root credentials.
 Production activation remains blocked until a separately authorized operation
 has enabled versioning on the existing application bucket. The activation
 preflight is read-only and requires both an existing bucket and `Enabled`
-versioning. It must never create the bucket or change versioning.
+versioning. It must never create the bucket or change versioning. The
+preflight does not depend on the service-readiness `local` alias: it uses a
+unique temporary `mc` configuration and loopback alias derived from the MinIO
+server's operator environment, then removes that temporary state on exit.
 
 After source, PR, and main Full evidence and immutable candidate preparation:
 

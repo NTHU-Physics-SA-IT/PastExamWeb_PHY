@@ -180,6 +180,14 @@ The storage preflight never creates a bucket or changes versioning. Production
 activation is blocked until a separately authorized operational gate enables
 versioning on the existing bucket.
 
+The MinIO service healthcheck's `mc ready local` command proves only service
+readiness. Activation does not trust that container-local alias for
+authenticated bucket authority. The storage preflight creates a unique,
+root-only temporary `mc` configuration inside the MinIO container, derives a
+distinct loopback alias from the server's operator environment, performs only
+the bucket and versioning reads, and removes the temporary configuration on
+exit. MinIO operator credentials never enter backend runtime configuration.
+
 There is no automatic database rollback. Any failure stops the sequence and
 does not mark the release activated. Missing or malformed external files,
 release-identity disagreement, missing rendered backup inputs, a missing
