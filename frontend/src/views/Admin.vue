@@ -4132,7 +4132,13 @@
         :header="$t('投稿等級設定')"
         class="contributor-level-settings-modal"
         :style="{ width: 'min(54rem, calc(100vw - 2rem))', maxHeight: 'min(90dvh, 48rem)' }"
-        :contentStyle="{ padding: 0, minWidth: 0, overflow: 'visible' }"
+        :contentStyle="{
+          padding: 0,
+          minWidth: 0,
+          minHeight: 0,
+          overflow: 'hidden',
+          display: 'flex',
+        }"
         @hide="closeContributorLevelSettingsDialog"
       >
         <div class="contributor-level-settings-dialog">
@@ -4196,6 +4202,7 @@
               :label="$t('還原目前已保存設定')"
               severity="secondary"
               text
+              class="contributor-level-settings-reset"
               :disabled="contributorLevelSettingsSaving"
               @click="resetContributorLevelSettingsDraft"
             />
@@ -11252,11 +11259,15 @@ onBeforeUnmount(() => {
 
 .contributor-level-settings-dialog {
   --contributor-level-grid: 8rem minmax(0, 1fr) minmax(0, 1fr) 7rem;
-  display: grid;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   gap: 0.75rem;
   width: 100%;
+  min-height: 0;
   min-width: 0;
   max-width: 100%;
+  overflow: hidden;
 }
 
 .contributor-level-settings-help {
@@ -11268,12 +11279,16 @@ onBeforeUnmount(() => {
 }
 
 .contributor-level-settings-list {
-  display: grid;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   gap: 0;
   width: 100%;
+  min-height: 0;
   min-width: 0;
   max-width: 100%;
   max-height: min(62vh, 34rem);
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   box-sizing: border-box;
@@ -11283,7 +11298,10 @@ onBeforeUnmount(() => {
 .contributor-level-settings-header,
 .contributor-level-settings-row {
   display: grid;
+  flex: 0 0 auto;
   grid-template-columns: var(--contributor-level-grid);
+  box-sizing: border-box;
+  width: 100%;
   min-width: 0;
   align-items: center;
   gap: 0.65rem;
@@ -11321,6 +11339,7 @@ onBeforeUnmount(() => {
 .contributor-level-settings-identity {
   display: flex;
   min-width: 0;
+  align-self: stretch;
   align-items: center;
   gap: 0.45rem;
 }
@@ -15724,8 +15743,10 @@ onBeforeUnmount(() => {
   }
 
   .contributor-level-settings-row {
+    flex: 0 0 auto;
     grid-template-columns: minmax(0, 1fr);
     gap: 0.4rem;
+    min-height: 0;
     padding: 0.55rem;
   }
 
@@ -15740,6 +15761,11 @@ onBeforeUnmount(() => {
   .contributor-level-settings-field {
     display: grid;
     gap: 0.2rem;
+  }
+
+  .contributor-level-settings-field :deep(.p-inputtext),
+  .contributor-level-settings-field :deep(.p-inputnumber-input) {
+    font-size: 16px !important;
   }
 
   .contributor-level-settings-mobile-label {
@@ -15760,8 +15786,24 @@ onBeforeUnmount(() => {
     display: none;
   }
 
+  .contributor-level-settings-footer {
+    position: static;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-bottom: max(0rem, env(safe-area-inset-bottom));
+  }
+
   .contributor-level-settings-footer :deep(.p-button) {
-    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .contributor-level-settings-footer :deep(.contributor-level-settings-reset.p-button) {
+    grid-column: 1 / -1;
+  }
+
+  .contributor-level-settings-footer :deep(.p-button-label) {
+    white-space: normal;
   }
 }
 
