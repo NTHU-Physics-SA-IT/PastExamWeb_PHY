@@ -92,6 +92,7 @@
       "tests/unit/test_pdf_security.py",
       "tests/unit/test_submission_decision.py",
       "tests/unit/test_user_online_duration.py",
+      "tests/unit/test_ws_ticket.py",
       "tests/utils/test_storage_utils.py"
     ]
   }

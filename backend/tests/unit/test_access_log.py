@@ -17,6 +17,20 @@ def _record(target: str) -> logging.LogRecord:
     )
 
 
+def _websocket_record(
+    target: str, message: str = '%s - "WebSocket %s" [accepted]'
+) -> logging.LogRecord:
+    return logging.LogRecord(
+        "uvicorn.error",
+        logging.INFO,
+        __file__,
+        1,
+        message,
+        ("127.0.0.1:1234", target),
+        None,
+    )
+
+
 def test_oauth_callback_access_log_removes_sensitive_query() -> None:
     record = _record("/api/auth/nthu/callback?code=provider-code&state=oauth-state")
 
@@ -31,6 +45,64 @@ def test_access_log_filter_preserves_other_requests() -> None:
 
     assert OAuthCallbackAccessLogFilter().filter(record) is True
     assert record.args[2] == "/api/courses?category=graduate"
+
+
+def test_websocket_log_removes_ticket_query_from_uvicorn_error() -> None:
+    record = _websocket_record(
+        "/courses/1/archives/2/discussion/ws?ticket=opaque-ticket-sentinel"
+    )
+
+    assert OAuthCallbackAccessLogFilter().filter(record) is True
+    assert record.args[1] == "/courses/1/archives/2/discussion/ws"
+    assert "opaque-ticket-sentinel" not in record.getMessage()
+
+
+def test_websocket_rejected_log_removes_legacy_token_query() -> None:
+    record = _websocket_record(
+        "/courses/1/archives/2/discussion/ws?token=legacy-bearer-sentinel",
+        '%s - "WebSocket %s" 403',
+    )
+
+    assert OAuthCallbackAccessLogFilter().filter(record) is True
+    assert record.args[1] == "/courses/1/archives/2/discussion/ws"
+    assert "legacy-bearer-sentinel" not in record.getMessage()
+
+
+def test_websocket_http_response_log_keeps_format_after_sanitizing() -> None:
+    record = logging.LogRecord(
+        "uvicorn.error",
+        logging.INFO,
+        __file__,
+        1,
+        '%s - "WebSocket %s" %d',
+        (
+            "127.0.0.1:1234",
+            "/courses/1/archives/2/discussion/ws?ticket=opaque-ticket-sentinel",
+            503,
+        ),
+        None,
+    )
+
+    assert OAuthCallbackAccessLogFilter().filter(record) is True
+    assert record.args[1] == "/courses/1/archives/2/discussion/ws"
+    assert "opaque-ticket-sentinel" not in record.getMessage()
+    assert "503" in record.getMessage()
+
+
+def test_websocket_route_is_sanitized_in_uvicorn_access_shape() -> None:
+    record = _record(
+        "/courses/1/archives/2/discussion/ws?ticket=opaque-ticket-sentinel"
+    )
+
+    assert OAuthCallbackAccessLogFilter().filter(record) is True
+    assert record.args[2] == "/courses/1/archives/2/discussion/ws"
+
+
+def test_websocket_log_filter_preserves_other_websocket_targets() -> None:
+    record = _websocket_record("/unrelated/ws?mode=debug")
+
+    assert OAuthCallbackAccessLogFilter().filter(record) is True
+    assert record.args[1] == "/unrelated/ws?mode=debug"
 
 
 def test_redacted_exc_info_preserves_traceback_without_exception_text() -> None:

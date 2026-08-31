@@ -66,7 +66,7 @@ function makeSocket() {
 }
 
 function mountPanel(socket, confirm = { require: ({ accept }) => accept() }) {
-  mocks.openSocket.mockReturnValue(socket)
+  if (socket !== undefined) mocks.openSocket.mockResolvedValue(socket)
   return mount(ArchiveDiscussionPanel, {
     props: { courseId: 1, archiveId: 2 },
     global: {
@@ -88,7 +88,7 @@ function mountPanel(socket, confirm = { require: ({ accept }) => accept() }) {
 }
 
 function mountPanelWithRealMessageCard(socket) {
-  mocks.openSocket.mockReturnValue(socket)
+  mocks.openSocket.mockResolvedValue(socket)
   return mount(ArchiveDiscussionPanel, {
     props: { courseId: 1, archiveId: 2 },
     global: {
@@ -119,6 +119,7 @@ function mountPanelWithRealMessageCard(socket) {
 }
 
 async function loadDiscussionHistory(socket, messages) {
+  await flushPromises()
   socket.onopen()
   socket.onmessage({
     data: JSON.stringify({ type: 'history', messages }),
@@ -137,6 +138,36 @@ describe('ArchiveDiscussionPanel', () => {
     mocks.unlike.mockResolvedValue({ data: { liked: false, like_count: 9 } })
     mocks.report.mockResolvedValue({ data: { id: 88 } })
     mocks.remove.mockResolvedValue({ data: { preserve_thread: false } })
+  })
+
+  it('obtains a fresh ticket-backed socket for each reconnect attempt', async () => {
+    vi.useFakeTimers()
+    const firstSocket = makeSocket()
+    const secondSocket = makeSocket()
+    mocks.openSocket.mockResolvedValueOnce(firstSocket).mockResolvedValueOnce(secondSocket)
+    const wrapper = mountPanel(undefined)
+    await flushPromises()
+
+    firstSocket.onclose({ code: 1006 })
+    await vi.advanceTimersByTimeAsync(500)
+    await flushPromises()
+
+    expect(mocks.openSocket).toHaveBeenNthCalledWith(1, 1, 2)
+    expect(mocks.openSocket).toHaveBeenNthCalledWith(2, 1, 2)
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
+  it('fails closed when ticket issuance fails', async () => {
+    vi.useFakeTimers()
+    mocks.openSocket.mockRejectedValueOnce(new Error('ticket unavailable'))
+    const wrapper = mountPanel(undefined)
+    await flushPromises()
+
+    expect(mocks.openSocket).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.connected).toBe(false)
+    wrapper.unmount()
+    vi.useRealTimers()
   })
 
   it('opens the reply editor from the real message-card reply button', async () => {
@@ -230,6 +261,7 @@ describe('ArchiveDiscussionPanel', () => {
   it('sorts roots and appends a reply to the existing thread without reloading', async () => {
     const socket = makeSocket()
     const wrapper = mountPanel(socket)
+    await flushPromises()
     socket.onopen()
     socket.onmessage({
       data: JSON.stringify({
@@ -300,6 +332,7 @@ describe('ArchiveDiscussionPanel', () => {
   it('keeps replies collapsed by default and clears the toggle after the final reply is deleted', async () => {
     const socket = makeSocket()
     const wrapper = mountPanel(socket)
+    await flushPromises()
     socket.onopen()
     socket.onmessage({
       data: JSON.stringify({

@@ -109,6 +109,10 @@ async def get_current_user(
         if not user:
             raise credentials_exception
 
-        return UserRoles(user_id=user_id, is_admin=user.is_admin)
+        return UserRoles(
+            user_id=user_id,
+            is_admin=user.is_admin,
+            token_expires_at=int(exp),
+        )
     except JWTError:
         raise credentials_exception

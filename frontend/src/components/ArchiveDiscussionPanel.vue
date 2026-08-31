@@ -406,6 +406,7 @@ function updateCurrentUserMessageNames() {
 }
 
 function closeSocket() {
+  connectSeq += 1
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)
     reconnectTimer = null
@@ -420,6 +421,7 @@ function closeSocket() {
   socket = null
   connected.value = false
   connecting.value = false
+  loading.value = false
 }
 
 function scheduleReconnect() {
@@ -494,8 +496,8 @@ function applyDelete(messageId, preserveThread) {
 }
 
 async function connect() {
-  const seq = (connectSeq += 1)
   closeSocket()
+  const seq = connectSeq
   if (!props.enabled || !currentUser.value) return
   const courseId = normalizeId(props.courseId)
   const archiveId = normalizeId(props.archiveId)
@@ -503,7 +505,27 @@ async function connect() {
 
   connecting.value = true
   loading.value = true
-  const ws = discussionService.openArchiveDiscussionWebSocket(courseId, archiveId)
+  let ws
+  try {
+    ws = await discussionService.openArchiveDiscussionWebSocket(courseId, archiveId)
+  } catch {
+    if (seq !== connectSeq) return
+    connecting.value = false
+    loading.value = false
+    scheduleReconnect()
+    return
+  }
+  if (seq !== connectSeq) {
+    if (ws) {
+      try {
+        ws.__manualClose = true
+        ws.close()
+      } catch {
+        // ignore stale socket cleanup failures
+      }
+    }
+    return
+  }
   if (!ws) {
     connecting.value = false
     loading.value = false

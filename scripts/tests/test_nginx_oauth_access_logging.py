@@ -62,6 +62,26 @@ def _access_log_enabled(request_target: str) -> bool:
     return urlsplit(request_target).path not in suppressed_paths
 
 
+def _logged_request_target(request_target: str) -> str:
+    config = _config()
+    match = re.search(
+        r"map\s+\$uri\s+\$access_request_target\s*\{(?P<body>.*?)\}",
+        config,
+        re.DOTALL,
+    )
+    assert match is not None
+    path = urlsplit(request_target).path
+    for pattern, replacement in re.findall(
+        r"^\s*(\S+)\s+(\$\w+);\s*$", match.group("body"), re.MULTILINE
+    ):
+        if pattern == "default":
+            default = replacement
+        elif pattern.startswith("~") and re.match(pattern[1:], path):
+            return path if replacement == "$uri" else request_target
+    assert default == "$request_uri"
+    return request_target
+
+
 def test_oauth_callback_queries_are_not_written_to_nginx_access_log() -> None:
     assert not _access_log_enabled(
         "/api/auth/nthu/callback?code=non-sensitive-provider-sentinel"
@@ -86,6 +106,21 @@ def test_ordinary_routes_keep_access_logging_enabled() -> None:
         "access_log /var/log/nginx/access.log proxy_peer_combined "
         "if=$access_loggable;" in config
     )
+
+
+def test_discussion_websocket_query_is_excluded_from_nginx_access_log_target() -> None:
+    target = "/api/courses/12/archives/34/discussion/ws?ticket=opaque-ticket-sentinel"
+
+    assert _logged_request_target(target) == "/api/courses/12/archives/34/discussion/ws"
+    assert _logged_request_target(
+        "/api/courses/12/archives/34/discussion/ws?token=legacy-bearer-sentinel"
+    ) == "/api/courses/12/archives/34/discussion/ws"
+    assert _logged_request_target("/api/courses?category=graduate") == (
+        "/api/courses?category=graduate"
+    )
+    config = _config()
+    assert '"$request"' not in config
+    assert '"$request_method $access_request_target $server_protocol"' in config
 
 
 def test_frontend_callback_keeps_the_existing_spa_fallback() -> None:
@@ -166,8 +201,8 @@ def test_proxy_rebuilds_a_single_authoritative_forwarded_identity() -> None:
     config = _config()
 
     assert "$proxy_add_x_forwarded_for" not in config
-    assert config.count("proxy_set_header X-Real-IP $remote_addr;") == 6
-    assert config.count("proxy_set_header X-Forwarded-For $remote_addr;") == 6
+    assert config.count("proxy_set_header X-Real-IP $remote_addr;") == 7
+    assert config.count("proxy_set_header X-Forwarded-For $remote_addr;") == 7
 
 
 def test_production_uvicorn_trust_matches_the_static_nginx_network_address() -> None:
@@ -245,3 +280,29 @@ def test_exact_upload_route_preserves_api_proxy_security_contract() -> None:
 
     assert "proxy_pass http://backend-trusted:8000/archives/upload;" in upload
     assert "$proxy_add_x_forwarded_for" not in upload
+
+
+def test_websocket_location_suppresses_unredactable_nginx_error_requests() -> None:
+    config = _config()
+    websocket = _location_body(
+        config,
+        "~ ^/api/courses/[0-9]+/archives/[0-9]+/discussion/ws$",
+    )
+    generic_api = _location_body(config, "/api/")
+
+    assert "error_log /dev/null crit;" in websocket
+    assert "error_log /dev/null" not in generic_api
+    assert "rewrite ^/api/(.*)$ /$1 break;" in websocket
+    assert "proxy_pass http://backend-trusted:8000;" in websocket
+    for directive in (
+        "proxy_http_version 1.1;",
+        "proxy_set_header Upgrade $http_upgrade;",
+        'proxy_set_header Connection "upgrade";',
+        "proxy_pass_request_headers on;",
+        "proxy_set_header Host $host;",
+        "proxy_set_header X-Real-IP $remote_addr;",
+        "proxy_set_header X-Forwarded-For $remote_addr;",
+        "proxy_set_header X-Forwarded-Proto $scheme;",
+        "proxy_set_header Authorization $http_authorization;",
+    ):
+        assert directive in websocket
