@@ -1,5 +1,6 @@
 import ipaddress
 import re
+import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -62,26 +63,6 @@ def _access_log_enabled(request_target: str) -> bool:
     return urlsplit(request_target).path not in suppressed_paths
 
 
-def _logged_request_target(request_target: str) -> str:
-    config = _config()
-    match = re.search(
-        r"map\s+\$uri\s+\$access_request_target\s*\{(?P<body>.*?)\}",
-        config,
-        re.DOTALL,
-    )
-    assert match is not None
-    path = urlsplit(request_target).path
-    for pattern, replacement in re.findall(
-        r"^\s*(\S+)\s+(\$\w+);\s*$", match.group("body"), re.MULTILINE
-    ):
-        if pattern == "default":
-            default = replacement
-        elif pattern.startswith("~") and re.match(pattern[1:], path):
-            return path if replacement == "$uri" else request_target
-    assert default == "$request_uri"
-    return request_target
-
-
 def test_oauth_callback_queries_are_not_written_to_nginx_access_log() -> None:
     assert not _access_log_enabled(
         "/api/auth/nthu/callback?code=non-sensitive-provider-sentinel"
@@ -106,21 +87,114 @@ def test_ordinary_routes_keep_access_logging_enabled() -> None:
         "access_log /var/log/nginx/access.log proxy_peer_combined "
         "if=$access_loggable;" in config
     )
+    assert '"$request_method $request_uri $server_protocol"' in config
 
 
 def test_discussion_websocket_query_is_excluded_from_nginx_access_log_target() -> None:
-    target = "/api/courses/12/archives/34/discussion/ws?ticket=opaque-ticket-sentinel"
-
-    assert _logged_request_target(target) == "/api/courses/12/archives/34/discussion/ws"
-    assert _logged_request_target(
-        "/api/courses/12/archives/34/discussion/ws?token=legacy-bearer-sentinel"
-    ) == "/api/courses/12/archives/34/discussion/ws"
-    assert _logged_request_target("/api/courses?category=graduate") == (
-        "/api/courses?category=graduate"
-    )
     config = _config()
-    assert '"$request"' not in config
-    assert '"$request_method $access_request_target $server_protocol"' in config
+    websocket = _location_body(
+        config,
+        "~ ^/api/courses/[0-9]+/archives/[0-9]+/discussion/ws$",
+    )
+    log_format = re.search(
+        r"log_format\s+proxy_peer_websocket\s+(?P<body>.*?);",
+        config,
+        re.DOTALL,
+    )
+
+    assert log_format is not None
+    assert (
+        "access_log /var/log/nginx/access.log proxy_peer_websocket;" in websocket
+    )
+    assert "/api/courses/:course_id/archives/:archive_id/discussion/ws" in (
+        log_format.group("body")
+    )
+    for query_capable_variable in ("$request_uri", '"$request"', "$args"):
+        assert query_capable_variable not in log_format.group("body")
+    assert "$http_" not in log_format.group("body")
+
+
+def test_nginx_runtime_keeps_websocket_queries_out_after_rewrite() -> None:
+    request_targets = (
+        "/api/courses/12/archives/34/discussion/ws?ticket=WS_TICKET_SENTINEL",
+        "/api/courses/12/archives/34/discussion/ws?token=LEGACY_TOKEN_SENTINEL",
+        "/api/courses/%31%32/archives/%33%34/discussion/ws?foo=ARBITRARY_SENTINEL",
+        "/api/courses/12/archives/34/discussion/ws?ticket=REJECTED_SENTINEL",
+    )
+    curl_command_lines = []
+    for index, request_target in enumerate(request_targets):
+        upgrade_headers = (
+            "--header 'Connection: Upgrade' --header 'Upgrade: websocket' "
+            if index < 3
+            else ""
+        )
+        untrusted_headers = (
+            "--referer 'https://example.test/path?ticket=REFERER_SENTINEL' "
+            "--user-agent 'probe?token=USER_AGENT_SENTINEL' "
+            if index == 0
+            else ""
+        )
+        curl_command_lines.append(
+            "curl --silent --show-error --output /dev/null --max-time 5 "
+            f"--http1.1 {upgrade_headers}{untrusted_headers}"
+            f"{'http://127.0.0.1:8080' + request_target!r}"
+        )
+    curl_commands = "\n".join(curl_command_lines)
+    runtime_script = f"""
+nginx
+{curl_commands}
+curl --silent --show-error --output /dev/null --max-time 5 \
+  'http://127.0.0.1:8080/api/courses?category=graduate'
+nginx -s quit
+while test -e /run/nginx.pid; do sleep 0.05; done
+test "$(grep -Fc '/api/courses/:course_id/archives/:archive_id/discussion/ws' \
+  /var/log/nginx/access.log)" -eq 4
+! grep -Fq 'ticket=' /var/log/nginx/access.log
+! grep -Fq 'token=' /var/log/nginx/access.log
+! grep -Fq 'WS_TICKET_SENTINEL' /var/log/nginx/access.log
+! grep -Fq 'LEGACY_TOKEN_SENTINEL' /var/log/nginx/access.log
+! grep -Fq 'ARBITRARY_SENTINEL' /var/log/nginx/access.log
+! grep -Fq 'REJECTED_SENTINEL' /var/log/nginx/access.log
+! grep -Fq 'REFERER_SENTINEL' /var/log/nginx/access.log
+! grep -Fq 'USER_AGENT_SENTINEL' /var/log/nginx/access.log
+grep -Fq '/api/courses?category=graduate' /var/log/nginx/access.log
+"""
+
+    result = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--add-host",
+            "backend-trusted:127.0.0.1",
+            "--add-host",
+            "frontend:127.0.0.1",
+            "--add-host",
+            "minio:127.0.0.1",
+            "--tmpfs",
+            "/var/log/nginx",
+            "--mount",
+            f"type=bind,source={NGINX_CONFIG},target=/etc/nginx/nginx.conf,readonly",
+            "--mount",
+            (
+                f"type=bind,source={DEVELOPMENT_LISTENERS},"
+                "target=/etc/nginx/pastexam-listeners.conf,readonly"
+            ),
+            "nginx:1.29.2",
+            "sh",
+            "-eu",
+            "-c",
+            runtime_script,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_frontend_callback_keeps_the_existing_spa_fallback() -> None:
