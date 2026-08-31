@@ -280,12 +280,6 @@ python3 "$contract_helper" verify-ingress \
   --current-ports-json "$current_nginx_ports" \
   --release-directory "$RELEASE_DIRECTORY"
 
-env -i \
-  PATH="$PATH" \
-  MINIO_CONTAINER="$MINIO_CONTAINER" \
-  MINIO_BUCKET_NAME="$MINIO_BUCKET_NAME" \
-  "$MINIO_PREFLIGHT_HELPER"
-
 for persistent_container in \
   "$DATABASE_CONTAINER" "$REDIS_CONTAINER" "$MINIO_CONTAINER"
 do
@@ -302,6 +296,21 @@ do
       ;;
   esac
 done
+
+if ! docker exec "$DATABASE_CONTAINER" \
+  pg_isready -U "$DATABASE_USER" -d "$DATABASE_NAME" >/dev/null; then
+  echo "PostgreSQL is not accepting connections for activation preflight." >&2
+  exit 2
+fi
+if [ "$(docker exec "$REDIS_CONTAINER" redis-cli ping)" != "PONG" ]; then
+  echo "Redis did not pass the activation preflight PING." >&2
+  exit 2
+fi
+env -i \
+  PATH="$PATH" \
+  MINIO_CONTAINER="$MINIO_CONTAINER" \
+  MINIO_BUCKET_NAME="$MINIO_BUCKET_NAME" \
+  "$MINIO_PREFLIGHT_HELPER"
 
 migration_report_before="$contract_directory/migration-before.json"
   "${compose[@]}" run --rm --no-deps migrate python migrate.py require-head --json \

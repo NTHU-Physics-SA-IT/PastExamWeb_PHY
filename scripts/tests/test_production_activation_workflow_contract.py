@@ -81,6 +81,7 @@ def test_activation_workflow_enforces_exact_main_twice_and_starts_once() -> None
     assert source.count('"start $TARGET_SHA') == 1
     assert "request-status $request_id" in source
     assert "resume $request_id" in source
+    assert "poll_count % 6" in source
     assert "production-deployment-receipt" in source
     assert "vars.PRODUCTION_DEPLOY_ENABLED" not in source
     assert source.rfind("git fetch --no-tags origin main") > source.find(
@@ -100,6 +101,7 @@ def test_rollback_is_separate_explicit_and_never_automatic() -> None:
     assert "rollback-preflight" in rollback
     assert "finalization-retry-required" in rollback
     assert '"resume $request_id"' in rollback
+    assert "poll_count % 6" in rollback
     assert rollback.rfind("git fetch --no-tags origin main") > rollback.find(
         '"rollback-preflight $TARGET_SHA'
     )

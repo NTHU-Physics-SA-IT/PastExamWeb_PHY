@@ -174,8 +174,9 @@ jobs:
               "start $TARGET_SHA $request_id $SOURCE_RUN $SOURCE_ATTEMPT $GITHUB_RUN_ID $GITHUB_RUN_ATTEMPT" \
               >"$state"
           fi
-          resumed=false
+          poll_count=0
           for _ in $(seq 1 120); do
+            poll_count=$((poll_count + 1))
             "${ssh_command[@]}" "request-status $request_id" >"$state"
             read -r status phase < <(python3 - "$state" <<'PY'
           import json, pathlib, sys
@@ -190,9 +191,9 @@ jobs:
                 exit 2
                 ;;
             esac
-            if [ "$phase" = finalization-retry-required ] && [ "$resumed" = false ]; then
+            if [ "$phase" = finalization-retry-required ] || \
+              [ $((poll_count % 6)) -eq 0 ]; then
               "${ssh_command[@]}" "resume $request_id" >/dev/null
-              resumed=true
             fi
             sleep 10
           done

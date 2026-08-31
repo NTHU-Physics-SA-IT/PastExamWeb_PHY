@@ -325,7 +325,7 @@ def _activation_environment(
         "elif [[ \"$1\" == 'compose' && \"$*\" == *'require-head --json'* ]]; then\n"
         '  cat "$FAKE_MIGRATION_REPORT"\n'
         "elif [[ \"$1\" == 'exec' && \"$*\" == *'redis-cli ping'* ]]; then\n"
-        "  printf 'PONG\\n'\n"
+        "  printf '%s\\n' \"$FAKE_REDIS_PING\"\n"
         "elif [[ \"$1\" == 'inspect' && \"$*\" == *'RestartCount'* ]]; then\n"
         "  printf '0\\n'\n"
         "elif [[ \"$1\" == 'inspect' && \"$*\" == *'Config.Image'* ]]; then\n"
@@ -379,7 +379,7 @@ def _activation_environment(
         "  elif [[ \"$1\" == 'compose' && \"$*\" == *'require-head --json'* ]]; then\n"
         '    cat "$FAKE_MIGRATION_REPORT"\n'
         "  elif [[ \"$1\" == 'exec' && \"$*\" == *'redis-cli ping'* ]]; then\n"
-        "    printf 'PONG\\n'\n"
+        "    printf '%s\\n' \"$FAKE_REDIS_PING\"\n"
         "  elif [[ \"$1\" == 'inspect' && \"$*\" == *'RestartCount'* ]]; then\n"
         "    printf '0\\n'\n"
         "  elif [[ \"$1\" == 'inspect' && \"$*\" == *'Config.Image'* ]]; then\n"
@@ -454,6 +454,7 @@ def _activation_environment(
             "FAKE_FRONTEND_IMAGE": resolved_compose["services"]["frontend"]["image"],
             "FAKE_CRITICAL_LOG": "",
             "FAKE_PERSISTENT_STATE": "running:healthy",
+            "FAKE_REDIS_PING": "PONG",
             "FAKE_EDGE_FILE": _bash_path(edge_file),
             "FAKE_EDGE_MODE": edge_mode,
             "FAKE_CONFIG_OWNER": config_owner,
@@ -636,11 +637,25 @@ def test_preflight_never_starts_missing_persistent_dependencies(tmp_path: Path) 
 
     assert process.returncode != 0
     assert "not already running and healthy" in process.stderr.lower()
-    assert not any(
-        line.startswith(("postgres:", "minio:"))
-        for line in backup_log.read_text(encoding="utf-8").splitlines()
-    )
+    assert not backup_log.exists()
     commands = docker_log.read_text(encoding="utf-8")
+    assert "require-head --json" not in commands
+    assert " up -d " not in commands
+
+
+def test_preflight_rejects_running_but_unresponsive_redis(tmp_path: Path) -> None:
+    environment, backup_log, docker_log = _activation_environment(tmp_path)
+    environment["ACTIVATION_PREFLIGHT_ONLY"] = "true"
+    environment["FAKE_PERSISTENT_STATE"] = "running:none"
+    environment["FAKE_REDIS_PING"] = "LOADING"
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "redis did not pass" in process.stderr.lower()
+    assert not backup_log.exists()
+    commands = docker_log.read_text(encoding="utf-8")
+    assert "redis-cli ping" in commands
     assert "require-head --json" not in commands
     assert " up -d " not in commands
 

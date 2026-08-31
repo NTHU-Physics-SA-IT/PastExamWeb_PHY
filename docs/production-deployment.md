@@ -178,7 +178,8 @@ It then acquires a host deployment lock and performs:
    `pastexam-nginx` bindings, exact immutable config-mount verification,
    required TLS directives, and Compose-target/listener consistency;
 5. read-only verification that the existing PostgreSQL, Redis, and MinIO
-   containers are already running and healthy; migration probes use
+   containers are already running, followed by functional PostgreSQL readiness,
+   Redis PING, and MinIO authority probes; migration probes use
    `docker compose run --no-deps` so preflight cannot start a missing service;
 6. read-only verification that the application bucket exists and versioning is
    `Enabled`;
@@ -238,7 +239,11 @@ repairs only the compatibility views, and completes the original request
 without rerunning backup or activation. A repeated identical request is a
 status lookup; conflicting reuse is rejected. A systemd-owned worker continues
 after SSH/runner disconnect, and a receipt-finalization retry uses existing
-engine evidence without rerunning backup or activation.
+engine evidence without rerunning backup or activation. During polling, the
+workflow periodically asks the controller to resume; the controller dispatches
+only when the original worker is inactive and either the target ledger is
+already committed or the request is explicitly in the finalization-retry
+phase.
 
 Rollback is a separate manual protected workflow. It accepts only the
 canonical previous exact SHA, requires the database revision to remain

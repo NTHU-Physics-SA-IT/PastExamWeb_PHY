@@ -52,6 +52,7 @@ def config(control, tmp_path: Path):
         mutation_lock=tmp_path / "activation.lock",
         engine_path=tmp_path / "engine",
         systemd_run="systemd-run",
+        systemctl="systemctl",
         internal_health_url="http://127.0.0.1/api/health",
         external_health_url="https://example.invalid/api/health",
         runtime_verification=False,
@@ -420,6 +421,36 @@ def test_runner_disconnect_leaves_durable_dispatched_request(control, config) ->
     assert result["worker_dispatched"] is True
     assert recovered["request_id"] == request.request_id
     assert recovered["state"] in {"PREPARED", "ACTIVATING"}
+
+
+def test_resume_dispatches_only_safe_inactive_finalization_recovery(
+    control, config
+) -> None:
+    store = control.DeploymentStore(config)
+    old = _active(control, config)
+    store.seed_active(old)
+    request = _request(control)
+    store.prepare_request(request, previous_active_sha=old.active_sha)
+    store.transition(request.request_id, "ACTIVATING", phase="engine")
+    calls: list[tuple[str, bool]] = []
+    controller = control.DeploymentController(
+        config,
+        dispatch_worker=lambda request_id, *, rollback=False: calls.append(
+            (request_id, rollback)
+        ),
+    )
+    controller._worker_is_active = lambda _: False
+
+    unchanged = controller.resume(request.request_id)
+    assert unchanged["phase"] == "engine"
+    assert calls == []
+
+    committed = _active(control, config, request.target_sha)
+    control.atomic_write_json(config.active_ledger, control.asdict(committed))
+    recovered = controller.resume(request.request_id)
+
+    assert recovered["worker_dispatched"] is True
+    assert calls == [(request.request_id, False)]
 
 
 def test_candidate_verifier_binds_receipt_source_ci_and_all_image_digests(

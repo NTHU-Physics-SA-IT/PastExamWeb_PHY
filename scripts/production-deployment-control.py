@@ -575,6 +575,7 @@ class DeploymentConfig:
     engine_path: Path = Path("/usr/local/libexec/pastexam-activate-production-release")
     backup_root: Path = Path("/opt/pastexam-backups")
     systemd_run: str = "systemd-run"
+    systemctl: str = "systemctl"
     internal_health_url: str = "http://127.0.0.1:8080/api/health"
     external_health_url: str = "https://physarchive.com/api/health"
     runtime_verification: bool = True
@@ -1058,6 +1059,20 @@ class DeploymentController:
         if process.returncode != 0:
             raise DeploymentError("The host deployment worker could not be dispatched.")
 
+    def _worker_is_active(self, request_id: str) -> bool:
+        unit = f"pastexam-deployment-{request_id}.service"
+        process = subprocess.run(
+            [self.config.systemctl, "is-active", "--quiet", unit],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if process.returncode == 0:
+            return True
+        if process.returncode in {3, 4}:
+            return False
+        raise DeploymentError("The host deployment worker state is unavailable.")
+
     def start(
         self,
         request: RequestContract,
@@ -1175,8 +1190,24 @@ class DeploymentController:
         request = self.store.load_request(request_id)
         if request["state"] in TERMINAL_STATES:
             return request
+        active = self.store.load_active()
+        safe_finalization_recovery = (
+            request["phase"] == "finalization-retry-required"
+            or active.active_sha == request["target_sha"]
+        )
+        if not safe_finalization_recovery or self._worker_is_active(request_id):
+            return request
         rollback = request["operation"] == "rollback"
-        self.dispatch_worker(request_id, rollback=rollback)
+        try:
+            self.dispatch_worker(request_id, rollback=rollback)
+        except DeploymentError as error:
+            self.store.mark_recoverable(
+                request_id,
+                phase="finalization-retry-required",
+                code="worker-redispatch-failed",
+                message=str(error),
+            )
+            raise
         return self.store.mark_worker_dispatched(request_id)
 
     def _engine_evidence_path(self, request_id: str) -> Path:
