@@ -1523,6 +1523,27 @@ describe('AdminView', () => {
     expect(adminTemplateSource).not.toContain("$t('最高等級')")
   })
 
+  it('keeps contributor level settings in a bounded mobile dialog flow', () => {
+    expect(adminTemplateSource).toMatch(
+      /:contentStyle="\{[\s\S]*?minHeight: 0,[\s\S]*?overflow: 'hidden',[\s\S]*?display: 'flex'/
+    )
+    expect(adminViewSource).toMatch(
+      /\.contributor-level-settings-dialog\s*\{[^}]*min-height:\s*0[^}]*overflow:\s*hidden/
+    )
+    expect(adminViewSource).toMatch(
+      /\.contributor-level-settings-list\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*min-height:\s*0[^}]*overflow-y:\s*auto/
+    )
+    expect(adminViewSource).toMatch(
+      /@media \(max-width: 640px\)[\s\S]*?\.contributor-level-settings-row\s*\{[^}]*flex:\s*0 0 auto/
+    )
+    expect(adminViewSource).toMatch(
+      /@media \(max-width: 640px\)[\s\S]*?\.contributor-level-settings-footer\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/
+    )
+    expect(adminViewSource).toMatch(
+      /@media \(max-width: 640px\)[\s\S]*?\.contributor-level-settings-field :deep\(\.p-inputtext\)[\s\S]*?font-size:\s*16px !important/
+    )
+  })
+
   it('keeps the shared mobile action row breakpoint-agnostic for five actions', () => {
     expect(adminViewSource).not.toMatch(/@media\s*\(max-width:\s*337px\)/)
     expect(adminViewSource).toContain('grid-template-columns: repeat(5, minmax(2.5rem, 1fr))')
