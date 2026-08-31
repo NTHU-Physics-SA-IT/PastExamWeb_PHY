@@ -5,6 +5,7 @@ import yaml
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MAIN_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "main.yml"
+BUILD_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "build.yml"
 RELEASE_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "release.yml"
 CONTRIBUTING = REPOSITORY_ROOT / "CONTRIBUTING.md"
 VALIDATION = REPOSITORY_ROOT / "docs" / "development" / "validation.md"
@@ -90,7 +91,7 @@ def test_main_calls_release_only_after_successful_full_ci_gate() -> None:
     assert "github.ref == 'refs/heads/main'" in condition
     assert release["uses"] == "./.github/workflows/release.yml"
     assert release["with"] == {"release_sha": "${{ github.sha }}"}
-    assert release["secrets"] == "inherit"
+    assert "secrets" not in release
     assert release["permissions"] == {
         "contents": "write",
         "issues": "write",
@@ -110,6 +111,19 @@ def test_main_calls_release_only_after_successful_full_ci_gate() -> None:
     assert "vars.AUTO_PREPARE_PRODUCTION_CANDIDATE == 'true'" in source
     assert "vars.PRODUCTION_DEPLOY_ENABLED" not in candidate["if"]
     assert candidate["secrets"] != "inherit"
+
+
+def test_build_and_release_calls_do_not_receive_repository_secrets() -> None:
+    _, workflow = _workflow(MAIN_WORKFLOW)
+
+    for job_name, called_workflow in (
+        ("build", BUILD_WORKFLOW),
+        ("release", RELEASE_WORKFLOW),
+    ):
+        assert "secrets" not in workflow["jobs"][job_name]
+        source, called = _workflow(called_workflow)
+        assert "secrets.GITHUB_TOKEN" in source
+        assert "secrets" not in called["on"]["workflow_call"]
 
 
 def test_governance_documentation_is_main_first_and_branch_decoupled() -> None:

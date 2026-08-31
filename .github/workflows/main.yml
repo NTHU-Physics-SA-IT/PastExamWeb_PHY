@@ -132,7 +132,6 @@ jobs:
         ${{ needs.ci_mode.outputs.ci_mode == 'full' &&
             github.event_name == 'push' &&
             github.ref == 'refs/heads/main' }}
-    secrets: inherit
 
   equivalent_provenance:
     name: Equivalent merge provenance
@@ -403,7 +402,6 @@ jobs:
     uses: ./.github/workflows/release.yml
     with:
       release_sha: ${{ github.sha }}
-    secrets: inherit
 
   image_authority:
     name: Publish production image authority

@@ -18,6 +18,14 @@ HOST_COMMAND = ROOT / "scripts" / "prepare-production-candidate.sh"
 RUNBOOK = ROOT / "docs" / "runbooks" / "production-candidate-preparation.md"
 RECEIPT_MODULE = ROOT / "scripts" / "ci" / "validate_candidate_receipt.py"
 SOURCE_MODULE = ROOT / "scripts" / "ci" / "validate_candidate_source_run.py"
+WORKFLOWS = ROOT / ".github" / "workflows"
+LEGACY_SSH_WORKFLOW = WORKFLOWS / "test-digitalocean-ssh.yml"
+LEGACY_DO_SECRETS = (
+    "DO_HOST",
+    "DO_KNOWN_HOSTS",
+    "DO_SSH_PRIVATE_KEY",
+    "DO_USER",
+)
 
 
 def _yaml(path: Path) -> dict:
@@ -35,6 +43,8 @@ def _load(path: Path, name: str):
 def test_automatic_candidate_control_and_explicit_secrets() -> None:
     job = _yaml(MAIN)["jobs"]["prepare_production_candidate"]
     assert "vars.AUTO_PREPARE_PRODUCTION_CANDIDATE == 'true'" in job["if"]
+    assert "github.event_name == 'push'" in job["if"]
+    assert "github.ref == 'refs/heads/main'" in job["if"]
     assert "PRODUCTION_DEPLOY_ENABLED" not in job["if"]
     assert job["uses"] == "./.github/workflows/deploy.yml"
     assert set(job["secrets"]) == {
@@ -70,6 +80,23 @@ def test_candidate_workflow_has_candidate_only_boundary() -> None:
     assert "secrets: inherit" not in source
     assert "PRODUCTION_DEPLOY_ENABLED" not in source
     assert "activate-production-release" not in source
+
+
+def test_legacy_generic_ssh_and_broad_secret_inheritance_are_absent() -> None:
+    assert not LEGACY_SSH_WORKFLOW.exists()
+    for workflow_path in WORKFLOWS.glob("*.y*ml"):
+        source = workflow_path.read_text(encoding="utf-8")
+        assert "secrets: inherit" not in source
+        for secret_name in LEGACY_DO_SECRETS:
+            assert secret_name not in source
+
+
+def test_activation_stub_has_no_ssh_or_host_activation_authority() -> None:
+    source = ACTIVATE.read_text(encoding="utf-8")
+    assert "vars.PRODUCTION_DEPLOY_ENABLED == 'true'" in source
+    assert "environment: production" in source
+    assert "ssh " not in source
+    assert "Host activation is intentionally not performed" in source
 
 
 def test_candidate_source_has_no_active_service_or_data_mutation() -> None:
