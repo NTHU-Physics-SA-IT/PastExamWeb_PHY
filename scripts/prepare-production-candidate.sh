@@ -204,10 +204,15 @@ prepare_candidate() {
   local staging_root="$releases_root/$release_sha.staging-$run_id"
   local frontend_image="$frontend_repository:frontend-$release_sha@$frontend_digest"
   local backend_image="$backend_repository:backend-$release_sha@$backend_digest"
+  PREPARE_CLEANUP_ARCHIVE="$archive"
+  PREPARE_CLEANUP_STAGING_ROOT="$staging_root"
 
   cleanup_run_artifacts() {
-    rm -f -- "$archive"
-    if [ -e "$staging_root" ]; then rm -rf -- "$staging_root"; fi
+    rm -f -- "$PREPARE_CLEANUP_ARCHIVE"
+    if [ -e "$PREPARE_CLEANUP_STAGING_ROOT" ]; then
+      rm -rf -- "$PREPARE_CLEANUP_STAGING_ROOT"
+    fi
+    unset PREPARE_CLEANUP_ARCHIVE PREPARE_CLEANUP_STAGING_ROOT
   }
   trap cleanup_run_artifacts EXIT
   trap 'exit 130' HUP INT TERM
