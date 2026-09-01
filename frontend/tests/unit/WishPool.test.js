@@ -527,7 +527,9 @@ describe('Wish Pool focused interactions', () => {
     [429, 869, 'honeycomb', 'mobile'],
     [768, 1024, 'honeycomb', 'tablet'],
     [834, 1210, 'honeycomb', 'tablet'],
-    [1024, 768, 'honeycomb', 'tablet'],
+    [1023, 768, 'honeycomb', 'tablet'],
+    [1024, 768, 'honeycomb', 'desktop'],
+    [1025, 768, 'honeycomb', 'desktop'],
     [1440, 900, 'honeycomb', 'desktop'],
   ])(
     'selects the intended responsive contract at %d×%d',

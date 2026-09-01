@@ -165,16 +165,10 @@ not Major Breakpoints.
 
 ### Wish Pool
 
-| Major Class / explicit px range | Current behavior or transition purpose | Owning Feature Breakpoint(s) | Status | Evidence |
-| --- | --- | --- | --- | --- |
-| Phone Portrait / `0–767px` | Native two-dimensional scrolling with the current Phone Portrait interaction branch. | `768px` | KEEP | `frontend/src/utils/wishHoneycombLayout.js`; `frontend/src/components/WishPool.vue` |
-| Tablet Portrait / `768–1023px` | Native two-dimensional scrolling with the current tablet interaction branch. | `768px`, `1024px` | KEEP | `frontend/src/utils/wishHoneycombLayout.js` |
-| Tablet Landscape / `1024px` | Major Class is Tablet Landscape; Wish Pool intentionally remains in its tablet interaction Feature Class. | `1024px` inclusive | KEEP | `frontend/src/utils/wishHoneycombLayout.js` |
-| Tablet Landscape / `1025–1399px` | Panning interaction branch. | above `1024px` | KEEP | `frontend/src/utils/wishHoneycombLayout.js`; `frontend/src/components/WishPool.vue` |
-| Desktop / `>=1400px` | Same panning interaction branch. | above `1024px` | KEEP | `frontend/src/utils/wishHoneycombLayout.js` |
-
-The Wish Pool `1024px` behavior MUST NOT be aligned to the next Feature Class
-without explicit approval and focused interaction verification.
+Wish Pool does not own a viewport Feature Breakpoint for its navigation model.
+Its native-scrolling to camera/panning transition is owned by the measured
+`.wish-pool-stage` width and is registered under the Container Breakpoint
+policy below.
 
 ### Public Courses and Public Course
 
@@ -291,12 +285,26 @@ Important current Container Breakpoints include:
 | `52rem`, `34rem` | Archive filter-grid composition | `frontend/src/views/Archive.vue` |
 | `680px` | Personal Settings display-form composition | `frontend/src/views/PersonalSettings.vue` |
 | `720px` | Wish Pool header/action composition | `frontend/src/components/WishPool.vue` |
+| `1024px` | Wish Pool native-scrolling to camera/panning interaction | `frontend/src/utils/wishHoneycombLayout.js`; `frontend/src/components/WishPool.vue` |
 | `640px` | Notification Center content composition | `frontend/src/components/NotificationCenterModal.vue` |
 | `640px` | User duration chart composition | `frontend/src/components/UserOnlineDurationChart.vue` |
 | `320px` | Archive discussion panel composition | `frontend/src/components/ArchiveDiscussionPanel.vue` |
 | `640px` | Admin insights card composition | `frontend/src/views/Admin.vue` |
 | `1080px` | Homepage slogan management composition | `frontend/src/components/admin/HomepageSloganManagementPanel.vue` |
 | `62rem`, `42rem`, `34rem`, `25rem`, `20rem` | Report section/filter/card composition | `frontend/src/style.css`; `frontend/src/components/admin/ReportManagementPanel.vue` |
+
+For the Wish Pool interaction Container Breakpoint:
+
+- **Owner:** Wish Pool / `.wish-pool-stage`.
+- **Measurement:** `.wish-pool-stage.clientWidth`, supplied through its
+  `ResizeObserver`.
+- **Semantics:** `<1024px` uses native scrolling; `>=1024px` uses
+  camera/panning.
+- **Purpose:** select the interaction model without coupling it to viewport
+  Major Classes or Feature Classes.
+- **Rationale:** camera/panning at an exact measured `1024px` stage width was
+  verified with mouse and proportional touch interaction. No concrete UX value
+  was found for retaining an inclusive one-pixel native-only boundary.
 
 ## Responsive utility authority
 

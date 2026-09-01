@@ -68,7 +68,9 @@ const responsiveViewports = [
   { width: 429, height: 869, interactionMode: 'mobile' },
   { width: 768, height: 1024, interactionMode: 'tablet' },
   { width: 834, height: 1210, interactionMode: 'tablet' },
-  { width: 1024, height: 768, interactionMode: 'tablet' },
+  { width: 1023, height: 768, interactionMode: 'tablet' },
+  { width: 1024, height: 768, interactionMode: 'desktop' },
+  { width: 1025, height: 768, interactionMode: 'desktop' },
   { width: 1440, height: 900, interactionMode: 'desktop' },
 ]
 
@@ -96,7 +98,7 @@ describe('Wish Pool shared honeycomb geometry', () => {
     }
   )
 
-  it.each(responsiveViewports.filter(({ width }) => width <= WISH_TABLET_MAX_WIDTH_PX))(
+  it.each(responsiveViewports.filter(({ width }) => width < WISH_TABLET_MAX_WIDTH_PX))(
     'provides a genuine multi-column native Honeycomb at $width × $height',
     ({ width, height }) => {
       const cells = generateWishHoneycombCells(12, { width, height }, 16, 1729)
@@ -173,7 +175,7 @@ describe('Wish Pool shared honeycomb geometry', () => {
 
   it('derives the native desktop-density width and center capacity from shared geometry', () => {
     for (const viewport of responsiveViewports.filter(
-      ({ width }) => width <= WISH_TABLET_MAX_WIDTH_PX
+      ({ width }) => width < WISH_TABLET_MAX_WIDTH_PX
     )) {
       const geometry = wishHoneycombGeometry(viewport, 16)
       const requiredWidth = wishHoneycombRequiredWidthForCapacity(
@@ -335,10 +337,22 @@ describe('Wish Pool shared honeycomb geometry', () => {
       'mobile'
     )
     expect(wishInteractionMode({ width: WISH_MOBILE_BREAKPOINT_PX, height: 1200 })).toBe('tablet')
-    expect(wishInteractionMode({ width: WISH_TABLET_MAX_WIDTH_PX, height: 700 })).toBe('tablet')
+    expect(wishInteractionMode({ width: WISH_TABLET_MAX_WIDTH_PX - 1, height: 700 })).toBe('tablet')
+    expect(wishInteractionMode({ width: WISH_TABLET_MAX_WIDTH_PX, height: 700 })).toBe('desktop')
     expect(wishInteractionMode({ width: WISH_TABLET_MAX_WIDTH_PX + 1, height: 700 })).toBe(
       'desktop'
     )
+    expect(
+      wishHoneycombGeometry({ width: WISH_TABLET_MAX_WIDTH_PX - 1, height: 700 }, 16)
+        .nativeNavigation
+    ).toBe(true)
+    expect(
+      wishHoneycombGeometry({ width: WISH_TABLET_MAX_WIDTH_PX, height: 700 }, 16).nativeNavigation
+    ).toBe(false)
+    expect(
+      wishHoneycombGeometry({ width: WISH_TABLET_MAX_WIDTH_PX + 1, height: 700 }, 16)
+        .nativeNavigation
+    ).toBe(false)
   })
 })
 

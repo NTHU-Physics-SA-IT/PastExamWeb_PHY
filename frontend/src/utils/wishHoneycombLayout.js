@@ -173,7 +173,7 @@ export function wishHoneycombGeometry(viewport, rootFontSize = 16, layoutMetrics
   const verticalSpacingRem = Number.isFinite(layoutMetrics?.verticalSpacingRem)
     ? layoutMetrics.verticalSpacingRem
     : WISH_CELL_VERTICAL_SPACING_REM
-  const nativeNavigation = normalizedSize.width <= WISH_TABLET_MAX_WIDTH_PX
+  const nativeNavigation = normalizedSize.width < WISH_TABLET_MAX_WIDTH_PX
   const horizontalScale = 1
   const verticalScale = 1
   return {
@@ -236,7 +236,7 @@ function honeycombCell(row, q, viewport, geometry) {
 export function wishInteractionMode(viewport) {
   const { width } = normalizedViewport(viewport)
   if (width < WISH_MOBILE_BREAKPOINT_PX) return 'mobile'
-  if (width <= WISH_TABLET_MAX_WIDTH_PX) return 'tablet'
+  if (width < WISH_TABLET_MAX_WIDTH_PX) return 'tablet'
   return 'desktop'
 }
 
