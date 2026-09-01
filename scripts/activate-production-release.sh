@@ -24,6 +24,25 @@ fi
 : "${HEALTH_CHECK_ATTEMPTS:=10}"
 : "${HEALTH_CHECK_INITIAL_DELAY_SECONDS:=2}"
 : "${HEALTH_CHECK_MAX_DELAY_SECONDS:=10}"
+: "${OBSERVATION_SNAPSHOTS:=3}"
+: "${OBSERVATION_INTERVAL_SECONDS:=300}"
+: "${ACTIVATION_CONTRACT_HELPER:=/usr/local/libexec/pastexam-production-activation-contract.py}"
+: "${POSTGRES_BACKUP_HELPER:=/usr/local/libexec/pastexam-postgres-logical-backup}"
+: "${MINIO_PREFLIGHT_HELPER:=/usr/local/libexec/pastexam-minio-storage-preflight}"
+: "${MINIO_MANIFEST_HELPER:=/usr/local/libexec/pastexam-minio-readonly-manifest}"
+: "${NGINX_IMAGE_OVERRIDE:=/usr/local/libexec/pastexam-nginx-image-override.yml}"
+: "${ACTIVATION_EVIDENCE_PATH:=}"
+: "${ACTIVATION_PREFLIGHT_ONLY:=false}"
+
+activation_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if [ -n "$ACTIVATION_EVIDENCE_PATH" ] && [[ "$ACTIVATION_EVIDENCE_PATH" != /* ]]; then
+  echo "ACTIVATION_EVIDENCE_PATH must be absolute." >&2
+  exit 2
+fi
+if [ "$ACTIVATION_PREFLIGHT_ONLY" != "true" ] && [ "$ACTIVATION_PREFLIGHT_ONLY" != "false" ]; then
+  echo "ACTIVATION_PREFLIGHT_ONLY must be true or false." >&2
+  exit 2
+fi
 
 if [ "$ACTIVATION_CONFIRMATION" != "activate-reviewed-production-release" ]; then
   echo "Production activation confirmation is invalid." >&2
@@ -33,7 +52,9 @@ fi
 for retry_value in \
   "$HEALTH_CHECK_ATTEMPTS" \
   "$HEALTH_CHECK_INITIAL_DELAY_SECONDS" \
-  "$HEALTH_CHECK_MAX_DELAY_SECONDS"
+  "$HEALTH_CHECK_MAX_DELAY_SECONDS" \
+  "$OBSERVATION_SNAPSHOTS" \
+  "$OBSERVATION_INTERVAL_SECONDS"
 do
   if [[ ! "$retry_value" =~ ^[0-9]+$ ]]; then
     echo "Health retry settings must be non-negative integers." >&2
@@ -44,6 +65,56 @@ if [ "$HEALTH_CHECK_ATTEMPTS" -lt 1 ]; then
   echo "HEALTH_CHECK_ATTEMPTS must be at least 1." >&2
   exit 2
 fi
+if [ "$OBSERVATION_SNAPSHOTS" -lt 1 ]; then
+  echo "OBSERVATION_SNAPSHOTS must be at least 1." >&2
+  exit 2
+fi
+
+verify_root_helper() {
+  local helper mode owner_uid
+  helper="$1"
+  if [ ! -f "$helper" ] || [ ! -x "$helper" ]; then
+    echo "A required root-installed activation helper is unavailable." >&2
+    exit 2
+  fi
+  case "$helper/" in
+    "$RELEASE_DIRECTORY/"*)
+      echo "Candidate release code cannot be privileged activation authority." >&2
+      exit 2
+      ;;
+  esac
+  owner_uid="$(stat -c '%u' "$helper")"
+  mode="$(stat -c '%a' "$helper")"
+  if [ "$owner_uid" != "0" ] || (( (8#$mode & 8#022) != 0 )); then
+    echo "Activation helpers must be root-owned and not group/world writable." >&2
+    exit 2
+  fi
+}
+
+verify_root_readonly_file() {
+  local path mode owner_uid
+  path="$1"
+  [ -f "$path" ] || {
+    echo "A required root-installed activation contract is unavailable." >&2
+    exit 2
+  }
+  owner_uid="$(stat -c '%u' "$path")"
+  mode="$(stat -c '%a' "$path")"
+  if [ "$owner_uid" != "0" ] || (( (8#$mode & 8#022) != 0 )); then
+    echo "Activation contracts must be root-owned and not group/world writable." >&2
+    exit 2
+  fi
+}
+
+for helper in \
+  "$ACTIVATION_CONTRACT_HELPER" \
+  "$POSTGRES_BACKUP_HELPER" \
+  "$MINIO_PREFLIGHT_HELPER" \
+  "$MINIO_MANIFEST_HELPER"
+do
+  verify_root_helper "$helper"
+done
+verify_root_readonly_file "$NGINX_IMAGE_OVERRIDE"
 
 for config_file in \
   "$PRODUCTION_COMPOSE_ENV_FILE" \
@@ -108,7 +179,7 @@ if [ "$actual_manifest_sha" != "$RELEASE_MANIFEST_SHA256" ]; then
   exit 2
 fi
 
-contract_helper="$RELEASE_DIRECTORY/scripts/production-activation-contract.py"
+contract_helper="$ACTIVATION_CONTRACT_HELPER"
 release_sha="$(
   python3 "$contract_helper" verify-release \
     --manifest "$RELEASE_MANIFEST" \
@@ -125,10 +196,12 @@ fi
 compose_file="$RELEASE_DIRECTORY/docker/docker-compose.prod.yml"
 compose=(
   docker compose
+  --project-directory "$RELEASE_DIRECTORY"
   --env-file "$PRODUCTION_COMPOSE_ENV_FILE"
   --env-file "$candidate_compose_env"
   --file "$compose_file"
   --file "$PRODUCTION_EDGE_COMPOSE_FILE"
+  --file "$NGINX_IMAGE_OVERRIDE"
 )
 
 export PRODUCTION_BACKEND_ENV_FILE
@@ -148,12 +221,35 @@ python3 "$contract_helper" verify-images \
   --compose-json "$rendered_compose" \
   --manifest "$RELEASE_MANIFEST"
 
+runtime_image_values="$(
+  python3 "$contract_helper" runtime-image-values \
+    --compose-json "$rendered_compose"
+)"
+mapfile -t runtime_image_contract <<<"$runtime_image_values"
+if [ "${#runtime_image_contract[@]}" -ne 3 ]; then
+  echo "Rendered runtime image contract is incomplete." >&2
+  exit 2
+fi
+declare -A expected_runtime_images
+for runtime_image_binding in "${runtime_image_contract[@]}"; do
+  container_name="${runtime_image_binding%%=*}"
+  expected_image="${runtime_image_binding#*=}"
+  if [ -z "$container_name" ] || [ -z "$expected_image" ] || \
+    [ "$container_name" = "$runtime_image_binding" ] || \
+    [ -n "${expected_runtime_images[$container_name]:-}" ]
+  then
+    echo "Rendered runtime image contract is malformed." >&2
+    exit 2
+  fi
+  expected_runtime_images["$container_name"]="$expected_image"
+done
+
 production_values="$(
   python3 "$contract_helper" compose-values \
     --compose-json "$rendered_compose"
 )"
 mapfile -t production_contract <<<"$production_values"
-if [ "${#production_contract[@]}" -ne 6 ]; then
+if [ "${#production_contract[@]}" -ne 7 ]; then
   echo "Rendered production backup contract is incomplete." >&2
   exit 2
 fi
@@ -163,6 +259,7 @@ DATABASE_USER="${production_contract[2]}"
 MINIO_CONTAINER="${production_contract[3]}"
 MINIO_BUCKET_NAME="${production_contract[4]}"
 NGINX_CONTAINER="${production_contract[5]}"
+REDIS_CONTAINER="${production_contract[6]}"
 
 mount_values="$(
   python3 "$contract_helper" mount-values \
@@ -183,35 +280,82 @@ python3 "$contract_helper" verify-ingress \
   --current-ports-json "$current_nginx_ports" \
   --release-directory "$RELEASE_DIRECTORY"
 
-cleanup_contract
-trap - EXIT HUP INT TERM
+for persistent_container in \
+  "$DATABASE_CONTAINER" "$REDIS_CONTAINER" "$MINIO_CONTAINER"
+do
+  persistent_state="$(
+    docker inspect --format \
+      '{{.State.Status}}:{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+      "$persistent_container"
+  )"
+  case "$persistent_state" in
+    running:healthy|running:none) ;;
+    *)
+      echo "A required persistent service is not already running and healthy." >&2
+      exit 2
+      ;;
+  esac
+done
 
+if ! docker exec "$DATABASE_CONTAINER" \
+  pg_isready -U "$DATABASE_USER" -d "$DATABASE_NAME" >/dev/null; then
+  echo "PostgreSQL is not accepting connections for activation preflight." >&2
+  exit 2
+fi
+if [ "$(docker exec "$REDIS_CONTAINER" redis-cli ping)" != "PONG" ]; then
+  echo "Redis did not pass the activation preflight PING." >&2
+  exit 2
+fi
 env -i \
   PATH="$PATH" \
   MINIO_CONTAINER="$MINIO_CONTAINER" \
   MINIO_BUCKET_NAME="$MINIO_BUCKET_NAME" \
-  "$RELEASE_DIRECTORY/scripts/minio-storage-preflight.sh"
+  "$MINIO_PREFLIGHT_HELPER"
 
-env -i \
+migration_report_before="$contract_directory/migration-before.json"
+  "${compose[@]}" run --rm --no-deps migrate python migrate.py require-head --json \
+  >"$migration_report_before"
+database_revision_before="$(
+  python3 "$contract_helper" verify-class-zero --report "$migration_report_before"
+)"
+
+if [ "$ACTIVATION_PREFLIGHT_ONLY" = "true" ]; then
+  printf '{"database_revision":"%s","outcome":"eligible","schema_version":1,"target_sha":"%s"}\n' \
+    "$database_revision_before" "$release_sha"
+  cleanup_contract
+  trap - EXIT HUP INT TERM
+  exit 0
+fi
+
+postgres_backup_output="$(env -i \
   PATH="$PATH" \
   BACKUP_DIRECTORY="$PRODUCTION_BACKUP_DIRECTORY" \
   DATABASE_CONTAINER="$DATABASE_CONTAINER" \
   DATABASE_NAME="$DATABASE_NAME" \
   DATABASE_USER="$DATABASE_USER" \
   APPLICATION_RELEASE_SHA="$release_sha" \
-  "$RELEASE_DIRECTORY/scripts/postgres-logical-backup.sh"
-env -i \
+  "$POSTGRES_BACKUP_HELPER")"
+printf '%s\n' "$postgres_backup_output"
+minio_manifest_output="$(env -i \
   PATH="$PATH" \
   BACKUP_DIRECTORY="$PRODUCTION_BACKUP_DIRECTORY" \
   MINIO_CONTAINER="$MINIO_CONTAINER" \
   MINIO_BUCKET_NAME="$MINIO_BUCKET_NAME" \
-  "$RELEASE_DIRECTORY/scripts/minio-readonly-manifest.sh"
+  "$MINIO_MANIFEST_HELPER")"
+printf '%s\n' "$minio_manifest_output"
 
-"${compose[@]}" run --rm migrate python migrate.py preflight
-"${compose[@]}" run --rm migrate
-"${compose[@]}" run --rm migrate python migrate.py preflight
+migration_report_after="$contract_directory/migration-after.json"
+  "${compose[@]}" run --rm --no-deps migrate python migrate.py require-head --json \
+  >"$migration_report_after"
+database_revision_after="$(
+  python3 "$contract_helper" verify-class-zero --report "$migration_report_after"
+)"
+if [ "$database_revision_before" != "$database_revision_after" ]; then
+  echo "Database revision changed during the Class 0 activation preflight." >&2
+  exit 2
+fi
 
-"${compose[@]}" up -d backend frontend nginx
+"${compose[@]}" up -d --no-deps backend frontend nginx
 
 wait_for_health() {
   local label url attempt delay
@@ -243,9 +387,97 @@ wait_for_health() {
 wait_for_health "Internal" "$INTERNAL_HEALTH_URL"
 wait_for_health "External" "$EXTERNAL_HEALTH_URL"
 
+container_names=(
+  pastexam-nginx
+  pastexam-backend
+  pastexam-frontend
+  pastexam-postgres
+  pastexam-redis
+  pastexam-minio
+)
+declare -A initial_restart_counts
+for container_name in "${container_names[@]}"; do
+  restart_count="$(docker inspect --format '{{.RestartCount}}' "$container_name")"
+  [[ "$restart_count" =~ ^[0-9]+$ ]] || {
+    echo "Container restart evidence is malformed." >&2
+    exit 2
+  }
+  initial_restart_counts["$container_name"]="$restart_count"
+done
+
+critical_error_count=0
+for ((snapshot = 1; snapshot <= OBSERVATION_SNAPSHOTS; snapshot += 1)); do
+  if [ "$snapshot" -gt 1 ]; then
+    sleep "$OBSERVATION_INTERVAL_SECONDS"
+  fi
+  wait_for_health "Observation internal" "$INTERNAL_HEALTH_URL"
+  wait_for_health "Observation external" "$EXTERNAL_HEALTH_URL"
+  test "$(docker exec pastexam-redis redis-cli ping)" = "PONG"
+  env -i \
+    PATH="$PATH" \
+    MINIO_CONTAINER="$MINIO_CONTAINER" \
+    MINIO_BUCKET_NAME="$MINIO_BUCKET_NAME" \
+    "$MINIO_PREFLIGHT_HELPER"
+  for container_name in "${container_names[@]}"; do
+    restart_count="$(docker inspect --format '{{.RestartCount}}' "$container_name")"
+    if [ "$restart_count" != "${initial_restart_counts[$container_name]}" ]; then
+      echo "Container restart count changed during bounded observation." >&2
+      exit 2
+    fi
+  done
+  for container_name in pastexam-nginx pastexam-backend pastexam-frontend; do
+    running_image="$(docker inspect --format '{{.Config.Image}}' "$container_name")"
+    if [ "$running_image" != "${expected_runtime_images[$container_name]}" ]; then
+      echo "Container image authority changed during bounded observation." >&2
+      exit 2
+    fi
+    critical_log_sample="$contract_directory/${container_name}.critical.log"
+    if ! docker logs --since "$activation_started_at" "$container_name" \
+      >"$critical_log_sample" 2>&1
+    then
+      echo "Critical-error observation could not read container logs." >&2
+      exit 2
+    fi
+    observed_critical_count="$(
+      grep -Eic '(^|[^a-z])(panic|fatal|segmentation fault|traceback|unhandled exception|\[emerg\]|\[crit\])([^a-z]|$)' \
+        "$critical_log_sample" || true
+    )"
+    rm -f -- "$critical_log_sample"
+    if [[ ! "$observed_critical_count" =~ ^[0-9]+$ ]]; then
+      echo "Critical-error observation evidence is malformed." >&2
+      exit 2
+    fi
+    critical_error_count=$((critical_error_count + observed_critical_count))
+  done
+  if [ "$critical_error_count" -ne 0 ]; then
+    echo "Critical runtime errors were observed during bounded observation." >&2
+    exit 2
+  fi
+done
+
 activated_marker="$RELEASE_DIRECTORY/.activated"
 temporary_marker="$activated_marker.partial"
 printf '%s\n' "$RELEASE_MANIFEST_SHA256" >"$temporary_marker"
 mv "$temporary_marker" "$activated_marker"
+
+if [ -n "$ACTIVATION_EVIDENCE_PATH" ]; then
+  postgres_metadata="$(printf '%s\n' "$postgres_backup_output" | sed -n 's/^Metadata: //p')"
+  postgres_checksum="$(printf '%s\n' "$postgres_backup_output" | sed -n 's/^Checksum: //p')"
+  minio_manifest="$(printf '%s\n' "$minio_manifest_output" | sed -n 's/^Read-only MinIO manifest: //p')"
+  python3 "$contract_helper" write-engine-evidence \
+    --output "$ACTIVATION_EVIDENCE_PATH" \
+    --target-sha "$release_sha" \
+    --database-revision-before "$database_revision_before" \
+    --database-revision-after "$database_revision_after" \
+    --postgres-metadata "$postgres_metadata" \
+    --postgres-checksum "$postgres_checksum" \
+    --minio-manifest "$minio_manifest" \
+    --observation-snapshots "$OBSERVATION_SNAPSHOTS" \
+    --critical-error-count "$critical_error_count" \
+    --started-at "$activation_started_at"
+fi
+
+cleanup_contract
+trap - EXIT HUP INT TERM
 
 echo "Production release activation completed."

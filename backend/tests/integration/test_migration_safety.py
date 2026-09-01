@@ -591,6 +591,35 @@ def test_head_database_preflight_is_read_only(clean_public_schema: Engine) -> No
         )
 
 
+def test_require_head_is_read_only_at_exact_head(clean_public_schema: Engine) -> None:
+    upgrade()
+    course_id = insert_course(clean_public_schema)
+    before = inspect_database().to_dict()
+
+    assert migrate.main(["require-head", "--json"]) == 0
+
+    assert inspect_database().to_dict() == before
+    with clean_public_schema.connect() as connection:
+        assert (
+            connection.scalar(
+                text("SELECT count(*) FROM courses WHERE id = :course_id"),
+                {"course_id": course_id},
+            )
+            == 1
+        )
+
+
+def test_require_head_rejects_reviewed_nonzero_delta_without_upgrade() -> None:
+    upgrade(PREVIOUS_HEAD_SCHEMA_REVISION)
+    before = inspect_database().to_dict()
+
+    assert migrate.main(["require-head", "--json"]) == 2
+
+    after = inspect_database().to_dict()
+    assert after == before
+    assert after["current_revision"] == PREVIOUS_HEAD_SCHEMA_REVISION
+
+
 def test_head_schema_matches_sqlmodel_autogenerate_contract() -> None:
     upgrade()
 

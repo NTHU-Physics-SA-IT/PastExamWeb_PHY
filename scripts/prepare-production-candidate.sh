@@ -24,6 +24,8 @@ fi
 
 frontend_repository=ghcr.io/nthu-physics-sa-it/pastexam
 backend_repository=ghcr.io/nthu-physics-sa-it/pastexam
+nginx_image=nginx:1.29.2@sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903
+nginx_digest=sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903
 manifest_name=release-manifest.env
 receipt_name=candidate-receipt.json
 receipt_checksum_name=candidate-receipt.sha256
@@ -129,10 +131,12 @@ verify_candidate() {
   test "$(manifest_value "$manifest" release_files_sha256)" = "$release_files_checksum"
   test "$(manifest_value "$manifest" frontend_image_digest)" = "$frontend_digest"
   test "$(manifest_value "$manifest" backend_image_digest)" = "$backend_digest"
+  test "$(manifest_value "$manifest" nginx_image)" = "$nginx_image"
+  test "$(manifest_value "$manifest" nginx_image_digest)" = "$nginx_digest"
   local manifest_checksum
   manifest_checksum="$("${checksum_command[@]}" "$manifest" | cut -d ' ' -f 1)"
 
-  python3 - "$receipt" "$release_sha" "$frontend_digest" "$backend_digest" \
+  python3 - "$receipt" "$release_sha" "$frontend_digest" "$backend_digest" "$nginx_digest" \
     "$source_archive_checksum" "$release_files_checksum" "$manifest_checksum" <<'PY'
 import json
 import pathlib
@@ -141,12 +145,12 @@ import sys
 
 path = pathlib.Path(sys.argv[1])
 data = json.loads(path.read_text(encoding="utf-8"))
-sha, frontend, backend, package, files, manifest = sys.argv[2:]
+sha, frontend, backend, nginx, package, files, manifest = sys.argv[2:]
 expected = {
     "schema_version": 1,
     "kind": "production-candidate-preparation",
     "source_sha": sha,
-    "image_digests": {"frontend": frontend, "backend": backend},
+    "image_digests": {"frontend": frontend, "backend": backend, "nginx": nginx},
     "package_sha256": package,
     "release_files_sha256": files,
     "release_manifest_sha256": manifest,
@@ -172,6 +176,7 @@ PY
     --file "$candidate_root/docker/docker-compose.prod.yml" config --images)"
   printf '%s\n' "$configured_images" | grep -Fxq "$frontend_image"
   printf '%s\n' "$configured_images" | grep -Fxq "$backend_image"
+  printf '%s\n' "$configured_images" | grep -Fxq "$nginx_image"
 }
 
 prepare_candidate() {
@@ -199,10 +204,15 @@ prepare_candidate() {
   local staging_root="$releases_root/$release_sha.staging-$run_id"
   local frontend_image="$frontend_repository:frontend-$release_sha@$frontend_digest"
   local backend_image="$backend_repository:backend-$release_sha@$backend_digest"
+  PREPARE_CLEANUP_ARCHIVE="$archive"
+  PREPARE_CLEANUP_STAGING_ROOT="$staging_root"
 
   cleanup_run_artifacts() {
-    rm -f -- "$archive"
-    if [ -e "$staging_root" ]; then rm -rf -- "$staging_root"; fi
+    rm -f -- "$PREPARE_CLEANUP_ARCHIVE"
+    if [ -e "$PREPARE_CLEANUP_STAGING_ROOT" ]; then
+      rm -rf -- "$PREPARE_CLEANUP_STAGING_ROOT"
+    fi
+    unset PREPARE_CLEANUP_ARCHIVE PREPARE_CLEANUP_STAGING_ROOT
   }
   trap cleanup_run_artifacts EXIT
   trap 'exit 130' HUP INT TERM
@@ -262,6 +272,8 @@ frontend_image=$frontend_image
 frontend_image_digest=$frontend_digest
 backend_image=$backend_image
 backend_image_digest=$backend_digest
+nginx_image=$nginx_image
+nginx_image_digest=$nginx_digest
 created_at=$created_at
 source_archive_sha256=$source_archive_checksum
 release_files_sha256=$release_files_checksum
@@ -271,14 +283,14 @@ EOF
 
   python3 - "$staging_root/$receipt_name" "$release_sha" "$run_id" \
     "$run_attempt" "$source_ci_run_id" "$source_ci_run_attempt" \
-    "$created_at" "$frontend_digest" "$backend_digest" \
+    "$created_at" "$frontend_digest" "$backend_digest" "$nginx_digest" \
     "$source_archive_checksum" "$release_files_checksum" "$manifest_checksum" <<'PY'
 import json
 import pathlib
 import sys
 
 (path, sha, run_id, run_attempt, source_run, source_attempt, prepared_at,
- frontend, backend, package, files, manifest) = sys.argv[1:]
+ frontend, backend, nginx, package, files, manifest) = sys.argv[1:]
 receipt = {
     "schema_version": 1,
     "kind": "production-candidate-preparation",
@@ -288,7 +300,7 @@ receipt = {
     "source_ci_run_id": int(source_run),
     "source_ci_run_attempt": int(source_attempt),
     "prepared_at": prepared_at,
-    "image_digests": {"frontend": frontend, "backend": backend},
+    "image_digests": {"frontend": frontend, "backend": backend, "nginx": nginx},
     "package_sha256": package,
     "release_files_sha256": files,
     "release_manifest_sha256": manifest,

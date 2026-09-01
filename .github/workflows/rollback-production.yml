@@ -1,10 +1,10 @@
-name: Activate reviewed production release
+name: Roll back reviewed production release
 
 on:
   workflow_dispatch:
     inputs:
       target_sha:
-        description: Exact current main SHA to activate
+        description: Exact retained previous production SHA
         required: true
         type: string
 
@@ -20,30 +20,27 @@ jobs:
   authority:
     runs-on: ubuntu-latest
     outputs:
-      release_sha: ${{ steps.full.outputs.release_sha }}
       source_ci_run_id: ${{ steps.full.outputs.source_ci_run_id }}
       source_ci_run_attempt: ${{ steps.full.outputs.source_ci_run_attempt }}
-      candidate_receipt_sha256: ${{ steps.artifacts.outputs.candidate_receipt_sha256 }}
-      release_manifest_sha256: ${{ steps.artifacts.outputs.release_manifest_sha256 }}
+      manifest_sha256: ${{ steps.artifacts.outputs.release_manifest_sha256 }}
+      receipt_sha256: ${{ steps.artifacts.outputs.candidate_receipt_sha256 }}
     steps:
-      - name: Checkout the exact requested main authority
+      - name: Checkout current protected workflow source
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: ${{ inputs.target_sha }}
 
-      - name: Require workflow source and target to be exact current main
+      - name: Require current main workflow authority
         env:
           TARGET_SHA: ${{ inputs.target_sha }}
         run: |
           set -euo pipefail
           [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
           test "$GITHUB_REF" = refs/heads/main
-          test "$GITHUB_SHA" = "$TARGET_SHA"
           git fetch --no-tags origin main
-          test "$(git rev-parse origin/main)" = "$TARGET_SHA"
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
 
-      - name: Resolve authoritative exact-SHA Main Full
+      - name: Resolve target's authoritative Main Full
         id: full
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -53,7 +50,7 @@ jobs:
             --release-sha '${{ inputs.target_sha }}' \
             --output "$GITHUB_OUTPUT"
 
-      - name: Download exact Full image authority
+      - name: Download target image authority
         uses: actions/download-artifact@v7
         with:
           name: production-image-authority-${{ inputs.target_sha }}
@@ -62,7 +59,7 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ steps.full.outputs.source_ci_run_id }}
 
-      - name: Download exact candidate receipt
+      - name: Download target candidate receipt
         uses: actions/download-artifact@v7
         with:
           name: production-candidate-receipt-${{ inputs.target_sha }}
@@ -71,45 +68,36 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ steps.full.outputs.source_ci_run_id }}
 
-      - name: Bind candidate, image, and Full authority
+      - name: Bind rollback target artifacts
         id: artifacts
         run: |
+          git show '${{ inputs.target_sha }}:docker/docker-compose.prod.yml' \
+            >"$RUNNER_TEMP/rollback-target-compose.yml"
           python3 scripts/ci/validate_activation_authority.py \
             --receipt "$RUNNER_TEMP/candidate-receipt/candidate-receipt.json" \
             --image-authority "$RUNNER_TEMP/image-authority/production-image-authority.env" \
             --release-sha '${{ inputs.target_sha }}' \
             --source-ci-run-id '${{ steps.full.outputs.source_ci_run_id }}' \
             --source-ci-run-attempt '${{ steps.full.outputs.source_ci_run_attempt }}' \
+            --legacy-nginx-compose "$RUNNER_TEMP/rollback-target-compose.yml" \
             --output "$GITHUB_OUTPUT"
 
-  activate:
+  rollback:
     needs: authority
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 30
     steps:
-      - name: Checkout approved exact source
+      - name: Checkout current protected workflow source
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: ${{ needs.authority.outputs.release_sha }}
 
-      - name: Re-lock current main and Main Full after approval
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TARGET_SHA: ${{ needs.authority.outputs.release_sha }}
+      - name: Re-lock current main after approval
         run: |
           set -euo pipefail
           git fetch --no-tags origin main
-          test "$(git rev-parse origin/main)" = "$TARGET_SHA"
-          authority="$RUNNER_TEMP/fresh-main-full.env"
-          python3 scripts/ci/validate_candidate_source_run.py \
-            --repository "$GITHUB_REPOSITORY" --release-sha "$TARGET_SHA" \
-            --output "$authority"
-          test '${{ needs.authority.outputs.source_ci_run_id }}' = \
-            "$(sed -n 's/^source_ci_run_id=//p' "$authority")"
-          test '${{ needs.authority.outputs.source_ci_run_attempt }}' = \
-            "$(sed -n 's/^source_ci_run_attempt=//p' "$authority")"
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
 
       - name: Configure restricted production SSH identity
         env:
@@ -125,16 +113,16 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
           ssh-keygen -F "$ACTIVATION_HOST" -f ~/.ssh/known_hosts >/dev/null
 
-      - name: Recheck host authority and start exactly once
+      - name: Execute one explicit DB-safe rollback request
         env:
           ACTIVATION_HOST: ${{ secrets.PRODUCTION_ACTIVATION_HOST }}
           ACTIVATION_USER: ${{ secrets.PRODUCTION_ACTIVATION_USER }}
-          TARGET_SHA: ${{ needs.authority.outputs.release_sha }}
+          TARGET_SHA: ${{ inputs.target_sha }}
           SOURCE_RUN: ${{ needs.authority.outputs.source_ci_run_id }}
           SOURCE_ATTEMPT: ${{ needs.authority.outputs.source_ci_run_attempt }}
-          EXPECTED_MANIFEST: ${{ needs.authority.outputs.release_manifest_sha256 }}
-          EXPECTED_RECEIPT: ${{ needs.authority.outputs.candidate_receipt_sha256 }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXPECTED_MANIFEST: ${{ needs.authority.outputs.manifest_sha256 }}
+          EXPECTED_RECEIPT: ${{ needs.authority.outputs.receipt_sha256 }}
+          CURRENT_MAIN_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           ssh_command=(ssh -i ~/.ssh/pastexam-activate -o IdentitiesOnly=yes \
@@ -142,9 +130,9 @@ jobs:
             "$ACTIVATION_USER@$ACTIVATION_HOST")
           "${ssh_command[@]}" status >"$RUNNER_TEMP/production-status.json"
           "${ssh_command[@]}" \
-            "preflight $TARGET_SHA $SOURCE_RUN $SOURCE_ATTEMPT" \
-            >"$RUNNER_TEMP/production-preflight.json"
-          python3 - "$RUNNER_TEMP/production-preflight.json" \
+            "rollback-preflight $TARGET_SHA $SOURCE_RUN $SOURCE_ATTEMPT" \
+            >"$RUNNER_TEMP/rollback-preflight.json"
+          python3 - "$RUNNER_TEMP/rollback-preflight.json" \
             "$TARGET_SHA" "$EXPECTED_MANIFEST" "$EXPECTED_RECEIPT" <<'PY'
           import json, pathlib, sys
           data = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
@@ -152,26 +140,18 @@ jobs:
               "target_sha": sys.argv[2],
               "manifest_sha256": sys.argv[3],
               "candidate_receipt_sha256": sys.argv[4],
-              "outcome": "eligible",
+              "outcome": "rollback-eligible",
           }
           if any(data.get(key) != value for key, value in expected.items()):
-              raise SystemExit("Host preflight authority disagrees.")
+              raise SystemExit("Host rollback authority disagrees.")
           PY
-          request_id="activation-$GITHUB_RUN_ID"
-          state="$RUNNER_TEMP/deployment-state.json"
+          request_id="rollback-$GITHUB_RUN_ID"
+          state="$RUNNER_TEMP/rollback-state.json"
           if ! "${ssh_command[@]}" "request-status $request_id" >"$state" 2>/dev/null; then
             git fetch --no-tags origin main
-            test "$(git rev-parse origin/main)" = "$TARGET_SHA"
-            immediate_authority="$RUNNER_TEMP/immediate-main-full.env"
-            python3 scripts/ci/validate_candidate_source_run.py \
-              --repository "$GITHUB_REPOSITORY" --release-sha "$TARGET_SHA" \
-              --output "$immediate_authority"
-            test "$SOURCE_RUN" = \
-              "$(sed -n 's/^source_ci_run_id=//p' "$immediate_authority")"
-            test "$SOURCE_ATTEMPT" = \
-              "$(sed -n 's/^source_ci_run_attempt=//p' "$immediate_authority")"
+            test "$(git rev-parse origin/main)" = "$CURRENT_MAIN_SHA"
             "${ssh_command[@]}" \
-              "start $TARGET_SHA $request_id $SOURCE_RUN $SOURCE_ATTEMPT $GITHUB_RUN_ID $GITHUB_RUN_ATTEMPT" \
+              "rollback-start $TARGET_SHA $request_id $SOURCE_RUN $SOURCE_ATTEMPT $GITHUB_RUN_ID $GITHUB_RUN_ATTEMPT" \
               >"$state"
           fi
           poll_count=0
@@ -185,9 +165,9 @@ jobs:
           PY
           )
             case "$status" in
-              ACTIVE) break ;;
-              FAILED|ROLLED_BACK)
-                echo "Production activation reached terminal state $status." >&2
+              ROLLED_BACK) break ;;
+              ACTIVE|FAILED)
+                echo "Production rollback reached terminal state $status." >&2
                 exit 2
                 ;;
             esac
@@ -197,14 +177,14 @@ jobs:
             fi
             sleep 10
           done
-          test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["state"])' "$state")" = ACTIVE
-          "${ssh_command[@]}" "receipt $request_id" >"$RUNNER_TEMP/production-deployment-receipt.json"
+          test "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["state"])' "$state")" = ROLLED_BACK
+          "${ssh_command[@]}" "receipt $request_id" >"$RUNNER_TEMP/production-rollback-receipt.json"
 
-      - name: Upload durable production deployment receipt
+      - name: Upload durable production rollback receipt
         uses: actions/upload-artifact@v6
         with:
-          name: production-deployment-receipt-${{ needs.authority.outputs.release_sha }}
-          path: ${{ runner.temp }}/production-deployment-receipt.json
+          name: production-rollback-receipt-${{ inputs.target_sha }}
+          path: ${{ runner.temp }}/production-rollback-receipt.json
           if-no-files-found: error
           retention-days: 365
 

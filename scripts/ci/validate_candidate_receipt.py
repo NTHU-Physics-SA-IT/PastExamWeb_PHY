@@ -41,6 +41,7 @@ def validate_receipt(data: object, expected: dict[str, str]) -> None:
         "image_digests": {
             "frontend": expected["frontend_digest"],
             "backend": expected["backend_digest"],
+            "nginx": expected["nginx_digest"],
         },
         "package_sha256": expected["source_archive_sha256"],
         "release_files_sha256": expected["release_files_sha256"],
@@ -73,6 +74,7 @@ def main() -> int:
     parser.add_argument("--release-sha", required=True)
     parser.add_argument("--frontend-digest", required=True)
     parser.add_argument("--backend-digest", required=True)
+    parser.add_argument("--nginx-digest", required=True)
     parser.add_argument("--source-archive-sha256", required=True)
     parser.add_argument("--release-files-sha256", required=True)
     args = parser.parse_args()
@@ -83,6 +85,7 @@ def main() -> int:
             "release_sha": args.release_sha,
             "frontend_digest": args.frontend_digest,
             "backend_digest": args.backend_digest,
+            "nginx_digest": args.nginx_digest,
             "source_archive_sha256": args.source_archive_sha256,
             "release_files_sha256": args.release_files_sha256,
         },

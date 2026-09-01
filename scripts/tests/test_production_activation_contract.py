@@ -20,6 +20,7 @@ TEST_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "test.yml"
 RELEASE_SHA = "19782580b710924d8ccdb939600be72ecd44d303"
 FRONTEND_IMAGE = f"ghcr.io/example/pastexam:frontend-{RELEASE_SHA}@sha256:{'1' * 64}"
 BACKEND_IMAGE = f"ghcr.io/example/pastexam:backend-{RELEASE_SHA}@sha256:{'2' * 64}"
+NGINX_IMAGE = "nginx:1.29.2@sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903"
 
 
 def _bash() -> Path:
@@ -112,7 +113,11 @@ def _compose_contract(
                 },
             },
             "frontend": {"image": FRONTEND_IMAGE, "networks": {"app_network": {}}},
-            "migrate": {"image": BACKEND_IMAGE, "networks": {"app_network": {}}},
+            "migrate": {
+                "image": BACKEND_IMAGE,
+                "command": ["python", "migrate.py", "upgrade"],
+                "networks": {"app_network": {}},
+            },
             "db": {
                 "container_name": "pastexam-postgres",
                 "environment": {
@@ -123,10 +128,15 @@ def _compose_contract(
             },
             "minio": {
                 "container_name": "pastexam-minio",
+                "command": ["server", "/data", "--console-address", ":9001"],
                 "networks": {"app_network": {}},
             },
-            "redis": {"networks": {"app_network": {}}},
+            "redis": {
+                "container_name": "pastexam-redis",
+                "networks": {"app_network": {}},
+            },
             "nginx": {
+                "image": NGINX_IMAGE,
                 "container_name": "pastexam-nginx",
                 "networks": {
                     "app_network": {},
@@ -181,12 +191,16 @@ def _activation_environment(
     config_owner: str = "0",
     tls_mode: str = "600",
     tls_owner: str = "0",
+    migration_revision: str = "9f1c2a7e4b63",
+    repository_head: str = "9f1c2a7e4b63",
 ) -> tuple[dict[str, str], Path, Path]:
     release = tmp_path / RELEASE_SHA
     scripts = release / "scripts"
+    host_helpers = tmp_path / "host-helpers"
     proxy = release / "proxy"
     docker_dir = release / "docker"
     scripts.mkdir(parents=True)
+    host_helpers.mkdir()
     proxy.mkdir()
     docker_dir.mkdir()
 
@@ -200,7 +214,9 @@ def _activation_environment(
     manifest.write_text(
         f"release_sha={RELEASE_SHA}\n"
         f"frontend_image={FRONTEND_IMAGE}\n"
-        f"backend_image={BACKEND_IMAGE}\n",
+        f"backend_image={BACKEND_IMAGE}\n"
+        f"nginx_image={NGINX_IMAGE}\n"
+        "nginx_image_digest=sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903\n",
         encoding="utf-8",
     )
     (release / "compose.prod.env").write_text(
@@ -223,11 +239,17 @@ def _activation_environment(
         encoding="utf-8",
     )
     if CONTRACT_HELPER.exists():
-        shutil.copy2(CONTRACT_HELPER, scripts / CONTRACT_HELPER.name)
+        shutil.copy2(CONTRACT_HELPER, host_helpers / CONTRACT_HELPER.name)
+        (host_helpers / CONTRACT_HELPER.name).chmod(0o755)
+    nginx_override = host_helpers / "pastexam-nginx-image-override.yml"
+    nginx_override.write_text(
+        "services:\n  nginx:\n    image: nginx:1.29.2@sha256:" + "0" * 64 + "\n",
+        encoding="utf-8",
+    )
 
     backup_log = tmp_path / "backup-contract.log"
     _write_executable(
-        scripts / "postgres-logical-backup.sh",
+        host_helpers / "postgres-logical-backup.sh",
         "#!/usr/bin/env bash\n"
         "set -eu\n"
         f"printf 'postgres:%s:%s:%s:%s\\n' \"$BACKUP_DIRECTORY\" "
@@ -236,7 +258,7 @@ def _activation_environment(
         f"exit {postgres_exit}\n",
     )
     _write_executable(
-        scripts / "minio-readonly-manifest.sh",
+        host_helpers / "minio-readonly-manifest.sh",
         "#!/usr/bin/env bash\n"
         "set -eu\n"
         f"printf 'minio:%s:%s:%s\\n' \"$BACKUP_DIRECTORY\" "
@@ -244,7 +266,7 @@ def _activation_environment(
         f">>'{_bash_path(backup_log)}'\n",
     )
     _write_executable(
-        scripts / STORAGE_PREFLIGHT.name,
+        host_helpers / STORAGE_PREFLIGHT.name,
         "#!/usr/bin/env bash\n"
         "set -eu\n"
         f"printf 'preflight:%s:%s\n' \"$MINIO_CONTAINER\" "
@@ -252,11 +274,12 @@ def _activation_environment(
         f"exit {storage_preflight_exit}\n",
     )
 
+    resolved_compose = compose_contract or _compose_contract(
+        release, certificate, certificate_key
+    )
     compose_json = tmp_path / "compose.json"
     compose_json.write_text(
-        json.dumps(
-            compose_contract or _compose_contract(release, certificate, certificate_key)
-        ),
+        json.dumps(resolved_compose),
         encoding="utf-8",
     )
     ports_json = tmp_path / "current-ports.json"
@@ -273,6 +296,22 @@ def _activation_environment(
         ),
         encoding="utf-8",
     )
+    migration_report = tmp_path / "migration-report.json"
+    migration_report.write_text(
+        json.dumps(
+            {
+                "database_connected": True,
+                "current_revision": migration_revision,
+                "current_revision_known": True,
+                "repository_heads": [repository_head],
+                "multiple_heads": False,
+                "schema_matches_head": True,
+                "upgrade_allowed": True,
+                "errors": [],
+            }
+        ),
+        encoding="utf-8",
+    )
     docker_log = tmp_path / "docker.log"
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -283,6 +322,22 @@ def _activation_environment(
         'printf \'%s\\n\' "$*" >>"$FAKE_DOCKER_LOG"\n'
         "if [[ \"$1\" == 'compose' && \"$*\" == *'config --format json'* ]]; then\n"
         '  cat "$FAKE_COMPOSE_JSON"\n'
+        "elif [[ \"$1\" == 'compose' && \"$*\" == *'require-head --json'* ]]; then\n"
+        '  cat "$FAKE_MIGRATION_REPORT"\n'
+        "elif [[ \"$1\" == 'exec' && \"$*\" == *'redis-cli ping'* ]]; then\n"
+        "  printf '%s\\n' \"$FAKE_REDIS_PING\"\n"
+        "elif [[ \"$1\" == 'inspect' && \"$*\" == *'RestartCount'* ]]; then\n"
+        "  printf '0\\n'\n"
+        "elif [[ \"$1\" == 'inspect' && \"$*\" == *'Config.Image'* ]]; then\n"
+        '  case "${@: -1}" in\n'
+        "    pastexam-nginx) printf '%s\\n' \"$FAKE_NGINX_IMAGE\" ;;\n"
+        "    pastexam-backend) printf '%s\\n' \"$FAKE_BACKEND_IMAGE\" ;;\n"
+        "    pastexam-frontend) printf '%s\\n' \"$FAKE_FRONTEND_IMAGE\" ;;\n"
+        "  esac\n"
+        "elif [[ \"$1\" == 'inspect' && \"$*\" == *'State.Status'* ]]; then\n"
+        "  printf '%s\\n' \"$FAKE_PERSISTENT_STATE\"\n"
+        "elif [[ \"$1\" == 'logs' ]]; then\n"
+        "  printf '%s' \"$FAKE_CRITICAL_LOG\"\n"
         "elif [[ \"$1\" == 'inspect' ]]; then\n"
         '  cat "$FAKE_CURRENT_PORTS_JSON"\n'
         "fi\n",
@@ -321,12 +376,29 @@ def _activation_environment(
         '  printf \'%s\\n\' "$*" >>"$FAKE_DOCKER_LOG"\n'
         "  if [[ \"$1\" == 'compose' && \"$*\" == *'config --format json'* ]]; then\n"
         '    cat "$FAKE_COMPOSE_JSON"\n'
+        "  elif [[ \"$1\" == 'compose' && \"$*\" == *'require-head --json'* ]]; then\n"
+        '    cat "$FAKE_MIGRATION_REPORT"\n'
+        "  elif [[ \"$1\" == 'exec' && \"$*\" == *'redis-cli ping'* ]]; then\n"
+        "    printf '%s\\n' \"$FAKE_REDIS_PING\"\n"
+        "  elif [[ \"$1\" == 'inspect' && \"$*\" == *'RestartCount'* ]]; then\n"
+        "    printf '0\\n'\n"
+        "  elif [[ \"$1\" == 'inspect' && \"$*\" == *'Config.Image'* ]]; then\n"
+        '    case "${@: -1}" in\n'
+        "      pastexam-nginx) printf '%s\\n' \"$FAKE_NGINX_IMAGE\" ;;\n"
+        "      pastexam-backend) printf '%s\\n' \"$FAKE_BACKEND_IMAGE\" ;;\n"
+        "      pastexam-frontend) printf '%s\\n' \"$FAKE_FRONTEND_IMAGE\" ;;\n"
+        "    esac\n"
+        "  elif [[ \"$1\" == 'inspect' && \"$*\" == *'State.Status'* ]]; then\n"
+        "    printf '%s\\n' \"$FAKE_PERSISTENT_STATE\"\n"
+        "  elif [[ \"$1\" == 'logs' ]]; then\n"
+        "    printf '%s' \"$FAKE_CRITICAL_LOG\"\n"
         "  elif [[ \"$1\" == 'inspect' ]]; then\n"
         '    cat "$FAKE_CURRENT_PORTS_JSON"\n'
         "  fi\n"
         "}\n"
         "curl() { return 0; }\n"
         "flock() { return 0; }\n"
+        "sleep() { return 0; }\n"
         f"python3() {{ '{_bash_path(Path(sys.executable))}' \"$@\"; }}\n",
         encoding="utf-8",
     )
@@ -360,9 +432,29 @@ def _activation_environment(
             "HEALTH_CHECK_ATTEMPTS": "3",
             "HEALTH_CHECK_INITIAL_DELAY_SECONDS": "0",
             "HEALTH_CHECK_MAX_DELAY_SECONDS": "0",
+            "OBSERVATION_SNAPSHOTS": "1",
+            "OBSERVATION_INTERVAL_SECONDS": "0",
+            "ACTIVATION_CONTRACT_HELPER": _bash_path(
+                host_helpers / CONTRACT_HELPER.name
+            ),
+            "POSTGRES_BACKUP_HELPER": _bash_path(
+                host_helpers / "postgres-logical-backup.sh"
+            ),
+            "MINIO_PREFLIGHT_HELPER": _bash_path(host_helpers / STORAGE_PREFLIGHT.name),
+            "MINIO_MANIFEST_HELPER": _bash_path(
+                host_helpers / "minio-readonly-manifest.sh"
+            ),
+            "NGINX_IMAGE_OVERRIDE": _bash_path(nginx_override),
             "FAKE_COMPOSE_JSON": _bash_path(compose_json),
             "FAKE_CURRENT_PORTS_JSON": _bash_path(ports_json),
+            "FAKE_MIGRATION_REPORT": _bash_path(migration_report),
             "FAKE_DOCKER_LOG": _bash_path(docker_log),
+            "FAKE_NGINX_IMAGE": resolved_compose["services"]["nginx"]["image"],
+            "FAKE_BACKEND_IMAGE": resolved_compose["services"]["backend"]["image"],
+            "FAKE_FRONTEND_IMAGE": resolved_compose["services"]["frontend"]["image"],
+            "FAKE_CRITICAL_LOG": "",
+            "FAKE_PERSISTENT_STATE": "running:healthy",
+            "FAKE_REDIS_PING": "PONG",
             "FAKE_EDGE_FILE": _bash_path(edge_file),
             "FAKE_EDGE_MODE": edge_mode,
             "FAKE_CONFIG_OWNER": config_owner,
@@ -377,6 +469,7 @@ def _activation_environment(
         "DATABASE_USER",
         "MINIO_CONTAINER",
         "MINIO_BUCKET_NAME",
+        "REDIS_CONTAINER",
     ):
         environment.pop(inherited, None)
     return environment, backup_log, docker_log
@@ -447,6 +540,7 @@ def test_activation_supplies_all_backup_contract_inputs(tmp_path: Path) -> None:
             f"{environment['PRODUCTION_BACKUP_DIRECTORY']}:"
             "pastexam-minio:exam-archive"
         ),
+        "preflight:pastexam-minio:exam-archive",
     ]
 
 
@@ -531,7 +625,39 @@ def test_storage_preflight_failure_stops_before_backup_or_migration(
     assert backup_log.read_text(encoding="utf-8").splitlines() == [
         "preflight:pastexam-minio:exam-archive"
     ]
-    assert "run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+    assert "require-head --json" not in docker_log.read_text(encoding="utf-8")
+
+
+def test_preflight_never_starts_missing_persistent_dependencies(tmp_path: Path) -> None:
+    environment, backup_log, docker_log = _activation_environment(tmp_path)
+    environment["ACTIVATION_PREFLIGHT_ONLY"] = "true"
+    environment["FAKE_PERSISTENT_STATE"] = "exited:none"
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "not already running and healthy" in process.stderr.lower()
+    assert not backup_log.exists()
+    commands = docker_log.read_text(encoding="utf-8")
+    assert "require-head --json" not in commands
+    assert " up -d " not in commands
+
+
+def test_preflight_rejects_running_but_unresponsive_redis(tmp_path: Path) -> None:
+    environment, backup_log, docker_log = _activation_environment(tmp_path)
+    environment["ACTIVATION_PREFLIGHT_ONLY"] = "true"
+    environment["FAKE_PERSISTENT_STATE"] = "running:none"
+    environment["FAKE_REDIS_PING"] = "LOADING"
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "redis did not pass" in process.stderr.lower()
+    assert not backup_log.exists()
+    commands = docker_log.read_text(encoding="utf-8")
+    assert "redis-cli ping" in commands
+    assert "require-head --json" not in commands
+    assert " up -d " not in commands
 
 
 @pytest.mark.parametrize("service", ["frontend", "backend", "migrate"])
@@ -552,7 +678,7 @@ def test_rendered_image_mismatch_fails_before_backup(
     assert process.returncode != 0
     assert "images disagree" in process.stderr
     assert not backup_log.exists()
-    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+    assert "require-head --json" not in docker_log.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -573,9 +699,7 @@ def test_unsafe_or_mismatched_uvicorn_proxy_trust_fails_before_backup(
         tmp_path / "origin.pem",
         tmp_path / "origin-key.pem",
     )
-    contract["services"]["backend"]["environment"][
-        "FORWARDED_ALLOW_IPS"
-    ] = trusted_peer
+    contract["services"]["backend"]["environment"]["FORWARDED_ALLOW_IPS"] = trusted_peer
     contract["services"]["nginx"]["networks"]["trusted_proxy_network"][
         "ipv4_address"
     ] = nginx_address
@@ -589,7 +713,7 @@ def test_unsafe_or_mismatched_uvicorn_proxy_trust_fails_before_backup(
     assert process.returncode != 0
     assert "proxy trust" in process.stderr.lower()
     assert not backup_log.exists()
-    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+    assert "require-head --json" not in docker_log.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -605,9 +729,9 @@ def test_unreserved_nginx_proxy_address_fails_before_backup(
         tmp_path / "origin.pem",
         tmp_path / "origin-key.pem",
     )
-    contract["services"]["backend"]["environment"][
-        "FORWARDED_ALLOW_IPS"
-    ] = nginx_address
+    contract["services"]["backend"]["environment"]["FORWARDED_ALLOW_IPS"] = (
+        nginx_address
+    )
     contract["services"]["nginx"]["networks"]["trusted_proxy_network"][
         "ipv4_address"
     ] = nginx_address
@@ -621,7 +745,7 @@ def test_unreserved_nginx_proxy_address_fails_before_backup(
     assert process.returncode != 0
     assert "proxy" in process.stderr.lower() or "ipam" in process.stderr.lower()
     assert not backup_log.exists()
-    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+    assert "require-head --json" not in docker_log.read_text(encoding="utf-8")
 
 
 def test_dynamic_range_cannot_include_static_nginx_peer(tmp_path: Path) -> None:
@@ -631,9 +755,9 @@ def test_dynamic_range_cannot_include_static_nginx_peer(tmp_path: Path) -> None:
         tmp_path / "origin.pem",
         tmp_path / "origin-key.pem",
     )
-    contract["networks"]["trusted_proxy_network"]["ipam"]["config"][0][
-        "ip_range"
-    ] = "172.30.0.2/31"
+    contract["networks"]["trusted_proxy_network"]["ipam"]["config"][0]["ip_range"] = (
+        "172.30.0.2/31"
+    )
     environment, backup_log, docker_log = _activation_environment(
         tmp_path,
         compose_contract=contract,
@@ -644,7 +768,7 @@ def test_dynamic_range_cannot_include_static_nginx_peer(tmp_path: Path) -> None:
     assert process.returncode != 0
     assert "reserved" in process.stderr.lower()
     assert not backup_log.exists()
-    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+    assert "require-head --json" not in docker_log.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
@@ -669,19 +793,89 @@ def test_unrelated_service_cannot_join_trusted_proxy_network(
     process = _activate(environment)
 
     assert process.returncode != 0
-    assert "unrelated service" in process.stderr.lower()
+    assert (
+        "unrelated service" in process.stderr.lower()
+        or "reviewed production set" in process.stderr.lower()
+    )
     assert not backup_log.exists()
-    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+    assert "require-head --json" not in docker_log.read_text(encoding="utf-8")
 
 
-def test_health_retries_initial_connection_failure_then_succeeds(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("service_name", "field", "value"),
+    [
+        ("backend", "privileged", True),
+        ("backend", "network_mode", "host"),
+        ("backend", "pid", "host"),
+        ("backend", "devices", ["/dev/sda:/dev/sda"]),
+        ("backend", "cap_add", ["SYS_ADMIN"]),
+        ("backend", "entrypoint", ["/bin/sh"]),
+        ("backend", "security_opt", ["apparmor=unconfined"]),
+        ("backend", "user", "root"),
+        ("backend", "volumes_from", ["pastexam-postgres"]),
+        ("backend", "secrets", [{"source": "host-secret"}]),
+    ],
+)
+def test_rendered_compose_privilege_expansion_fails_before_backup(
+    tmp_path: Path, service_name: str, field: str, value: object
+) -> None:
+    release = tmp_path / RELEASE_SHA
+    certificate = tmp_path / "origin.pem"
+    certificate_key = tmp_path / "origin-key.pem"
+    compose = _compose_contract(release, certificate, certificate_key)
+    compose["services"][service_name][field] = value
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path, compose_contract=compose
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert (
+        "privilege" in process.stderr.lower()
+        or "entrypoint" in process.stderr.lower()
+        or "security" in process.stderr.lower()
+    )
+    assert not backup_log.exists()
+    assert "require-head --json" not in docker_log.read_text(encoding="utf-8")
+
+
+def test_nginx_extra_writable_bind_mount_fails_before_backup(tmp_path: Path) -> None:
+    release = tmp_path / RELEASE_SHA
+    compose = _compose_contract(
+        release, tmp_path / "origin.pem", tmp_path / "origin-key.pem"
+    )
+    compose["services"]["nginx"]["volumes"].append(
+        {
+            "type": "bind",
+            "source": "/",
+            "target": "/host",
+            "read_only": False,
+        }
+    )
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path, compose_contract=compose
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "exact reviewed read-only set" in process.stderr.lower()
+    assert not backup_log.exists()
+    assert "require-head --json" not in docker_log.read_text(encoding="utf-8")
+
+
+def test_health_retries_initial_connection_failure_then_succeeds(
+    tmp_path: Path,
+) -> None:
     environment, _, _ = _activation_environment(tmp_path)
     health_log = _set_health_failures(tmp_path, environment, failures=1)
 
     process = _activate(environment)
 
     assert process.returncode == 0, process.stderr
-    assert len(health_log.read_text(encoding="utf-8").splitlines()) == 3
+    # Three immediate probes (one retry plus external) and two observation probes.
+    assert len(health_log.read_text(encoding="utf-8").splitlines()) == 5
     assert (tmp_path / RELEASE_SHA / ".activated").is_file()
 
 
@@ -763,8 +957,91 @@ def test_backup_failure_stops_before_migration_or_compose_up(tmp_path: Path) -> 
 
     assert process.returncode == 9
     commands = docker_log.read_text(encoding="utf-8")
-    assert " run --rm migrate" not in commands
+    assert "migrate.py require-head --json" in commands
+    assert "migrate.py upgrade" not in commands
     assert " up -d " not in commands
+
+
+def test_nonzero_migration_delta_fails_before_backup_or_application_mutation(
+    tmp_path: Path,
+) -> None:
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path,
+        migration_revision="6f3a9c2d8e41",
+        repository_head="9f1c2a7e4b63",
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "delta" in process.stderr.lower() or "head" in process.stderr.lower()
+    assert backup_log.read_text(encoding="utf-8").splitlines() == [
+        "preflight:pastexam-minio:exam-archive"
+    ]
+    commands = docker_log.read_text(encoding="utf-8")
+    assert " up -d " not in commands
+    assert " migrate.py upgrade" not in commands
+
+
+def test_activation_never_runs_upgrade_or_dependency_migration(tmp_path: Path) -> None:
+    environment, _, docker_log = _activation_environment(tmp_path)
+
+    process = _activate(environment)
+
+    assert process.returncode == 0, process.stderr
+    commands = docker_log.read_text(encoding="utf-8")
+    assert "migrate.py upgrade" not in commands
+    assert (
+        "run --rm --no-deps migrate python migrate.py require-head --json" in commands
+    )
+    assert "up -d --no-deps backend frontend nginx" in commands
+
+
+def test_observation_fails_if_running_image_authority_changes(tmp_path: Path) -> None:
+    environment, _, _ = _activation_environment(tmp_path)
+    environment["FAKE_BACKEND_IMAGE"] = "ghcr.io/example/backend@sha256:" + "f" * 64
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "image authority changed" in process.stderr.lower()
+    assert not (tmp_path / RELEASE_SHA / ".activated").exists()
+
+
+def test_observation_fails_on_bounded_critical_error_evidence(tmp_path: Path) -> None:
+    environment, _, _ = _activation_environment(tmp_path)
+    environment["FAKE_CRITICAL_LOG"] = "fatal: simulated fixture failure\n"
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "critical runtime errors" in process.stderr.lower()
+    assert not (tmp_path / RELEASE_SHA / ".activated").exists()
+
+
+def test_read_only_preflight_stops_before_backup_and_application_mutation(
+    tmp_path: Path,
+) -> None:
+    environment, backup_log, docker_log = _activation_environment(tmp_path)
+    environment["ACTIVATION_PREFLIGHT_ONLY"] = "true"
+
+    process = _activate(environment)
+
+    assert process.returncode == 0, process.stderr
+    payload = json.loads(process.stdout.splitlines()[-1])
+    assert payload == {
+        "database_revision": "9f1c2a7e4b63",
+        "outcome": "eligible",
+        "schema_version": 1,
+        "target_sha": RELEASE_SHA,
+    }
+    assert backup_log.read_text(encoding="utf-8").splitlines() == [
+        "preflight:pastexam-minio:exam-archive"
+    ]
+    commands = docker_log.read_text(encoding="utf-8")
+    assert "migrate.py require-head --json" in commands
+    assert " up -d " not in commands
+    assert not (tmp_path / RELEASE_SHA / ".activated").exists()
 
 
 def test_target_ports_cannot_drop_current_production_ingress(tmp_path: Path) -> None:
@@ -793,7 +1070,7 @@ def test_target_ports_cannot_drop_current_production_ingress(tmp_path: Path) -> 
     assert process.returncode != 0
     assert "ingress" in process.stderr.lower()
     assert not backup_log.exists()
-    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+    assert "require-head --json" not in docker_log.read_text(encoding="utf-8")
 
 
 def test_compose_targets_must_match_nginx_listeners(tmp_path: Path) -> None:
@@ -816,7 +1093,7 @@ def test_compose_targets_must_match_nginx_listeners(tmp_path: Path) -> None:
     assert process.returncode != 0
     assert "listener" in process.stderr.lower()
     assert not backup_log.exists()
-    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+    assert "require-head --json" not in docker_log.read_text(encoding="utf-8")
 
 
 def test_missing_8443_tls_listener_fails_before_backup(tmp_path: Path) -> None:
@@ -831,7 +1108,7 @@ def test_missing_8443_tls_listener_fails_before_backup(tmp_path: Path) -> None:
     assert process.returncode != 0
     assert "listener" in process.stderr.lower() or "tls" in process.stderr.lower()
     assert not backup_log.exists()
-    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+    assert "require-head --json" not in docker_log.read_text(encoding="utf-8")
 
 
 def test_missing_certificate_mounts_fail_before_backup(tmp_path: Path) -> None:
@@ -851,7 +1128,7 @@ def test_missing_certificate_mounts_fail_before_backup(tmp_path: Path) -> None:
     assert process.returncode != 0
     assert "certificate" in process.stderr.lower() or "mount" in process.stderr.lower()
     assert not backup_log.exists()
-    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+    assert "require-head --json" not in docker_log.read_text(encoding="utf-8")
 
 
 def test_compose_cannot_mount_a_different_nginx_config_than_is_validated(
@@ -878,7 +1155,7 @@ def test_compose_cannot_mount_a_different_nginx_config_than_is_validated(
     assert process.returncode != 0
     assert "nginx" in process.stderr.lower()
     assert not backup_log.exists()
-    assert " run --rm migrate" not in docker_log.read_text(encoding="utf-8")
+    assert "require-head --json" not in docker_log.read_text(encoding="utf-8")
 
 
 def _backup_environment(tmp_path: Path, application_sha: str) -> dict[str, str]:
