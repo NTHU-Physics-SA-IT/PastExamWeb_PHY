@@ -81,6 +81,18 @@ def test_candidate_workflow_has_candidate_only_boundary() -> None:
     assert "activate-production-release" not in source
 
 
+def test_candidate_receipt_validation_receives_immutable_nginx_authority() -> None:
+    steps = _yaml(PREPARE)["jobs"]["prepare"]["steps"]
+    validation_step = next(
+        step for step in steps if step["name"] == "Prepare and verify immutable candidate"
+    )
+    nginx_digest = validation_step["env"]["NGINX_IMAGE_DIGEST"]
+
+    assert nginx_digest.startswith("sha256:")
+    assert len(nginx_digest) == len("sha256:") + 64
+    assert '--nginx-digest "$NGINX_IMAGE_DIGEST"' in validation_step["run"]
+
+
 def test_legacy_generic_ssh_and_broad_secret_inheritance_are_absent() -> None:
     assert not LEGACY_SSH_WORKFLOW.exists()
     for workflow_path in WORKFLOWS.glob("*.y*ml"):
