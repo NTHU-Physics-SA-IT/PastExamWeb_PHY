@@ -450,7 +450,7 @@ function updateIsMobile() {
   const prev = isMobile.value
   const next =
     typeof window !== 'undefined' && window.matchMedia
-      ? window.matchMedia('(max-width: 768px)').matches
+      ? window.matchMedia('(width < 768px)').matches
       : false
 
   isMobile.value = next
@@ -582,7 +582,7 @@ function handleDownload() {
 }
 
 /* Mobile responsive adjustments */
-@media (max-width: 768px) {
+@media (width < 768px) {
   :deep(.p-dialog .p-dialog-header) {
     font-size: 1rem;
   }

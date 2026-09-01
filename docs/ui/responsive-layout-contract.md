@@ -66,10 +66,9 @@ For every Major Breakpoint `B`, the canonical boundary convention is:
 Therefore `767px` is Phone Portrait, `768px` and `1023px` are Tablet
 Portrait, `1024px` and `1399px` are Tablet Landscape, and `1400px` is Desktop.
 
-This convention defines the project taxonomy. It does not claim that every
-existing feature rule already uses matching inclusive/exclusive syntax. Known
-legacy exact-boundary behavior is recorded below and must not be silently
-changed.
+This convention defines the project taxonomy. An intentional Feature Class may
+still span a Major Breakpoint only when the registry explicitly records that
+behavior; it must not be silently reclassified or changed.
 
 Major Breakpoints are product-level governance. A Major Breakpoint MUST NOT be
 added, removed, or moved without explicit owner product authorization.
@@ -123,11 +122,6 @@ Statuses:
 
 - **KEEP:** preserve the current Feature Breakpoint and behavior unless a later
   task explicitly authorizes a change.
-- **PENDING REVIEW:** the current behavior needs focused visual/runtime evidence
-  before alignment or movement can be considered.
-- **LEGACY EXACT-BOUNDARY BEHAVIOR:** the current feature includes a Major
-  Breakpoint width in the preceding visual/interaction behavior even though the
-  width belongs to the next Major Class.
 - **NO FEATURE BREAKPOINT:** the page inherits shared layout behavior and has no
   meaningful feature-owned viewport transition.
 
@@ -146,9 +140,8 @@ Statuses:
 | Major Class / explicit px range | Current behavior or transition purpose | Owning Feature Breakpoint(s) | Status | Evidence |
 | --- | --- | --- | --- | --- |
 | Phone Portrait / `0–560px` | Stacked hero with the narrowest background, sizing, and overflow adjustments. | `560px` | KEEP | `frontend/src/views/Home.vue` |
-| Phone Portrait / `561–767px` | Stacked hero; dashboard is one column through the current inclusive `768px` rule. | `768px` | KEEP | `frontend/src/views/Home.vue` |
-| Tablet Portrait / `768px` | Taxonomy is Tablet Portrait, while the current title/dashboard rule still includes `768px`. | `768px` | LEGACY EXACT-BOUNDARY BEHAVIOR; PENDING REVIEW | `frontend/src/views/Home.vue` |
-| Tablet Portrait / `769–920px` | Stacked hero with reduced formula field and two-column dashboard. | `920px` | KEEP | `frontend/src/views/Home.vue`; `frontend/src/composables/useFormulaPhysics.js` |
+| Phone Portrait / `561–767px` | Stacked hero; dashboard remains one column below `768px`. | `768px` | KEEP | `frontend/src/views/Home.vue` |
+| Tablet Portrait / `768–920px` | Stacked hero with reduced formula field and two-column dashboard. | `768px`, `920px` | KEEP | `frontend/src/views/Home.vue`; `frontend/src/composables/useFormulaPhysics.js` |
 | Tablet Portrait / `921–1023px` | Stacked hero and two-column dashboard without the `<=920px` formula reduction. | `920px` | KEEP | `frontend/src/views/Home.vue` |
 | Tablet Landscape / `1024–1180px` | Stacked, centered hero composition. | `1181px` | KEEP | `frontend/src/views/Home.vue` |
 | Tablet Landscape / `1181–1399px` | Wide hero composition, right-side metrics, and relocated catalog action. | `1181px` | KEEP | `frontend/src/views/Home.vue` |
@@ -164,8 +157,7 @@ not Major Breakpoints.
 | Phone Portrait / `0–480px` | Drawer navigation with the narrowest card/action treatment. | `480px` | KEEP | `frontend/src/views/Archive.vue` |
 | Phone Portrait / `481–640px` | Drawer navigation with additional compact card/action treatment through `640px`. | `640px` | KEEP | `frontend/src/views/Archive.vue` |
 | Phone Portrait / `641–767px` | Drawer navigation and Phone Portrait header/content rules. | `768px` | KEEP | `frontend/src/views/Archive.vue` |
-| Tablet Portrait / `768px` | Fixed `258px` sidebar is selected, but several current CSS blocks still include `768px` in preceding compact/table treatment. | `768px` | LEGACY EXACT-BOUNDARY BEHAVIOR; PENDING REVIEW | `frontend/src/views/Archive.vue` |
-| Tablet Portrait / `769–1023px` | Fixed `258px` sidebar and the wider table-overflow treatment. | `768px`, `769px` | KEEP | `frontend/src/views/Archive.vue` |
+| Tablet Portrait / `768–1023px` | Fixed `258px` sidebar and the wider table-overflow treatment. | `768px` | KEEP | `frontend/src/views/Archive.vue` |
 | Tablet Landscape / `1024px` | Remains in Archive's inclusive `768–1024px` sidebar Feature Class with a `258px` sidebar. | `1025px` | KEEP | `frontend/src/views/Archive.vue` |
 | Tablet Landscape / `1025–1199px` | Sidebar expands to `280px`; content retains the `<=1199px` refinements. | `1025px`, `1200px` | KEEP | `frontend/src/views/Archive.vue` |
 | Tablet Landscape / `1200–1399px` | Default Archive sizing after the `<=1199px` refinements end. | `1200px` | KEEP | `frontend/src/views/Archive.vue` |
@@ -225,8 +217,8 @@ below must not be collapsed into one universal Admin mode.
 | Shared Admin shell/dialogs | Phone Portrait / `0–640px` | Narrow action, toolbar, paginator, and card arrangements. | `360/400/480/600/640px` | KEEP | `frontend/src/views/Admin.vue` |
 | Shared Admin toolbars | Phone Portrait / `641–760px` | Narrower toolbar/card arrangement. | `760px`, `761px` | KEEP | `frontend/src/views/Admin.vue` |
 | Shared Admin toolbars | Phone Portrait / `761–767px` | Wider three-part toolbar arrangement within Phone Portrait. | `761px`, `768px` | KEEP | `frontend/src/views/Admin.vue` |
-| Shared Admin shell/dialogs | Tablet Portrait / `768px` | Some current `max-width:768px` rules retain preceding compact action/table behavior. | `768px`, `769px` | LEGACY EXACT-BOUNDARY BEHAVIOR; PENDING REVIEW | `frontend/src/views/Admin.vue` |
-| User/notification management | Tablet Portrait / `769–1023px` | Responsive card/list representation; PrimeVue stack boundaries use `1023px`. | `1024px` expressed by `max-width:1023px` | KEEP | `frontend/src/views/Admin.vue` |
+| Shared Admin shell/dialogs | Tablet Portrait / `768–1023px` | Tablet Portrait shell/table overflow and labeled review-dialog action treatment; surface-specific card rules continue to apply. | `768px` | KEEP | `frontend/src/views/Admin.vue` |
+| User/notification management | Tablet Portrait / `768–1023px` | Responsive card/list representation; PrimeVue stack boundaries use `1023px`. | `1024px` expressed by `max-width:1023px` | KEEP | `frontend/src/views/Admin.vue` |
 | User/notification management | Tablet Landscape / `1024–1399px` | May return to the surface's table representation where no narrower surface rule overrides it. | `1024px` | KEEP | `frontend/src/views/Admin.vue` |
 | Course/category management | Tablet Portrait / `768–1023px` | Dedicated tablet card geometry. | `768px`, `1024px` | KEEP | `frontend/src/views/Admin.vue` |
 | Course/category management | Tablet Landscape / `1024–1399px` | Tablet card geometry with the category layout refinement beginning at `1024px`. | `1024px`, `1400px` | KEEP | `frontend/src/views/Admin.vue` |
@@ -249,11 +241,10 @@ separate set of Major Breakpoints.
 | About Us | Tablet Portrait / `768–1023px` | Same default content/action Feature Class. | `640px` | KEEP | `frontend/src/views/AboutUs.vue` |
 | About Us | Tablet Landscape / `1024–1399px` | Same default content/action Feature Class. | `640px` | KEEP | `frontend/src/views/AboutUs.vue` |
 | About Us | Desktop / `>=1400px` | Same default content/action Feature Class. | `640px` | KEEP | `frontend/src/views/AboutUs.vue` |
-| PDF Preview / discussion | Phone Portrait / `0–767px` | Current narrow interaction branch closes the persistent discussion panel and uses modal discussion behavior. | `768px` inclusive in current code | KEEP | `frontend/src/components/PdfPreviewModal.vue` |
-| PDF Preview / discussion | Tablet Portrait / `768px` | Taxonomy is Tablet Portrait, but current JavaScript and CSS still include `768px` in the preceding interaction/styling branch. | `768px` | LEGACY EXACT-BOUNDARY BEHAVIOR; PENDING REVIEW | `frontend/src/components/PdfPreviewModal.vue` |
-| PDF Preview / discussion | Tablet Portrait / `769–1023px` | Persistent discussion side-panel behavior is available. | `769px` effective lower edge | KEEP | `frontend/src/components/PdfPreviewModal.vue` |
-| PDF Preview / discussion | Tablet Landscape / `1024–1399px` | Same persistent discussion side-panel Feature Class. | `769px` effective lower edge | KEEP | `frontend/src/components/PdfPreviewModal.vue` |
-| PDF Preview / discussion | Desktop / `>=1400px` | Same persistent discussion side-panel Feature Class. | `769px` effective lower edge | KEEP | `frontend/src/components/PdfPreviewModal.vue` |
+| PDF Preview / discussion | Phone Portrait / `0–767px` | The narrow interaction branch closes the persistent discussion panel and uses modal discussion behavior. | `768px` | KEEP | `frontend/src/components/PdfPreviewModal.vue` |
+| PDF Preview / discussion | Tablet Portrait / `768–1023px` | Persistent discussion side-panel behavior is available. | `768px` | KEEP | `frontend/src/components/PdfPreviewModal.vue` |
+| PDF Preview / discussion | Tablet Landscape / `1024–1399px` | Same persistent discussion side-panel Feature Class. | `768px` | KEEP | `frontend/src/components/PdfPreviewModal.vue` |
+| PDF Preview / discussion | Desktop / `>=1400px` | Same persistent discussion side-panel Feature Class. | `768px` | KEEP | `frontend/src/components/PdfPreviewModal.vue` |
 | Login Callback | All Major Classes | No meaningful feature-owned viewport transition; inherits shared application layout. | none | NO FEATURE BREAKPOINT | `frontend/src/views/LoginCallback.vue` |
 | Not Found | All Major Classes | No meaningful feature-owned viewport transition; inherits shared application layout. | none | NO FEATURE BREAKPOINT | `frontend/src/views/NotFound.vue` |
 | Development login | All Major Classes | No meaningful feature-owned viewport transition found; development-only route inherits shared layout. | none | NO FEATURE BREAKPOINT | `frontend/src/views/NthuDevLogin.vue`; `frontend/src/router/index.js` |
@@ -342,20 +333,3 @@ Exact `B-1`, `B`, and `B+1` coverage is required proportionately when:
 - a known boundary inconsistency is under review.
 
 It is not automatically required for every cosmetic threshold change.
-
-## Pending 768px focused review
-
-Adopting this contract does not mean current code is normalized at `768px`.
-The canonical taxonomy is:
-
-- `width < 768px`: Phone Portrait;
-- `width >= 768px && width < 1024px`: Tablet Portrait.
-
-Home, Archive, Admin, and PDF Preview contain current Feature Classes or rules
-that still include exactly `768px` in preceding compact or narrow interaction
-behavior. Their exact-boundary behavior is **PENDING REVIEW**, not silently
-reclassified or changed by this contract.
-
-A future focused visual/runtime review must inspect `767px`, `768px`, and
-`769px` for those four areas before any alignment proposal. This pending review
-does not block use of the Major Class vocabulary.

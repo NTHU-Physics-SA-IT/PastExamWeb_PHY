@@ -1555,6 +1555,13 @@ describe('AdminView', () => {
     )
   })
 
+  it('aligns affected Admin surfaces at Major Breakpoint 768', () => {
+    expect(adminViewSource.match(/@media \(width < 768px\)/g)).toHaveLength(3)
+    expect(adminViewSource).toContain('@media (width >= 768px)')
+    expect(adminViewSource).not.toContain('@media (max-width: 768px)')
+    expect(adminViewSource).not.toContain('@media (min-width: 769px)')
+  })
+
   it('keeps takedown filled, republish outlined, and scopes the dark reject colors', () => {
     expect(adminViewSource).toContain("'review-takedown-action': action.key === 'takedown'")
     expect(adminViewSource).toMatch(

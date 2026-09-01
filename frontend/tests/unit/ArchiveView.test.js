@@ -344,14 +344,16 @@ describe('ArchiveView', () => {
     getArchivePreviewUrlMock.mockReset()
     getArchivePreviewUrlMock
       .mockImplementationOnce(
-        () => new Promise((resolve) => {
-          resolveFirst = resolve
-        })
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve
+          })
       )
       .mockImplementationOnce(
-        () => new Promise((resolve) => {
-          resolveSecond = resolve
-        })
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve
+          })
       )
 
     const [firstArchive, secondArchive] = wrapper.vm.groupedArchives.flatMap((group) => group.list)
@@ -882,6 +884,19 @@ describe('ArchiveView', () => {
 
     expect(archiveViewSource).not.toContain('deleteMySubmission')
     expect(archiveViewSource).not.toContain('owner_self_delete_consumed')
+  })
+
+  it('aligns Archive CSS and drawer logic at Major Breakpoint 768', () => {
+    const archiveViewSource = readFileSync(
+      resolve(globalThis.process.cwd(), 'src/views/Archive.vue'),
+      'utf8'
+    )
+
+    expect(archiveViewSource).toContain('const mobile = window.innerWidth < 768')
+    expect(archiveViewSource.match(/@media \(width < 768px\)/g)).toHaveLength(3)
+    expect(archiveViewSource).toContain('@media (width >= 768px)')
+    expect(archiveViewSource).not.toContain('@media (max-width: 768px)')
+    expect(archiveViewSource).not.toContain('@media (min-width: 769px)')
   })
 
   it('keeps administrator identity separate from the ordinary submission-family contract', async () => {

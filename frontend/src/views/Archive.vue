@@ -3234,7 +3234,7 @@ const mobileMenuItems = computed(() => {
   display: none;
 }
 
-@media (max-width: 768px) {
+@media (width < 768px) {
   .mobile-drawer {
     display: block;
   }
@@ -3398,7 +3398,7 @@ const mobileMenuItems = computed(() => {
 }
 
 /* Ensure proper mobile responsiveness */
-@media (max-width: 768px) {
+@media (width < 768px) {
   .main-content {
     width: 100%;
     min-width: 0;
@@ -3507,7 +3507,7 @@ const mobileMenuItems = computed(() => {
   }
 }
 
-@media (max-width: 768px) {
+@media (width < 768px) {
   :deep(.mobile-drawer .p-panelmenu),
   :deep(.mobile-drawer .p-panelmenu-panel),
   :deep(.mobile-drawer .p-panelmenu-header-content),
@@ -3628,7 +3628,7 @@ const mobileMenuItems = computed(() => {
 }
 
 /* Desktop table overflow handling */
-@media (min-width: 769px) {
+@media (width >= 768px) {
   :deep(.p-accordioncontent-content .p-datatable) {
     width: 100%;
     max-width: 100%;
