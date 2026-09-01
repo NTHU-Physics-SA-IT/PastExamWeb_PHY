@@ -304,6 +304,7 @@ if "--images" in args:
     for line in values:
         if line.startswith(("FRONTEND_IMAGE=", "BACKEND_IMAGE=")):
             print(line.split("=", 1)[1])
+    print("nginx:1.29.2@sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903")
 """,
         encoding="utf-8",
     )
