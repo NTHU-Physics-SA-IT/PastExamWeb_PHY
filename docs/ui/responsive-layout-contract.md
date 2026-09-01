@@ -284,7 +284,7 @@ Important current Container Breakpoints include:
 | `32rem` | Archive course-header summary arrangement | `frontend/src/views/Archive.vue` |
 | `52rem`, `34rem` | Archive filter-grid composition | `frontend/src/views/Archive.vue` |
 | `680px` | Personal Settings display-form composition | `frontend/src/views/PersonalSettings.vue` |
-| `720px` | Wish Pool header/action composition | `frontend/src/components/WishPool.vue` |
+| `680px` | Wish Pool wide horizontal header to title-above/two-column action composition | `frontend/src/components/WishPool.vue` |
 | `1024px` | Wish Pool native-scrolling to camera/panning interaction | `frontend/src/utils/wishHoneycombLayout.js`; `frontend/src/components/WishPool.vue` |
 | `640px` | Notification Center content composition | `frontend/src/components/NotificationCenterModal.vue` |
 | `640px` | User duration chart composition | `frontend/src/components/UserOnlineDurationChart.vue` |
@@ -292,6 +292,14 @@ Important current Container Breakpoints include:
 | `640px` | Admin insights card composition | `frontend/src/views/Admin.vue` |
 | `1080px` | Homepage slogan management composition | `frontend/src/components/admin/HomepageSloganManagementPanel.vue` |
 | `62rem`, `42rem`, `34rem`, `25rem`, `20rem` | Report section/filter/card composition | `frontend/src/style.css`; `frontend/src/components/admin/ReportManagementPanel.vue` |
+
+For the Wish Pool header/action Container Breakpoint, `680px` is the lowest
+audited comfortable size for the wide horizontal header. At or below `680px`,
+the title remains above two equal-width action columns. This removes the
+Archive `1025px` sidebar transition's former wide-to-narrow-to-wide header
+oscillation; the narrow grid was verified across the audited narrow range.
+Archive retains independent ownership of its unchanged `1025px` Feature
+Breakpoint.
 
 For the Wish Pool interaction Container Breakpoint:
 

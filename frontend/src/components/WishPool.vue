@@ -1139,16 +1139,19 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   justify-content: flex-start;
 }
-@container (max-width:720px) {
+@container (max-width:680px) {
   .wish-header {
     align-items: stretch;
     flex-direction: column;
   }
   .wish-header :deep(.p-button) {
     width: 100%;
+    min-width: 0;
     justify-content: center;
   }
   .wish-header__actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
   }
 }
