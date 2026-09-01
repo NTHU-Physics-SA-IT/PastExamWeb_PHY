@@ -48,7 +48,6 @@ jobs:
       EXTERNAL_ENDPOINT: http://localhost:9000
       REDIS_URL: redis://localhost:6379/0
       DEFAULT_ADMIN_NAME: admin
-      DEFAULT_ADMIN_PASSWORD: test-password
       DEFAULT_ADMIN_EMAIL: admin@example.invalid
     steps:
       - name: Checkout repository
@@ -128,6 +127,7 @@ jobs:
             ../scripts/tests/test_production_activation_ssh_wrapper.py \
             ../scripts/tests/test_production_activation_workflow_contract.py \
             ../scripts/tests/test_production_deployment_control.py \
+            ../scripts/tests/test_production_env_key_validation.py \
             ../scripts/tests/test_release_workflow_contract.py \
             --confcutdir=../scripts/tests
 
@@ -216,12 +216,12 @@ jobs:
           docker compose \
             --env-file docker/.env \
             -f docker/docker-compose.dev.yml \
-            run --rm \
+            --profile bootstrap \
+            run --rm --no-deps \
             -e DB_NAME=pastexam_test_local \
             -e DB_USER=pastexam_test_local \
             -e DB_PASSWORD=local-test-only \
-            -e ALLOW_DATABASE_BOOTSTRAP=true \
-            backend uv run python app/scripts/seed_db.py \
+            bootstrap uv run python -m app.scripts.seed_db \
               --confirm-database-name pastexam_test_local
 
       - name: Run backend shard with coverage

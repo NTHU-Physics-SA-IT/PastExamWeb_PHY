@@ -39,7 +39,8 @@ The canonical development project name is `pastexam-dev`. The default stack is:
 | Nginx | `nginx` | Exposes the development site on `127.0.0.1:8080` by default |
 
 An explicit `bootstrap` profile exists for guarded initialization. It is not a
-normal startup step.
+normal startup step. Its `BOOTSTRAP_ADMIN_PASSWORD` input is scoped to that
+profile; the normal backend and migrator services do not receive it.
 
 ### Intended invariant
 
@@ -166,8 +167,8 @@ bucket, volume, or network as a verification shortcut.
 | Variable class | Current source and timing |
 | --- | --- |
 | Frontend build-time | `frontend/.env.example` documents `VITE_*` values consumed by Vite, including API, site, timezone, and Umami settings |
-| Backend runtime | `backend/.env.example` documents database, authentication, MinIO, Redis, and bootstrap settings loaded by the backend |
-| Compose interpolation | `docker/.env.example` documents local Compose identities, ports, credentials, database, bucket, network, and volume names; `scripts/dev-compose.sh` defaults to `docker/.env` and supports `PASTEXAM_DEV_COMPOSE_ENV_FILE` |
+| Backend runtime | `backend/.env.example` documents database, authentication, MinIO, Redis, and bootstrap-gate settings loaded by the backend; it does not contain a bootstrap credential |
+| Compose interpolation | `docker/.env.example` documents local Compose identities, ports, credentials, database, bucket, network, and volume names, including the bootstrap-only credential supplied exclusively to the explicit bootstrap profile; `scripts/dev-compose.sh` defaults to `docker/.env` and supports `PASTEXAM_DEV_COMPOSE_ENV_FILE` |
 | Production external configuration | `docker/docker-compose.prod.yml` reads the Compose environment and mounts separate backend runtime and migrator environment files under the production configuration path |
 
 Local MinIO root variables belong only to the server and `minio-init` bootstrap.

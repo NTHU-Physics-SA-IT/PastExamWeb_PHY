@@ -5,6 +5,10 @@ set -euo pipefail
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 temporary_directory="$(mktemp -d)"
 
+python3 "$repository_root/scripts/validate_production_env_keys.py" \
+  "$repository_root/backend/.env.production.runtime.example" \
+  "$repository_root/backend/.env.production.migrator.example"
+
 cleanup() {
   rm -rf -- "$temporary_directory"
 }
@@ -64,6 +68,10 @@ for compose in (production, development):
     assert "seed" not in " ".join(migrate["command"]).lower()
 
 assert "bootstrap" not in production["services"]
+for service_name in ("backend", "migrate"):
+    environment = production["services"][service_name]["environment"]
+    assert "DEFAULT_ADMIN_PASSWORD" not in environment
+    assert "BOOTSTRAP_ADMIN_PASSWORD" not in environment
 for service in production["services"].values():
     raw_command = service.get("command") or []
     command = (
@@ -177,6 +185,14 @@ production_minio_environment = production["services"]["minio"]["environment"]
 assert production_minio_environment["MINIO_ROOT_USER"]
 assert production_minio_environment["MINIO_ROOT_PASSWORD"]
 assert development["services"]["bootstrap"]["profiles"] == ["bootstrap"]
+for service_name in ("backend", "migrate"):
+    environment = development["services"][service_name]["environment"]
+    assert "DEFAULT_ADMIN_PASSWORD" not in environment
+    assert "BOOTSTRAP_ADMIN_PASSWORD" not in environment
+bootstrap_environment = development["services"]["bootstrap"]["environment"]
+assert "DEFAULT_ADMIN_PASSWORD" not in bootstrap_environment
+assert bootstrap_environment["BOOTSTRAP_ADMIN_PASSWORD"]
+assert bootstrap_environment["ALLOW_DATABASE_BOOTSTRAP"] == "true"
 assert (
     development["services"]["backend"]["depends_on"]["migrate"]["condition"]
     == "service_completed_successfully"

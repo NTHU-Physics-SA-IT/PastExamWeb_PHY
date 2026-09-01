@@ -15,7 +15,6 @@ x-application-environment: &application-environment
   EXTERNAL_ENDPOINT: http://localhost:${DEV_HTTP_PORT:-8080}/minio
   REDIS_URL: redis://redis:6379
   DEFAULT_ADMIN_NAME: ${DEFAULT_ADMIN_NAME:?Set DEFAULT_ADMIN_NAME}
-  DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:?Set DEFAULT_ADMIN_PASSWORD}
   DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:?Set DEFAULT_ADMIN_EMAIL}
 
 x-runtime-environment: &runtime-environment
@@ -143,6 +142,7 @@ services:
       <<: *runtime-environment
       ALLOW_DATABASE_BOOTSTRAP: "true"
       BOOTSTRAP_LOCAL_PROJECT: ${COMPOSE_PROJECT_NAME:?Set COMPOSE_PROJECT_NAME}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?Set BOOTSTRAP_ADMIN_PASSWORD}
     depends_on:
       migrate:
         condition: service_completed_successfully
