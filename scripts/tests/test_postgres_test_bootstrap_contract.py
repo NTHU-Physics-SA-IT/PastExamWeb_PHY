@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import re
 import subprocess
+from pathlib import Path
 
 import pytest
-
+import yaml
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
 DEV_COMPOSE = REPOSITORY_ROOT / "docker" / "docker-compose.dev.yml"
@@ -23,6 +23,34 @@ def _backend_job() -> str:
     return workflow.split("\n  backend:\n", maxsplit=1)[1].split(
         "\n  frontend-unit:\n", maxsplit=1
     )[0]
+
+
+def _example_environment_value(name: str) -> str:
+    environment = (REPOSITORY_ROOT / "docker" / ".env.example").read_text(
+        encoding="utf-8"
+    )
+    prefix = f"{name}="
+    return next(
+        line.removeprefix(prefix)
+        for line in environment.splitlines()
+        if line.startswith(prefix)
+    )
+
+
+def test_frontend_e2e_bootstrap_password_matches_playwright_password() -> None:
+    workflow = yaml.load(TEST_WORKFLOW.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    steps = {
+        step["name"]: step
+        for step in workflow["jobs"]["frontend-e2e-family"]["steps"]
+    }
+    bootstrap_password = _example_environment_value("BOOTSTRAP_ADMIN_PASSWORD")
+
+    assert bootstrap_password
+    for step_name in (
+        "List selected frontend E2E cases",
+        "Run frontend E2E tests",
+    ):
+        assert steps[step_name]["env"]["PLAYWRIGHT_ADMIN_PASSWORD"] == bootstrap_password
 
 
 def test_dev_postgres_healthcheck_requires_final_tcp_server() -> None:

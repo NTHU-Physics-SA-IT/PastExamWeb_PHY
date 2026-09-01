@@ -152,11 +152,21 @@ or application mutation; this framework never runs `migrate.py upgrade`.
 
 The production Compose definition has no bootstrap profile or `seed_db.py`
 command, and backend startup performs only its read-only schema readiness
-check. Consequently,
-`DEFAULT_ADMIN_PASSWORD` is never consumed to create, restore, or reset an
-account during a production update. Category display metadata and custom
-categories remain managed data; deployment does not synchronize them to
-application defaults.
+check. `DEFAULT_ADMIN_PASSWORD` is forbidden in the production runtime and
+migrator environment contracts. A key-name-only source validator rejects it
+in both committed production environment templates before Compose rendering;
+the validator never emits or resolves a value. The explicit dev/test bootstrap
+instead owns `BOOTSTRAP_ADMIN_PASSWORD`, which normal API and migrator settings
+do not load.
+
+An older active release may still require the legacy key in its root-owned
+host configuration. Leave that physical key in place until a compatible
+release is deployed and verified, then remove only that key through a separate
+human-controlled cleanup. Enforcement against the actual external host files
+must be coordinated with that cleanup; committed-template validation does not
+claim the deployed legacy file is already clean. Category display metadata and
+custom categories remain managed data; deployment does not synchronize them
+to application defaults.
 
 The root-owned activation engine remains fail-closed unless all of the
 following are supplied by the reviewed controller:

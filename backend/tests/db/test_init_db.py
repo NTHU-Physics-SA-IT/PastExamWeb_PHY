@@ -20,6 +20,8 @@ from app.models.models import (
 )
 from app.utils.auth import get_password_hash, verify_password
 
+BOOTSTRAP_PASSWORD = "test-bootstrap-password"
+
 
 class FakeScalarResult:
     def __init__(self, value):
@@ -177,11 +179,12 @@ async def test_explicit_bootstrap_creates_admin_and_canonical_seed(monkeypatch):
 
     await init_db.bootstrap_db(
         confirmed_database_name=settings.DB_NAME,
+        bootstrap_password=BOOTSTRAP_PASSWORD,
     )
 
     assert fake_session.admin is not None
     assert verify_password(
-        settings.DEFAULT_ADMIN_PASSWORD,
+        BOOTSTRAP_PASSWORD,
         fake_session.admin.password_hash,
     )
     assert [item.key for item in fake_session.added_category_configs] == [
@@ -374,6 +377,7 @@ async def test_first_bootstrap_rejects_missing_category_before_writes(
     with pytest.raises(RuntimeError, match="six migration-created"):
         await init_db.bootstrap_db(
             confirmed_database_name=settings.DB_NAME,
+            bootstrap_password=BOOTSTRAP_PASSWORD,
         )
 
     assert fake_session.admin is None
@@ -488,6 +492,7 @@ async def test_existing_default_admin_credentials_are_not_changed(monkeypatch):
 
     await init_db.bootstrap_db(
         confirmed_database_name=settings.DB_NAME,
+        bootstrap_password=BOOTSTRAP_PASSWORD,
     )
 
     assert admin.password_hash == original_hash
@@ -518,11 +523,12 @@ async def test_soft_deleted_default_admin_is_restored_and_password_reset(
 
     await init_db.bootstrap_db(
         confirmed_database_name=settings.DB_NAME,
+        bootstrap_password=BOOTSTRAP_PASSWORD,
     )
 
     assert admin.deleted_at is None
     assert admin.password_hash != old_hash
-    assert verify_password(settings.DEFAULT_ADMIN_PASSWORD, admin.password_hash)
+    assert verify_password(BOOTSTRAP_PASSWORD, admin.password_hash)
     assert admin.is_local is True
     assert admin.is_admin is True
 
@@ -538,12 +544,13 @@ async def test_missing_default_admin_is_created(monkeypatch):
 
     await init_db.bootstrap_db(
         confirmed_database_name=settings.DB_NAME,
+        bootstrap_password=BOOTSTRAP_PASSWORD,
     )
 
     assert fake_session.admin is not None
     assert fake_session.admin.name == settings.DEFAULT_ADMIN_NAME
     assert verify_password(
-        settings.DEFAULT_ADMIN_PASSWORD,
+        BOOTSTRAP_PASSWORD,
         fake_session.admin.password_hash,
     )
 
@@ -567,6 +574,7 @@ async def test_renamed_admin_email_collision_fails_without_mutation(monkeypatch)
     with pytest.raises(RuntimeError, match="email is already used"):
         await init_db.bootstrap_db(
             confirmed_database_name=settings.DB_NAME,
+            bootstrap_password=BOOTSTRAP_PASSWORD,
         )
 
     assert email_owner.password_hash == original_hash
@@ -582,12 +590,26 @@ async def test_bootstrap_requires_explicit_flag_and_exact_database_confirmation(
     with pytest.raises(RuntimeError, match="disabled"):
         await init_db.bootstrap_db(
             confirmed_database_name=settings.DB_NAME,
+            bootstrap_password=BOOTSTRAP_PASSWORD,
         )
 
     monkeypatch.setattr(settings, "ALLOW_DATABASE_BOOTSTRAP", True)
     with pytest.raises(RuntimeError, match="confirmation"):
         await init_db.bootstrap_db(
             confirmed_database_name=f"{settings.DB_NAME}_wrong",
+            bootstrap_password=BOOTSTRAP_PASSWORD,
+        )
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_rejects_empty_explicit_password(monkeypatch):
+    monkeypatch.setattr(settings, "ALLOW_DATABASE_BOOTSTRAP", True)
+    monkeypatch.setattr(settings, "DB_NAME", "archive_db_dev_empty_password")
+
+    with pytest.raises(RuntimeError, match="must not be empty"):
+        await init_db.bootstrap_db(
+            confirmed_database_name=settings.DB_NAME,
+            bootstrap_password="",
         )
 
 
@@ -601,6 +623,7 @@ async def test_bootstrap_rejects_normal_and_production_database_names(
         with pytest.raises(RuntimeError, match="dev/test"):
             await init_db.bootstrap_db(
                 confirmed_database_name=database_name,
+                bootstrap_password=BOOTSTRAP_PASSWORD,
             )
 
 

@@ -303,7 +303,9 @@ async def _validate_bootstrap_contents(session) -> bool:
     return True
 
 
-async def bootstrap_db(*, confirmed_database_name: str) -> None:
+async def bootstrap_db(
+    *, confirmed_database_name: str, bootstrap_password: str
+) -> None:
     """Explicitly seed an already-migrated database; never called at startup."""
     if not settings.ALLOW_DATABASE_BOOTSTRAP:
         raise RuntimeError(
@@ -318,6 +320,8 @@ async def bootstrap_db(*, confirmed_database_name: str) -> None:
         raise RuntimeError(
             "Database bootstrap is allowed only for explicit dev/test names"
         )
+    if not bootstrap_password:
+        raise RuntimeError("Explicit bootstrap password must not be empty")
     await asyncio.to_thread(validate_database_ready)
 
     async with AsyncSessionLocal() as session:
@@ -329,9 +333,7 @@ async def bootstrap_db(*, confirmed_database_name: str) -> None:
 
         if admin_user and getattr(admin_user, "deleted_at", None) is not None:
             admin_user.deleted_at = None
-            admin_user.password_hash = get_password_hash(
-                settings.DEFAULT_ADMIN_PASSWORD
-            )
+            admin_user.password_hash = get_password_hash(bootstrap_password)
             admin_user.is_local = True
             admin_user.is_admin = True
         elif not admin_user:
@@ -350,7 +352,7 @@ async def bootstrap_db(*, confirmed_database_name: str) -> None:
             admin_user = User(
                 name=settings.DEFAULT_ADMIN_NAME,
                 email=settings.DEFAULT_ADMIN_EMAIL,
-                password_hash=get_password_hash(settings.DEFAULT_ADMIN_PASSWORD),
+                password_hash=get_password_hash(bootstrap_password),
                 is_local=True,
                 is_admin=True,
             )

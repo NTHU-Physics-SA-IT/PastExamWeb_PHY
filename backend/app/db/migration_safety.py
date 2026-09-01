@@ -132,7 +132,6 @@ def _sensitive_values() -> set[str]:
         settings.SECRET_KEY,
         settings.OAUTH_CLIENT_SECRET,
         settings.MINIO_SECRET_KEY,
-        settings.DEFAULT_ADMIN_PASSWORD,
         quote(settings.DB_PASSWORD, safe=""),
         quote_plus(settings.DB_PASSWORD),
         raw_url,

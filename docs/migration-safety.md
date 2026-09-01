@@ -134,10 +134,16 @@ Fresh isolated development/test databases may be seeded only with the
 explicit bootstrap command:
 
 ```bash
+BOOTSTRAP_ADMIN_PASSWORD=local-bootstrap-only \
 ALLOW_DATABASE_BOOTSTRAP=true \
 uv run python -m app.scripts.seed_db \
   --confirm-database-name archive_db_dev_example
 ```
+
+`BOOTSTRAP_ADMIN_PASSWORD` belongs only to this explicit command. Normal API
+and migrator settings do not load it. Use an independent synthetic credential
+for a dev/test database and do not put a production credential in shell
+history or repository files.
 
 The database name must use an approved dev/test prefix. The canonical local
 Compose exception is the exact `pastexam-dev` project using `archive_db`, the

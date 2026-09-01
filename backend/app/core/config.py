@@ -44,7 +44,6 @@ class Settings(BaseSettings):
     LOGIN_RATE_LIMIT_COOLDOWN_SECONDS: int = Field(default=600, gt=0)
 
     DEFAULT_ADMIN_NAME: str
-    DEFAULT_ADMIN_PASSWORD: str
     DEFAULT_ADMIN_EMAIL: str
     ALLOW_DATABASE_BOOTSTRAP: bool = False
     BOOTSTRAP_LOCAL_PROJECT: str = ""
