@@ -11559,7 +11559,7 @@ onBeforeUnmount(() => {
   line-height: 1.55;
 }
 
-@media (max-width: 768px) {
+@media (width < 768px) {
   .backup-card__header {
     align-items: stretch;
     flex-direction: column;
@@ -12659,7 +12659,7 @@ onBeforeUnmount(() => {
 }
 
 /* Mobile responsive adjustments */
-@media (max-width: 768px) {
+@media (width < 768px) {
   .admin-container {
     padding-left: 0.75rem !important;
     padding-right: 0.75rem !important;
@@ -13967,7 +13967,7 @@ onBeforeUnmount(() => {
   }
 }
 
-@media (max-width: 768px) {
+@media (width < 768px) {
   .review-dialog-actions {
     display: grid !important;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -13994,7 +13994,7 @@ onBeforeUnmount(() => {
 }
 
 /* Desktop table overflow handling */
-@media (min-width: 769px) {
+@media (width >= 768px) {
   :deep(.p-datatable) {
     overflow-x: auto;
   }

@@ -115,11 +115,17 @@ describe('Wish Pool focused interactions', () => {
     vi.unstubAllGlobals()
   })
 
-  it('reflows the header before the add-wish button reaches the cramped middle state', () => {
+  it('uses the audited container boundary and two-column narrow header actions', () => {
     expect(wishPoolSource).toMatch(/container-type:\s*inline-size/)
-    expect(wishPoolSource).toMatch(/@container \(max-width:\s*720px\)/)
+    expect(wishPoolSource).toMatch(/@container \(max-width:\s*680px\)/)
     expect(wishPoolSource).toMatch(
-      /@container \(max-width:\s*720px\)[\s\S]*?\.wish-header\s*\{[^}]*align-items:\s*stretch;[^}]*flex-direction:\s*column;/
+      /@container \(max-width:\s*680px\)[\s\S]*?\.wish-header\s*\{[^}]*align-items:\s*stretch;[^}]*flex-direction:\s*column;/
+    )
+    expect(wishPoolSource).toMatch(
+      /@container \(max-width:\s*680px\)[\s\S]*?\.wish-header__actions\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);[^}]*width:\s*100%;/
+    )
+    expect(wishPoolSource).toMatch(
+      /@container \(max-width:\s*680px\)[\s\S]*?\.wish-header :deep\(\.p-button\)\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*justify-content:\s*center;/
     )
     expect(wishPoolSource).toMatch(
       /\.wish-header :deep\(\.p-button\)\s*\{[^}]*flex:\s*0 0 auto;[^}]*white-space:\s*nowrap[;}]/
@@ -527,7 +533,9 @@ describe('Wish Pool focused interactions', () => {
     [429, 869, 'honeycomb', 'mobile'],
     [768, 1024, 'honeycomb', 'tablet'],
     [834, 1210, 'honeycomb', 'tablet'],
-    [1024, 768, 'honeycomb', 'tablet'],
+    [1023, 768, 'honeycomb', 'tablet'],
+    [1024, 768, 'honeycomb', 'desktop'],
+    [1025, 768, 'honeycomb', 'desktop'],
     [1440, 900, 'honeycomb', 'desktop'],
   ])(
     'selects the intended responsive contract at %d×%d',

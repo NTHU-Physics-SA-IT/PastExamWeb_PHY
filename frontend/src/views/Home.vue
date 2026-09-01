@@ -2255,7 +2255,7 @@ h1 {
   }
 }
 
-@media (max-width: 768px) {
+@media (width < 768px) {
   .hero-title-lockup {
     margin-block: 0.3rem;
     transform: scale(1.1111);

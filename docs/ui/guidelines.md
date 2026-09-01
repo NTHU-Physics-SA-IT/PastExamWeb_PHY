@@ -137,8 +137,8 @@ checked. Do not claim visual equivalence from a build alone.
   helpers.
 - Define placeholder semantics for common table/detail contexts.
 - Reduce hard-coded colors by extending semantic tokens.
-- Apply the documented Major Classes and Feature Classes while resolving known
-  legacy exact-boundary behavior through focused visual evidence.
+- Keep responsive implementation aligned with the documented Major Classes and
+  Feature Classes while preserving approved Feature Breakpoints.
 - Extract repeatable loading/empty/error/timeout patterns without erasing
   feature-specific recovery.
 

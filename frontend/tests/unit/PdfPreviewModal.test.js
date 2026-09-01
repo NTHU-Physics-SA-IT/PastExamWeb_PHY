@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import pdfPreviewSource from '@/components/PdfPreviewModal.vue?raw'
 
 const unauthorizedCallbacks = vi.hoisted(() => [])
 let consoleErrorSpy
@@ -167,6 +168,12 @@ describe('PdfPreviewModal', () => {
 
     expect(wrapper.find('.discussion-panel-stub').exists()).toBe(false)
     wrapper.unmount()
+  })
+
+  it('uses Tablet Portrait discussion behavior from Major Breakpoint 768', () => {
+    expect(pdfPreviewSource).toContain("window.matchMedia('(width < 768px)')")
+    expect(pdfPreviewSource).toContain('@media (width < 768px)')
+    expect(pdfPreviewSource).not.toContain('(max-width: 768px)')
   })
 
   it('顯示明確的考古題檔案缺失訊息', async () => {
