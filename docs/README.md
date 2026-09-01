@@ -46,6 +46,7 @@ it is not current operating authority merely because this index retains it.
 | [`../scripts/run-isolated-backend-tests.py`](../scripts/run-isolated-backend-tests.py) | Guarded local isolated PostgreSQL test execution | Active tool | Direct Docker runner; no Compose or persistent test service. |
 | [`../scripts/check-backend-runtime.py`](../scripts/check-backend-runtime.py) | Read-only backend source/runtime/service/data classification | Active tool | Requires exact container IDs and explicit backend source paths. |
 | [`ui/guidelines.md`](ui/guidelines.md) | UI presentation and responsive consistency | Active | Canonical UI-level decisions; Domain meaning is linked, not duplicated. |
+| [`ui/responsive-layout-contract.md`](ui/responsive-layout-contract.md) | Viewport taxonomy, responsive breakpoint authority, feature-owned ranges, container-query separation, and responsive QA governance | Active | Canonical responsive governance; current legacy exact-boundary behavior remains explicitly recorded. |
 | [`domain/README.md`](domain/README.md) | Domain terminology, evidence labels, and contract map | Active | Entry point for product behavior contracts. |
 | [`domain/entity-relationships.md`](domain/entity-relationships.md) | Entity ownership, grouping, and lifecycle relationships | Active | Distinguishes current implementation from intended product relations. |
 | [`domain/state-transitions.md`](domain/state-transitions.md) | Domain states, authorization, visibility, and business errors | Active | Canonical state and action contract. |

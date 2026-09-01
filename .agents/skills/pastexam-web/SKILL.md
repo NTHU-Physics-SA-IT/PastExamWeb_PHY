@@ -44,7 +44,9 @@ Read only the smallest set needed for the task:
 - Backend runtime diagnosis or recovery:
   `docs/development/backend-runtime-recovery.md`.
 - UI, responsive behavior, theme, accessibility, or display:
-  `docs/ui/guidelines.md`.
+  `docs/ui/guidelines.md`; for viewport classification, responsive breakpoint
+  authority, or width-scoped UI work, also read
+  `docs/ui/responsive-layout-contract.md`.
 - User-visible frontend text, translation catalogs, locale behavior,
   interpolation, `$t()`, `t()`, `getMessageTemplate()`, localized placeholders,
   tooltips, labels, or accessibility copy: `docs/development/i18n.md`.
@@ -175,6 +177,29 @@ If `ui-ux-pro-max` is available in user scope, use it only as optional advice
 for explicit redesign, UX, or accessibility tasks. The project UI authority
 remains `docs/ui/guidelines.md`, and this workflow must not require the
 advisory Skill to be installed.
+
+## Responsive governance
+
+For responsive work, use `docs/ui/responsive-layout-contract.md` as the project
+authority and use its exact terms: Major Class, Major Breakpoint, Feature Class,
+Feature Breakpoint, Container Breakpoint, and Representative Viewport.
+
+- Treat a single requested width as a locator. Resolve it to the target
+  feature's existing Feature Class and use that Feature Class as the default
+  minimum modification scope. A single requested viewport width identifies an
+  existing Feature Class; it does not authorize creation of a new Feature
+  Breakpoint.
+- Do not create or move a Feature Breakpoint unless the owner or user explicitly
+  requests or approves it. Do not modify a Major Breakpoint without explicit
+  owner product authorization.
+- Keep Container Breakpoints outside the viewport taxonomy.
+- Use the contract rather than framework `lg` or `xl` names as responsive
+  product authority.
+- Validate boundaries proportionately under the contract and
+  `docs/development/validation.md`.
+
+Keep the full Feature Class registry and project breakpoint facts in the
+canonical contract rather than duplicating them in this Skill.
 
 ## Stop conditions
 
