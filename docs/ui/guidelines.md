@@ -7,6 +7,7 @@ Source of truth for: UI presentation consistency, responsive behavior, and visua
 Applies to: Vue views, components, shared styles, and user-visible labels
 
 Related documents:
+- [Responsive layout contract](responsive-layout-contract.md)
 - [Code organization](../development/code-organization.md)
 - [Frontend internationalization](../development/i18n.md)
 - [Validation policy](../development/validation.md)
@@ -81,13 +82,19 @@ index sort.
 
 ## Responsive principles
 
-- A mobile fix must not change the desktop contract unintentionally.
-- Prefer the existing common breakpoint tiers. A page-specific breakpoint is
-  acceptable only when the component's intrinsic layout demonstrates the need.
-- Keep fixed layout-tier boundaries in pixels so root typography preferences do
-  not reclassify the same viewport or container as a different responsive tier.
-- For a changed breakpoint `B`, verify `B-1`, `B`, and `B+1`, plus one
-  representative narrow mobile, wide mobile/tablet, and desktop viewport.
+- Use the canonical Major Class, Major Breakpoint, Feature Class, Feature
+  Breakpoint, and Container Breakpoint terminology and authority in the
+  [Responsive layout contract](responsive-layout-contract.md).
+- A change scoped to one Feature Class must not change another Feature Class
+  unintentionally.
+- Preserve documented Feature Breakpoints unless the owner explicitly approves
+  adding, moving, or removing one.
+- Keep fixed Major Breakpoints and Feature Breakpoints in pixels so root
+  typography preferences do not reclassify the same viewport as a different
+  class. Keep Container Breakpoints outside the viewport taxonomy.
+- Apply the contract's proportional boundary validation. Use `B-1`, `B`, and
+  `B+1` for changed structural or high-risk boundaries and for joint CSS/JS
+  mode switching, not automatically for every cosmetic adjustment.
 - Do not begin with another extremely narrow media query when the issue may be
   caused by intrinsic sizing or a parent constraint.
 - After a second CSS attempt fails for the same scenario, stop stacking rules
@@ -130,8 +137,8 @@ checked. Do not claim visual equivalence from a build alone.
   helpers.
 - Define placeholder semantics for common table/detail contexts.
 - Reduce hard-coded colors by extending semantic tokens.
-- Establish common responsive tiers while retaining justified component
-  boundaries.
+- Apply the documented Major Classes and Feature Classes while resolving known
+  legacy exact-boundary behavior through focused visual evidence.
 - Extract repeatable loading/empty/error/timeout patterns without erasing
   feature-specific recovery.
 
