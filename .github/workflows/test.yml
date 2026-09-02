@@ -122,6 +122,7 @@ jobs:
             ../scripts/tests/test_minio_least_privilege_contract.py \
             ../scripts/tests/test_minio_least_privilege_integration.py \
             ../scripts/tests/test_minio_storage_preflight.py \
+            ../scripts/tests/test_merger_bound_deploy_authority.py \
             ../scripts/tests/test_postgres_test_bootstrap_contract.py \
             ../scripts/tests/test_production_activation_contract.py \
             ../scripts/tests/test_production_activation_ssh_wrapper.py \

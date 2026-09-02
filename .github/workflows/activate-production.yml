@@ -11,6 +11,7 @@ on:
 permissions:
   actions: read
   contents: read
+  pull-requests: read
 
 concurrency:
   group: production-activation
@@ -42,6 +43,20 @@ jobs:
           test "$GITHUB_SHA" = "$TARGET_SHA"
           git fetch --no-tags origin main
           test "$(git rev-parse origin/main)" = "$TARGET_SHA"
+
+      - name: Require merger-bound self-deploy authority
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          ORIGINAL_ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          python3 scripts/ci/validate_merger_bound_deploy.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --target-sha "$TARGET_SHA" \
+            --base-branch main \
+            --actor "$ORIGINAL_ACTOR" \
+            --triggering-actor "$TRIGGERING_ACTOR"
 
       - name: Resolve authoritative exact-SHA Main Full
         id: full
@@ -110,6 +125,20 @@ jobs:
             "$(sed -n 's/^source_ci_run_id=//p' "$authority")"
           test '${{ needs.authority.outputs.source_ci_run_attempt }}' = \
             "$(sed -n 's/^source_ci_run_attempt=//p' "$authority")"
+
+      - name: Revalidate merger-bound authority after approval
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ needs.authority.outputs.release_sha }}
+          ORIGINAL_ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          python3 scripts/ci/validate_merger_bound_deploy.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --target-sha "$TARGET_SHA" \
+            --base-branch main \
+            --actor "$ORIGINAL_ACTOR" \
+            --triggering-actor "$TRIGGERING_ACTOR"
 
       - name: Configure restricted production SSH identity
         env:
