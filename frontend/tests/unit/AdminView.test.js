@@ -1544,14 +1544,26 @@ describe('AdminView', () => {
     )
   })
 
-  it('keeps the shared mobile action row breakpoint-agnostic for five actions', () => {
+  it('keeps review card actions adaptive with one shared labeled-to-icon breakpoint', () => {
     expect(adminViewSource).not.toMatch(/@media\s*\(max-width:\s*337px\)/)
-    expect(adminViewSource).toContain('grid-template-columns: repeat(5, minmax(2.5rem, 1fr))')
+    expect(adminViewSource).not.toContain('grid-template-columns: repeat(4')
+    expect(
+      adminTemplateSource.match(/v-for="action in getReviewRowActions\(data\)"/g)
+    ).toHaveLength(2)
+    expect(
+      adminTemplateSource.match(/review-mobile-summary[\s\S]*?review-row-action-area/g)
+    ).toHaveLength(2)
     expect(adminViewSource).toMatch(
-      /@media \(max-width: 640px\)[\s\S]*?review-card-actions[\s\S]*?flex-wrap: nowrap/
+      /@media \(max-width: 640px\)[\s\S]*?\.review-center :deep\(\.review-row-action-area\)[\s\S]*?display:\s*flex[\s\S]*?flex-direction:\s*column[\s\S]*?align-items:\s*stretch/
     )
     expect(adminViewSource).toMatch(
-      /review-card-actions \.p-button[\s\S]*?flex: 1 1 0[\s\S]*?min-width: 0/
+      /\.review-center :deep\(\.review-row-action-area > \.review-card-actions\)[\s\S]*?display:\s*flex[\s\S]*?flex-wrap:\s*nowrap[\s\S]*?width:\s*100%/
+    )
+    expect(adminViewSource).toMatch(
+      /@media \(min-width: 480px\) and \(max-width: 640px\)[\s\S]*?review-card-actions \.p-button[\s\S]*?flex:\s*1 1 auto[\s\S]*?width:\s*auto[\s\S]*?review-card-actions \.p-button \.p-button-label[\s\S]*?display:\s*inline-flex/
+    )
+    expect(adminViewSource).toMatch(
+      /@media \(max-width: 479px\)[\s\S]*?review-card-actions \.p-button[\s\S]*?flex:\s*1 1 0[\s\S]*?review-card-actions \.p-button \.p-button-label[\s\S]*?display:\s*none/
     )
   })
 
@@ -1650,7 +1662,7 @@ describe('AdminView', () => {
       /@media \(min-width: 1400px\)[\s\S]*?review-row-action-area > \.review-card-actions\)\s*\{[\s\S]*?order:\s*1[\s\S]*?review-row-action-area > \.review-card-action-note\)\s*\{[\s\S]*?order:\s*2/
     )
     expect(adminViewSource).toMatch(
-      /@media \(max-width: 640px\)[\s\S]*?review-card-actions\)\s*\{[\s\S]*?justify-content:\s*flex-end/
+      /@media \(max-width: 640px\)[\s\S]*?\.review-center :deep\(\.review-row-action-area > \.review-card-actions\)\s*\{[\s\S]*?align-self:\s*stretch[\s\S]*?width:\s*100%/
     )
     expect(adminViewSource).not.toContain('max-width: min(18rem, 100%)')
     expect(adminViewSource.match(/'review-mobile-card-status-badge'/g)).toHaveLength(2)
