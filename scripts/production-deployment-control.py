@@ -29,6 +29,7 @@ ACTIVATION_FAILURE_STAGES = frozenset(
         "helper-authority",
         "external-config",
         "candidate-contract",
+        "mutation-lock",
         "compose-structure",
         "image-contract",
         "production-values",
@@ -1283,6 +1284,10 @@ class DeploymentController:
     def _invoke_engine(
         self, request: dict[str, Any], candidate: dict[str, Any]
     ) -> None:
+        if self.config.mutation_lock.resolve(strict=False) not in _HELD_LOCKS:
+            raise DeploymentError(
+                "Controller mutation lock authority is unavailable."
+            )
         evidence = self._engine_evidence_path(request["request_id"])
         failure_evidence = self._engine_failure_evidence_path(request["request_id"])
         if failure_evidence.exists():
@@ -1291,6 +1296,7 @@ class DeploymentController:
             "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "PRODUCTION_DEPLOY_ENABLED": "true",
             "ACTIVATION_CONFIRMATION": "activate-reviewed-production-release",
+            "ACTIVATION_CONTROLLER_LOCK_HELD": "true",
             "RELEASE_DIRECTORY": candidate["release_directory"],
             "RELEASE_MANIFEST": str(
                 Path(candidate["release_directory"]) / "release-manifest.env"

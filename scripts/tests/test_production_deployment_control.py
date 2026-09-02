@@ -360,6 +360,84 @@ def test_only_one_mutation_lock_holder_is_allowed(control, config) -> None:
         second.acquire()
 
 
+def test_invoke_engine_requires_worker_lock_and_sets_narrow_internal_authority(
+    control, config, monkeypatch
+) -> None:
+    controller = control.DeploymentController(config)
+    request = control.asdict(_request(control))
+    candidate = {
+        "release_directory": str(config.releases_root / request["target_sha"]),
+        "manifest_sha256": "f" * 64,
+    }
+    calls: list[dict[str, object]] = []
+
+    def successful_engine(command, **kwargs):
+        calls.append(kwargs)
+        return control.subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(control.subprocess, "run", successful_engine)
+
+    with pytest.raises(control.DeploymentError, match="mutation lock authority"):
+        controller._invoke_engine(request, candidate)
+    assert calls == []
+
+    with control.MutationLock(config.mutation_lock):
+        controller._invoke_engine(request, candidate)
+
+    assert len(calls) == 1
+    environment = calls[0]["env"]
+    assert environment["ACTIVATION_CONTROLLER_LOCK_HELD"] == "true"
+    assert environment["ACTIVATION_REQUEST_ID"] == request["request_id"]
+    assert environment["ACTIVATION_TARGET_SHA"] == request["target_sha"]
+
+
+def test_preflight_engine_does_not_receive_controller_lock_authority(
+    control, config, monkeypatch
+) -> None:
+    store = control.DeploymentStore(config)
+    active = _active(control, config)
+    store.seed_active(active)
+    request = _request(control)
+    _candidate(control, config, request)
+    calls: list[dict[str, object]] = []
+
+    def successful_engine(command, **kwargs):
+        calls.append(kwargs)
+        return control.subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(control.subprocess, "run", successful_engine)
+
+    control.DeploymentController(config).preflight(request.target_sha, request)
+
+    assert len(calls) == 1
+    assert "ACTIVATION_CONTROLLER_LOCK_HELD" not in calls[0]["env"]
+
+
+def test_controller_accepts_only_sanctioned_mutation_lock_failure_evidence(
+    control, config
+) -> None:
+    controller = control.DeploymentController(config)
+    request = control.asdict(_request(control))
+    evidence = controller._engine_failure_evidence_path(request["request_id"])
+    evidence.parent.mkdir(parents=True)
+    control.atomic_write_json(
+        evidence,
+        {
+            "schema_version": 1,
+            "request_id": request["request_id"],
+            "target_sha": request["target_sha"],
+            "stage": "mutation-lock",
+            "exit_code": 2,
+            "observed_at": "2026-09-03T00:00:00Z",
+        },
+    )
+
+    accepted = controller._load_engine_failure_evidence(request, expected_exit_code=2)
+
+    assert accepted is not None
+    assert accepted["stage"] == "mutation-lock"
+
+
 def test_finalization_updates_compatibility_views_and_ledger(control, config) -> None:
     store = control.DeploymentStore(config)
     old = _active(control, config)
@@ -500,6 +578,7 @@ def test_worker_finalizes_receipt_ledger_and_views_once(control, config) -> None
     controller = control.DeploymentController(config)
 
     def invoke(payload, candidate):
+        assert config.mutation_lock.resolve() in control._HELD_LOCKS
         calls.append(payload["request_id"])
         _fake_engine_success(control, controller, payload, candidate)
 

@@ -26,6 +26,7 @@ ACTIVATION_FAILURE_STAGES = frozenset(
         "helper-authority",
         "external-config",
         "candidate-contract",
+        "mutation-lock",
         "compose-structure",
         "image-contract",
         "production-values",
