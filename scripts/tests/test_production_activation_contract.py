@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -38,6 +39,22 @@ COMPOSE_CONFIG_HELP = (
     "      --no-path-resolution\n"
     f"unrelated-help-text={SECRET_SENTINEL}\n"
 )
+
+
+def _load_contract():
+    spec = importlib.util.spec_from_file_location(
+        "production_activation_contract", CONTRACT_HELPER
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture()
+def contract():
+    return _load_contract()
 
 
 def _bash() -> Path:
@@ -872,6 +889,89 @@ def test_failure_evidence_contract_rejects_unknown_stage(tmp_path: Path) -> None
     assert process.returncode == 2
     assert "stage is unsupported" in process.stderr
     assert not evidence.exists()
+
+
+def test_failure_evidence_write_fsyncs_file_replace_then_directory(
+    contract, tmp_path: Path, monkeypatch
+) -> None:
+    evidence = tmp_path / "activation-engine-failure.json"
+    events: list[tuple[str, object]] = []
+    original_fsync = contract.os.fsync
+    original_replace = contract.os.replace
+
+    def tracked_fsync(descriptor: int) -> None:
+        events.append(("file-fsync", descriptor))
+        original_fsync(descriptor)
+
+    def tracked_replace(source: Path, destination: Path) -> None:
+        events.append(("replace", destination))
+        original_replace(source, destination)
+
+    monkeypatch.setattr(contract.os, "fsync", tracked_fsync)
+    monkeypatch.setattr(contract.os, "replace", tracked_replace)
+    monkeypatch.setattr(
+        contract,
+        "_fsync_directory",
+        lambda path: events.append(("directory-fsync", path)),
+        raising=False,
+    )
+
+    contract._write_engine_failure_evidence(
+        evidence,
+        "activation-100-1",
+        RELEASE_SHA,
+        "postgres-backup",
+        17,
+    )
+
+    assert [event for event, _ in events] == [
+        "file-fsync",
+        "replace",
+        "directory-fsync",
+    ]
+    assert events[1][1] == evidence
+    assert events[2][1] == evidence.parent
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows cannot open a directory descriptor for fsync; Linux CI covers it.",
+)
+def test_directory_fsync_uses_supported_platform_descriptor(
+    contract, tmp_path: Path, monkeypatch
+) -> None:
+    events: list[tuple[str, object]] = []
+    directory_descriptor = 73
+
+    def tracked_open(path: Path, flags: int) -> int:
+        events.append(("open", (path, flags)))
+        return directory_descriptor
+
+    monkeypatch.setattr(contract.os, "open", tracked_open)
+    monkeypatch.setattr(
+        contract.os,
+        "fsync",
+        lambda descriptor: events.append(("fsync", descriptor)),
+    )
+    monkeypatch.setattr(
+        contract.os,
+        "close",
+        lambda descriptor: events.append(("close", descriptor)),
+    )
+
+    contract._fsync_directory(tmp_path)
+
+    assert events == [
+        (
+            "open",
+            (
+                tmp_path,
+                contract.os.O_RDONLY | getattr(contract.os, "O_DIRECTORY", 0),
+            ),
+        ),
+        ("fsync", directory_descriptor),
+        ("close", directory_descriptor),
+    ]
 
 
 def test_candidate_helper_cannot_become_failure_evidence_authority(

@@ -281,6 +281,16 @@ def _load_json_stream() -> Any:
         raise ContractError("Structural Compose input is not valid JSON.") from error
 
 
+def _fsync_directory(path: Path) -> None:
+    if os.name == "nt":
+        return
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _write_json_atomic(output: Path, payload: Any) -> None:
     if not output.is_absolute():
         raise ContractError("Validated metadata output path must be absolute.")
@@ -300,6 +310,7 @@ def _write_json_atomic(output: Path, payload: Any) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, output)
+        _fsync_directory(output.parent)
     finally:
         temporary.unlink(missing_ok=True)
 
