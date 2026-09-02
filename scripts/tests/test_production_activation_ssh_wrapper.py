@@ -119,6 +119,8 @@ def test_installer_uses_root_owned_immutable_sources_and_starts_nothing() -> Non
     assert "sha256sum --check --quiet .release-files.sha256" in source
     assert "stat -c '%u' \"$source_root\"" in source
     assert '[ ! -L "$source_path" ]' in source
+    assert "8#$source_mode & 8#022" in source
+    assert "writable by an unsafe role" in source
     assert "sha256:%s %s *" in source
     assert "visudo -c" in source
     for forbidden in (

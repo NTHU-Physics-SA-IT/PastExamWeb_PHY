@@ -17,6 +17,16 @@ manifest, every tracked source file, the immutable image references, and the
 rendered Compose images. Matching candidates are reused; mismatches fail
 without overwriting either candidate.
 
+Candidate packaging applies a fixed `0022` archive umask to all tracked members,
+preserving Git's executable distinction while removing group/world write
+permission without changing file content. Candidate verification additionally
+enforces the activation framework installer's source-mode boundary for its eight
+installer-consumed files before atomic promotion and during same-SHA reuse.
+Unsafe existing immutable candidates fail verification and are never repaired
+in place; the installer independently rechecks ownership,
+regular-file/symlink status, and group/world write safety before installing
+anything.
+
 Automatic candidate preparation is governed only by
 `AUTO_PREPARE_PRODUCTION_CANDIDATE`; activation authority remains separate.
 Candidate preparation never runs `docker compose pull`, `docker compose up`,

@@ -58,6 +58,17 @@ else
   die "sha256sum is required."
 fi
 
+source_authorities=(
+  scripts/production-deployment-control.py
+  scripts/pastexam-activate-ssh-wrapper.sh
+  scripts/activate-production-release.sh
+  scripts/production-activation-contract.py
+  scripts/postgres-logical-backup.sh
+  scripts/minio-storage-preflight.sh
+  scripts/minio-readonly-manifest.sh
+  docker/docker-compose.nginx-immutable.yml
+)
+
 capacity_preflight() {
   [ -d "$releases_root" ] || die "Candidate release root is unavailable."
   local disk_metrics inode_metrics
@@ -102,6 +113,23 @@ manifest_value() {
   sed -n "s/^${2}=//p" "$1" | tail -n 1
 }
 
+verify_framework_source_authorities() {
+  local candidate_root="$1" candidate_owner relative source_path
+  local source_owner source_mode
+  candidate_owner="$(stat -c '%u' "$candidate_root")"
+  for relative in "${source_authorities[@]}"; do
+    source_path="$candidate_root/$relative"
+    [ -f "$source_path" ] && [ ! -L "$source_path" ] || \
+      die "Activation framework source authority is not a regular file."
+    source_owner="$(stat -c '%u' "$source_path")"
+    [ "$source_owner" = "$candidate_owner" ] || \
+      die "Activation framework source authority has an unexpected owner."
+    source_mode="$(stat -c '%a' "$source_path")"
+    (( (8#$source_mode & 8#022) == 0 )) || \
+      die "Activation framework source authority is writable by an unsafe role."
+  done
+}
+
 verify_candidate() {
   local candidate_root="$1"
   local release_sha="$2"
@@ -125,6 +153,7 @@ verify_candidate() {
   test "$("${checksum_command[@]}" "$candidate_root/.release-files.sha256" | cut -d ' ' -f 1)" = "$release_files_checksum"
   (cd "$candidate_root" && "${checksum_check_command[@]}" .release-files.sha256)
   (cd "$candidate_root" && "${checksum_check_command[@]}" "$receipt_checksum_name")
+  verify_framework_source_authorities "$candidate_root"
 
   test "$(manifest_value "$manifest" release_sha)" = "$release_sha"
   test "$(manifest_value "$manifest" source_archive_sha256)" = "$source_archive_checksum"
@@ -251,6 +280,7 @@ PY
   test "$(cat "$staging_root/.release-source-sha")" = "$release_sha"
   test "$("${checksum_command[@]}" "$staging_root/.release-files.sha256" | cut -d ' ' -f 1)" = "$release_files_checksum"
   (cd "$staging_root" && "${checksum_check_command[@]}" .release-files.sha256)
+  verify_framework_source_authorities "$staging_root"
 
   printf '# Immutable images for release %s\nFRONTEND_IMAGE=%s\nBACKEND_IMAGE=%s\n' \
     "$release_sha" "$frontend_image" "$backend_image" >"$staging_root/compose.prod.env"
