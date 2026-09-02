@@ -431,7 +431,7 @@ jobs:
             "$RELEASE_SHA" "$FRONTEND_IMAGE_DIGEST" \
             "$BACKEND_IMAGE_DIGEST" >"$authority"
       - name: Retain exact-SHA image authority
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: production-image-authority-${{ github.sha }}
           path: ${{ runner.temp }}/production-image-authority.env

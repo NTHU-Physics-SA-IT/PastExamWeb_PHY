@@ -167,7 +167,7 @@ jobs:
             --release-files-sha256 "$RELEASE_FILES_SHA256"
 
       - name: Upload durable candidate receipt
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: production-candidate-receipt-${{ inputs.release_sha }}
           path: ${{ runner.temp }}/candidate-receipt.json
