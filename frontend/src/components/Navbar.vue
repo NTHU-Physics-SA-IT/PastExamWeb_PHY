@@ -31,7 +31,7 @@
             }}</span>
             <Button
               v-if="canAccessAdmin"
-              icon="pi pi-cog"
+              icon="pi pi-database"
               :label="$t('管理中心')"
               severity="secondary"
               size="small"
@@ -76,7 +76,7 @@
           <div class="flex md:hidden align-items-center gap-2 nav-action-group">
             <Button
               v-if="canAccessAdmin"
-              icon="pi pi-cog"
+              icon="pi pi-database"
               @click="handleNavigateAdmin"
               severity="secondary"
               size="small"
