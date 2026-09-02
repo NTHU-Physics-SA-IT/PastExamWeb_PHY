@@ -47,7 +47,7 @@ jobs:
             --output "$GITHUB_OUTPUT"
 
       - name: Download exact Full image authority
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: production-image-authority-${{ inputs.release_sha }}
           path: ${{ runner.temp }}/production-image-authority
