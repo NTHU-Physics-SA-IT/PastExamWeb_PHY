@@ -222,6 +222,15 @@ below must not be collapsed into one universal Admin mode.
 | Review/trash/report/slogan surfaces | Tablet Landscape / `1024–1399px` | Responsive cards with the wider metadata arrangements. | `900px`, `1400px`; lower side currently written as `1399px` or `1399.98px` | KEEP | same sources |
 | Review/trash/report/slogan surfaces | Desktop / `>=1400px` | Wide table composition and desktop-specific table/action ordering. | `1400px` | KEEP | same sources |
 
+Within the Phone Portrait review-card range, the Admin review application cards
+for `新課程 / 新分類考古申請` and `既有課程考古申請` reuse the existing `480px`
+Feature Breakpoint. At `width < 480px`, each card keeps its actual action set in
+one icon-only row. At `width >= 480px && width < 641px`, the same actions remain
+in one labeled icon-and-text row. Card metadata stays above the action controls
+throughout `width < 641px`. The shared threshold is based on measured fit of the
+worst-case five-action row and is owned only by these Admin review application
+cards; it does not change Trash responsive behavior.
+
 The existing `1399px`, `1399.98px`, and `1400px` notation remains unchanged.
 It expresses the approved Tablet Landscape to Desktop transition and is not a
 separate set of Major Breakpoints.
