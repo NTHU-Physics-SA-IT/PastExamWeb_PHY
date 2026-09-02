@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -481,6 +482,11 @@ def _activation_environment(
     )
     _write_executable(fake_bin / "curl", "#!/usr/bin/env bash\nset -eu\nexit 0\n")
     _write_executable(
+        fake_bin / "python3",
+        "#!/usr/bin/env bash\n"
+        f"exec '{_bash_path(Path(sys.executable))}' \"$@\"\n",
+    )
+    _write_executable(
         fake_bin / "stat",
         "#!/usr/bin/env bash\n"
         "set -eu\n"
@@ -706,6 +712,189 @@ def _activate(environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
         check=False,
         env=environment,
     )
+
+
+def _enable_failure_evidence(
+    tmp_path: Path, environment: dict[str, str]
+) -> Path:
+    evidence = tmp_path / "activation-engine-failure.json"
+    environment.update(
+        {
+            "ACTIVATION_FAILURE_EVIDENCE_PATH": _bash_path(evidence),
+            "ACTIVATION_REQUEST_ID": "activation-100-1",
+            "ACTIVATION_TARGET_SHA": RELEASE_SHA,
+        }
+    )
+    return evidence
+
+
+def _assert_failure_evidence(
+    evidence: Path, *, stage: str, exit_code: int
+) -> dict[str, object]:
+    payload = json.loads(evidence.read_text(encoding="utf-8"))
+    assert payload == {
+        "schema_version": 1,
+        "request_id": "activation-100-1",
+        "target_sha": RELEASE_SHA,
+        "stage": stage,
+        "exit_code": exit_code,
+        "observed_at": payload["observed_at"],
+    }
+    assert payload["observed_at"].endswith("Z")
+    if os.name != "nt":
+        assert stat.S_IMODE(evidence.stat().st_mode) == 0o600
+    assert not list(evidence.parent.glob(f".{evidence.name}.partial-*"))
+    return payload
+
+
+def test_common_preflight_failure_writes_only_sanitized_stage_evidence(
+    tmp_path: Path,
+) -> None:
+    environment, _, _ = _activation_environment(tmp_path)
+    environment["FAKE_PERSISTENT_STATE"] = "exited:none"
+    evidence = _enable_failure_evidence(tmp_path, environment)
+
+    process = _activate(environment)
+
+    assert process.returncode == 2
+    _assert_failure_evidence(evidence, stage="persistent-services", exit_code=2)
+
+
+def test_postgres_backup_failure_records_first_actual_only_stage(
+    tmp_path: Path,
+) -> None:
+    environment, _, docker_log = _activation_environment(tmp_path, postgres_exit=9)
+    evidence = _enable_failure_evidence(tmp_path, environment)
+
+    process = _activate(environment)
+
+    assert process.returncode == 9
+    _assert_failure_evidence(evidence, stage="postgres-backup", exit_code=9)
+    assert " up -d " not in docker_log.read_text(encoding="utf-8")
+
+
+def test_minio_manifest_failure_records_later_precutover_stage(
+    tmp_path: Path,
+) -> None:
+    environment, _, docker_log = _activation_environment(tmp_path)
+    _write_executable(
+        tmp_path / "host-helpers" / "minio-readonly-manifest.sh",
+        "#!/usr/bin/env bash\nexit 8\n",
+    )
+    evidence = _enable_failure_evidence(tmp_path, environment)
+
+    process = _activate(environment)
+
+    assert process.returncode == 8
+    _assert_failure_evidence(evidence, stage="minio-manifest", exit_code=8)
+    assert " up -d " not in docker_log.read_text(encoding="utf-8")
+
+
+def test_health_failure_records_post_cutover_stage_without_success_evidence(
+    tmp_path: Path,
+) -> None:
+    environment, _, docker_log = _activation_environment(tmp_path)
+    _set_health_failures(tmp_path, environment, failures=3)
+    evidence = _enable_failure_evidence(tmp_path, environment)
+    engine_evidence = tmp_path / "engine-evidence.json"
+    environment["ACTIVATION_EVIDENCE_PATH"] = _bash_path(engine_evidence)
+
+    process = _activate(environment)
+
+    assert process.returncode == 1
+    _assert_failure_evidence(evidence, stage="internal-health", exit_code=1)
+    assert " up -d --no-deps backend frontend nginx" in docker_log.read_text(
+        encoding="utf-8"
+    )
+    assert not engine_evidence.exists()
+    assert not (tmp_path / RELEASE_SHA / ".activated").exists()
+
+
+def test_raw_failure_stderr_is_not_written_to_sanitized_evidence(
+    tmp_path: Path,
+) -> None:
+    environment, _, _ = _activation_environment(tmp_path)
+    _write_executable(
+        tmp_path / "host-helpers" / STORAGE_PREFLIGHT.name,
+        "#!/usr/bin/env bash\n"
+        f"printf '%s\\n' '{SECRET_SENTINEL}' >&2\n"
+        "exit 7\n",
+    )
+    evidence = _enable_failure_evidence(tmp_path, environment)
+
+    process = _activate(environment)
+
+    assert process.returncode == 7
+    payload = _assert_failure_evidence(
+        evidence, stage="minio-preflight", exit_code=7
+    )
+    assert SECRET_SENTINEL in process.stderr
+    assert SECRET_SENTINEL not in json.dumps(payload)
+
+
+def test_successful_activation_does_not_create_failure_evidence(
+    tmp_path: Path,
+) -> None:
+    environment, _, _ = _activation_environment(tmp_path)
+    evidence = _enable_failure_evidence(tmp_path, environment)
+
+    process = _activate(environment)
+
+    assert process.returncode == 0, process.stderr
+    assert not evidence.exists()
+
+
+def test_failure_evidence_contract_rejects_unknown_stage(tmp_path: Path) -> None:
+    evidence = tmp_path / "activation-engine-failure.json"
+
+    process = subprocess.run(
+        [
+            sys.executable,
+            str(CONTRACT_HELPER),
+            "write-engine-failure-evidence",
+            "--output",
+            str(evidence),
+            "--request-id",
+            "activation-100-1",
+            "--target-sha",
+            RELEASE_SHA,
+            "--stage",
+            "candidate-controlled-stage",
+            "--exit-code",
+            "2",
+        ],
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+    )
+
+    assert process.returncode == 2
+    assert "stage is unsupported" in process.stderr
+    assert not evidence.exists()
+
+
+def test_candidate_helper_cannot_become_failure_evidence_authority(
+    tmp_path: Path,
+) -> None:
+    environment, _, _ = _activation_environment(tmp_path)
+    invoked = tmp_path / "candidate-helper-invoked"
+    candidate_helper = tmp_path / RELEASE_SHA / "candidate-helper"
+    _write_executable(
+        candidate_helper,
+        "#!/usr/bin/env bash\n"
+        f"touch '{_bash_path(invoked)}'\n"
+        "exit 2\n",
+    )
+    environment["ACTIVATION_CONTRACT_HELPER"] = _bash_path(candidate_helper)
+    evidence = _enable_failure_evidence(tmp_path, environment)
+
+    process = _activate(environment)
+
+    assert process.returncode == 2
+    assert "cannot be privileged activation authority" in process.stderr.lower()
+    assert not invoked.exists()
+    assert not evidence.exists()
 
 
 def test_activation_supplies_all_backup_contract_inputs(tmp_path: Path) -> None:
@@ -1717,6 +1906,7 @@ def test_read_only_preflight_stops_before_backup_and_application_mutation(
     tmp_path: Path,
 ) -> None:
     environment, backup_log, docker_log = _activation_environment(tmp_path)
+    failure_evidence = _enable_failure_evidence(tmp_path, environment)
     environment["ACTIVATION_PREFLIGHT_ONLY"] = "true"
 
     process = _activate(environment)
@@ -1736,6 +1926,7 @@ def test_read_only_preflight_stops_before_backup_and_application_mutation(
     assert "migrate.py require-head --json" in commands
     assert " up -d " not in commands
     assert not (tmp_path / RELEASE_SHA / ".activated").exists()
+    assert not failure_evidence.exists()
 
 
 def test_target_ports_cannot_drop_current_production_ingress(tmp_path: Path) -> None:

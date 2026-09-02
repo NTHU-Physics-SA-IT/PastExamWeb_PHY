@@ -3,6 +3,38 @@
 set -euo pipefail
 umask 077
 
+current_stage="startup"
+contract_directory=""
+failure_contract_helper=""
+record_activation_exit() {
+  local status="$?"
+  trap - EXIT HUP INT TERM
+  set +e
+  if [ -n "$contract_directory" ]; then
+    rm -rf -- "$contract_directory"
+  fi
+  if [ "$status" -ne 0 ] && [ -n "${ACTIVATION_FAILURE_EVIDENCE_PATH:-}" ] && \
+    [ -n "$failure_contract_helper" ]
+  then
+    env -i \
+      PATH="${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}" \
+      python3 \
+      "$failure_contract_helper" \
+      write-engine-failure-evidence \
+      --output "$ACTIVATION_FAILURE_EVIDENCE_PATH" \
+      --request-id "${ACTIVATION_REQUEST_ID:-}" \
+      --target-sha "${ACTIVATION_TARGET_SHA:-}" \
+      --stage "$current_stage" \
+      --exit-code "$status" \
+      >/dev/null 2>&1
+  fi
+  exit "$status"
+}
+trap record_activation_exit EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 PRODUCTION_DEPLOY_ENABLED="${PRODUCTION_DEPLOY_ENABLED:-false}"
 if [ "$PRODUCTION_DEPLOY_ENABLED" != "true" ]; then
   echo "Production activation is disabled." >&2
@@ -32,11 +64,18 @@ fi
 : "${MINIO_MANIFEST_HELPER:=/usr/local/libexec/pastexam-minio-readonly-manifest}"
 : "${NGINX_IMAGE_OVERRIDE:=/usr/local/libexec/pastexam-nginx-image-override.yml}"
 : "${ACTIVATION_EVIDENCE_PATH:=}"
+: "${ACTIVATION_FAILURE_EVIDENCE_PATH:=}"
 : "${ACTIVATION_PREFLIGHT_ONLY:=false}"
 
 activation_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 if [ -n "$ACTIVATION_EVIDENCE_PATH" ] && [[ "$ACTIVATION_EVIDENCE_PATH" != /* ]]; then
   echo "ACTIVATION_EVIDENCE_PATH must be absolute." >&2
+  exit 2
+fi
+if [ -n "$ACTIVATION_FAILURE_EVIDENCE_PATH" ] && \
+  [[ "$ACTIVATION_FAILURE_EVIDENCE_PATH" != /* ]]
+then
+  echo "ACTIVATION_FAILURE_EVIDENCE_PATH must be absolute." >&2
   exit 2
 fi
 if [ "$ACTIVATION_PREFLIGHT_ONLY" != "true" ] && [ "$ACTIVATION_PREFLIGHT_ONLY" != "false" ]; then
@@ -134,8 +173,10 @@ verify_root_readonly_file() {
   fi
 }
 
+current_stage="helper-authority"
+verify_root_helper "$ACTIVATION_CONTRACT_HELPER"
+failure_contract_helper="$ACTIVATION_CONTRACT_HELPER"
 for helper in \
-  "$ACTIVATION_CONTRACT_HELPER" \
   "$POSTGRES_BACKUP_HELPER" \
   "$MINIO_PREFLIGHT_HELPER" \
   "$MINIO_MANIFEST_HELPER"
@@ -144,6 +185,7 @@ do
 done
 verify_root_readonly_file "$NGINX_IMAGE_OVERRIDE"
 
+current_stage="external-config"
 for config_file in \
   "$PRODUCTION_COMPOSE_ENV_FILE" \
   "$PRODUCTION_BACKEND_ENV_FILE" \
@@ -191,6 +233,7 @@ verify_external_file() {
   fi
 }
 
+current_stage="candidate-contract"
 if [ "$RELEASE_MANIFEST" != "$RELEASE_DIRECTORY/release-manifest.env" ]; then
   echo "Release manifest must use the canonical immutable release path." >&2
   exit 2
@@ -245,8 +288,9 @@ export PRODUCTION_MIGRATOR_ENV_FILE
 contract_directory="$(mktemp -d)"
 cleanup_contract() {
   rm -rf -- "$contract_directory"
+  contract_directory=""
 }
-trap cleanup_contract EXIT HUP INT TERM
+current_stage="compose-structure"
 structural_compose="$contract_directory/compose-structure.json"
 current_nginx_ports="$contract_directory/current-nginx-ports.json"
 if ! "${compose_structure[@]}" config \
@@ -262,6 +306,7 @@ then
   exit 2
 fi
 
+current_stage="image-contract"
 python3 "$contract_helper" verify-images \
   --compose-json "$structural_compose" \
   --manifest "$RELEASE_MANIFEST" \
@@ -290,6 +335,7 @@ for runtime_image_binding in "${runtime_image_contract[@]}"; do
   expected_runtime_images["$container_name"]="$expected_image"
 done
 
+current_stage="production-values"
 production_values="$(
   python3 "$contract_helper" compose-values \
     --compose-json "$structural_compose" \
@@ -310,11 +356,13 @@ MINIO_BUCKET_NAME="${production_contract[4]}"
 NGINX_CONTAINER="${production_contract[5]}"
 REDIS_CONTAINER="${production_contract[6]}"
 
+current_stage="runtime-compose-config"
 if ! "${compose[@]}" config --quiet >/dev/null 2>&1; then
   echo "Production Compose runtime configuration is invalid." >&2
   exit 2
 fi
 
+current_stage="ingress-contract"
 mount_values="$(
   python3 "$contract_helper" mount-values \
     --compose-json "$structural_compose" \
@@ -337,6 +385,7 @@ python3 "$contract_helper" verify-ingress \
   --release-directory "$RELEASE_DIRECTORY" \
   --compose-env "$PRODUCTION_COMPOSE_ENV_FILE"
 
+current_stage="persistent-services"
 for persistent_container in \
   "$DATABASE_CONTAINER" "$REDIS_CONTAINER" "$MINIO_CONTAINER"
 do
@@ -354,21 +403,25 @@ do
   esac
 done
 
+current_stage="postgres-readiness"
 if ! docker exec "$DATABASE_CONTAINER" \
   pg_isready -U "$DATABASE_USER" -d "$DATABASE_NAME" >/dev/null; then
   echo "PostgreSQL is not accepting connections for activation preflight." >&2
   exit 2
 fi
+current_stage="redis-readiness"
 if [ "$(docker exec "$REDIS_CONTAINER" redis-cli ping)" != "PONG" ]; then
   echo "Redis did not pass the activation preflight PING." >&2
   exit 2
 fi
+current_stage="minio-preflight"
 env -i \
   PATH="$PATH" \
   MINIO_CONTAINER="$MINIO_CONTAINER" \
   MINIO_BUCKET_NAME="$MINIO_BUCKET_NAME" \
   "$MINIO_PREFLIGHT_HELPER"
 
+current_stage="class-zero-before"
 migration_report_before="$contract_directory/migration-before.json"
   "${compose[@]}" run --rm --no-deps migrate python migrate.py require-head --json \
   >"$migration_report_before"
@@ -384,6 +437,7 @@ if [ "$ACTIVATION_PREFLIGHT_ONLY" = "true" ]; then
   exit 0
 fi
 
+current_stage="postgres-backup"
 postgres_backup_output="$(env -i \
   PATH="$PATH" \
   BACKUP_DIRECTORY="$PRODUCTION_BACKUP_DIRECTORY" \
@@ -393,6 +447,7 @@ postgres_backup_output="$(env -i \
   APPLICATION_RELEASE_SHA="$release_sha" \
   "$POSTGRES_BACKUP_HELPER")"
 printf '%s\n' "$postgres_backup_output"
+current_stage="minio-manifest"
 minio_manifest_output="$(env -i \
   PATH="$PATH" \
   BACKUP_DIRECTORY="$PRODUCTION_BACKUP_DIRECTORY" \
@@ -401,6 +456,7 @@ minio_manifest_output="$(env -i \
   "$MINIO_MANIFEST_HELPER")"
 printf '%s\n' "$minio_manifest_output"
 
+current_stage="class-zero-after"
 migration_report_after="$contract_directory/migration-after.json"
   "${compose[@]}" run --rm --no-deps migrate python migrate.py require-head --json \
   >"$migration_report_after"
@@ -412,6 +468,7 @@ if [ "$database_revision_before" != "$database_revision_after" ]; then
   exit 2
 fi
 
+current_stage="application-cutover"
 "${compose[@]}" up -d --no-deps backend frontend nginx
 
 wait_for_health() {
@@ -441,9 +498,12 @@ wait_for_health() {
   done
 }
 
+current_stage="internal-health"
 wait_for_health "Internal" "$INTERNAL_HEALTH_URL"
+current_stage="external-health"
 wait_for_health "External" "$EXTERNAL_HEALTH_URL"
 
+current_stage="bounded-observation"
 container_names=(
   pastexam-nginx
   pastexam-backend
@@ -508,12 +568,14 @@ for ((snapshot = 1; snapshot <= OBSERVATION_SNAPSHOTS; snapshot += 1)); do
   fi
 done
 
+current_stage="activation-marker"
 activated_marker="$RELEASE_DIRECTORY/.activated"
 temporary_marker="$activated_marker.partial"
 printf '%s\n' "$RELEASE_MANIFEST_SHA256" >"$temporary_marker"
 mv "$temporary_marker" "$activated_marker"
 
 if [ -n "$ACTIVATION_EVIDENCE_PATH" ]; then
+  current_stage="engine-evidence"
   postgres_metadata="$(printf '%s\n' "$postgres_backup_output" | sed -n 's/^Metadata: //p')"
   postgres_checksum="$(printf '%s\n' "$postgres_backup_output" | sed -n 's/^Checksum: //p')"
   minio_manifest="$(printf '%s\n' "$minio_manifest_output" | sed -n 's/^Read-only MinIO manifest: //p')"

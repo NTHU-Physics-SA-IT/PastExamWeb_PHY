@@ -23,6 +23,33 @@ DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 REQUEST_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{7,79}$")
 REVISION_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 IMAGE_PATTERN = re.compile(r"^[A-Za-z0-9./_-]+:[A-Za-z0-9_.-]+@sha256:[0-9a-f]{64}$")
+ACTIVATION_FAILURE_STAGES = frozenset(
+    {
+        "startup",
+        "helper-authority",
+        "external-config",
+        "candidate-contract",
+        "compose-structure",
+        "image-contract",
+        "production-values",
+        "runtime-compose-config",
+        "ingress-contract",
+        "persistent-services",
+        "postgres-readiness",
+        "redis-readiness",
+        "minio-preflight",
+        "class-zero-before",
+        "postgres-backup",
+        "minio-manifest",
+        "class-zero-after",
+        "application-cutover",
+        "internal-health",
+        "external-health",
+        "bounded-observation",
+        "activation-marker",
+        "engine-evidence",
+    }
+)
 NGINX_DIGEST = "sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903"
 CANDIDATE_RECEIPT_KEYS = frozenset(
     {
@@ -1214,10 +1241,52 @@ class DeploymentController:
         _require_request_id(request_id)
         return self.config.requests_dir / f"{request_id}.engine.json"
 
+    def _engine_failure_evidence_path(self, request_id: str) -> Path:
+        _require_request_id(request_id)
+        return self.config.requests_dir / f"{request_id}.failure.json"
+
+    def _load_engine_failure_evidence(
+        self, request: dict[str, Any], *, expected_exit_code: int
+    ) -> dict[str, Any] | None:
+        path = self._engine_failure_evidence_path(request["request_id"])
+        try:
+            if not path.is_file() or path.is_symlink():
+                return None
+            payload = _load_json(path, label="engine failure evidence")
+            if set(payload) != {
+                "schema_version",
+                "request_id",
+                "target_sha",
+                "stage",
+                "exit_code",
+                "observed_at",
+            }:
+                return None
+            if (
+                payload["schema_version"] != 1
+                or payload["request_id"] != request["request_id"]
+                or payload["target_sha"] != request["target_sha"]
+                or payload["stage"] not in ACTIVATION_FAILURE_STAGES
+                or isinstance(payload["exit_code"], bool)
+                or not isinstance(payload["exit_code"], int)
+                or payload["exit_code"] != expected_exit_code
+                or not 1 <= payload["exit_code"] <= 255
+            ):
+                return None
+            _require_timestamp(
+                payload["observed_at"], label="Engine failure observed timestamp"
+            )
+        except (DeploymentError, OSError, TypeError):
+            return None
+        return payload
+
     def _invoke_engine(
         self, request: dict[str, Any], candidate: dict[str, Any]
     ) -> None:
         evidence = self._engine_evidence_path(request["request_id"])
+        failure_evidence = self._engine_failure_evidence_path(request["request_id"])
+        if failure_evidence.exists():
+            raise DeploymentError("The production activation engine failed closed.")
         environment = {
             "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
             "PRODUCTION_DEPLOY_ENABLED": "true",
@@ -1229,6 +1298,9 @@ class DeploymentController:
             "RELEASE_MANIFEST_SHA256": candidate["manifest_sha256"],
             "PRODUCTION_BACKUP_DIRECTORY": str(self.config.backup_root),
             "ACTIVATION_EVIDENCE_PATH": str(evidence),
+            "ACTIVATION_FAILURE_EVIDENCE_PATH": str(failure_evidence),
+            "ACTIVATION_REQUEST_ID": request["request_id"],
+            "ACTIVATION_TARGET_SHA": request["target_sha"],
             "INTERNAL_HEALTH_URL": self.config.internal_health_url,
             "EXTERNAL_HEALTH_URL": self.config.external_health_url,
         }
@@ -1240,6 +1312,16 @@ class DeploymentController:
             env=environment,
         )
         if process.returncode != 0:
+            failure = self._load_engine_failure_evidence(
+                request, expected_exit_code=process.returncode
+            )
+            if failure is not None:
+                raise DeploymentError(
+                    "The production activation engine failed closed at stage "
+                    f"'{failure['stage']}' with exit code {failure['exit_code']}."
+                )
+            raise DeploymentError("The production activation engine failed closed.")
+        if failure_evidence.exists():
             raise DeploymentError("The production activation engine failed closed.")
 
     def _load_engine_evidence(

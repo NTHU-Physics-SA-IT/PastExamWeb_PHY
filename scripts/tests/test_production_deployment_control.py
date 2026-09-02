@@ -544,6 +544,128 @@ def test_worker_failure_is_durable_and_does_not_update_active(control, config) -
     failed = store.load_request(request.request_id)
     assert failed["state"] == "FAILED"
     assert failed["failure"]["code"] == "activation-failed"
+    assert set(failed["failure"]) == {"code", "message"}
+    assert controller.resume(request.request_id) == failed
+    assert store.load_active() == active
+
+
+def test_engine_failure_evidence_is_sanitized_durable_and_fail_closed(
+    control, config, monkeypatch
+) -> None:
+    secret = "THIS_MUST_NOT_ENTER_DURABLE_REQUEST_EVIDENCE"
+    config = replace(config, backup_root=config.state_root.parent / "backups")
+    store = control.DeploymentStore(config)
+    active = _active(control, config)
+    store.seed_active(active)
+    request = _request(control)
+    _candidate(control, config, request)
+    store.prepare_request(request, previous_active_sha=active.active_sha)
+    controller = control.DeploymentController(config)
+
+    def fail_engine(command, **kwargs):
+        environment = kwargs["env"]
+        control.atomic_write_json(
+            Path(environment["ACTIVATION_FAILURE_EVIDENCE_PATH"]),
+            {
+                "schema_version": 1,
+                "request_id": request.request_id,
+                "target_sha": request.target_sha,
+                "stage": "postgres-backup",
+                "exit_code": 17,
+                "observed_at": "2026-09-02T12:12:23Z",
+            },
+        )
+        return control.subprocess.CompletedProcess(
+            command, 17, stdout=f"stdout {secret}", stderr=f"stderr {secret}"
+        )
+
+    monkeypatch.setattr(control.subprocess, "run", fail_engine)
+
+    with pytest.raises(
+        control.DeploymentError,
+        match="failed closed at stage 'postgres-backup' with exit code 17",
+    ):
+        controller.worker(request.request_id)
+
+    failed = store.load_request(request.request_id)
+    request_source = (config.requests_dir / f"{request.request_id}.json").read_text(
+        encoding="utf-8"
+    )
+    failure_source = controller._engine_failure_evidence_path(
+        request.request_id
+    ).read_text(encoding="utf-8")
+    assert failed["state"] == "FAILED"
+    assert failed["failure"] == {
+        "code": "activation-failed",
+        "message": (
+            "The production activation engine failed closed at stage "
+            "'postgres-backup' with exit code 17."
+        ),
+    }
+    assert secret not in request_source
+    assert secret not in failure_source
+    assert store.load_active() == active
+
+
+@pytest.mark.parametrize(
+    "evidence_update",
+    [
+        None,
+        {"stage": "candidate-controlled-stage"},
+        {"exit_code": 18},
+        {"unexpected": "THIS_MUST_NOT_ENTER_DURABLE_REQUEST_EVIDENCE"},
+    ],
+    ids=["missing", "unknown-stage", "exit-mismatch", "unexpected-field"],
+)
+def test_invalid_engine_failure_evidence_uses_generic_fallback(
+    control, config, monkeypatch, evidence_update
+) -> None:
+    secret = "THIS_MUST_NOT_ENTER_DURABLE_REQUEST_EVIDENCE"
+    config = replace(config, backup_root=config.state_root.parent / "backups")
+    store = control.DeploymentStore(config)
+    active = _active(control, config)
+    store.seed_active(active)
+    request = _request(control)
+    _candidate(control, config, request)
+    store.prepare_request(request, previous_active_sha=active.active_sha)
+    controller = control.DeploymentController(config)
+
+    def fail_engine(command, **kwargs):
+        if evidence_update is not None:
+            payload = {
+                "schema_version": 1,
+                "request_id": request.request_id,
+                "target_sha": request.target_sha,
+                "stage": "postgres-backup",
+                "exit_code": 17,
+                "observed_at": "2026-09-02T12:12:23Z",
+            }
+            payload.update(evidence_update)
+            control.atomic_write_json(
+                Path(kwargs["env"]["ACTIVATION_FAILURE_EVIDENCE_PATH"]), payload
+            )
+        return control.subprocess.CompletedProcess(
+            command, 17, stdout=secret, stderr=secret
+        )
+
+    monkeypatch.setattr(control.subprocess, "run", fail_engine)
+
+    with pytest.raises(
+        control.DeploymentError,
+        match=r"^The production activation engine failed closed\.$",
+    ):
+        controller.worker(request.request_id)
+
+    failed = store.load_request(request.request_id)
+    request_source = (config.requests_dir / f"{request.request_id}.json").read_text(
+        encoding="utf-8"
+    )
+    assert failed["state"] == "FAILED"
+    assert failed["failure"] == {
+        "code": "activation-failed",
+        "message": "The production activation engine failed closed.",
+    }
+    assert secret not in request_source
     assert store.load_active() == active
 
 

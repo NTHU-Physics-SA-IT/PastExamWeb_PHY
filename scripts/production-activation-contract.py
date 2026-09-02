@@ -15,10 +15,38 @@ from pathlib import Path
 from typing import Any
 
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+REQUEST_ID = re.compile(r"^[a-z][a-z0-9-]{7,79}$")
 IMAGE_PATTERN = re.compile(r"^[A-Za-z0-9./_-]+:[A-Za-z0-9_.-]+@sha256:[0-9a-f]{64}$")
 SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9_.:-]+$")
 SAFE_CONTAINER = re.compile(r"^[A-Za-z0-9_.-]+$")
 SAFE_BUCKET = re.compile(r"^[A-Za-z0-9._-]+$")
+ACTIVATION_FAILURE_STAGES = frozenset(
+    {
+        "startup",
+        "helper-authority",
+        "external-config",
+        "candidate-contract",
+        "compose-structure",
+        "image-contract",
+        "production-values",
+        "runtime-compose-config",
+        "ingress-contract",
+        "persistent-services",
+        "postgres-readiness",
+        "redis-readiness",
+        "minio-preflight",
+        "class-zero-before",
+        "postgres-backup",
+        "minio-manifest",
+        "class-zero-after",
+        "application-cutover",
+        "internal-health",
+        "external-health",
+        "bounded-observation",
+        "activation-marker",
+        "engine-evidence",
+    }
+)
 LISTEN_PORT = re.compile(
     r"\blisten\s+(?:\[[^\]]+\]:|[A-Za-z0-9_.-]+:)?"
     r"(?P<port>[0-9]{1,5})(?=[\s;])"
@@ -1184,6 +1212,37 @@ def _write_engine_evidence(
     _write_json_atomic(output, payload)
 
 
+def _write_engine_failure_evidence(
+    output: Path,
+    request_id: str,
+    target_sha: str,
+    stage: str,
+    exit_code: int,
+) -> None:
+    if not output.is_absolute():
+        raise ContractError("Engine failure evidence output path must be absolute.")
+    if REQUEST_ID.fullmatch(request_id) is None:
+        raise ContractError("Engine failure evidence request ID is malformed.")
+    if FULL_SHA.fullmatch(target_sha) is None:
+        raise ContractError("Engine failure evidence target SHA is malformed.")
+    if stage not in ACTIVATION_FAILURE_STAGES:
+        raise ContractError("Engine failure evidence stage is unsupported.")
+    if isinstance(exit_code, bool) or not 1 <= exit_code <= 255:
+        raise ContractError("Engine failure evidence exit code is malformed.")
+    payload = {
+        "schema_version": 1,
+        "request_id": request_id,
+        "target_sha": target_sha,
+        "stage": stage,
+        "exit_code": exit_code,
+        "observed_at": datetime.now(UTC)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z"),
+    }
+    _write_json_atomic(output, payload)
+
+
 def _verify_release(
     manifest: Path, source_sha_path: Path, release_directory: Path
 ) -> None:
@@ -1454,6 +1513,12 @@ def _parser() -> argparse.ArgumentParser:
     evidence.add_argument("--observation-snapshots", type=int, required=True)
     evidence.add_argument("--critical-error-count", type=int, required=True)
     evidence.add_argument("--started-at", required=True)
+    failure = subparsers.add_parser("write-engine-failure-evidence")
+    failure.add_argument("--output", type=Path, required=True)
+    failure.add_argument("--request-id", required=True)
+    failure.add_argument("--target-sha", required=True)
+    failure.add_argument("--stage", required=True)
+    failure.add_argument("--exit-code", type=int, required=True)
     subparsers.add_parser("count-critical-log-lines")
     return parser
 
@@ -1493,6 +1558,14 @@ def main() -> int:
             _verify_class_zero(args.report)
         elif args.command == "count-critical-log-lines":
             _count_critical_log_lines()
+        elif args.command == "write-engine-failure-evidence":
+            _write_engine_failure_evidence(
+                args.output,
+                args.request_id,
+                args.target_sha,
+                args.stage,
+                args.exit_code,
+            )
         else:
             _write_engine_evidence(
                 args.output,
