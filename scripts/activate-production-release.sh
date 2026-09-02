@@ -66,6 +66,7 @@ fi
 : "${ACTIVATION_EVIDENCE_PATH:=}"
 : "${ACTIVATION_FAILURE_EVIDENCE_PATH:=}"
 : "${ACTIVATION_PREFLIGHT_ONLY:=false}"
+: "${ACTIVATION_CONTROLLER_LOCK_HELD:=false}"
 
 activation_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 if [ -n "$ACTIVATION_EVIDENCE_PATH" ] && [[ "$ACTIVATION_EVIDENCE_PATH" != /* ]]; then
@@ -81,6 +82,25 @@ fi
 if [ "$ACTIVATION_PREFLIGHT_ONLY" != "true" ] && [ "$ACTIVATION_PREFLIGHT_ONLY" != "false" ]; then
   echo "ACTIVATION_PREFLIGHT_ONLY must be true or false." >&2
   exit 2
+fi
+if [ "$ACTIVATION_CONTROLLER_LOCK_HELD" != "true" ] && \
+  [ "$ACTIVATION_CONTROLLER_LOCK_HELD" != "false" ]
+then
+  echo "Activation controller lock mode is invalid." >&2
+  exit 2
+fi
+if [ "$ACTIVATION_CONTROLLER_LOCK_HELD" = "true" ]; then
+  if [ "$ACTIVATION_PREFLIGHT_ONLY" = "true" ] || \
+    [[ ! "${ACTIVATION_REQUEST_ID:-}" =~ ^[a-z][a-z0-9-]{7,79}$ ]] || \
+    [[ ! "${ACTIVATION_TARGET_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || \
+    [[ "$ACTIVATION_EVIDENCE_PATH" != \
+      */requests/"${ACTIVATION_REQUEST_ID}".engine.json ]] || \
+    [[ "$ACTIVATION_FAILURE_EVIDENCE_PATH" != \
+      */requests/"${ACTIVATION_REQUEST_ID}".failure.json ]]
+  then
+    echo "Activation controller lock authority is invalid." >&2
+    exit 2
+  fi
 fi
 
 if [ "$ACTIVATION_CONFIRMATION" != "activate-reviewed-production-release" ]; then
@@ -257,11 +277,20 @@ release_sha="$(
     --source-sha "$RELEASE_DIRECTORY/.release-source-sha" \
     --release-directory "$RELEASE_DIRECTORY"
 )"
-
-exec 9>"$PRODUCTION_LOCK_FILE"
-if ! flock -n 9; then
-  echo "Another production activation holds the deployment lock." >&2
+if [ "$ACTIVATION_CONTROLLER_LOCK_HELD" = "true" ] && \
+  [ "$release_sha" != "$ACTIVATION_TARGET_SHA" ]
+then
+  echo "Activation controller target authority is invalid." >&2
   exit 2
+fi
+
+current_stage="mutation-lock"
+if [ "$ACTIVATION_CONTROLLER_LOCK_HELD" = "false" ]; then
+  exec 9>"$PRODUCTION_LOCK_FILE"
+  if ! flock -n 9; then
+    echo "Another production activation holds the deployment lock." >&2
+    exit 2
+  fi
 fi
 
 compose_file="$RELEASE_DIRECTORY/docker/docker-compose.prod.yml"

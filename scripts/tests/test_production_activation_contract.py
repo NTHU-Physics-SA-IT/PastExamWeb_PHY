@@ -17,6 +17,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 ACTIVATION_SCRIPT = REPOSITORY_ROOT / "scripts" / "activate-production-release.sh"
 BACKUP_SCRIPT = REPOSITORY_ROOT / "scripts" / "postgres-logical-backup.sh"
 CONTRACT_HELPER = REPOSITORY_ROOT / "scripts" / "production-activation-contract.py"
+CONTROL_PATH = REPOSITORY_ROOT / "scripts" / "production-deployment-control.py"
 STORAGE_PREFLIGHT = REPOSITORY_ROOT / "scripts" / "minio-storage-preflight.sh"
 TEST_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "test.yml"
 RELEASE_SHA = "19782580b710924d8ccdb939600be72ecd44d303"
@@ -44,6 +45,17 @@ COMPOSE_CONFIG_HELP = (
 def _load_contract():
     spec = importlib.util.spec_from_file_location(
         "production_activation_contract", CONTRACT_HELPER
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_control():
+    spec = importlib.util.spec_from_file_location(
+        "production_deployment_control_for_activation", CONTROL_PATH
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -330,6 +342,7 @@ def _activation_environment(
     tls_owner: str = "0",
     migration_revision: str = "9f1c2a7e4b63",
     repository_head: str = "9f1c2a7e4b63",
+    stub_flock: bool = True,
 ) -> tuple[dict[str, str], Path, Path]:
     release = tmp_path / RELEASE_SHA
     scripts = release / "scripts"
@@ -515,6 +528,7 @@ def _activation_environment(
         "  printf '600\\n'\n"
         "fi\n",
     )
+    flock_stub = "flock() { return 0; }\n" if stub_flock else ""
     bash_env = tmp_path / "activation-bash-env"
     bash_env.write_text(
         "mktemp() {\n"
@@ -570,7 +584,7 @@ def _activation_environment(
         "  fi\n"
         "}\n"
         "curl() { return 0; }\n"
-        "flock() { return 0; }\n"
+        f"{flock_stub}"
         "sleep() { return 0; }\n"
         "python3() {\n"
         "  if [[ \"$*\" == *'count-critical-log-lines'* && \"$FAKE_CRITICAL_PARSER_EXIT\" != '0' ]]; then\n"
@@ -745,6 +759,25 @@ def _enable_failure_evidence(
     return evidence
 
 
+def _enable_controller_lock_authority(
+    tmp_path: Path, environment: dict[str, str]
+) -> tuple[Path, Path]:
+    requests = tmp_path / "requests"
+    requests.mkdir()
+    engine_evidence = requests / "activation-100-1.engine.json"
+    failure_evidence = requests / "activation-100-1.failure.json"
+    environment.update(
+        {
+            "ACTIVATION_CONTROLLER_LOCK_HELD": "true",
+            "ACTIVATION_EVIDENCE_PATH": _bash_path(engine_evidence),
+            "ACTIVATION_FAILURE_EVIDENCE_PATH": _bash_path(failure_evidence),
+            "ACTIVATION_REQUEST_ID": "activation-100-1",
+            "ACTIVATION_TARGET_SHA": RELEASE_SHA,
+        }
+    )
+    return engine_evidence, failure_evidence
+
+
 def _assert_failure_evidence(
     evidence: Path, *, stage: str, exit_code: int
 ) -> dict[str, object]:
@@ -859,6 +892,163 @@ def test_successful_activation_does_not_create_failure_evidence(
 
     assert process.returncode == 0, process.stderr
     assert not evidence.exists()
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux flock semantics required")
+def test_controller_held_lock_alias_does_not_self_contend_and_blocks_competitor(
+    tmp_path: Path,
+) -> None:
+    flock_binary = shutil.which("flock")
+    if flock_binary is None:
+        pytest.skip("flock is unavailable")
+    control = _load_control()
+    environment, _, _ = _activation_environment(tmp_path, stub_flock=False)
+    canonical_directory = tmp_path / "run" / "lock"
+    canonical_directory.mkdir(parents=True)
+    alias_parent = tmp_path / "var"
+    alias_parent.mkdir()
+    alias_directory = alias_parent / "lock"
+    alias_directory.symlink_to(canonical_directory, target_is_directory=True)
+    canonical_lock = canonical_directory / "activation.lock"
+    alias_lock = alias_directory / "activation.lock"
+    environment["PRODUCTION_LOCK_FILE"] = str(alias_lock)
+    _, failure_evidence = _enable_controller_lock_authority(tmp_path, environment)
+
+    with control.MutationLock(canonical_lock):
+        process = _activate(environment)
+        competitor = subprocess.run(
+            [flock_binary, "-n", str(alias_lock), "true"],
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+
+    assert process.returncode == 0, process.stderr
+    assert competitor.returncode != 0
+    assert not failure_evidence.exists()
+    assert canonical_lock.stat().st_ino == alias_lock.stat().st_ino
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux flock semantics required")
+def test_direct_preflight_engine_uses_alias_lock_and_reports_real_contention(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("flock") is None:
+        pytest.skip("flock is unavailable")
+    control = _load_control()
+    environment, _, _ = _activation_environment(tmp_path, stub_flock=False)
+    canonical_directory = tmp_path / "run" / "lock"
+    canonical_directory.mkdir(parents=True)
+    alias_parent = tmp_path / "var"
+    alias_parent.mkdir()
+    alias_directory = alias_parent / "lock"
+    alias_directory.symlink_to(canonical_directory, target_is_directory=True)
+    canonical_lock = canonical_directory / "activation.lock"
+    alias_lock = alias_directory / "activation.lock"
+    environment["PRODUCTION_LOCK_FILE"] = str(alias_lock)
+    environment["ACTIVATION_PREFLIGHT_ONLY"] = "true"
+
+    uncontended = _activate(environment)
+    assert uncontended.returncode == 0, uncontended.stderr
+
+    failure_evidence = _enable_failure_evidence(tmp_path, environment)
+    with control.MutationLock(canonical_lock):
+        contended = _activate(environment)
+
+    assert contended.returncode == 2
+    _assert_failure_evidence(failure_evidence, stage="mutation-lock", exit_code=2)
+    assert canonical_lock.stat().st_ino == alias_lock.stat().st_ino
+
+
+@pytest.mark.parametrize("invalid_mode", ["yes", "TRUE", "1"])
+def test_invalid_controller_lock_mode_fails_closed(
+    tmp_path: Path, invalid_mode: str
+) -> None:
+    environment, _, _ = _activation_environment(tmp_path)
+    environment["ACTIVATION_CONTROLLER_LOCK_HELD"] = invalid_mode
+
+    process = _activate(environment)
+
+    assert process.returncode == 2
+    assert "controller lock mode is invalid" in process.stderr.lower()
+
+
+def test_controller_lock_mode_requires_exact_worker_context(tmp_path: Path) -> None:
+    environment, _, _ = _activation_environment(tmp_path)
+    environment["ACTIVATION_CONTROLLER_LOCK_HELD"] = "true"
+
+    process = _activate(environment)
+
+    assert process.returncode == 2
+    assert "controller lock authority is invalid" in process.stderr.lower()
+
+
+def test_controller_lock_mode_rejects_preflight_context(tmp_path: Path) -> None:
+    environment, _, _ = _activation_environment(tmp_path)
+    _enable_controller_lock_authority(tmp_path, environment)
+    environment["ACTIVATION_PREFLIGHT_ONLY"] = "true"
+
+    process = _activate(environment)
+
+    assert process.returncode == 2
+    assert "controller lock authority is invalid" in process.stderr.lower()
+
+
+def test_controller_lock_mode_rejects_release_target_mismatch(tmp_path: Path) -> None:
+    environment, _, _ = _activation_environment(tmp_path)
+    _enable_controller_lock_authority(tmp_path, environment)
+    environment["ACTIVATION_TARGET_SHA"] = "a" * 40
+
+    process = _activate(environment)
+
+    assert process.returncode == 2
+    assert "controller target authority is invalid" in process.stderr.lower()
+
+
+def test_controller_lock_mode_skips_only_the_duplicate_engine_lock(
+    tmp_path: Path,
+) -> None:
+    environment, _, _ = _activation_environment(tmp_path)
+    bash_env = tmp_path / "activation-bash-env"
+    with bash_env.open("a", encoding="utf-8") as stream:
+        stream.write("flock() { return 23; }\n")
+    _, failure_evidence = _enable_controller_lock_authority(tmp_path, environment)
+
+    process = _activate(environment)
+
+    assert process.returncode == 0, process.stderr
+    assert not failure_evidence.exists()
+
+
+def test_failure_evidence_contract_accepts_mutation_lock_stage(tmp_path: Path) -> None:
+    evidence = tmp_path / "activation-engine-failure.json"
+
+    process = subprocess.run(
+        [
+            sys.executable,
+            str(CONTRACT_HELPER),
+            "write-engine-failure-evidence",
+            "--output",
+            str(evidence),
+            "--request-id",
+            "activation-100-1",
+            "--target-sha",
+            RELEASE_SHA,
+            "--stage",
+            "mutation-lock",
+            "--exit-code",
+            "2",
+        ],
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+    )
+
+    assert process.returncode == 0, process.stderr
+    payload = json.loads(evidence.read_text(encoding="utf-8"))
+    assert payload["stage"] == "mutation-lock"
 
 
 def test_failure_evidence_contract_rejects_unknown_stage(tmp_path: Path) -> None:

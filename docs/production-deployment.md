@@ -207,8 +207,18 @@ following are supplied by the reviewed controller:
 - external `0600` configuration;
 - an external health URL.
 
-After the Compose capability check succeeds, it acquires a host deployment
-lock and performs:
+The durable controller worker owns the canonical production mutation lock
+across active-state verification, request transition, engine execution,
+receipt construction, ledger finalization, and compatibility-view updates. It
+passes a narrowly validated controller-lock-held mode to the root-only engine,
+which must not reacquire the same logical lock in that process chain. The
+engine acquires the lock itself for preflight or any other supported invocation
+outside a controller worker. A malformed internal mode or a genuinely
+independent contender fails closed, so avoiding parent/child self-contention
+does not weaken mutual exclusion.
+
+After the Compose capability check succeeds and lock ownership is established,
+the engine performs:
 
 1. immutable `release_sha` agreement across `release-manifest.env`,
    `.release-source-sha`, and the release directory name;
@@ -319,7 +329,8 @@ stdout and stderr are intentionally never copied into durable request state,
 failure evidence, receipts, or operator messages.
 
 The fixed failure-stage taxonomy is: `startup`, `helper-authority`,
-`external-config`, `candidate-contract`, `compose-structure`, `image-contract`,
+`external-config`, `candidate-contract`, `mutation-lock`, `compose-structure`,
+`image-contract`,
 `production-values`, `runtime-compose-config`, `ingress-contract`,
 `persistent-services`, `postgres-readiness`, `redis-readiness`,
 `minio-preflight`, `class-zero-before`, `postgres-backup`, `minio-manifest`,
@@ -327,6 +338,12 @@ The fixed failure-stage taxonomy is: `startup`, `helper-authority`,
 `bounded-observation`, `activation-marker`, and `engine-evidence`. These names
 identify the current root-installed engine boundary; they are not candidate
 input and do not grant authorization or permit a failed command to continue.
+
+`mutation-lock` identifies failure to acquire independent engine-side mutation
+authority. `candidate-contract` remains limited to immutable candidate path,
+checksum, and release-identity validation. Historical `candidate-contract`
+failure evidence produced before this stage split may include the former lock
+placement and must be interpreted against the exact installed engine version.
 
 `FAILED` remains terminal. Sanitized failure evidence does not make the failed
 request resumable, authorize rollback, or prove whether production cut over.
