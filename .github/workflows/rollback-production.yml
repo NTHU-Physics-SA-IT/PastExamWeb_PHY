@@ -181,7 +181,7 @@ jobs:
           "${ssh_command[@]}" "receipt $request_id" >"$RUNNER_TEMP/production-rollback-receipt.json"
 
       - name: Upload durable production rollback receipt
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: production-rollback-receipt-${{ inputs.target_sha }}
           path: ${{ runner.temp }}/production-rollback-receipt.json

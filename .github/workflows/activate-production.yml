@@ -201,7 +201,7 @@ jobs:
           "${ssh_command[@]}" "receipt $request_id" >"$RUNNER_TEMP/production-deployment-receipt.json"
 
       - name: Upload durable production deployment receipt
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: production-deployment-receipt-${{ needs.authority.outputs.release_sha }}
           path: ${{ runner.temp }}/production-deployment-receipt.json
