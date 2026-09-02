@@ -14426,30 +14426,61 @@ onBeforeUnmount(() => {
     width: 100%;
   }
 
-  :deep(.p-datatable .review-card-actions),
-  :deep(.review-card-actions) {
+  .review-center :deep(.review-row-action-area) {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    row-gap: 0.6rem;
+  }
+
+  .review-center :deep(.review-row-action-area > .review-card-action-note) {
+    align-self: flex-start;
+  }
+
+  .review-center :deep(.review-row-action-area > .review-card-actions) {
+    align-self: stretch;
     display: flex;
     flex-wrap: nowrap;
-    justify-content: flex-end;
+    justify-content: stretch;
+    width: 100%;
     overflow-x: visible;
   }
 
-  :deep(.p-datatable .review-card-actions .p-button),
-  :deep(.review-card-actions .p-button) {
-    flex: 1 1 0;
-    width: auto;
+  .review-center :deep(.review-card-actions .p-button) {
     min-width: 0;
     min-height: 2.45rem;
     padding-inline: 0.45rem;
   }
+}
 
-  :deep(.p-datatable .review-card-actions .p-button .p-button-label),
-  :deep(.review-card-actions .p-button .p-button-label) {
+@media (min-width: 480px) and (max-width: 640px) {
+  .review-center :deep(.review-card-actions .p-button) {
+    flex: 1 1 auto;
+    width: auto;
+  }
+
+  .review-center :deep(.review-card-actions .p-button .p-button-label) {
+    display: inline-flex;
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  .review-center :deep(.review-card-actions .p-button .pi) {
+    margin-inline-end: 0.3rem;
+  }
+}
+
+@media (max-width: 479px) {
+  .review-center :deep(.review-card-actions .p-button) {
+    flex: 1 1 0;
+    width: auto;
+  }
+
+  .review-center :deep(.review-card-actions .p-button .p-button-label) {
     display: none;
   }
 
-  :deep(.p-datatable .review-card-actions .p-button .pi),
-  :deep(.review-card-actions .p-button .pi) {
+  .review-center :deep(.review-card-actions .p-button .pi) {
     margin: 0;
   }
 }
