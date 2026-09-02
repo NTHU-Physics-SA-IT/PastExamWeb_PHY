@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ACTIVATE = ROOT / ".github" / "workflows" / "activate-production.yml"
 ROLLBACK = ROOT / ".github" / "workflows" / "rollback-production.yml"
 AUTHORITY = ROOT / "scripts" / "ci" / "validate_activation_authority.py"
+MERGER_BOUND = ROOT / "scripts" / "ci" / "validate_merger_bound_deploy.py"
 INSTALLER = ROOT / "scripts" / "install-production-activation-framework.sh"
 TEST_WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
 CLASSIFIER = ROOT / "scripts" / "ci" / "classify_ci_mode.py"
@@ -51,16 +52,25 @@ def _load_classifier():
         sys.path.pop(0)
 
 
-@pytest.mark.parametrize("workflow", [ACTIVATE, ROLLBACK])
+@pytest.mark.parametrize(
+    ("workflow", "expected_permissions"),
+    [
+        (
+            ACTIVATE,
+            {"actions": "read", "contents": "read", "pull-requests": "read"},
+        ),
+        (ROLLBACK, {"actions": "read", "contents": "read"}),
+    ],
+)
 def test_production_workflows_are_manual_protected_and_non_cancelling(
-    workflow: Path,
+    workflow: Path, expected_permissions: dict[str, str]
 ) -> None:
     source = workflow.read_text(encoding="utf-8")
     document = yaml.safe_load(source)
     trigger = document.get("on", document.get(True))
 
     assert set(trigger) == {"workflow_dispatch"}
-    assert document["permissions"] == {"actions": "read", "contents": "read"}
+    assert document["permissions"] == expected_permissions
     assert document["concurrency"] == {
         "group": "production-activation",
         "cancel-in-progress": False,
@@ -90,6 +100,54 @@ def test_activation_workflow_enforces_exact_main_twice_and_starts_once() -> None
     assert source.rfind("git fetch --no-tags origin main") < source.find(
         '"start $TARGET_SHA'
     )
+
+
+def test_activation_revalidates_merger_bound_authority_before_production_ssh() -> None:
+    source = ACTIVATE.read_text(encoding="utf-8")
+    workflow = yaml.load(source, Loader=yaml.BaseLoader)
+    authority_steps = workflow["jobs"]["authority"]["steps"]
+    activate_steps = workflow["jobs"]["activate"]["steps"]
+
+    assert MERGER_BOUND.is_file()
+    assert source.count("validate_merger_bound_deploy.py") == 2
+    assert "--actor \"$ORIGINAL_ACTOR\"" in source
+    assert "--triggering-actor \"$TRIGGERING_ACTOR\"" in source
+    assert "--target-sha \"$TARGET_SHA\"" in source
+    assert "--token" not in source
+
+    first_gate = next(
+        index
+        for index, step in enumerate(authority_steps)
+        if "validate_merger_bound_deploy.py" in step.get("run", "")
+    )
+    exact_main_lock = next(
+        index
+        for index, step in enumerate(authority_steps)
+        if step["name"] == "Require workflow source and target to be exact current main"
+    )
+    assert first_gate == exact_main_lock + 1
+
+    second_gate = next(
+        index
+        for index, step in enumerate(activate_steps)
+        if "validate_merger_bound_deploy.py" in step.get("run", "")
+    )
+    relock = next(
+        index
+        for index, step in enumerate(activate_steps)
+        if step["name"] == "Re-lock current main and Main Full after approval"
+    )
+    ssh_setup = next(
+        index
+        for index, step in enumerate(activate_steps)
+        if step["name"] == "Configure restricted production SSH identity"
+    )
+    assert relock < second_gate < ssh_setup
+    for steps, gate in ((authority_steps, first_gate), (activate_steps, second_gate)):
+        env = steps[gate]["env"]
+        assert env["GITHUB_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
+        assert env["ORIGINAL_ACTOR"] == "${{ github.actor }}"
+        assert env["TRIGGERING_ACTOR"] == "${{ github.triggering_actor }}"
 
 
 def test_rollback_is_separate_explicit_and_never_automatic() -> None:
@@ -126,6 +184,7 @@ def test_stage_b_control_plane_is_always_full_ci_and_its_tests_are_wired() -> No
     for test_name in (
         "test_production_activation_contract.py",
         "test_production_activation_ssh_wrapper.py",
+        "test_merger_bound_deploy_authority.py",
         "test_production_activation_workflow_contract.py",
         "test_production_deployment_control.py",
     ):
