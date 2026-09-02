@@ -280,6 +280,34 @@ only when the original worker is inactive and either the target ledger is
 already committed or the request is explicitly in the finalization-retry
 phase.
 
+An engine process that exits unsuccessfully may also atomically leave root-only
+sanitized failure evidence at `requests/<request-id>.failure.json`. This record is
+distinct from both successful `requests/<request-id>.engine.json` evidence and
+the final deployment receipt. Its exact schema contains only version, request
+ID, target SHA, one fixed activation stage, numeric engine exit code, and UTC
+observation time. The controller accepts it only when every field and the
+observed process exit code agree; missing, malformed, stale, or unsupported
+evidence falls back to the generic fail-closed request failure. Raw engine
+stdout and stderr are intentionally never copied into durable request state,
+failure evidence, receipts, or operator messages.
+
+The fixed failure-stage taxonomy is: `startup`, `helper-authority`,
+`external-config`, `candidate-contract`, `compose-structure`, `image-contract`,
+`production-values`, `runtime-compose-config`, `ingress-contract`,
+`persistent-services`, `postgres-readiness`, `redis-readiness`,
+`minio-preflight`, `class-zero-before`, `postgres-backup`, `minio-manifest`,
+`class-zero-after`, `application-cutover`, `internal-health`, `external-health`,
+`bounded-observation`, `activation-marker`, and `engine-evidence`. These names
+identify the current root-installed engine boundary; they are not candidate
+input and do not grant authorization or permit a failed command to continue.
+
+`FAILED` remains terminal. Sanitized failure evidence does not make the failed
+request resumable, authorize rollback, or prove whether production cut over.
+Operators must still reconcile the canonical ledger, compatibility views,
+runtime images and container identities, database revision, request state, and
+successful engine/receipt evidence. Any new deployment attempt requires fresh
+authority and separate authorization rather than reuse of the failed request.
+
 Rollback is a separate manual protected workflow. It accepts only the
 canonical previous exact SHA, requires the database revision to remain
 unchanged, performs no Alembic downgrade, and never runs automatically in
