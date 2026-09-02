@@ -55,6 +55,16 @@ Missing, zero, or malformed filesystem metrics fail closed. Preparation never
 prunes releases. It validates the deterministic package, tracked-file manifest,
 source SHA, digest-pinned images, and production Compose rendering, then moves a
 run-specific staging directory atomically to `/opt/pastexam-releases/<SHA>`.
+Before upload, packaging applies a fixed `0022` archive umask to every tracked
+member. Git's tracked executable distinction is preserved while group/world
+write permission is removed; content checksums remain content-only. After safe
+extraction and before promotion, preparation requires each of the eight
+framework source-authority files consumed by the canonical activation framework
+installer to remain a regular non-symlink owned by the candidate authority with
+no group/world write permission. The same verification applies when reusing an
+existing same-SHA candidate, but an already promoted immutable candidate is
+never chmod/chown-repaired in place. The installer keeps its independent source
+ownership and mode checks as defense in depth.
 The fixed command also holds a host-side nonblocking preparation lock, so the
 same immutable namespace cannot be raced by a second caller.
 An existing same-SHA candidate is reused only when all immutable inputs and its

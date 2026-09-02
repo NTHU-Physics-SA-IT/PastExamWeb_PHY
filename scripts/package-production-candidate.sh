@@ -45,7 +45,7 @@ printf '%s\n' "$release_sha" >"$metadata_root/.release-source-sha"
   done < <(git ls-files -z)
 ) >"$metadata_root/.release-files.sha256"
 
-git -C "$repository_root" archive \
+git -C "$repository_root" -c tar.umask=0022 archive \
   --format=tar \
   --output="$temporary_root/candidate.tar" \
   "$release_sha"
