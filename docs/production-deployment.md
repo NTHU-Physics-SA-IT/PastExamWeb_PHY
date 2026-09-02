@@ -82,18 +82,38 @@ recreated merely to activate this trust boundary. Development supplies the
 same backend alias on its existing default network without production IPAM or
 Cloudflare trust.
 
-`docker/.env.production.example` documents the Compose variable contract. A
-release is rendered explicitly with the production definition, external
-configuration, and its later immutable image override:
+`docker/.env.production.example` documents the Compose variable contract.
+Operator validation must not render the secret-bearing external environments.
+The safe structural inspection preserves variable references, relative paths,
+and external environment-file references instead:
 
 ```bash
 docker compose \
-  --env-file /etc/pastexam/compose.prod.env \
-  --env-file /opt/pastexam-releases/<release-sha>/compose.prod.env \
-  --file docker/docker-compose.prod.yml \
+  --project-directory /opt/pastexam-releases/<release-sha> \
+  --file /opt/pastexam-releases/<release-sha>/docker/docker-compose.prod.yml \
   --file /etc/pastexam/docker-compose.edge.yml \
-  config
+  --file /usr/local/libexec/pastexam-nginx-image-override.yml \
+  config --no-env-resolution --no-interpolate --no-path-resolution --format json
 ```
+
+Before reading any production configuration, activation checks
+`docker compose config --help` for the exact required option tokens. Missing
+options or a failed help command stop activation with a fixed diagnostic; raw
+help or Compose error text is never retained as deployment evidence. This
+capability check avoids a brittle exact-version pin while failing closed on a
+future incompatible host.
+
+Do not redirect a fully resolved `docker compose config` model built with the
+real production environment files. Activation validates this structural model
+against an exact service, image, mount, network, port, volume, and lifecycle
+contract. Compose stdout is piped directly into that validator; it is not first
+redirected to a file. Only the accepted key-name/placeholder structure is then
+written atomically as mode-`0600` metadata. Activation reads external
+environment files only as key/value records and retains only the allowlisted
+non-secret metadata needed for backup, mounts, proxy trust, and ingress
+validation. Required secret key names must be present and non-empty, but their
+values are discarded immediately and never enter the retained structural
+Compose model, temporary JSON, logs, receipts, or evidence.
 
 The supported DigitalOcean edge terminates Cloudflare Origin TLS inside
 `pastexam-nginx` and has this explicit topology:
@@ -129,12 +149,12 @@ from its normalized `$remote_addr`; applications must not trust arbitrary
 incoming forwarding headers directly. The access log intentionally retains
 the immediate peer address rather than adding raw visitor-IP logging.
 
-Before backup, activation renders the combined Compose configuration without
-printing it and derives the PostgreSQL container, database and role plus the
-MinIO container and bucket from that rendered contract. These values are
-passed to the backup tools through isolated explicit environments. Arbitrary
-inherited shell values are not backup authority, and runtime/migrator
-credential files remain separate.
+Before backup, activation validates the non-interpolated structural Compose
+model and separately derives only the allowlisted PostgreSQL container,
+database and role plus the MinIO container and bucket. These values are passed
+to the backup tools through isolated explicit environments. Arbitrary inherited
+shell values are not backup authority, runtime/migrator credential files remain
+separate, and secret values never become activation validation artifacts.
 
 ## Migration and activation order
 
@@ -177,12 +197,14 @@ following are supplied by the reviewed controller:
 - external `0600` configuration;
 - an external health URL.
 
-It then acquires a host deployment lock and performs:
+After the Compose capability check succeeds, it acquires a host deployment
+lock and performs:
 
 1. immutable `release_sha` agreement across `release-manifest.env`,
    `.release-source-sha`, and the release directory name;
-2. combined base/edge Compose rendering and backup-identity extraction;
-3. rendered nginx config, listener, certificate, and private-key mount
+2. unresolved base/edge Compose structural validation plus non-secret
+   backup-identity metadata extraction;
+3. structural nginx config, listener, certificate, and private-key mount
    extraction, followed by external TLS file ownership/mode checks;
 4. nginx ingress preservation preflight against the currently published
    `pastexam-nginx` bindings, exact immutable config-mount verification,
@@ -198,8 +220,11 @@ It then acquires a host deployment lock and performs:
 9. exact-head, zero-delta migration verification before and after backup;
 10. exact backend/frontend/nginx start with dependency traversal disabled;
 11. immediate internal and external health checks;
-12. three bounded observation snapshots covering health, Redis, storage, and
-    restart-count stability; and
+12. three bounded observation snapshots covering health, Redis, storage,
+    restart-count stability, image authority, and a streaming critical-log
+    signature count; arbitrary runtime log text is never written to activation
+    temporary files or evidence, and operators retrieve raw logs only through
+    a separately authorized troubleshooting task; and
 13. activation evidence and a marker written only after success.
 
 The storage preflight never creates a bucket or changes versioning. Production

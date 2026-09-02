@@ -21,6 +21,22 @@ RELEASE_SHA = "19782580b710924d8ccdb939600be72ecd44d303"
 FRONTEND_IMAGE = f"ghcr.io/example/pastexam:frontend-{RELEASE_SHA}@sha256:{'1' * 64}"
 BACKEND_IMAGE = f"ghcr.io/example/pastexam:backend-{RELEASE_SHA}@sha256:{'2' * 64}"
 NGINX_IMAGE = "nginx:1.29.2@sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903"
+SECRET_SENTINEL = "THIS_MUST_NEVER_APPEAR_IN_DEPLOYMENT_EVIDENCE_DSMD_2026"
+FRONTEND_IMAGE_EXPRESSION = (
+    "${FRONTEND_IMAGE:-ghcr.io/nthu-physics-sa-it/pastexam:frontend}"
+)
+BACKEND_IMAGE_EXPRESSION = (
+    "${BACKEND_IMAGE:-ghcr.io/nthu-physics-sa-it/pastexam:backend}"
+)
+PROXY_IP_EXPRESSION = "${PRODUCTION_NGINX_PROXY_IP:?Set PRODUCTION_NGINX_PROXY_IP}"
+COMPOSE_CONFIG_HELP = (
+    "Usage: docker compose config [OPTIONS]\n"
+    "      --format string\n"
+    "      --no-env-resolution\n"
+    "      --no-interpolate\n"
+    "      --no-path-resolution\n"
+    f"unrelated-help-text={SECRET_SENTINEL}\n"
+)
 
 
 def _bash() -> Path:
@@ -62,13 +78,16 @@ def _write_executable(path: Path, source: str) -> None:
     path.chmod(0o700)
 
 
-def _bind(source: Path, target: str) -> dict[str, object]:
-    return {
+def _structural_bind(source: str, target: str) -> dict[str, object]:
+    binding: dict[str, object] = {
         "type": "bind",
-        "source": str(source.resolve()),
+        "source": source,
         "target": target,
         "read_only": True,
     }
+    if not source.startswith("${"):
+        binding["bind"] = {"create_host_path": True}
+    return binding
 
 
 def _compose_contract(
@@ -82,69 +101,163 @@ def _compose_contract(
     include_certificate_mounts: bool = True,
 ) -> dict:
     nginx_volumes = [
-        _bind(
-            nginx_config or release / "proxy" / "nginx.conf", "/etc/nginx/nginx.conf"
+        _structural_bind(
+            str(nginx_config) if nginx_config else "../proxy/nginx.conf",
+            "/etc/nginx/nginx.conf",
         ),
-        _bind(
-            listener_config or release / "proxy" / "nginx.production-listeners.conf",
+        _structural_bind(
+            str(listener_config)
+            if listener_config
+            else "../proxy/nginx.production-listeners.conf",
             "/etc/nginx/pastexam-listeners.conf",
         ),
     ]
     if include_certificate_mounts:
         nginx_volumes.extend(
             [
-                _bind(certificate, "/etc/nginx/certs/origin.pem"),
-                _bind(certificate_key, "/etc/nginx/certs/origin-key.pem"),
+                _structural_bind(
+                    "${PRODUCTION_TLS_CERT_FILE:?Set PRODUCTION_TLS_CERT_FILE}",
+                    "/etc/nginx/certs/origin.pem",
+                ),
+                _structural_bind(
+                    "${PRODUCTION_TLS_KEY_FILE:?Set PRODUCTION_TLS_KEY_FILE}",
+                    "/etc/nginx/certs/origin-key.pem",
+                ),
             ]
         )
     return {
+        "name": "pastexam",
         "services": {
             "backend": {
-                "image": BACKEND_IMAGE,
-                "environment": {
-                    "MINIO_BUCKET_NAME": "exam-archive",
-                    "MINIO_ACCESS_KEY": "scoped-application-access",
-                    "MINIO_SECRET_KEY": "scoped-application-secret",
-                    "FORWARDED_ALLOW_IPS": "172.30.0.2",
+                "image": BACKEND_IMAGE_EXPRESSION,
+                "container_name": "pastexam-backend",
+                "restart": "always",
+                "depends_on": {
+                    "migrate": {
+                        "condition": "service_completed_successfully",
+                        "required": True,
+                    },
+                    "minio": {"condition": "service_started", "required": True},
+                    "redis": {"condition": "service_started", "required": True},
                 },
+                "env_file": [
+                    {
+                        "path": "${PRODUCTION_BACKEND_ENV_FILE:-/opt/pastexam-config/backend.env}",
+                        "required": True,
+                    }
+                ],
+                "environment": {"FORWARDED_ALLOW_IPS": PROXY_IP_EXPRESSION},
                 "networks": {
                     "app_network": {"aliases": ["backend"]},
                     "trusted_proxy_network": {"aliases": ["backend-trusted"]},
                 },
             },
-            "frontend": {"image": FRONTEND_IMAGE, "networks": {"app_network": {}}},
+            "frontend": {
+                "image": FRONTEND_IMAGE_EXPRESSION,
+                "container_name": "pastexam-frontend",
+                "restart": "always",
+                "networks": {"app_network": {"aliases": ["frontend"]}},
+            },
             "migrate": {
-                "image": BACKEND_IMAGE,
+                "image": BACKEND_IMAGE_EXPRESSION,
+                "restart": "no",
                 "command": ["python", "migrate.py", "upgrade"],
+                "depends_on": {
+                    "db": {"condition": "service_healthy", "required": True}
+                },
+                "env_file": [
+                    {
+                        "path": "${PRODUCTION_MIGRATOR_ENV_FILE:-/opt/pastexam-config/migrator.env}",
+                        "required": True,
+                    }
+                ],
                 "networks": {"app_network": {}},
             },
             "db": {
+                "image": "postgres:15.14-alpine3.22",
                 "container_name": "pastexam-postgres",
+                "restart": "always",
                 "environment": {
-                    "POSTGRES_DB": "archive_db",
-                    "POSTGRES_USER": "postgres_owner",
+                    "POSTGRES_DB": "${POSTGRES_DB}",
+                    "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}",
+                    "POSTGRES_USER": "${POSTGRES_USER}",
                 },
+                "healthcheck": {
+                    "test": [
+                        "CMD-SHELL",
+                        "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}",
+                    ],
+                    "interval": "5s",
+                    "timeout": "5s",
+                    "retries": 5,
+                },
+                "volumes": [
+                    {
+                        "type": "volume",
+                        "source": "pg_data",
+                        "target": "/var/lib/postgresql/data",
+                        "volume": {},
+                    }
+                ],
                 "networks": {"app_network": {}},
             },
             "minio": {
+                "image": "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z",
                 "container_name": "pastexam-minio",
+                "restart": "always",
                 "command": ["server", "/data", "--console-address", ":9001"],
-                "networks": {"app_network": {}},
+                "environment": [
+                    "MINIO_ROOT_USER=${MINIO_ROOT_USER}",
+                    "MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}",
+                ],
+                "healthcheck": {
+                    "test": ["CMD", "mc", "ready", "local"],
+                    "interval": "5s",
+                    "timeout": "5s",
+                    "retries": 5,
+                },
+                "volumes": [
+                    {
+                        "type": "volume",
+                        "source": "minio_data",
+                        "target": "/data",
+                        "volume": {},
+                    }
+                ],
+                "networks": {"app_network": {"aliases": ["minio"]}},
             },
             "redis": {
+                "image": "redis:7.4.5-alpine3.21",
                 "container_name": "pastexam-redis",
+                "restart": "always",
+                "volumes": [
+                    {
+                        "type": "volume",
+                        "source": "redis_data",
+                        "target": "/data",
+                        "volume": {},
+                    }
+                ],
                 "networks": {"app_network": {}},
             },
             "nginx": {
                 "image": NGINX_IMAGE,
                 "container_name": "pastexam-nginx",
+                "restart": "always",
+                "expose": ["8080", "8443"],
+                "depends_on": {
+                    "backend": {"condition": "service_started", "required": True},
+                    "frontend": {"condition": "service_started", "required": True},
+                    "minio": {"condition": "service_started", "required": True},
+                },
                 "networks": {
                     "app_network": {},
-                    "trusted_proxy_network": {"ipv4_address": "172.30.0.2"},
+                    "trusted_proxy_network": {
+                        "ipv4_address": PROXY_IP_EXPRESSION
+                    },
                 },
                 "ports": [
                     {
-                        "host_ip": "0.0.0.0",
                         "published": str(published),
                         "protocol": "tcp",
                         "target": target,
@@ -176,6 +289,11 @@ def _compose_contract(
                 },
             },
         },
+        "volumes": {
+            "pg_data": {"name": "pastexam-postgres-data"},
+            "minio_data": {"name": "pastexam-minio-data"},
+            "redis_data": {"name": "pastexam-redis-data"},
+        },
     }
 
 
@@ -186,6 +304,7 @@ def _activation_environment(
     current_ports: dict | None = None,
     postgres_exit: int = 0,
     storage_preflight_exit: int = 0,
+    compose_quiet_exit: int = 0,
     source_sha: str = RELEASE_SHA,
     edge_mode: str = "600",
     config_owner: str = "0",
@@ -248,6 +367,12 @@ def _activation_environment(
     )
 
     backup_log = tmp_path / "backup-contract.log"
+    postgres_metadata = tmp_path / "postgres-backup-metadata.json"
+    postgres_checksum = tmp_path / "postgres-backup-metadata.sha256"
+    minio_manifest = tmp_path / "minio-readonly-manifest.json"
+    postgres_metadata.write_text("{}\n", encoding="utf-8")
+    postgres_checksum.write_text("0" * 64 + "\n", encoding="utf-8")
+    minio_manifest.write_text("{}\n", encoding="utf-8")
     _write_executable(
         host_helpers / "postgres-logical-backup.sh",
         "#!/usr/bin/env bash\n"
@@ -255,6 +380,8 @@ def _activation_environment(
         f"printf 'postgres:%s:%s:%s:%s\\n' \"$BACKUP_DIRECTORY\" "
         f'"$DATABASE_CONTAINER" "$DATABASE_NAME" "$DATABASE_USER" '
         f">>'{_bash_path(backup_log)}'\n"
+        f"printf 'Metadata: %s\n' '{_bash_path(postgres_metadata)}'\n"
+        f"printf 'Checksum: %s\n' '{_bash_path(postgres_checksum)}'\n"
         f"exit {postgres_exit}\n",
     )
     _write_executable(
@@ -263,7 +390,8 @@ def _activation_environment(
         "set -eu\n"
         f"printf 'minio:%s:%s:%s\\n' \"$BACKUP_DIRECTORY\" "
         f'"$MINIO_CONTAINER" "$MINIO_BUCKET_NAME" '
-        f">>'{_bash_path(backup_log)}'\n",
+        f">>'{_bash_path(backup_log)}'\n"
+        f"printf 'Read-only MinIO manifest: %s\n' '{_bash_path(minio_manifest)}'\n",
     )
     _write_executable(
         host_helpers / STORAGE_PREFLIGHT.name,
@@ -320,8 +448,15 @@ def _activation_environment(
         "#!/usr/bin/env bash\n"
         "set -eu\n"
         'printf \'%s\\n\' "$*" >>"$FAKE_DOCKER_LOG"\n'
-        "if [[ \"$1\" == 'compose' && \"$*\" == *'config --format json'* ]]; then\n"
+        "if [[ \"$1\" == 'compose' && \"$*\" == 'compose config --help' ]]; then\n"
+        "  printf '%s' \"$FAKE_COMPOSE_HELP\"\n"
+        "  printf '%s' \"$FAKE_COMPOSE_HELP_STDERR\" >&2\n"
+        "  exit \"$FAKE_COMPOSE_HELP_EXIT\"\n"
+        "elif [[ \"$1\" == 'compose' && \"$*\" == *'config '* && \"$*\" == *'--no-env-resolution'* && \"$*\" == *'--no-interpolate'* && \"$*\" == *'--no-path-resolution'* && \"$*\" == *'--format json'* ]]; then\n"
         '  cat "$FAKE_COMPOSE_JSON"\n'
+        "elif [[ \"$1\" == 'compose' && \"$*\" == *'config --quiet'* ]]; then\n"
+        "  printf '%s' \"$FAKE_COMPOSE_QUIET_STDERR\" >&2\n"
+        "  exit \"$FAKE_COMPOSE_QUIET_EXIT\"\n"
         "elif [[ \"$1\" == 'compose' && \"$*\" == *'require-head --json'* ]]; then\n"
         '  cat "$FAKE_MIGRATION_REPORT"\n'
         "elif [[ \"$1\" == 'exec' && \"$*\" == *'redis-cli ping'* ]]; then\n"
@@ -338,6 +473,8 @@ def _activation_environment(
         "  printf '%s\\n' \"$FAKE_PERSISTENT_STATE\"\n"
         "elif [[ \"$1\" == 'logs' ]]; then\n"
         "  printf '%s' \"$FAKE_CRITICAL_LOG\"\n"
+        "  printf '%s' \"$FAKE_CRITICAL_LOG_STDERR\" >&2\n"
+        "  exit \"$FAKE_CRITICAL_LOG_EXIT\"\n"
         "elif [[ \"$1\" == 'inspect' ]]; then\n"
         '  cat "$FAKE_CURRENT_PORTS_JSON"\n'
         "fi\n",
@@ -357,6 +494,10 @@ def _activation_environment(
     )
     bash_env = tmp_path / "activation-bash-env"
     bash_env.write_text(
+        "mktemp() {\n"
+        '  mkdir -p "$FAKE_CONTRACT_DIRECTORY"\n'
+        '  printf "%s\\n" "$FAKE_CONTRACT_DIRECTORY"\n'
+        "}\n"
         "stat() {\n"
         '  if [[ "$*" == *"%u"* ]]; then\n'
         '    if [[ "${@: -1}" == *"origin"* ]]; then\n'
@@ -374,8 +515,15 @@ def _activation_environment(
         "}\n"
         "docker() {\n"
         '  printf \'%s\\n\' "$*" >>"$FAKE_DOCKER_LOG"\n'
-        "  if [[ \"$1\" == 'compose' && \"$*\" == *'config --format json'* ]]; then\n"
+        "  if [[ \"$1\" == 'compose' && \"$*\" == 'compose config --help' ]]; then\n"
+        "    printf '%s' \"$FAKE_COMPOSE_HELP\"\n"
+        "    printf '%s' \"$FAKE_COMPOSE_HELP_STDERR\" >&2\n"
+        "    return \"$FAKE_COMPOSE_HELP_EXIT\"\n"
+        "  elif [[ \"$1\" == 'compose' && \"$*\" == *'config '* && \"$*\" == *'--no-env-resolution'* && \"$*\" == *'--no-interpolate'* && \"$*\" == *'--no-path-resolution'* && \"$*\" == *'--format json'* ]]; then\n"
         '    cat "$FAKE_COMPOSE_JSON"\n'
+        "  elif [[ \"$1\" == 'compose' && \"$*\" == *'config --quiet'* ]]; then\n"
+        "    printf '%s' \"$FAKE_COMPOSE_QUIET_STDERR\" >&2\n"
+        "    return \"$FAKE_COMPOSE_QUIET_EXIT\"\n"
         "  elif [[ \"$1\" == 'compose' && \"$*\" == *'require-head --json'* ]]; then\n"
         '    cat "$FAKE_MIGRATION_REPORT"\n'
         "  elif [[ \"$1\" == 'exec' && \"$*\" == *'redis-cli ping'* ]]; then\n"
@@ -392,6 +540,8 @@ def _activation_environment(
         "    printf '%s\\n' \"$FAKE_PERSISTENT_STATE\"\n"
         "  elif [[ \"$1\" == 'logs' ]]; then\n"
         "    printf '%s' \"$FAKE_CRITICAL_LOG\"\n"
+        "    printf '%s' \"$FAKE_CRITICAL_LOG_STDERR\" >&2\n"
+        "    return \"$FAKE_CRITICAL_LOG_EXIT\"\n"
         "  elif [[ \"$1\" == 'inspect' ]]; then\n"
         '    cat "$FAKE_CURRENT_PORTS_JSON"\n'
         "  fi\n"
@@ -399,7 +549,13 @@ def _activation_environment(
         "curl() { return 0; }\n"
         "flock() { return 0; }\n"
         "sleep() { return 0; }\n"
-        f"python3() {{ '{_bash_path(Path(sys.executable))}' \"$@\"; }}\n",
+        "python3() {\n"
+        "  if [[ \"$*\" == *'count-critical-log-lines'* && \"$FAKE_CRITICAL_PARSER_EXIT\" != '0' ]]; then\n"
+        "    cat >/dev/null\n"
+        "    return \"$FAKE_CRITICAL_PARSER_EXIT\"\n"
+        "  fi\n"
+        f"  '{_bash_path(Path(sys.executable))}' \"$@\"\n"
+        "}\n",
         encoding="utf-8",
     )
 
@@ -407,8 +563,37 @@ def _activation_environment(
         tmp_path / name for name in ("compose.env", "backend.env", "migrator.env")
     ]
     edge_file = tmp_path / "edge.yml"
-    for path in [*config_files, edge_file]:
-        path.write_text("contract-test=true\n", encoding="utf-8")
+    config_files[0].write_text(
+        "POSTGRES_USER=postgres_owner\n"
+        f"POSTGRES_PASSWORD={SECRET_SENTINEL}\n"
+        "POSTGRES_DB=archive_db\n"
+        f"MINIO_ROOT_USER={SECRET_SENTINEL}\n"
+        f"MINIO_ROOT_PASSWORD={SECRET_SENTINEL}\n"
+        "PRODUCTION_NGINX_PROXY_IP=172.30.0.2\n"
+        f"PRODUCTION_TLS_CERT_FILE={certificate.resolve()}\n"
+        f"PRODUCTION_TLS_KEY_FILE={certificate_key.resolve()}\n",
+        encoding="utf-8",
+    )
+    config_files[1].write_text(
+        "DB_HOST=db\n"
+        "DB_PORT=5432\n"
+        "DB_USER=runtime\n"
+        f"DB_PASSWORD={SECRET_SENTINEL}\n"
+        "DB_NAME=archive_db\n"
+        f"MINIO_ACCESS_KEY={SECRET_SENTINEL}\n"
+        f"MINIO_SECRET_KEY={SECRET_SENTINEL}\n"
+        "MINIO_BUCKET_NAME=exam-archive\n",
+        encoding="utf-8",
+    )
+    config_files[2].write_text(
+        "DB_HOST=db\n"
+        "DB_PORT=5432\n"
+        "DB_USER=migrator\n"
+        f"DB_PASSWORD={SECRET_SENTINEL}\n"
+        "DB_NAME=archive_db\n",
+        encoding="utf-8",
+    )
+    edge_file.write_text("contract-test=true\n", encoding="utf-8")
 
     environment = os.environ.copy()
     environment.update(
@@ -449,17 +634,28 @@ def _activation_environment(
             "FAKE_CURRENT_PORTS_JSON": _bash_path(ports_json),
             "FAKE_MIGRATION_REPORT": _bash_path(migration_report),
             "FAKE_DOCKER_LOG": _bash_path(docker_log),
-            "FAKE_NGINX_IMAGE": resolved_compose["services"]["nginx"]["image"],
-            "FAKE_BACKEND_IMAGE": resolved_compose["services"]["backend"]["image"],
-            "FAKE_FRONTEND_IMAGE": resolved_compose["services"]["frontend"]["image"],
+            "FAKE_NGINX_IMAGE": NGINX_IMAGE,
+            "FAKE_BACKEND_IMAGE": BACKEND_IMAGE,
+            "FAKE_FRONTEND_IMAGE": FRONTEND_IMAGE,
             "FAKE_CRITICAL_LOG": "",
+            "FAKE_CRITICAL_LOG_STDERR": "",
+            "FAKE_CRITICAL_LOG_EXIT": "0",
+            "FAKE_CRITICAL_PARSER_EXIT": "0",
             "FAKE_PERSISTENT_STATE": "running:healthy",
             "FAKE_REDIS_PING": "PONG",
+            "FAKE_COMPOSE_QUIET_EXIT": str(compose_quiet_exit),
+            "FAKE_COMPOSE_QUIET_STDERR": "",
+            "FAKE_COMPOSE_HELP": COMPOSE_CONFIG_HELP,
+            "FAKE_COMPOSE_HELP_STDERR": "",
+            "FAKE_COMPOSE_HELP_EXIT": "0",
             "FAKE_EDGE_FILE": _bash_path(edge_file),
             "FAKE_EDGE_MODE": edge_mode,
             "FAKE_CONFIG_OWNER": config_owner,
             "FAKE_TLS_MODE": tls_mode,
             "FAKE_TLS_OWNER": tls_owner,
+            "FAKE_CONTRACT_DIRECTORY": _bash_path(
+                tmp_path / "activation-contract"
+            ),
         }
     )
     for inherited in (
@@ -548,14 +744,10 @@ def test_activation_supplies_all_backup_contract_inputs(tmp_path: Path) -> None:
 def test_activation_rejects_legacy_backend_minio_contract(
     tmp_path: Path, legacy_name: str
 ) -> None:
-    release = tmp_path / RELEASE_SHA
-    certificate = tmp_path / "origin.pem"
-    certificate_key = tmp_path / "origin-key.pem"
-    contract = _compose_contract(release, certificate, certificate_key)
-    contract["services"]["backend"]["environment"][legacy_name] = "forbidden"
-    environment, backup_log, _ = _activation_environment(
-        tmp_path, compose_contract=contract
-    )
+    environment, backup_log, _ = _activation_environment(tmp_path)
+    backend_environment = tmp_path / "backend.env"
+    with backend_environment.open("a", encoding="utf-8") as stream:
+        stream.write(f"{legacy_name}=forbidden\n")
 
     process = _activate(environment)
 
@@ -568,13 +760,13 @@ def test_activation_rejects_legacy_backend_minio_contract(
 def test_activation_requires_scoped_backend_minio_contract(
     tmp_path: Path, required_name: str
 ) -> None:
-    release = tmp_path / RELEASE_SHA
-    certificate = tmp_path / "origin.pem"
-    certificate_key = tmp_path / "origin-key.pem"
-    contract = _compose_contract(release, certificate, certificate_key)
-    del contract["services"]["backend"]["environment"][required_name]
-    environment, backup_log, _ = _activation_environment(
-        tmp_path, compose_contract=contract
+    environment, backup_log, _ = _activation_environment(tmp_path)
+    backend_environment = tmp_path / "backend.env"
+    lines = backend_environment.read_text(encoding="utf-8").splitlines()
+    backend_environment.write_text(
+        "\n".join(line for line in lines if not line.startswith(f"{required_name}="))
+        + "\n",
+        encoding="utf-8",
     )
 
     process = _activate(environment)
@@ -582,6 +774,378 @@ def test_activation_requires_scoped_backend_minio_contract(
     assert process.returncode != 0
     assert required_name in process.stderr
     assert not backup_log.exists()
+
+
+def test_compose_capability_precheck_passes_before_production_config_processing(
+    tmp_path: Path,
+) -> None:
+    environment, _, docker_log = _activation_environment(tmp_path)
+
+    process = _activate(environment)
+
+    assert process.returncode == 0, process.stderr
+    commands = docker_log.read_text(encoding="utf-8").splitlines()
+    assert commands[0] == "compose config --help"
+    _assert_sentinel_absent(process.stdout, process.stderr)
+
+
+@pytest.mark.parametrize(
+    "missing_flag",
+    ["--no-env-resolution", "--no-interpolate", "--no-path-resolution", "--format"],
+)
+def test_compose_capability_precheck_fails_closed_for_each_missing_flag(
+    tmp_path: Path, missing_flag: str
+) -> None:
+    environment, backup_log, docker_log = _activation_environment(tmp_path)
+    environment["FAKE_COMPOSE_HELP"] = COMPOSE_CONFIG_HELP.replace(
+        f"      {missing_flag}", "      --unrelated-option"
+    )
+    environment["PRODUCTION_COMPOSE_ENV_FILE"] = _bash_path(
+        tmp_path / "missing-production-config.env"
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert f"capability is missing: {missing_flag}" in process.stderr
+    assert "external production configuration" not in process.stderr.lower()
+    assert docker_log.read_text(encoding="utf-8").splitlines() == [
+        "compose config --help"
+    ]
+    assert not backup_log.exists()
+    _assert_sentinel_absent(process.stdout, process.stderr)
+
+
+def test_compose_capability_precheck_rejects_similar_substring(tmp_path: Path) -> None:
+    environment, backup_log, docker_log = _activation_environment(tmp_path)
+    environment["FAKE_COMPOSE_HELP"] = COMPOSE_CONFIG_HELP.replace(
+        "--format string", "--formatting string"
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "capability is missing: --format" in process.stderr
+    assert docker_log.read_text(encoding="utf-8").splitlines() == [
+        "compose config --help"
+    ]
+    assert not backup_log.exists()
+
+
+def test_compose_capability_precheck_suppresses_command_failure_output(
+    tmp_path: Path,
+) -> None:
+    environment, backup_log, docker_log = _activation_environment(tmp_path)
+    environment["FAKE_COMPOSE_HELP_EXIT"] = "2"
+    environment["FAKE_COMPOSE_HELP_STDERR"] = SECRET_SENTINEL
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "configuration capabilities are unavailable" in process.stderr
+    assert docker_log.read_text(encoding="utf-8").splitlines() == [
+        "compose config --help"
+    ]
+    assert not backup_log.exists()
+    _assert_sentinel_absent(process.stdout, process.stderr)
+
+
+@pytest.mark.parametrize(
+    ("log_bytes", "expected_count"),
+    [
+        (b"ordinary runtime line\n", 0),
+        (b"PANIC: failure\n", 1),
+        (b"fatal and traceback on one line\n", 1),
+        (b"fatality is not fatalistic\n", 0),
+        (b"prefix [emerg] suffix\nprefix [crit] suffix\n", 2),
+        (b"\xff\xfefatal: invalid utf8 remains countable\n", 1),
+        (b"x" * (2 * 1024 * 1024) + b" fatal\n", 1),
+    ],
+    ids=[
+        "ordinary",
+        "uppercase-panic",
+        "multiple-signatures-one-line",
+        "word-boundary-nonmatch",
+        "nginx-emerg-and-crit",
+        "invalid-utf8",
+        "large-line",
+    ],
+)
+def test_critical_log_counter_emits_only_matching_line_count(
+    log_bytes: bytes, expected_count: int
+) -> None:
+    process = subprocess.run(
+        [sys.executable, str(CONTRACT_HELPER), "count-critical-log-lines"],
+        input=log_bytes,
+        capture_output=True,
+        check=False,
+    )
+
+    assert process.returncode == 0, process.stderr
+    assert process.stdout == f"{expected_count}\n".encode()
+    assert process.stderr == b""
+    assert SECRET_SENTINEL.encode() not in process.stdout
+
+
+@pytest.mark.parametrize(
+    ("file_name", "mutation", "expected_error"),
+    [
+        (
+            "compose.env",
+            "POSTGRES_DB=duplicate_archive\n",
+            "POSTGRES_DB is duplicated",
+        ),
+        ("backend.env", "not-an-assignment\n", "assignment is malformed"),
+        ("migrator.env", "DB_PASSWORD=\n", "DB_PASSWORD is duplicated"),
+    ],
+)
+def test_external_environment_metadata_fails_closed_on_invalid_syntax(
+    tmp_path: Path, file_name: str, mutation: str, expected_error: str
+) -> None:
+    environment, backup_log, docker_log = _activation_environment(tmp_path)
+    with (tmp_path / file_name).open("a", encoding="utf-8") as stream:
+        stream.write(mutation)
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert expected_error in process.stderr
+    assert not backup_log.exists()
+    _assert_sentinel_absent(
+        process.stdout,
+        process.stderr,
+        docker_log.read_text(encoding="utf-8"),
+    )
+
+
+def test_external_environment_metadata_rejects_empty_required_value(
+    tmp_path: Path,
+) -> None:
+    environment, backup_log, docker_log = _activation_environment(tmp_path)
+    migrator_environment = tmp_path / "migrator.env"
+    migrator_environment.write_text(
+        migrator_environment.read_text(encoding="utf-8").replace(
+            f"DB_PASSWORD={SECRET_SENTINEL}", "DB_PASSWORD="
+        ),
+        encoding="utf-8",
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "DB_PASSWORD is empty" in process.stderr
+    assert not backup_log.exists()
+    _assert_sentinel_absent(
+        process.stdout,
+        process.stderr,
+        docker_log.read_text(encoding="utf-8"),
+    )
+
+
+@pytest.mark.parametrize("file_name", ["compose.env", "backend.env", "migrator.env"])
+def test_external_environment_metadata_rejects_forbidden_key_name(
+    tmp_path: Path, file_name: str
+) -> None:
+    environment, backup_log, docker_log = _activation_environment(tmp_path)
+    with (tmp_path / file_name).open("a", encoding="utf-8") as stream:
+        stream.write(f"DEFAULT_ADMIN_PASSWORD={SECRET_SENTINEL}\n")
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "forbidden key names: DEFAULT_ADMIN_PASSWORD" in process.stderr
+    assert not backup_log.exists()
+    assert "config --quiet" not in docker_log.read_text(encoding="utf-8")
+    _assert_sentinel_absent(
+        process.stdout,
+        process.stderr,
+        docker_log.read_text(encoding="utf-8"),
+    )
+
+
+def test_structural_compose_rejects_unreviewed_service_environment(
+    tmp_path: Path,
+) -> None:
+    contract = _compose_contract(
+        tmp_path / RELEASE_SHA,
+        tmp_path / "origin.pem",
+        tmp_path / "origin-key.pem",
+    )
+    contract["services"]["nginx"]["environment"] = {
+        "UNREVIEWED": SECRET_SENTINEL
+    }
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path, compose_contract=contract
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "nginx" in process.stderr and "privilege" in process.stderr
+    assert not backup_log.exists()
+    commands = docker_log.read_text(encoding="utf-8")
+    _assert_sentinel_absent(process.stdout, process.stderr, commands)
+    assert "up --detach" not in commands
+    assert not (tmp_path / "activation-contract").exists()
+
+
+@pytest.mark.parametrize(
+    "bypass_kind",
+    ["api_socket", "backend_port", "external_network", "code_overlay"],
+)
+def test_structural_compose_rejects_host_authority_bypasses(
+    tmp_path: Path, bypass_kind: str
+) -> None:
+    contract = _compose_contract(
+        tmp_path / RELEASE_SHA,
+        tmp_path / "origin.pem",
+        tmp_path / "origin-key.pem",
+    )
+    backend = contract["services"]["backend"]
+    if bypass_kind == "api_socket":
+        backend["use_api_socket"] = True
+    elif bypass_kind == "backend_port":
+        backend["ports"] = [
+            {"published": "8000", "target": 8000, "protocol": "tcp"}
+        ]
+    elif bypass_kind == "external_network":
+        contract["networks"]["escape"] = {"external": True}
+        backend["networks"]["escape"] = {}
+    else:
+        contract["volumes"]["code_overlay"] = {"external": True}
+        backend["volumes"] = [
+            {
+                "type": "volume",
+                "source": "code_overlay",
+                "target": "/app",
+                "volume": {},
+            }
+        ]
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path, compose_contract=contract
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "Production activation contract failed" in process.stderr
+    assert not backup_log.exists()
+    commands = docker_log.read_text(encoding="utf-8")
+    assert "config --quiet" not in commands
+    assert "up --detach" not in commands
+
+
+def test_runtime_compose_validation_error_cannot_echo_secret_value(
+    tmp_path: Path,
+) -> None:
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path, compose_quiet_exit=2
+    )
+    environment["FAKE_COMPOSE_QUIET_STDERR"] = SECRET_SENTINEL
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "runtime configuration is invalid" in process.stderr
+    _assert_sentinel_absent(process.stdout, process.stderr)
+    assert not backup_log.exists()
+    assert "config --quiet" in docker_log.read_text(encoding="utf-8")
+    assert not (tmp_path / "activation-contract").exists()
+
+
+def test_structural_compose_error_cannot_retain_or_echo_secret_value(
+    tmp_path: Path,
+) -> None:
+    environment, backup_log, docker_log = _activation_environment(tmp_path)
+    (tmp_path / "compose.json").write_text(SECRET_SENTINEL, encoding="utf-8")
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "structural configuration is invalid" in process.stderr
+    commands = docker_log.read_text(encoding="utf-8")
+    _assert_sentinel_absent(process.stdout, process.stderr, commands)
+    assert not backup_log.exists()
+    assert not (tmp_path / "activation-contract").exists()
+
+
+def _assert_sentinel_absent(*surfaces: str) -> None:
+    assert all(SECRET_SENTINEL not in surface for surface in surfaces)
+
+
+def test_real_compose_structural_model_matches_activation_contract(tmp_path: Path) -> None:
+    docker = shutil.which("docker")
+    if docker is None:
+        pytest.skip("Docker Compose is unavailable in this environment.")
+    command = [
+        docker,
+        "compose",
+        "--project-directory",
+        str(REPOSITORY_ROOT),
+        "--file",
+        str(REPOSITORY_ROOT / "docker" / "docker-compose.prod.yml"),
+        "--file",
+        str(REPOSITORY_ROOT / "docker" / "docker-compose.prod-edge.example.yml"),
+        "--file",
+        str(REPOSITORY_ROOT / "docker" / "docker-compose.nginx-immutable.yml"),
+        "config",
+        "--no-env-resolution",
+        "--no-interpolate",
+        "--no-path-resolution",
+        "--format",
+        "json",
+    ]
+    rendered = subprocess.run(command, text=True, capture_output=True, check=False)
+    assert rendered.returncode == 0, rendered.stderr
+    structural_compose = tmp_path / "compose-structure.json"
+    structural_compose.write_text(rendered.stdout, encoding="utf-8")
+    compose_environment = tmp_path / "compose.env"
+    backend_environment = tmp_path / "backend.env"
+    migrator_environment = tmp_path / "migrator.env"
+    compose_environment.write_text(
+        "POSTGRES_USER=postgres_owner\n"
+        f"POSTGRES_PASSWORD={SECRET_SENTINEL}\n"
+        "POSTGRES_DB=archive_db\n"
+        f"MINIO_ROOT_USER={SECRET_SENTINEL}\n"
+        f"MINIO_ROOT_PASSWORD={SECRET_SENTINEL}\n"
+        "PRODUCTION_NGINX_PROXY_IP=172.30.0.2\n"
+        f"PRODUCTION_TLS_CERT_FILE={tmp_path / 'origin.pem'}\n"
+        f"PRODUCTION_TLS_KEY_FILE={tmp_path / 'origin-key.pem'}\n",
+        encoding="utf-8",
+    )
+    backend_environment.write_text(
+        "DB_HOST=db\nDB_PORT=5432\nDB_USER=runtime\n"
+        f"DB_PASSWORD={SECRET_SENTINEL}\nDB_NAME=archive_db\n"
+        f"MINIO_ACCESS_KEY={SECRET_SENTINEL}\n"
+        f"MINIO_SECRET_KEY={SECRET_SENTINEL}\n"
+        "MINIO_BUCKET_NAME=exam-archive\n",
+        encoding="utf-8",
+    )
+    migrator_environment.write_text(
+        "DB_HOST=db\nDB_PORT=5432\nDB_USER=migrator\n"
+        f"DB_PASSWORD={SECRET_SENTINEL}\nDB_NAME=archive_db\n",
+        encoding="utf-8",
+    )
+    validated = subprocess.run(
+        [
+            sys.executable,
+            str(CONTRACT_HELPER),
+            "compose-values",
+            "--compose-json",
+            str(structural_compose),
+            "--compose-env",
+            str(compose_environment),
+            "--backend-env",
+            str(backend_environment),
+            "--migrator-env",
+            str(migrator_environment),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert validated.returncode == 0, validated.stderr
+    _assert_sentinel_absent(rendered.stdout, rendered.stderr, validated.stdout, validated.stderr)
 
 
 def test_release_metadata_disagreement_fails_before_backup(tmp_path: Path) -> None:
@@ -594,7 +1158,9 @@ def test_release_metadata_disagreement_fails_before_backup(tmp_path: Path) -> No
     assert process.returncode != 0
     assert "release" in process.stderr.lower()
     assert not backup_log.exists()
-    assert not docker_log.exists()
+    assert docker_log.read_text(encoding="utf-8").splitlines() == [
+        "compose config --help"
+    ]
 
 
 def test_activation_uses_candidate_compose_environment(tmp_path: Path) -> None:
@@ -610,6 +1176,55 @@ def test_activation_uses_candidate_compose_environment(tmp_path: Path) -> None:
     assert external in commands
     assert candidate in commands
     assert commands.index(external) < commands.index(candidate)
+    structural_commands = [
+        line for line in commands.splitlines() if "--no-env-resolution" in line
+    ]
+    assert len(structural_commands) == 1
+    structural = structural_commands[0]
+    assert "--no-interpolate" in structural
+    assert "--no-path-resolution" in structural
+    assert "--env-file" not in structural
+
+
+def test_secret_sentinel_never_enters_success_path_evidence(tmp_path: Path) -> None:
+    environment, backup_log, docker_log = _activation_environment(tmp_path)
+    engine_evidence = tmp_path / "engine-evidence.json"
+    environment["ACTIVATION_EVIDENCE_PATH"] = _bash_path(engine_evidence)
+
+    process = _activate(environment)
+
+    assert process.returncode == 0, process.stderr
+    release = tmp_path / RELEASE_SHA
+    _assert_sentinel_absent(
+        process.stdout,
+        process.stderr,
+        backup_log.read_text(encoding="utf-8"),
+        docker_log.read_text(encoding="utf-8"),
+        engine_evidence.read_text(encoding="utf-8"),
+        (release / "release-manifest.env").read_text(encoding="utf-8"),
+        (release / "compose.prod.env").read_text(encoding="utf-8"),
+    )
+    assert not (tmp_path / "activation-contract").exists()
+
+
+def test_secret_sentinel_never_enters_failure_path_evidence(tmp_path: Path) -> None:
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path, storage_preflight_exit=2
+    )
+    engine_evidence = tmp_path / "engine-evidence.json"
+    environment["ACTIVATION_EVIDENCE_PATH"] = _bash_path(engine_evidence)
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    _assert_sentinel_absent(
+        process.stdout,
+        process.stderr,
+        backup_log.read_text(encoding="utf-8"),
+        docker_log.read_text(encoding="utf-8"),
+    )
+    assert not (tmp_path / "activation-contract").exists()
+    assert not engine_evidence.exists()
 
 
 def test_storage_preflight_failure_stops_before_backup_or_migration(
@@ -901,7 +1516,9 @@ def test_external_edge_contract_must_remain_mode_0600(tmp_path: Path) -> None:
     assert process.returncode != 0
     assert "0600" in process.stderr
     assert not backup_log.exists()
-    assert not docker_log.exists()
+    assert docker_log.read_text(encoding="utf-8").splitlines() == [
+        "compose config --help"
+    ]
 
 
 def test_external_production_contracts_must_remain_root_owned(
@@ -916,7 +1533,9 @@ def test_external_production_contracts_must_remain_root_owned(
     assert process.returncode != 0
     assert "root-owned" in process.stderr
     assert not backup_log.exists()
-    assert not docker_log.exists()
+    assert docker_log.read_text(encoding="utf-8").splitlines() == [
+        "compose config --help"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -1016,6 +1635,81 @@ def test_observation_fails_on_bounded_critical_error_evidence(tmp_path: Path) ->
 
     assert process.returncode != 0
     assert "critical runtime errors" in process.stderr.lower()
+    assert not (tmp_path / RELEASE_SHA / ".activated").exists()
+
+
+def test_runtime_log_stream_discards_noncritical_sentinel_text(tmp_path: Path) -> None:
+    environment, _, docker_log = _activation_environment(tmp_path)
+    engine_evidence = tmp_path / "engine-evidence.json"
+    environment["ACTIVATION_EVIDENCE_PATH"] = _bash_path(engine_evidence)
+    environment["FAKE_CRITICAL_LOG"] = f"ordinary {SECRET_SENTINEL} line\n"
+    environment["FAKE_CRITICAL_LOG_STDERR"] = (
+        f"ordinary stderr {SECRET_SENTINEL} line\n"
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode == 0, process.stderr
+    _assert_sentinel_absent(
+        process.stdout,
+        process.stderr,
+        docker_log.read_text(encoding="utf-8"),
+        engine_evidence.read_text(encoding="utf-8"),
+    )
+    assert not list(tmp_path.rglob("*.critical.log"))
+    assert ".critical.log" not in ACTIVATION_SCRIPT.read_text(encoding="utf-8")
+
+
+def test_runtime_log_stream_discards_sentinel_surrounding_critical_match(
+    tmp_path: Path,
+) -> None:
+    environment, _, docker_log = _activation_environment(tmp_path)
+    environment["FAKE_CRITICAL_LOG"] = (
+        f"{SECRET_SENTINEL} fatal {SECRET_SENTINEL}\n"
+        f"{SECRET_SENTINEL} traceback {SECRET_SENTINEL}\n"
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "critical runtime errors" in process.stderr.lower()
+    _assert_sentinel_absent(
+        process.stdout, process.stderr, docker_log.read_text(encoding="utf-8")
+    )
+    assert not (tmp_path / RELEASE_SHA / ".activated").exists()
+    assert not list(tmp_path.rglob("*.critical.log"))
+
+
+def test_runtime_log_producer_failure_is_not_treated_as_zero_matches(
+    tmp_path: Path,
+) -> None:
+    environment, _, docker_log = _activation_environment(tmp_path)
+    environment["FAKE_CRITICAL_LOG_EXIT"] = "2"
+    environment["FAKE_CRITICAL_LOG_STDERR"] = SECRET_SENTINEL
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "could not process container logs" in process.stderr.lower()
+    assert "critical runtime errors" not in process.stderr.lower()
+    _assert_sentinel_absent(
+        process.stdout, process.stderr, docker_log.read_text(encoding="utf-8")
+    )
+    assert not (tmp_path / RELEASE_SHA / ".activated").exists()
+
+
+def test_runtime_log_parser_failure_is_fail_closed(tmp_path: Path) -> None:
+    environment, _, docker_log = _activation_environment(tmp_path)
+    environment["FAKE_CRITICAL_PARSER_EXIT"] = "2"
+    environment["FAKE_CRITICAL_LOG"] = SECRET_SENTINEL
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "could not process container logs" in process.stderr.lower()
+    _assert_sentinel_absent(
+        process.stdout, process.stderr, docker_log.read_text(encoding="utf-8")
+    )
     assert not (tmp_path / RELEASE_SHA / ".activated").exists()
 
 
