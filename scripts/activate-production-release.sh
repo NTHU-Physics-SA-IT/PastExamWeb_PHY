@@ -70,6 +70,34 @@ if [ "$OBSERVATION_SNAPSHOTS" -lt 1 ]; then
   exit 2
 fi
 
+required_compose_flags=(
+  --no-env-resolution
+  --no-interpolate
+  --no-path-resolution
+  --format
+)
+if ! compose_config_help="$(docker compose config --help 2>/dev/null)"; then
+  echo "Docker Compose configuration capabilities are unavailable." >&2
+  exit 2
+fi
+for required_compose_flag in "${required_compose_flags[@]}"; do
+  if ! awk -v required="$required_compose_flag" '
+    {
+      for (field = 1; field <= NF; field += 1) {
+        if ($field == required) {
+          found = 1
+        }
+      }
+    }
+    END { exit(found ? 0 : 1) }
+  ' <<<"$compose_config_help"
+  then
+    echo "Docker Compose configuration capability is missing: $required_compose_flag" >&2
+    exit 2
+  fi
+done
+unset compose_config_help required_compose_flag
+
 verify_root_helper() {
   local helper mode owner_uid
   helper="$1"
@@ -122,8 +150,8 @@ for config_file in \
   "$PRODUCTION_MIGRATOR_ENV_FILE" \
   "$PRODUCTION_EDGE_COMPOSE_FILE"
 do
-  if [ ! -f "$config_file" ]; then
-    echo "Required external configuration file is missing." >&2
+  if [ ! -f "$config_file" ] || [ -L "$config_file" ]; then
+    echo "External production configuration must be a regular non-symlink file." >&2
     exit 2
   fi
   mode="$(stat -c '%a' "$config_file")"
@@ -203,27 +231,45 @@ compose=(
   --file "$PRODUCTION_EDGE_COMPOSE_FILE"
   --file "$NGINX_IMAGE_OVERRIDE"
 )
+compose_structure=(
+  docker compose
+  --project-directory "$RELEASE_DIRECTORY"
+  --file "$compose_file"
+  --file "$PRODUCTION_EDGE_COMPOSE_FILE"
+  --file "$NGINX_IMAGE_OVERRIDE"
+)
 
 export PRODUCTION_BACKEND_ENV_FILE
 export PRODUCTION_MIGRATOR_ENV_FILE
-"${compose[@]}" config --quiet
 
 contract_directory="$(mktemp -d)"
 cleanup_contract() {
   rm -rf -- "$contract_directory"
 }
 trap cleanup_contract EXIT HUP INT TERM
-rendered_compose="$contract_directory/compose.json"
+structural_compose="$contract_directory/compose-structure.json"
 current_nginx_ports="$contract_directory/current-nginx-ports.json"
-"${compose[@]}" config --format json >"$rendered_compose"
+if ! "${compose_structure[@]}" config \
+  --no-env-resolution \
+  --no-interpolate \
+  --no-path-resolution \
+  --format json 2>/dev/null | \
+  python3 "$contract_helper" write-validated-structure \
+    --output "$structural_compose" \
+    --compose-env "$PRODUCTION_COMPOSE_ENV_FILE"
+then
+  echo "Production Compose structural configuration is invalid." >&2
+  exit 2
+fi
 
 python3 "$contract_helper" verify-images \
-  --compose-json "$rendered_compose" \
-  --manifest "$RELEASE_MANIFEST"
+  --compose-json "$structural_compose" \
+  --manifest "$RELEASE_MANIFEST" \
+  --candidate-env "$candidate_compose_env"
 
 runtime_image_values="$(
   python3 "$contract_helper" runtime-image-values \
-    --compose-json "$rendered_compose"
+    --manifest "$RELEASE_MANIFEST"
 )"
 mapfile -t runtime_image_contract <<<"$runtime_image_values"
 if [ "${#runtime_image_contract[@]}" -ne 3 ]; then
@@ -246,7 +292,10 @@ done
 
 production_values="$(
   python3 "$contract_helper" compose-values \
-    --compose-json "$rendered_compose"
+    --compose-json "$structural_compose" \
+    --compose-env "$PRODUCTION_COMPOSE_ENV_FILE" \
+    --backend-env "$PRODUCTION_BACKEND_ENV_FILE" \
+    --migrator-env "$PRODUCTION_MIGRATOR_ENV_FILE"
 )"
 mapfile -t production_contract <<<"$production_values"
 if [ "${#production_contract[@]}" -ne 7 ]; then
@@ -261,9 +310,16 @@ MINIO_BUCKET_NAME="${production_contract[4]}"
 NGINX_CONTAINER="${production_contract[5]}"
 REDIS_CONTAINER="${production_contract[6]}"
 
+if ! "${compose[@]}" config --quiet >/dev/null 2>&1; then
+  echo "Production Compose runtime configuration is invalid." >&2
+  exit 2
+fi
+
 mount_values="$(
   python3 "$contract_helper" mount-values \
-    --compose-json "$rendered_compose"
+    --compose-json "$structural_compose" \
+    --compose-env "$PRODUCTION_COMPOSE_ENV_FILE" \
+    --release-directory "$RELEASE_DIRECTORY"
 )"
 mapfile -t nginx_mount_contract <<<"$mount_values"
 if [ "${#nginx_mount_contract[@]}" -ne 4 ]; then
@@ -276,9 +332,10 @@ verify_external_file "${nginx_mount_contract[3]}"
 docker inspect --format '{{json .NetworkSettings.Ports}}' \
   "$NGINX_CONTAINER" >"$current_nginx_ports"
 python3 "$contract_helper" verify-ingress \
-  --compose-json "$rendered_compose" \
+  --compose-json "$structural_compose" \
   --current-ports-json "$current_nginx_ports" \
-  --release-directory "$RELEASE_DIRECTORY"
+  --release-directory "$RELEASE_DIRECTORY" \
+  --compose-env "$PRODUCTION_COMPOSE_ENV_FILE"
 
 for persistent_container in \
   "$DATABASE_CONTAINER" "$REDIS_CONTAINER" "$MINIO_CONTAINER"
@@ -431,18 +488,14 @@ for ((snapshot = 1; snapshot <= OBSERVATION_SNAPSHOTS; snapshot += 1)); do
       echo "Container image authority changed during bounded observation." >&2
       exit 2
     fi
-    critical_log_sample="$contract_directory/${container_name}.critical.log"
-    if ! docker logs --since "$activation_started_at" "$container_name" \
-      >"$critical_log_sample" 2>&1
+    if ! observed_critical_count="$(
+      docker logs --since "$activation_started_at" "$container_name" 2>&1 | \
+        python3 "$contract_helper" count-critical-log-lines
+    )"
     then
-      echo "Critical-error observation could not read container logs." >&2
+      echo "Critical-error observation could not process container logs." >&2
       exit 2
     fi
-    observed_critical_count="$(
-      grep -Eic '(^|[^a-z])(panic|fatal|segmentation fault|traceback|unhandled exception|\[emerg\]|\[crit\])([^a-z]|$)' \
-        "$critical_log_sample" || true
-    )"
-    rm -f -- "$critical_log_sample"
     if [[ ! "$observed_critical_count" =~ ^[0-9]+$ ]]; then
       echo "Critical-error observation evidence is malformed." >&2
       exit 2
