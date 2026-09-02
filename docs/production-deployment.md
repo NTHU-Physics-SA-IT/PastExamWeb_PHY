@@ -262,6 +262,23 @@ ordinary activation.
 
 ## GitHub activation and durable state
 
+`.github/workflows/preflight-production.yml` is a separate manual protected
+operation for reviewing an exact-current-main production candidate before any
+activation is authorized. It repeats the merger-bound human identity gate and
+binds the authoritative Main Full run, immutable image authority, and candidate
+receipt before entering the protected `production` Environment. After approval
+it re-locks current main and the same Main Full run, repeats merger-bound
+authorization, and uses the restricted production identity only for `status`
+and one `preflight` command. The workflow validates and retains only the
+sanitized preflight evidence; it creates no deployment request and cannot start,
+resume, or roll back an activation.
+
+A successful preflight means only that the host reported the exact candidate
+eligible at that time. It is neither activation authorization nor deployment
+success. Human review and a separately authorized activation dispatch remain
+required. If main advances, the evidence is stale; the later activation
+workflow independently repeats its freshness and authority checks.
+
 `.github/workflows/activate-production.yml` is manual `workflow_dispatch`
 only. Before approval it binds the requested exact current-main SHA to one
 authoritative successful Main Full run, immutable image authority, and the

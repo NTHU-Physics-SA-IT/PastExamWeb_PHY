@@ -11,6 +11,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 ACTIVATE = ROOT / ".github" / "workflows" / "activate-production.yml"
+PREFLIGHT = ROOT / ".github" / "workflows" / "preflight-production.yml"
 ROLLBACK = ROOT / ".github" / "workflows" / "rollback-production.yml"
 AUTHORITY = ROOT / "scripts" / "ci" / "validate_activation_authority.py"
 MERGER_BOUND = ROOT / "scripts" / "ci" / "validate_merger_bound_deploy.py"
@@ -59,6 +60,10 @@ def _load_classifier():
             ACTIVATE,
             {"actions": "read", "contents": "read", "pull-requests": "read"},
         ),
+        (
+            PREFLIGHT,
+            {"actions": "read", "contents": "read", "pull-requests": "read"},
+        ),
         (ROLLBACK, {"actions": "read", "contents": "read"}),
     ],
 )
@@ -82,6 +87,109 @@ def test_production_workflows_are_manual_protected_and_non_cancelling(
         set(re.findall(r"secrets\.(PRODUCTION_ACTIVATION_[A-Z_]+)", source))
         == EXPECTED_SECRETS
     )
+
+
+def test_preflight_workflow_is_protected_authoritative_and_preflight_only() -> None:
+    source = PREFLIGHT.read_text(encoding="utf-8")
+    workflow = yaml.load(source, Loader=yaml.BaseLoader)
+    trigger = workflow.get("on", workflow.get(True))
+    authority_steps = workflow["jobs"]["authority"]["steps"]
+    protected = workflow["jobs"]["preflight"]
+    protected_steps = protected["steps"]
+
+    assert set(trigger) == {"workflow_dispatch"}
+    assert trigger["workflow_dispatch"]["inputs"]["target_sha"] == {
+        "description": "Exact current main SHA to preflight",
+        "required": "true",
+        "type": "string",
+    }
+    assert protected["environment"] == "production"
+    assert source.count("validate_candidate_source_run.py") == 2
+    assert source.count("validate_merger_bound_deploy.py") == 2
+    assert source.count("validate_activation_authority.py") == 1
+
+    first_gate = next(
+        index
+        for index, step in enumerate(authority_steps)
+        if "validate_merger_bound_deploy.py" in step.get("run", "")
+    )
+    assert authority_steps[first_gate - 1]["name"] == (
+        "Require workflow source and target to be exact current main"
+    )
+    relock = next(
+        index
+        for index, step in enumerate(protected_steps)
+        if step["name"] == "Re-lock current main and Main Full after approval"
+    )
+    second_gate = next(
+        index
+        for index, step in enumerate(protected_steps)
+        if "validate_merger_bound_deploy.py" in step.get("run", "")
+    )
+    ssh_setup = next(
+        index
+        for index, step in enumerate(protected_steps)
+        if step["name"] == "Configure restricted production SSH identity"
+    )
+    assert relock < second_gate < ssh_setup
+    for steps, gate in ((authority_steps, first_gate), (protected_steps, second_gate)):
+        env = steps[gate]["env"]
+        assert env["GITHUB_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
+        assert env["ORIGINAL_ACTOR"] == "${{ github.actor }}"
+        assert env["TRIGGERING_ACTOR"] == "${{ github.triggering_actor }}"
+
+    host_step = next(
+        step
+        for step in protected_steps
+        if step["name"] == "Run protected production preflight only"
+    )
+    host_commands = host_step["run"]
+    assert host_commands.count('"${ssh_command[@]}"') == 2
+    assert '"${ssh_command[@]}" status' in host_commands
+    assert (
+        host_commands.count('"preflight $TARGET_SHA $SOURCE_RUN $SOURCE_ATTEMPT"') == 1
+    )
+    for option in (
+        "IdentitiesOnly=yes",
+        "BatchMode=yes",
+        "StrictHostKeyChecking=yes",
+    ):
+        assert option in host_commands
+    for evidence_field in (
+        '"schema_version": 1',
+        '"outcome": "eligible"',
+        '"target_sha": sys.argv[2]',
+        '"manifest_sha256": sys.argv[3]',
+        '"candidate_receipt_sha256": sys.argv[4]',
+        'data["current_active_sha"]',
+    ):
+        assert evidence_field in host_commands
+
+    all_runs = "\n".join(step.get("run", "") for step in protected_steps)
+    assert all_runs.count('"${ssh_command[@]}"') == 2
+    for forbidden_command in (
+        "start ",
+        "resume ",
+        "rollback-start ",
+        "rollback-preflight ",
+        "request-status ",
+        '"receipt ',
+    ):
+        assert forbidden_command not in all_runs
+    assert "request_id=" not in all_runs
+    assert "poll_count" not in all_runs
+    assert "production-deployment-receipt" not in source
+    assert "activate-production.yml" not in source
+
+    upload = next(
+        step
+        for step in protected_steps
+        if step["name"] == "Upload durable production preflight evidence"
+    )
+    assert upload["with"]["path"] == "${{ runner.temp }}/production-preflight.json"
+    cleanup = protected_steps[-1]
+    assert cleanup["name"] == "Remove ephemeral activation key"
+    assert cleanup["if"] == "always()"
 
 
 def test_activation_workflow_enforces_exact_main_twice_and_starts_once() -> None:
@@ -110,9 +218,9 @@ def test_activation_revalidates_merger_bound_authority_before_production_ssh() -
 
     assert MERGER_BOUND.is_file()
     assert source.count("validate_merger_bound_deploy.py") == 2
-    assert "--actor \"$ORIGINAL_ACTOR\"" in source
-    assert "--triggering-actor \"$TRIGGERING_ACTOR\"" in source
-    assert "--target-sha \"$TARGET_SHA\"" in source
+    assert '--actor "$ORIGINAL_ACTOR"' in source
+    assert '--triggering-actor "$TRIGGERING_ACTOR"' in source
+    assert '--target-sha "$TARGET_SHA"' in source
     assert "--token" not in source
 
     first_gate = next(

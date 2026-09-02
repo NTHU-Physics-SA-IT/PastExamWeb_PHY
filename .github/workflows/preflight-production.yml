@@ -1,0 +1,235 @@
+name: Preflight reviewed production release
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact current main SHA to preflight
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: production-activation
+  cancel-in-progress: false
+
+jobs:
+  authority:
+    runs-on: ubuntu-latest
+    outputs:
+      release_sha: ${{ steps.full.outputs.release_sha }}
+      source_ci_run_id: ${{ steps.full.outputs.source_ci_run_id }}
+      source_ci_run_attempt: ${{ steps.full.outputs.source_ci_run_attempt }}
+      candidate_receipt_sha256: ${{ steps.artifacts.outputs.candidate_receipt_sha256 }}
+      release_manifest_sha256: ${{ steps.artifacts.outputs.release_manifest_sha256 }}
+    steps:
+      - name: Checkout the exact requested main authority
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.target_sha }}
+
+      - name: Require workflow source and target to be exact current main
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$TARGET_SHA"
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = "$TARGET_SHA"
+
+      - name: Require merger-bound self-deploy authority
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ inputs.target_sha }}
+          ORIGINAL_ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          python3 scripts/ci/validate_merger_bound_deploy.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --target-sha "$TARGET_SHA" \
+            --base-branch main \
+            --actor "$ORIGINAL_ACTOR" \
+            --triggering-actor "$TRIGGERING_ACTOR"
+
+      - name: Resolve authoritative exact-SHA Main Full
+        id: full
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 scripts/ci/validate_candidate_source_run.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --release-sha '${{ inputs.target_sha }}' \
+            --output "$GITHUB_OUTPUT"
+
+      - name: Download exact Full image authority
+        uses: actions/download-artifact@v8
+        with:
+          name: production-image-authority-${{ inputs.target_sha }}
+          path: ${{ runner.temp }}/image-authority
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.full.outputs.source_ci_run_id }}
+
+      - name: Download exact candidate receipt
+        uses: actions/download-artifact@v8
+        with:
+          name: production-candidate-receipt-${{ inputs.target_sha }}
+          path: ${{ runner.temp }}/candidate-receipt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.full.outputs.source_ci_run_id }}
+
+      - name: Bind candidate, image, and Full authority
+        id: artifacts
+        run: |
+          python3 scripts/ci/validate_activation_authority.py \
+            --receipt "$RUNNER_TEMP/candidate-receipt/candidate-receipt.json" \
+            --image-authority "$RUNNER_TEMP/image-authority/production-image-authority.env" \
+            --release-sha '${{ inputs.target_sha }}' \
+            --source-ci-run-id '${{ steps.full.outputs.source_ci_run_id }}' \
+            --source-ci-run-attempt '${{ steps.full.outputs.source_ci_run_attempt }}' \
+            --output "$GITHUB_OUTPUT"
+
+  preflight:
+    needs: authority
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - name: Checkout approved exact source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.authority.outputs.release_sha }}
+
+      - name: Re-lock current main and Main Full after approval
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ needs.authority.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = "$TARGET_SHA"
+          authority="$RUNNER_TEMP/fresh-main-full.env"
+          python3 scripts/ci/validate_candidate_source_run.py \
+            --repository "$GITHUB_REPOSITORY" --release-sha "$TARGET_SHA" \
+            --output "$authority"
+          test '${{ needs.authority.outputs.source_ci_run_id }}' = \
+            "$(sed -n 's/^source_ci_run_id=//p' "$authority")"
+          test '${{ needs.authority.outputs.source_ci_run_attempt }}' = \
+            "$(sed -n 's/^source_ci_run_attempt=//p' "$authority")"
+
+      - name: Revalidate merger-bound authority after approval
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ needs.authority.outputs.release_sha }}
+          ORIGINAL_ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          python3 scripts/ci/validate_merger_bound_deploy.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --target-sha "$TARGET_SHA" \
+            --base-branch main \
+            --actor "$ORIGINAL_ACTOR" \
+            --triggering-actor "$TRIGGERING_ACTOR"
+
+      - name: Configure restricted production SSH identity
+        env:
+          ACTIVATION_HOST: ${{ secrets.PRODUCTION_ACTIVATION_HOST }}
+          ACTIVATION_KNOWN_HOSTS: ${{ secrets.PRODUCTION_ACTIVATION_KNOWN_HOSTS }}
+          ACTIVATION_PRIVATE_KEY: ${{ secrets.PRODUCTION_ACTIVATION_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$ACTIVATION_PRIVATE_KEY" >~/.ssh/pastexam-activate
+          chmod 600 ~/.ssh/pastexam-activate
+          printf '%s\n' "$ACTIVATION_KNOWN_HOSTS" >~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          ssh-keygen -F "$ACTIVATION_HOST" -f ~/.ssh/known_hosts >/dev/null
+
+      - name: Run protected production preflight only
+        env:
+          ACTIVATION_HOST: ${{ secrets.PRODUCTION_ACTIVATION_HOST }}
+          ACTIVATION_USER: ${{ secrets.PRODUCTION_ACTIVATION_USER }}
+          TARGET_SHA: ${{ needs.authority.outputs.release_sha }}
+          SOURCE_RUN: ${{ needs.authority.outputs.source_ci_run_id }}
+          SOURCE_ATTEMPT: ${{ needs.authority.outputs.source_ci_run_attempt }}
+          EXPECTED_MANIFEST: ${{ needs.authority.outputs.release_manifest_sha256 }}
+          EXPECTED_RECEIPT: ${{ needs.authority.outputs.candidate_receipt_sha256 }}
+        run: |
+          set -euo pipefail
+          ssh_command=(ssh -i ~/.ssh/pastexam-activate -o IdentitiesOnly=yes \
+            -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$ACTIVATION_USER@$ACTIVATION_HOST")
+          "${ssh_command[@]}" status >"$RUNNER_TEMP/production-status.json"
+          "${ssh_command[@]}" \
+            "preflight $TARGET_SHA $SOURCE_RUN $SOURCE_ATTEMPT" \
+            >"$RUNNER_TEMP/production-preflight.json"
+          python3 - "$RUNNER_TEMP/production-preflight.json" \
+            "$TARGET_SHA" "$EXPECTED_MANIFEST" "$EXPECTED_RECEIPT" <<'PY'
+          import json
+          import pathlib
+          import re
+          import sys
+
+          def strict_object(pairs):
+              result = {}
+              for key, value in pairs:
+                  if key in result:
+                      raise ValueError("duplicate JSON object key")
+                  result[key] = value
+              return result
+
+          path = pathlib.Path(sys.argv[1])
+          data = json.loads(
+              path.read_text(encoding="utf-8"), object_pairs_hook=strict_object
+          )
+          required = {
+              "schema_version",
+              "outcome",
+              "target_sha",
+              "current_active_sha",
+              "manifest_sha256",
+              "candidate_receipt_sha256",
+          }
+          if not isinstance(data, dict) or set(data) != required:
+              raise SystemExit("Host preflight evidence has an unexpected schema.")
+          if type(data["schema_version"]) is not int:
+              raise SystemExit("Host preflight schema version is malformed.")
+          expected = {
+              "schema_version": 1,
+              "outcome": "eligible",
+              "target_sha": sys.argv[2],
+              "manifest_sha256": sys.argv[3],
+              "candidate_receipt_sha256": sys.argv[4],
+          }
+          if any(data[key] != value for key, value in expected.items()):
+              raise SystemExit("Host preflight authority disagrees.")
+          if not isinstance(data["current_active_sha"], str) or not re.fullmatch(
+              r"[0-9a-f]{40}", data["current_active_sha"]
+          ):
+              raise SystemExit("Host preflight active SHA is malformed.")
+          path.write_text(
+              json.dumps(data, sort_keys=True, separators=(",", ":")) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload durable production preflight evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: production-preflight-evidence-${{ needs.authority.outputs.release_sha }}
+          path: ${{ runner.temp }}/production-preflight.json
+          if-no-files-found: error
+          retention-days: 365
+
+      - name: Remove ephemeral activation key
+        if: always()
+        run: rm -f -- ~/.ssh/pastexam-activate
