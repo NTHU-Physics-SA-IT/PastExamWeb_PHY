@@ -89,6 +89,7 @@ describe('API service wrappers', () => {
       formData,
       expect.objectContaining({
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 30_000,
       })
     )
 

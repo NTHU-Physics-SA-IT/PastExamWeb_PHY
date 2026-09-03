@@ -143,6 +143,13 @@ function mountDialog(props = {}) {
 }
 
 describe('UploadArchiveDialog', () => {
+  it('shows the fixed PDF normalization notice without adding interaction', () => {
+    const wrapper = mountDialog()
+
+    expect(wrapper.text()).toContain('PDF 處理說明：為確保檔案相容性與安全性')
+    wrapper.unmount()
+  })
+
   it('formats pre-100 academic term selections', () => {
     const wrapper = mountDialog()
 

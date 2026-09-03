@@ -556,6 +556,13 @@
                   {{ form.hasAnswers ? $t('是') : $t('否') }}
                 </div>
               </div>
+              <p v-if="!isWishMode" class="m-0 text-sm text-color-secondary line-height-3">
+                {{
+                  $t(
+                    'PDF 處理說明：為確保檔案相容性與安全性，部分 PDF 可能在上傳時自動進行正規化處理；若原檔包含數位簽章，正規化後原有簽章將不會保留。'
+                  )
+                }}
+              </p>
             </div>
             <div class="flex pt-6 justify-between">
               <Button

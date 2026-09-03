@@ -2,7 +2,9 @@ import asyncio
 import io
 import logging
 import os
+import stat
 import sys
+import zlib
 from pathlib import Path
 
 import pikepdf
@@ -31,10 +33,76 @@ def _save_mutated_pdf(tmp_path: Path, mutate) -> Path:
     return path
 
 
+def _truncated_flate_pdf(tmp_path: Path, *, with_attachment: bool) -> Path:
+    path = tmp_path / (
+        "truncated-with-attachment.pdf"
+        if with_attachment
+        else "truncated-without-attachment.pdf"
+    )
+    content = b"q\n0 0 10 10 re\nS\nQ\n" * 32
+    compressed = zlib.compress(content)[:-4]
+    page_attachment = b" /AF [5 0 R]" if with_attachment else b""
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] "
+        b"/Contents 4 0 R /Resources << >>" + page_attachment + b" >>",
+        b"<< /Length "
+        + str(len(compressed)).encode("ascii")
+        + b" /Filter /FlateDecode >>\nstream\n"
+        + compressed
+        + b"\nendstream",
+    ]
+    if with_attachment:
+        embedded_payload = b"pastexam-synthetic-private-attachment"
+        objects.extend(
+            [
+                b"<< /Type /Filespec /F (metadata.json) /EF << /F 6 0 R >> >>",
+                b"<< /Type /EmbeddedFile /Length "
+                + str(len(embedded_payload)).encode("ascii")
+                + b" >>\nstream\n"
+                + embedded_payload
+                + b"\nendstream",
+            ]
+        )
+
+    payload = bytearray(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n")
+    offsets = [0]
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(payload))
+        payload.extend(f"{number} 0 obj\n".encode("ascii"))
+        payload.extend(body)
+        payload.extend(b"\nendobj\n")
+    xref_offset = len(payload)
+    payload.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    payload.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        payload.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    payload.extend(
+        (
+            f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref_offset}\n%%EOF\n"
+        ).encode("ascii")
+    )
+    path.write_bytes(payload)
+    return path
+
+
 def _assert_rejected(path: Path, code: str) -> None:
     with pytest.raises(_PdfPolicyViolation) as error:
         pdf_security._inspect_pdf(path)
     assert error.value.code == code
+
+
+def _inspection() -> pdf_security.PdfInspection:
+    return pdf_security.PdfInspection(
+        pages=1,
+        objects=4,
+        pikepdf_version=pikepdf.__version__,
+        qpdf_version=pikepdf.__libqpdf_version__,
+        memory_limit_applied=False,
+        global_lock_applied=False,
+    )
 
 
 def test_valid_pdf_and_explicit_uri_are_allowed(tmp_path: Path) -> None:
@@ -125,13 +193,31 @@ def test_valid_pdf_and_explicit_uri_are_allowed(tmp_path: Path) -> None:
                             Type=pikepdf.Name.Annot,
                             Subtype=pikepdf.Name.Link,
                             Rect=pikepdf.Array([0, 0, 10, 10]),
-                            A=pikepdf.Dictionary(
-                                S=pikepdf.Name.Launch, F="external"
-                            ),
+                            A=pikepdf.Dictionary(S=pikepdf.Name.Launch, F="external"),
                         )
                     )
                 ]
             ),
+        ),
+        lambda pdf, page: setattr(
+            page.obj,
+            "Annots",
+            pikepdf.Array(
+                [
+                    pdf.make_indirect(
+                        pikepdf.Dictionary(
+                            Type=pikepdf.Name.Annot,
+                            Subtype=pikepdf.Name.RichMedia,
+                            Rect=pikepdf.Array([0, 0, 10, 10]),
+                        )
+                    )
+                ]
+            ),
+        ),
+        lambda pdf, _page: setattr(
+            pdf.Root,
+            "OpenAction",
+            pikepdf.Dictionary(S=pikepdf.Name.GoToR, F="external.pdf"),
         ),
     ],
     ids=[
@@ -143,6 +229,8 @@ def test_valid_pdf_and_explicit_uri_are_allowed(tmp_path: Path) -> None:
         "xfa",
         "file-attachment",
         "launch",
+        "multimedia",
+        "external-action",
     ],
 )
 def test_forbidden_active_and_embedded_features_are_rejected(
@@ -215,6 +303,112 @@ def test_syntax_warning_policy_rejects_even_when_open_succeeds(
     with pytest.raises(_PdfPolicyViolation) as error:
         pdf_security._inspect_pdf(tmp_path / "synthetic.pdf")
     assert error.value.code == "syntax_warning"
+
+
+def test_minimized_flate_fixture_matches_only_the_pinned_incident_condition(
+    tmp_path: Path,
+) -> None:
+    path = _truncated_flate_pdf(tmp_path, with_attachment=False)
+    with pikepdf.open(path, attempt_recovery=False) as pdf:
+        issues = list(pdf.check_pdf_syntax()) + list(pdf.get_warnings())
+
+    assert pikepdf.__version__ == pdf_security._SUPPORTED_PIKEPDF_VERSION
+    assert pikepdf.__libqpdf_version__ == pdf_security._SUPPORTED_QPDF_VERSION
+    assert pdf_security._normalized_parser_findings(
+        issues,
+        pikepdf_version=pikepdf.__version__,
+        qpdf_version=pikepdf.__libqpdf_version__,
+    ) == {"flate_incomplete_termination"}
+    assert (
+        pdf_security._normalized_parser_findings(
+            issues,
+            pikepdf_version="10.12.1",
+            qpdf_version=pikepdf.__libqpdf_version__,
+        )
+        is None
+    )
+    _assert_rejected(path, "syntax_warning")
+
+
+def test_only_removable_attachment_findings_can_make_incident_flate_sanitizable(
+    tmp_path: Path,
+) -> None:
+    combined = pdf_security._classify_pdf(
+        _truncated_flate_pdf(tmp_path, with_attachment=True)
+    )
+    assert combined["disposition"] == "sanitizable"
+    assert combined["findings"] == [
+        "embedded_files",
+        "flate_incomplete_termination",
+    ]
+
+    def add_javascript(pdf, page):
+        page.obj.Annots = pikepdf.Array(
+            [
+                pdf.make_indirect(
+                    pikepdf.Dictionary(
+                        Type=pikepdf.Name.Annot,
+                        Subtype=pikepdf.Name.Link,
+                        Rect=pikepdf.Array([0, 0, 10, 10]),
+                        A=pikepdf.Dictionary(
+                            S=pikepdf.Name.JavaScript,
+                            JS="app.alert('x')",
+                        ),
+                    )
+                )
+            ]
+        )
+        pdf.attachments["metadata.json"] = b"{}"
+
+    _assert_rejected(
+        _save_mutated_pdf(tmp_path, add_javascript),
+        "forbidden_feature",
+    )
+
+
+def test_ambiguous_attachment_graph_and_arbitrary_forms_remain_fatal(
+    tmp_path: Path,
+) -> None:
+    def add_orphan_embedded_file(pdf, _page):
+        stream = pdf.make_stream(b"private")
+        stream.Type = pikepdf.Name.EmbeddedFile
+        pdf.Root.Orphan = pdf.make_indirect(
+            pikepdf.Dictionary(
+                Type=pikepdf.Name.Filespec,
+                F="orphan.bin",
+                EF=pikepdf.Dictionary(F=stream),
+            )
+        )
+
+    ambiguous = _save_mutated_pdf(tmp_path, add_orphan_embedded_file)
+    _assert_rejected(ambiguous, "forbidden_feature")
+
+    def add_signature_form(pdf, _page):
+        signature_field = pdf.make_indirect(
+            pikepdf.Dictionary(FT=pikepdf.Name.Sig, T="Signature1")
+        )
+        pdf.Root.AcroForm = pikepdf.Dictionary(Fields=pikepdf.Array([signature_field]))
+        pdf.attachments["metadata.json"] = b"{}"
+
+    signature_form = _save_mutated_pdf(tmp_path, add_signature_form)
+    _assert_rejected(signature_form, "forbidden_feature")
+
+
+def test_detached_signature_marker_does_not_broaden_acroform_policy(
+    tmp_path: Path,
+) -> None:
+    def add_detached_signature_and_attachment(pdf, _page):
+        pdf.Root.SignatureMetadata = pdf.make_indirect(
+            pikepdf.Dictionary(Type=pikepdf.Name.Sig)
+        )
+        pdf.attachments["metadata.json"] = b"{}"
+
+    source = _save_mutated_pdf(tmp_path, add_detached_signature_and_attachment)
+    classified = pdf_security._classify_pdf(source)
+    assert classified["findings"] == ["embedded_files", "signature_present"]
+    destination = tmp_path / "signature-normalized.pdf"
+    pdf_security._sanitize_pdf(source, destination)
+    assert pdf_security._inspect_pdf(destination)["pages"] == 1
 
 
 def test_production_page_limit_accepts_a_200_page_pdf(tmp_path: Path) -> None:
@@ -292,19 +486,25 @@ async def test_validated_context_removes_temp_file_on_success_and_failure(
         path.write_bytes(b"%PDF-")
         return pdf_security.StagedPdf(path=path, size=5)
 
-    async def accept(_path):
-        return None
+    async def accept(_path, *, deadline):
+        assert deadline > 0
+        return pdf_security.PdfClassification(
+            disposition=pdf_security.PdfDisposition.PASS,
+            inspection=_inspection(),
+        )
 
     monkeypatch.setattr(pdf_security, "stage_pdf_upload", fake_stage)
-    monkeypatch.setattr(pdf_security, "validate_staged_pdf", accept)
+    monkeypatch.setattr(pdf_security, "inspect_staged_pdf", accept)
     async with pdf_security.validated_pdf_upload(object()) as staged:
         assert staged.path.exists()
+        assert staged.path.read_bytes() == b"%PDF-"
     assert not path.exists()
 
-    async def reject(_path):
+    async def reject(_path, *, deadline):
+        assert deadline > 0
         raise PdfValidationError("invalid_pdf", "Invalid or unsupported PDF file")
 
-    monkeypatch.setattr(pdf_security, "validate_staged_pdf", reject)
+    monkeypatch.setattr(pdf_security, "inspect_staged_pdf", reject)
     with pytest.raises(PdfValidationError):
         async with pdf_security.validated_pdf_upload(object()):
             pass
@@ -312,7 +512,350 @@ async def test_validated_context_removes_temp_file_on_success_and_failure(
 
 
 @pytest.mark.asyncio
-async def test_helper_timeout_is_sanitized_and_process_is_reaped(tmp_path: Path) -> None:
+async def test_valid_pdf_fast_path_never_calls_sanitizer_and_preserves_bytes(
+    monkeypatch, tmp_path: Path
+) -> None:
+    source = _pdf_path(tmp_path)
+    original = source.read_bytes()
+
+    async def sanitizer_must_not_run(*_args, **_kwargs):
+        raise AssertionError("sanitizer called for a valid PDF")
+
+    monkeypatch.setattr(pdf_security, "sanitize_staged_pdf", sanitizer_must_not_run)
+    monkeypatch.setattr(pdf_security, "validate_staged_pdf", sanitizer_must_not_run)
+    upload = UploadFile(
+        filename="valid.pdf",
+        file=io.BytesIO(original),
+        size=len(original),
+    )
+    candidate_path = None
+    async with pdf_security.validated_pdf_upload(upload) as candidate:
+        candidate_path = candidate.path
+        assert candidate.path.read_bytes() == original
+        assert candidate.size == len(original)
+    assert candidate_path is not None and not candidate_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_combined_fallback_sanitizes_once_and_strictly_revalidates(
+    caplog, tmp_path: Path
+) -> None:
+    source = _truncated_flate_pdf(tmp_path, with_attachment=True)
+    original = source.read_bytes()
+    upload = UploadFile(
+        filename="scanner.pdf",
+        file=io.BytesIO(original),
+        size=len(original),
+    )
+    candidate_path = None
+    with caplog.at_level(logging.INFO, logger=pdf_security.logger.name):
+        async with pdf_security.validated_pdf_upload(upload) as candidate:
+            candidate_path = candidate.path
+            output = candidate.path.read_bytes()
+            assert candidate.size == len(output)
+            assert output != original
+            assert stat.S_IMODE(candidate.path.stat().st_mode) == 0o600
+            assert b"pastexam-synthetic-private-attachment" not in output
+            assert pdf_security._inspect_pdf(candidate.path)["pages"] == 1
+            with pikepdf.open(candidate.path, attempt_recovery=False) as pdf:
+                assert not pdf.attachments
+                assert not pdf_security._find_forbidden_features(pdf, pikepdf)
+    assert candidate_path is not None and not candidate_path.exists()
+    event_records = [
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) is not None
+    ]
+    events = [record.event for record in event_records]
+    assert events == [
+        "pdf_sanitization_candidate",
+        "pdf_sanitization_started",
+        "pdf_sanitization_succeeded",
+    ]
+    candidate_record = event_records[0]
+    assert candidate_record.finding == ("embedded_files+flate_incomplete_termination")
+    assert "scanner.pdf" not in caplog.text
+    assert "pastexam-synthetic-private-attachment" not in caplog.text
+
+
+def test_file_attachment_annotation_is_removed_by_sanitizer(tmp_path: Path) -> None:
+    def add_file_attachment(pdf, page):
+        pdf.attachments["metadata.json"] = b"private"
+        file_spec = pdf.attachments["metadata.json"].obj
+        page.obj.Annots = pikepdf.Array(
+            [
+                pdf.make_indirect(
+                    pikepdf.Dictionary(
+                        Type=pikepdf.Name.Annot,
+                        Subtype=pikepdf.Name.FileAttachment,
+                        Rect=pikepdf.Array([0, 0, 10, 10]),
+                        FS=file_spec,
+                    )
+                )
+            ]
+        )
+
+    source = _save_mutated_pdf(tmp_path, add_file_attachment)
+    classified = pdf_security._classify_pdf(source)
+    assert classified["findings"] == ["embedded_files", "file_attachment"]
+    destination = tmp_path / "sanitized.pdf"
+    pdf_security._sanitize_pdf(source, destination)
+    assert pdf_security._inspect_pdf(destination)["pages"] == 1
+    with pikepdf.open(destination, attempt_recovery=False) as pdf:
+        assert "/Annots" not in pdf.pages[0].obj
+
+
+def test_each_partial_rewrite_still_fails_the_unchanged_strict_policy(
+    tmp_path: Path,
+) -> None:
+    from pikepdf.sanitize import remove_attachments
+
+    source = _truncated_flate_pdf(tmp_path, with_attachment=True)
+    attachments_only = tmp_path / "attachments-only.pdf"
+    with pikepdf.open(source, attempt_recovery=False) as pdf:
+        remove_attachments(pdf)
+        pdf.save(attachments_only)
+    _assert_rejected(attachments_only, "syntax_warning")
+
+    flate_only = tmp_path / "flate-only.pdf"
+    with pikepdf.open(source, attempt_recovery=False) as pdf:
+        pdf.save(flate_only, recompress_flate=True)
+    _assert_rejected(flate_only, "forbidden_feature")
+
+
+@pytest.mark.asyncio
+async def test_fallback_uses_one_shared_deadline_and_one_sanitizer_attempt(
+    monkeypatch, tmp_path: Path
+) -> None:
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"%PDF-source")
+    sanitized_path = tmp_path / "sanitized.pdf"
+    deadlines: list[float] = []
+    sanitizer_calls = 0
+
+    async def fake_stage(_upload):
+        return pdf_security.StagedPdf(path=source, size=source.stat().st_size)
+
+    async def candidate(_path, *, deadline):
+        deadlines.append(deadline)
+        return pdf_security.PdfClassification(
+            disposition=pdf_security.PdfDisposition.SANITIZABLE,
+            inspection=_inspection(),
+            findings=("embedded_files",),
+        )
+
+    async def sanitize(_path, *, deadline):
+        nonlocal sanitizer_calls
+        sanitizer_calls += 1
+        deadlines.append(deadline)
+        sanitized_path.write_bytes(b"%PDF-sanitized")
+        return pdf_security.StagedPdf(
+            path=sanitized_path,
+            size=sanitized_path.stat().st_size,
+        )
+
+    async def reject_final(_path, *, deadline, **_kwargs):
+        deadlines.append(deadline)
+        raise PdfValidationError("syntax_warning", "Invalid or unsupported PDF file")
+
+    monkeypatch.setattr(pdf_security, "stage_pdf_upload", fake_stage)
+    monkeypatch.setattr(pdf_security, "inspect_staged_pdf", candidate)
+    monkeypatch.setattr(pdf_security, "sanitize_staged_pdf", sanitize)
+    monkeypatch.setattr(pdf_security, "validate_staged_pdf", reject_final)
+
+    with pytest.raises(PdfValidationError, match="post_sanitization_rejected"):
+        async with pdf_security.validated_pdf_upload(object()):
+            pass
+    assert sanitizer_calls == 1
+    assert len(set(deadlines)) == 1
+    assert not source.exists()
+    assert not sanitized_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_insufficient_shared_deadline_rejects_before_sanitizer(
+    monkeypatch, tmp_path: Path
+) -> None:
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"%PDF-source")
+
+    async def fake_stage(_upload):
+        return pdf_security.StagedPdf(path=source, size=source.stat().st_size)
+
+    async def candidate(_path, *, deadline):
+        return pdf_security.PdfClassification(
+            disposition=pdf_security.PdfDisposition.SANITIZABLE,
+            inspection=_inspection(),
+            findings=("embedded_files",),
+        )
+
+    async def sanitizer_must_not_run(*_args, **_kwargs):
+        raise AssertionError("sanitizer ran without enough shared deadline")
+
+    monkeypatch.setattr(pdf_security, "stage_pdf_upload", fake_stage)
+    monkeypatch.setattr(pdf_security, "inspect_staged_pdf", candidate)
+    monkeypatch.setattr(pdf_security, "sanitize_staged_pdf", sanitizer_must_not_run)
+    monkeypatch.setattr(
+        pdf_security,
+        "PDF_FALLBACK_MIN_REMAINING_SECONDS",
+        pdf_security.PDF_VALIDATION_TIMEOUT_SECONDS + 1,
+    )
+
+    with pytest.raises(PdfValidationError, match="fallback_deadline_exhausted"):
+        async with pdf_security.validated_pdf_upload(object()):
+            pass
+    assert not source.exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("helper_code", "expected_code"),
+    [
+        ("validation_timeout", "sanitizer_timeout"),
+        ("helper_failure", "sanitizer_failure"),
+    ],
+)
+async def test_sanitizer_failures_are_bounded_and_cleaned(
+    monkeypatch, tmp_path: Path, helper_code: str, expected_code: str
+) -> None:
+    destination = tmp_path / "bounded-output.pdf"
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"%PDF-source")
+
+    monkeypatch.setattr(
+        pdf_security.tempfile,
+        "mkstemp",
+        lambda **_kwargs: (
+            os.open(destination, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600),
+            os.fspath(destination),
+        ),
+    )
+
+    async def fail(*_args, **_kwargs):
+        raise PdfValidationError(helper_code, "Invalid or unsupported PDF file")
+
+    monkeypatch.setattr(pdf_security, "_run_helper_command", fail)
+    with pytest.raises(PdfValidationError, match=expected_code):
+        await pdf_security.sanitize_staged_pdf(
+            source,
+            deadline=asyncio.get_running_loop().time() + 10,
+        )
+    assert not destination.exists()
+
+
+@pytest.mark.asyncio
+async def test_sanitizer_cancellation_cleans_partial_output(
+    monkeypatch, tmp_path: Path
+) -> None:
+    destination = tmp_path / "cancelled-output.pdf"
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"%PDF-source")
+    monkeypatch.setattr(
+        pdf_security.tempfile,
+        "mkstemp",
+        lambda **_kwargs: (
+            os.open(destination, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600),
+            os.fspath(destination),
+        ),
+    )
+
+    async def cancel(*_args, **_kwargs):
+        destination.write_bytes(b"partial")
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(pdf_security, "_run_helper_command", cancel)
+    with pytest.raises(asyncio.CancelledError):
+        await pdf_security.sanitize_staged_pdf(
+            source,
+            deadline=asyncio.get_running_loop().time() + 10,
+        )
+    assert not destination.exists()
+
+
+def test_global_sanitizer_admission_is_non_blocking(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(pdf_security.sys, "platform", "linux-test")
+    monkeypatch.setattr(
+        pdf_security,
+        "_LINUX_SANITIZER_ADMISSION_PATH",
+        os.fspath(tmp_path / "sanitizer.lock"),
+    )
+    with (
+        pdf_security._global_sanitizer_admission() as first,
+        pdf_security._global_sanitizer_admission() as second,
+    ):
+        assert first is True
+        assert second is False
+
+
+def test_sanitizer_limits_keep_approved_memory_output_and_cpu_bounds(
+    monkeypatch,
+) -> None:
+    import resource
+
+    applied: dict[int, tuple[int, int]] = {}
+    monkeypatch.setattr(pdf_security.sys, "platform", "linux-test")
+    monkeypatch.setattr(
+        resource,
+        "getrlimit",
+        lambda _kind: (resource.RLIM_INFINITY, resource.RLIM_INFINITY),
+    )
+    monkeypatch.setattr(
+        resource,
+        "setrlimit",
+        lambda kind, limits: applied.__setitem__(kind, limits),
+    )
+
+    assert pdf_security._apply_sanitizer_limits() == (True, True, True)
+    memory_bytes = pdf_security.PDF_VALIDATION_MEMORY_LIMIT_MIB * 1024 * 1024
+    assert applied[resource.RLIMIT_AS] == (memory_bytes, memory_bytes)
+    assert applied[resource.RLIMIT_FSIZE] == (
+        pdf_security.MAX_PDF_BYTES,
+        pdf_security.MAX_PDF_BYTES,
+    )
+    assert applied[resource.RLIMIT_CPU] == (
+        pdf_security.PDF_SANITIZATION_CPU_SOFT_SECONDS,
+        pdf_security.PDF_SANITIZATION_CPU_HARD_SECONDS,
+    )
+
+
+@pytest.mark.asyncio
+async def test_sanitized_output_size_mismatch_fails_closed_and_cleans_up(
+    monkeypatch, tmp_path: Path
+) -> None:
+    destination = tmp_path / "oversized-output.pdf"
+    source = tmp_path / "source.pdf"
+    source.write_bytes(b"%PDF-source")
+    monkeypatch.setattr(
+        pdf_security.tempfile,
+        "mkstemp",
+        lambda **_kwargs: (
+            os.open(destination, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600),
+            os.fspath(destination),
+        ),
+    )
+
+    async def inconsistent_size(*_args, **_kwargs):
+        destination.write_bytes(b"partial")
+        return {
+            "status": "ok",
+            "output_size": pdf_security.MAX_PDF_BYTES + 1,
+        }, 0
+
+    monkeypatch.setattr(pdf_security, "_run_helper_command", inconsistent_size)
+    with pytest.raises(PdfValidationError, match="sanitized_file_too_large"):
+        await pdf_security.sanitize_staged_pdf(
+            source,
+            deadline=asyncio.get_running_loop().time() + 10,
+        )
+    assert not destination.exists()
+
+
+@pytest.mark.asyncio
+async def test_helper_timeout_is_sanitized_and_process_is_reaped(
+    tmp_path: Path,
+) -> None:
     path = _pdf_path(tmp_path)
     with pytest.raises(PdfValidationError) as error:
         await pdf_security.validate_staged_pdf(

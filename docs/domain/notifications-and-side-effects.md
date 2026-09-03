@@ -356,9 +356,14 @@ response rather than presenting a partial backup as complete.
 
 ### Current implementation
 
-Archive upload stages at most 20 MiB in a root-local temporary file, validates
-the complete document with the production pikepdf/qpdf parser boundary, and
-only then performs upload-specific database or MinIO mutation. Administrator
+Archive upload stages at most 20 MiB in a root-local temporary file and first
+validates the complete document with the production pikepdf/qpdf parser
+boundary. A document that passes follows the byte-identical fast path. Only a
+narrow attachment-only or attachment-plus-approved-Flate finding may receive
+one bounded structural sanitization attempt; its separate output must pass the
+unchanged strict validator before becoming the upload candidate. All parser,
+sanitizer, and revalidation work precedes upload-specific database or MinIO
+mutation. Administrator
 parent creation, Archive/Submission creation, notification enqueue, and the
 final database write share one caller-owned transaction. MinIO necessarily
 precedes that commit; if later database work fails, compensation removes the
@@ -420,7 +425,7 @@ finalization cannot precede exact-version absence.
 
 | Operation | Current boundary | Risk/status |
 | --- | --- | --- |
-| Archive upload | Bounded strict PDF validation precedes all upload-specific mutation; parent/archive/submission database work commits once, and a failed post-MinIO commit removes only a freshly proven-unreferenced exact object | Invalid input leaves no upload-specific persistent state; uncertain compensation authority safely retains storage for review |
+| Archive upload | Bounded validate-first PDF processing precedes all upload-specific mutation; ordinary valid bytes remain unchanged, while only a strict-revalidated sanitized candidate may replace a narrowly rejected original. Parent/archive/submission database work commits once, and a failed post-MinIO commit removes only a freshly proven-unreferenced exact object | Invalid or failed-sanitization input leaves no upload-specific persistent state; stored size describes the exact validated candidate; uncertain compensation authority safely retains storage for review |
 | Archive preview and download | Both authenticate and resolve the effective-public Archive before an exact-object existence check and bounded presign; preview is read-only, while download increments `download_count` once before returning its signed URL | Browser-native object transfer uses the existing private MinIO data plane; no object key is client-controlled and no bucket/object policy changes |
 | Submission approve | Category/Course/Archive work, submission review metadata, and notification enqueue share the approve caller's commit | PostgreSQL operation is caller-owned and protected by focused rollback tests |
 | Submission owner/admin delete | The route owns authorization, canonical parent-first locks, lifecycle mutation, and commit | Existing delete behavior remains silent; lock/revalidation failure commits no quota, status, Archive, notification, or event change |
