@@ -23,6 +23,7 @@ env -i \
   PRODUCTION_BACKEND_ENV_FILE="$repository_root/backend/.env.production.runtime.example" \
   PRODUCTION_MIGRATOR_ENV_FILE="$repository_root/backend/.env.production.migrator.example" \
   docker compose \
+  --project-directory "$repository_root" \
   --env-file "$repository_root/docker/.env.production.example" \
   --file "$repository_root/docker/docker-compose.prod.yml" \
   --file "$repository_root/docker/docker-compose.prod-edge.example.yml" \
@@ -114,6 +115,12 @@ for target in (
 ):
     assert production_mounts[target]["type"] == "bind"
     assert production_mounts[target]["read_only"] is True
+assert Path(production_mounts["/etc/nginx/nginx.conf"]["source"]).resolve() == (
+    Path(sys.argv[3]).resolve()
+)
+assert Path(
+    production_mounts["/etc/nginx/pastexam-listeners.conf"]["source"]
+).resolve() == Path(sys.argv[4]).resolve()
 assert "listen 8443 ssl;" in production_listener_config
 assert "ssl_certificate /etc/nginx/certs/origin.pem;" in production_listener_config
 assert "ssl_certificate_key /etc/nginx/certs/origin-key.pem;" in production_listener_config

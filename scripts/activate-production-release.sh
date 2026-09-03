@@ -392,6 +392,16 @@ if ! "${compose[@]}" config --quiet >/dev/null 2>&1; then
 fi
 
 current_stage="ingress-contract"
+if ! "${compose_structure[@]}" config \
+  --no-env-resolution \
+  --no-interpolate \
+  --format json 2>/dev/null | \
+  python3 "$contract_helper" verify-resolved-nginx-mounts \
+    --release-directory "$RELEASE_DIRECTORY"
+then
+  echo "Production Compose resolved nginx mount authority is invalid." >&2
+  exit 2
+fi
 mount_values="$(
   python3 "$contract_helper" mount-values \
     --compose-json "$structural_compose" \

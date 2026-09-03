@@ -132,13 +132,13 @@ def _compose_contract(
 ) -> dict:
     nginx_volumes = [
         _structural_bind(
-            str(nginx_config) if nginx_config else "../proxy/nginx.conf",
+            str(nginx_config) if nginx_config else "./proxy/nginx.conf",
             "/etc/nginx/nginx.conf",
         ),
         _structural_bind(
             str(listener_config)
             if listener_config
-            else "../proxy/nginx.production-listeners.conf",
+            else "./proxy/nginx.production-listeners.conf",
             "/etc/nginx/pastexam-listeners.conf",
         ),
     ]
@@ -327,10 +327,25 @@ def _compose_contract(
     }
 
 
+def _path_resolved_contract(compose: dict, release: Path) -> dict:
+    resolved = json.loads(json.dumps(compose))
+    for mount in resolved["services"]["nginx"]["volumes"]:
+        if mount["target"] not in {
+            "/etc/nginx/nginx.conf",
+            "/etc/nginx/pastexam-listeners.conf",
+        }:
+            continue
+        source = Path(mount["source"])
+        if not source.is_absolute():
+            mount["source"] = str((release / source).resolve())
+    return resolved
+
+
 def _activation_environment(
     tmp_path: Path,
     *,
     compose_contract: dict | None = None,
+    path_resolved_compose_contract: dict | None = None,
     current_ports: dict | None = None,
     postgres_exit: int = 0,
     storage_preflight_exit: int = 0,
@@ -433,12 +448,20 @@ def _activation_environment(
         f"exit {storage_preflight_exit}\n",
     )
 
-    resolved_compose = compose_contract or _compose_contract(
+    structural_compose = compose_contract or _compose_contract(
         release, certificate, certificate_key
     )
     compose_json = tmp_path / "compose.json"
     compose_json.write_text(
-        json.dumps(resolved_compose),
+        json.dumps(structural_compose),
+        encoding="utf-8",
+    )
+    path_resolved_compose_json = tmp_path / "path-resolved-compose.json"
+    path_resolved_compose_json.write_text(
+        json.dumps(
+            path_resolved_compose_contract
+            or _path_resolved_contract(structural_compose, release)
+        ),
         encoding="utf-8",
     )
     ports_json = tmp_path / "current-ports.json"
@@ -485,6 +508,8 @@ def _activation_environment(
         "  exit \"$FAKE_COMPOSE_HELP_EXIT\"\n"
         "elif [[ \"$1\" == 'compose' && \"$*\" == *'config '* && \"$*\" == *'--no-env-resolution'* && \"$*\" == *'--no-interpolate'* && \"$*\" == *'--no-path-resolution'* && \"$*\" == *'--format json'* ]]; then\n"
         '  cat "$FAKE_COMPOSE_JSON"\n'
+        "elif [[ \"$1\" == 'compose' && \"$*\" == *'config '* && \"$*\" == *'--no-env-resolution'* && \"$*\" == *'--no-interpolate'* && \"$*\" == *'--format json'* ]]; then\n"
+        '  cat "$FAKE_PATH_RESOLVED_COMPOSE_JSON"\n'
         "elif [[ \"$1\" == 'compose' && \"$*\" == *'config --quiet'* ]]; then\n"
         "  printf '%s' \"$FAKE_COMPOSE_QUIET_STDERR\" >&2\n"
         "  exit \"$FAKE_COMPOSE_QUIET_EXIT\"\n"
@@ -558,6 +583,8 @@ def _activation_environment(
         "    return \"$FAKE_COMPOSE_HELP_EXIT\"\n"
         "  elif [[ \"$1\" == 'compose' && \"$*\" == *'config '* && \"$*\" == *'--no-env-resolution'* && \"$*\" == *'--no-interpolate'* && \"$*\" == *'--no-path-resolution'* && \"$*\" == *'--format json'* ]]; then\n"
         '    cat "$FAKE_COMPOSE_JSON"\n'
+        "  elif [[ \"$1\" == 'compose' && \"$*\" == *'config '* && \"$*\" == *'--no-env-resolution'* && \"$*\" == *'--no-interpolate'* && \"$*\" == *'--format json'* ]]; then\n"
+        '    cat "$FAKE_PATH_RESOLVED_COMPOSE_JSON"\n'
         "  elif [[ \"$1\" == 'compose' && \"$*\" == *'config --quiet'* ]]; then\n"
         "    printf '%s' \"$FAKE_COMPOSE_QUIET_STDERR\" >&2\n"
         "    return \"$FAKE_COMPOSE_QUIET_EXIT\"\n"
@@ -668,6 +695,9 @@ def _activation_environment(
             ),
             "NGINX_IMAGE_OVERRIDE": _bash_path(nginx_override),
             "FAKE_COMPOSE_JSON": _bash_path(compose_json),
+            "FAKE_PATH_RESOLVED_COMPOSE_JSON": _bash_path(
+                path_resolved_compose_json
+            ),
             "FAKE_CURRENT_PORTS_JSON": _bash_path(ports_json),
             "FAKE_MIGRATION_REPORT": _bash_path(migration_report),
             "FAKE_DOCKER_LOG": _bash_path(docker_log),
@@ -742,6 +772,25 @@ def _activate(environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         check=False,
         env=environment,
+    )
+
+
+def _validate_resolved_mounts(
+    release: Path, compose: dict
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(CONTRACT_HELPER),
+            "verify-resolved-nginx-mounts",
+            "--release-directory",
+            str(release),
+        ],
+        input=json.dumps(compose),
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
     )
 
 
@@ -1627,6 +1676,118 @@ def test_real_compose_structural_model_matches_activation_contract(tmp_path: Pat
     _assert_sentinel_absent(rendered.stdout, rendered.stderr, validated.stdout, validated.stderr)
 
 
+def _real_path_resolved_compose(
+    release: Path, base_compose: Path
+) -> subprocess.CompletedProcess[str]:
+    docker = shutil.which("docker")
+    assert docker is not None
+    return subprocess.run(
+        [
+            docker,
+            "compose",
+            "--project-directory",
+            str(release),
+            "--file",
+            str(base_compose),
+            "--file",
+            str(REPOSITORY_ROOT / "docker" / "docker-compose.prod-edge.example.yml"),
+            "--file",
+            str(REPOSITORY_ROOT / "docker" / "docker-compose.nginx-immutable.yml"),
+            "config",
+            "--no-env-resolution",
+            "--no-interpolate",
+            "--format",
+            "json",
+        ],
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        check=False,
+    )
+
+
+def _copy_real_compose_release(tmp_path: Path) -> tuple[Path, Path]:
+    release = tmp_path / "releases" / RELEASE_SHA
+    (release / "docker").mkdir(parents=True)
+    (release / "proxy").mkdir()
+    base_compose = release / "docker" / "docker-compose.prod.yml"
+    shutil.copy2(REPOSITORY_ROOT / "docker" / "docker-compose.prod.yml", base_compose)
+    shutil.copy2(REPOSITORY_ROOT / "proxy" / "nginx.conf", release / "proxy")
+    shutil.copy2(
+        REPOSITORY_ROOT / "proxy" / "nginx.production-listeners.conf",
+        release / "proxy",
+    )
+    return release, base_compose
+
+
+def test_real_compose_path_resolution_binds_exact_release_files(tmp_path: Path) -> None:
+    if shutil.which("docker") is None:
+        pytest.skip("Docker Compose is unavailable in this environment.")
+    release, base_compose = _copy_real_compose_release(tmp_path)
+
+    rendered = _real_path_resolved_compose(release, base_compose)
+
+    assert rendered.returncode == 0, rendered.stderr
+    compose = json.loads(rendered.stdout)
+    mounts = {
+        mount["target"]: mount
+        for mount in compose["services"]["nginx"]["volumes"]
+    }
+    assert Path(mounts["/etc/nginx/nginx.conf"]["source"]) == (
+        release / "proxy" / "nginx.conf"
+    ).resolve()
+    assert Path(mounts["/etc/nginx/pastexam-listeners.conf"]["source"]) == (
+        release / "proxy" / "nginx.production-listeners.conf"
+    ).resolve()
+    for target in (
+        "/etc/nginx/nginx.conf",
+        "/etc/nginx/pastexam-listeners.conf",
+        "/etc/nginx/certs/origin.pem",
+        "/etc/nginx/certs/origin-key.pem",
+    ):
+        assert mounts[target]["type"] == "bind"
+        assert mounts[target]["read_only"] is True
+    assert {
+        (int(binding["published"]), int(binding["target"]))
+        for binding in compose["services"]["nginx"]["ports"]
+    } == {(80, 8080), (8080, 8080), (443, 8443)}
+    assert compose["services"]["nginx"]["image"] == NGINX_IMAGE
+    validated = _validate_resolved_mounts(release, compose)
+    assert validated.returncode == 0, validated.stderr
+    assert validated.stdout == ""
+
+
+def test_real_compose_reproduces_and_rejects_historical_parent_release_path(
+    tmp_path: Path,
+) -> None:
+    if shutil.which("docker") is None:
+        pytest.skip("Docker Compose is unavailable in this environment.")
+    release, base_compose = _copy_real_compose_release(tmp_path)
+    historical = base_compose.read_text(encoding="utf-8").replace(
+        "./proxy/", "../proxy/"
+    )
+    base_compose.write_text(historical, encoding="utf-8")
+
+    rendered = _real_path_resolved_compose(release, base_compose)
+
+    assert rendered.returncode == 0, rendered.stderr
+    compose = json.loads(rendered.stdout)
+    config_mount = next(
+        mount
+        for mount in compose["services"]["nginx"]["volumes"]
+        if mount["target"] == "/etc/nginx/nginx.conf"
+    )
+    assert Path(config_mount["source"]) == (
+        release.parent / "proxy" / "nginx.conf"
+    ).resolve()
+    assert Path(config_mount["source"]) != (
+        release / "proxy" / "nginx.conf"
+    ).resolve()
+    validated = _validate_resolved_mounts(release, compose)
+    assert validated.returncode != 0
+    assert "immutable release" in validated.stderr
+
+
 def test_release_metadata_disagreement_fails_before_backup(tmp_path: Path) -> None:
     environment, backup_log, docker_log = _activation_environment(
         tmp_path, source_sha="0" * 40
@@ -1658,11 +1819,203 @@ def test_activation_uses_candidate_compose_environment(tmp_path: Path) -> None:
     structural_commands = [
         line for line in commands.splitlines() if "--no-env-resolution" in line
     ]
-    assert len(structural_commands) == 1
-    structural = structural_commands[0]
+    assert len(structural_commands) == 2
+    structural = next(
+        command
+        for command in structural_commands
+        if "--no-path-resolution" in command
+    )
     assert "--no-interpolate" in structural
     assert "--no-path-resolution" in structural
     assert "--env-file" not in structural
+    path_resolved = next(
+        command
+        for command in structural_commands
+        if "--no-path-resolution" not in command
+    )
+    assert "--no-interpolate" in path_resolved
+    assert "--env-file" not in path_resolved
+
+
+def _resolved_mount_fixture(tmp_path: Path) -> tuple[Path, dict]:
+    release = tmp_path / "releases" / RELEASE_SHA
+    proxy = release / "proxy"
+    proxy.mkdir(parents=True)
+    (proxy / "nginx.conf").write_text("events {}\n", encoding="utf-8")
+    (proxy / "nginx.production-listeners.conf").write_text(
+        "listen 8080;\n", encoding="utf-8"
+    )
+    compose = _path_resolved_contract(
+        _compose_contract(release, tmp_path / "origin.pem", tmp_path / "key.pem"),
+        release,
+    )
+    return release, compose
+
+
+def test_exact_path_resolved_nginx_mounts_are_accepted(tmp_path: Path) -> None:
+    release, compose = _resolved_mount_fixture(tmp_path)
+
+    process = _validate_resolved_mounts(release, compose)
+
+    assert process.returncode == 0, process.stderr
+    assert process.stdout == ""
+
+
+@pytest.mark.parametrize(
+    ("target", "source_kind"),
+    [
+        ("/etc/nginx/nginx.conf", "parent-release"),
+        ("/etc/nginx/nginx.conf", "sibling-release"),
+        ("/etc/nginx/nginx.conf", "external"),
+        ("/etc/nginx/pastexam-listeners.conf", "wrong-listener"),
+    ],
+)
+def test_wrong_path_resolved_nginx_mount_is_rejected(
+    tmp_path: Path, target: str, source_kind: str
+) -> None:
+    release, compose = _resolved_mount_fixture(tmp_path)
+    sources = {
+        "parent-release": release.parent / "proxy" / "nginx.conf",
+        "sibling-release": release.parent / "sibling" / "proxy" / "nginx.conf",
+        "external": tmp_path / "external" / "nginx.conf",
+        "wrong-listener": release / "proxy" / "nginx.conf",
+    }
+    mount = next(
+        item
+        for item in compose["services"]["nginx"]["volumes"]
+        if item["target"] == target
+    )
+    mount["source"] = str(sources[source_kind])
+
+    process = _validate_resolved_mounts(release, compose)
+
+    assert process.returncode != 0
+    assert "immutable release" in process.stderr
+
+
+@pytest.mark.parametrize("source_kind", ["missing", "directory"])
+def test_path_resolved_nginx_source_must_be_a_regular_file(
+    tmp_path: Path, source_kind: str
+) -> None:
+    release, compose = _resolved_mount_fixture(tmp_path)
+    config = release / "proxy" / "nginx.conf"
+    config.unlink()
+    if source_kind == "directory":
+        config.mkdir()
+
+    process = _validate_resolved_mounts(release, compose)
+
+    assert process.returncode != 0
+    assert "source" in process.stderr.lower()
+
+
+def test_path_resolved_nginx_source_cannot_be_a_symlink(tmp_path: Path) -> None:
+    release, compose = _resolved_mount_fixture(tmp_path)
+    config = release / "proxy" / "nginx.conf"
+    external = tmp_path / "external-nginx.conf"
+    external.write_text("events {}\n", encoding="utf-8")
+    config.unlink()
+    try:
+        config.symlink_to(external)
+    except OSError:
+        pytest.skip("Creating symlinks is unavailable in this environment.")
+
+    process = _validate_resolved_mounts(release, compose)
+
+    assert process.returncode != 0
+    assert "immutable release file" in process.stderr
+
+
+def test_duplicate_path_resolved_protected_target_is_rejected(tmp_path: Path) -> None:
+    release, compose = _resolved_mount_fixture(tmp_path)
+    compose["services"]["nginx"]["volumes"].append(
+        dict(compose["services"]["nginx"]["volumes"][0])
+    )
+
+    process = _validate_resolved_mounts(release, compose)
+
+    assert process.returncode != 0
+    assert "exactly one" in process.stderr
+
+
+@pytest.mark.parametrize(
+    ("field", "value"), [("type", "volume"), ("read_only", False)]
+)
+def test_path_resolved_protected_target_must_remain_a_read_only_bind(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    release, compose = _resolved_mount_fixture(tmp_path)
+    compose["services"]["nginx"]["volumes"][0][field] = value
+
+    process = _validate_resolved_mounts(release, compose)
+
+    assert process.returncode != 0
+    assert "read-only bind" in process.stderr
+
+
+@pytest.mark.parametrize(
+    "preflight_only", [True, False], ids=["preflight", "activation"]
+)
+def test_bad_resolved_mount_fails_at_ingress_before_backup_or_cutover(
+    tmp_path: Path, preflight_only: bool
+) -> None:
+    release = tmp_path / RELEASE_SHA
+    structural = _compose_contract(
+        release, tmp_path / "origin.pem", tmp_path / "origin-key.pem"
+    )
+    resolved = _path_resolved_contract(structural, release)
+    resolved["services"]["nginx"]["volumes"][0]["source"] = str(
+        tmp_path / "proxy" / "nginx.conf"
+    )
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path,
+        compose_contract=structural,
+        path_resolved_compose_contract=resolved,
+    )
+    evidence = _enable_failure_evidence(tmp_path, environment)
+    if preflight_only:
+        environment["ACTIVATION_PREFLIGHT_ONLY"] = "true"
+
+    process = _activate(environment)
+
+    assert process.returncode != 0
+    assert "resolved nginx mount authority is invalid" in process.stderr
+    assert not backup_log.exists()
+    commands = docker_log.read_text(encoding="utf-8")
+    assert "require-head --json" not in commands
+    assert " up -d " not in commands
+    _assert_failure_evidence(evidence, stage="ingress-contract", exit_code=2)
+
+
+def test_path_resolved_render_does_not_leak_or_retain_secret_values(
+    tmp_path: Path,
+) -> None:
+    release = tmp_path / RELEASE_SHA
+    structural = _compose_contract(
+        release, tmp_path / "origin.pem", tmp_path / "origin-key.pem"
+    )
+    resolved = _path_resolved_contract(structural, release)
+    resolved["x-sensitive-test-input"] = SECRET_SENTINEL
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path,
+        compose_contract=structural,
+        path_resolved_compose_contract=resolved,
+    )
+    engine_evidence = tmp_path / "engine-evidence.json"
+    environment["ACTIVATION_EVIDENCE_PATH"] = _bash_path(engine_evidence)
+
+    process = _activate(environment)
+
+    assert process.returncode == 0, process.stderr
+    _assert_sentinel_absent(
+        process.stdout,
+        process.stderr,
+        backup_log.read_text(encoding="utf-8"),
+        docker_log.read_text(encoding="utf-8"),
+        engine_evidence.read_text(encoding="utf-8"),
+    )
+    assert not (tmp_path / "activation-contract").exists()
+    assert "path-resolved-compose" not in ACTIVATION_SCRIPT.read_text(encoding="utf-8")
 
 
 def test_secret_sentinel_never_enters_success_path_evidence(tmp_path: Path) -> None:
