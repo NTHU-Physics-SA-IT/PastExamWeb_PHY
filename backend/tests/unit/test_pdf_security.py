@@ -538,8 +538,12 @@ async def test_valid_pdf_fast_path_never_calls_sanitizer_and_preserves_bytes(
 
 @pytest.mark.asyncio
 async def test_combined_fallback_sanitizes_once_and_strictly_revalidates(
-    caplog, tmp_path: Path
+    caplog, monkeypatch, tmp_path: Path
 ) -> None:
+    # Alembic's logging configuration disables existing application loggers
+    # when this test runs as part of the complete backend shard.
+    monkeypatch.setattr(pdf_security.logger, "disabled", False)
+    monkeypatch.setattr(pdf_security.logger, "propagate", True)
     source = _truncated_flate_pdf(tmp_path, with_attachment=True)
     original = source.read_bytes()
     upload = UploadFile(
@@ -881,8 +885,12 @@ async def test_malformed_helper_result_is_sanitized(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_validation_rejection_logs_only_bounded_metadata(
-    caplog, tmp_path: Path
+    caplog, monkeypatch, tmp_path: Path
 ) -> None:
+    # Keep this assertion independent from logging configuration installed by
+    # earlier tests in the complete backend shard.
+    monkeypatch.setattr(pdf_security.logger, "disabled", False)
+    monkeypatch.setattr(pdf_security.logger, "propagate", True)
     private_detail = "private parser detail and /tmp/private-name.pdf"
     command = [
         sys.executable,
