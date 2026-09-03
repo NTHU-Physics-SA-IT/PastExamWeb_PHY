@@ -264,6 +264,18 @@ def _normalize_archive_submission_update(
     return values
 
 
+def _sync_archive_metadata_from_submission(
+    archive: Archive,
+    submission: ArchiveSubmission,
+) -> None:
+    archive.name = submission.name
+    archive.academic_year = submission.academic_year
+    archive.archive_type = submission.archive_type
+    archive.professor = submission.professor
+    archive.has_answers = submission.has_answers
+    archive.updated_at = datetime.now(UTC)
+
+
 def _ensure_archive_submission_editable(
     submission: ArchiveSubmission,
     changed_fields: set[str],
@@ -1794,15 +1806,10 @@ async def approve_archive_submission(
             else None
         )
         if archive:
-            archive.name = submission.name
-            archive.academic_year = submission.academic_year
-            archive.archive_type = submission.archive_type
-            archive.professor = submission.professor
-            archive.has_answers = submission.has_answers
+            _sync_archive_metadata_from_submission(archive, submission)
             archive.object_name = submission.object_name
             archive.uploader_id = submission.requester_id
             archive.deleted_at = None
-            archive.updated_at = datetime.now(UTC)
         else:
             formatted_course_name = format_course_display_name(
                 submission.requested_course_name or submission.subject
@@ -2089,6 +2096,7 @@ async def republish_archive_submission_endpoint(
                 detail="無法重新上架：此投稿先前因關聯課程刪除而下架",
             )
 
+        _sync_archive_metadata_from_submission(archive, submission)
         await republish_archive_submission(
             db,
             submission,
