@@ -14,7 +14,9 @@ ACTIVATE = ROOT / ".github" / "workflows" / "activate-production.yml"
 PREFLIGHT = ROOT / ".github" / "workflows" / "preflight-production.yml"
 ROLLBACK = ROOT / ".github" / "workflows" / "rollback-production.yml"
 AUTHORITY = ROOT / "scripts" / "ci" / "validate_activation_authority.py"
-MERGER_BOUND = ROOT / "scripts" / "ci" / "validate_merger_bound_deploy.py"
+DEPLOY_AUTHORITY = (
+    ROOT / "scripts" / "ci" / "validate_production_deploy_authority.py"
+)
 INSTALLER = ROOT / "scripts" / "install-production-activation-framework.sh"
 TEST_WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
 CLASSIFIER = ROOT / "scripts" / "ci" / "classify_ci_mode.py"
@@ -64,7 +66,10 @@ def _load_classifier():
             PREFLIGHT,
             {"actions": "read", "contents": "read", "pull-requests": "read"},
         ),
-        (ROLLBACK, {"actions": "read", "contents": "read"}),
+        (
+            ROLLBACK,
+            {"actions": "read", "contents": "read", "pull-requests": "read"},
+        ),
     ],
 )
 def test_production_workflows_are_manual_protected_and_non_cancelling(
@@ -105,13 +110,13 @@ def test_preflight_workflow_is_protected_authoritative_and_preflight_only() -> N
     }
     assert protected["environment"] == "production"
     assert source.count("validate_candidate_source_run.py") == 2
-    assert source.count("validate_merger_bound_deploy.py") == 2
+    assert source.count("validate_production_deploy_authority.py") == 2
     assert source.count("validate_activation_authority.py") == 1
 
     first_gate = next(
         index
         for index, step in enumerate(authority_steps)
-        if "validate_merger_bound_deploy.py" in step.get("run", "")
+        if "validate_production_deploy_authority.py" in step.get("run", "")
     )
     assert authority_steps[first_gate - 1]["name"] == (
         "Require workflow source and target to be exact current main"
@@ -124,7 +129,7 @@ def test_preflight_workflow_is_protected_authoritative_and_preflight_only() -> N
     second_gate = next(
         index
         for index, step in enumerate(protected_steps)
-        if "validate_merger_bound_deploy.py" in step.get("run", "")
+        if "validate_production_deploy_authority.py" in step.get("run", "")
     )
     ssh_setup = next(
         index
@@ -132,6 +137,12 @@ def test_preflight_workflow_is_protected_authoritative_and_preflight_only() -> N
         if step["name"] == "Configure restricted production SSH identity"
     )
     assert relock < second_gate < ssh_setup
+    assert authority_steps[first_gate]["env"]["AUTHORITY_SHA"] == (
+        "${{ inputs.target_sha }}"
+    )
+    assert protected_steps[second_gate]["env"]["AUTHORITY_SHA"] == (
+        "${{ needs.authority.outputs.release_sha }}"
+    )
     for steps, gate in ((authority_steps, first_gate), (protected_steps, second_gate)):
         env = steps[gate]["env"]
         assert env["GITHUB_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
@@ -210,23 +221,24 @@ def test_activation_workflow_enforces_exact_main_twice_and_starts_once() -> None
     )
 
 
-def test_activation_revalidates_merger_bound_authority_before_production_ssh() -> None:
+def test_activation_revalidates_deploy_authority_before_production_ssh() -> None:
     source = ACTIVATE.read_text(encoding="utf-8")
     workflow = yaml.load(source, Loader=yaml.BaseLoader)
     authority_steps = workflow["jobs"]["authority"]["steps"]
     activate_steps = workflow["jobs"]["activate"]["steps"]
 
-    assert MERGER_BOUND.is_file()
-    assert source.count("validate_merger_bound_deploy.py") == 2
+    assert DEPLOY_AUTHORITY.is_file()
+    assert source.count("validate_production_deploy_authority.py") == 2
     assert '--actor "$ORIGINAL_ACTOR"' in source
     assert '--triggering-actor "$TRIGGERING_ACTOR"' in source
-    assert '--target-sha "$TARGET_SHA"' in source
+    assert '--authority-sha "$AUTHORITY_SHA"' in source
+    assert "--authority-file .github/production-deploy-authority.json" in source
     assert "--token" not in source
 
     first_gate = next(
         index
         for index, step in enumerate(authority_steps)
-        if "validate_merger_bound_deploy.py" in step.get("run", "")
+        if "validate_production_deploy_authority.py" in step.get("run", "")
     )
     exact_main_lock = next(
         index
@@ -238,7 +250,7 @@ def test_activation_revalidates_merger_bound_authority_before_production_ssh() -
     second_gate = next(
         index
         for index, step in enumerate(activate_steps)
-        if "validate_merger_bound_deploy.py" in step.get("run", "")
+        if "validate_production_deploy_authority.py" in step.get("run", "")
     )
     relock = next(
         index
@@ -251,6 +263,12 @@ def test_activation_revalidates_merger_bound_authority_before_production_ssh() -
         if step["name"] == "Configure restricted production SSH identity"
     )
     assert relock < second_gate < ssh_setup
+    assert authority_steps[first_gate]["env"]["AUTHORITY_SHA"] == (
+        "${{ inputs.target_sha }}"
+    )
+    assert activate_steps[second_gate]["env"]["AUTHORITY_SHA"] == (
+        "${{ needs.authority.outputs.release_sha }}"
+    )
     for steps, gate in ((authority_steps, first_gate), (activate_steps, second_gate)):
         env = steps[gate]["env"]
         assert env["GITHUB_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
@@ -277,9 +295,58 @@ def test_rollback_is_separate_explicit_and_never_automatic() -> None:
     assert "alembic downgrade" not in rollback.lower()
 
 
+def test_rollback_revalidates_current_main_deploy_authority_before_ssh() -> None:
+    source = ROLLBACK.read_text(encoding="utf-8")
+    workflow = yaml.load(source, Loader=yaml.BaseLoader)
+    authority_steps = workflow["jobs"]["authority"]["steps"]
+    rollback_steps = workflow["jobs"]["rollback"]["steps"]
+
+    assert source.count("validate_production_deploy_authority.py") == 2
+    first_gate = next(
+        index
+        for index, step in enumerate(authority_steps)
+        if "validate_production_deploy_authority.py" in step.get("run", "")
+    )
+    first_lock = next(
+        index
+        for index, step in enumerate(authority_steps)
+        if step["name"] == "Require current main workflow authority"
+    )
+    second_gate = next(
+        index
+        for index, step in enumerate(rollback_steps)
+        if "validate_production_deploy_authority.py" in step.get("run", "")
+    )
+    relock = next(
+        index
+        for index, step in enumerate(rollback_steps)
+        if step["name"] == "Re-lock current main after approval"
+    )
+    ssh_setup = next(
+        index
+        for index, step in enumerate(rollback_steps)
+        if step["name"] == "Configure restricted production SSH identity"
+    )
+    assert first_gate == first_lock + 1
+    assert relock < second_gate < ssh_setup
+    for steps, gate in ((authority_steps, first_gate), (rollback_steps, second_gate)):
+        step = steps[gate]
+        assert step["env"]["AUTHORITY_SHA"] == "${{ github.sha }}"
+        assert step["env"]["GITHUB_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
+        assert step["env"]["ORIGINAL_ACTOR"] == "${{ github.actor }}"
+        assert step["env"]["TRIGGERING_ACTOR"] == "${{ github.triggering_actor }}"
+        assert '--authority-sha "$AUTHORITY_SHA"' in step["run"]
+        assert '--target-sha "$TARGET_SHA"' not in step["run"]
+
+    assert "--release-sha '${{ inputs.target_sha }}'" in source
+    assert '"rollback-preflight $TARGET_SHA' in source
+    assert '"rollback-start $TARGET_SHA' in source
+
+
 def test_stage_b_control_plane_is_always_full_ci_and_its_tests_are_wired() -> None:
     classifier = _load_classifier()
     governed_paths = {
+        ".github/production-deploy-authority.json",
         "scripts/activate-production-release.sh",
         "scripts/install-production-activation-framework.sh",
         "scripts/pastexam-activate-ssh-wrapper.sh",
@@ -292,7 +359,7 @@ def test_stage_b_control_plane_is_always_full_ci_and_its_tests_are_wired() -> No
     for test_name in (
         "test_production_activation_contract.py",
         "test_production_activation_ssh_wrapper.py",
-        "test_merger_bound_deploy_authority.py",
+        "test_production_deploy_authority.py",
         "test_production_activation_workflow_contract.py",
         "test_production_deployment_control.py",
     ):

@@ -44,19 +44,20 @@ jobs:
           git fetch --no-tags origin main
           test "$(git rev-parse origin/main)" = "$TARGET_SHA"
 
-      - name: Require merger-bound self-deploy authority
+      - name: Require production deploy authority
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TARGET_SHA: ${{ inputs.target_sha }}
+          AUTHORITY_SHA: ${{ inputs.target_sha }}
           ORIGINAL_ACTOR: ${{ github.actor }}
           TRIGGERING_ACTOR: ${{ github.triggering_actor }}
         run: |
-          python3 scripts/ci/validate_merger_bound_deploy.py \
+          python3 scripts/ci/validate_production_deploy_authority.py \
             --repository "$GITHUB_REPOSITORY" \
-            --target-sha "$TARGET_SHA" \
+            --authority-sha "$AUTHORITY_SHA" \
             --base-branch main \
             --actor "$ORIGINAL_ACTOR" \
-            --triggering-actor "$TRIGGERING_ACTOR"
+            --triggering-actor "$TRIGGERING_ACTOR" \
+            --authority-file .github/production-deploy-authority.json
 
       - name: Resolve authoritative exact-SHA Main Full
         id: full
@@ -126,19 +127,20 @@ jobs:
           test '${{ needs.authority.outputs.source_ci_run_attempt }}' = \
             "$(sed -n 's/^source_ci_run_attempt=//p' "$authority")"
 
-      - name: Revalidate merger-bound authority after approval
+      - name: Revalidate production deploy authority after approval
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TARGET_SHA: ${{ needs.authority.outputs.release_sha }}
+          AUTHORITY_SHA: ${{ needs.authority.outputs.release_sha }}
           ORIGINAL_ACTOR: ${{ github.actor }}
           TRIGGERING_ACTOR: ${{ github.triggering_actor }}
         run: |
-          python3 scripts/ci/validate_merger_bound_deploy.py \
+          python3 scripts/ci/validate_production_deploy_authority.py \
             --repository "$GITHUB_REPOSITORY" \
-            --target-sha "$TARGET_SHA" \
+            --authority-sha "$AUTHORITY_SHA" \
             --base-branch main \
             --actor "$ORIGINAL_ACTOR" \
-            --triggering-actor "$TRIGGERING_ACTOR"
+            --triggering-actor "$TRIGGERING_ACTOR" \
+            --authority-file .github/production-deploy-authority.json
 
       - name: Configure restricted production SSH identity
         env:

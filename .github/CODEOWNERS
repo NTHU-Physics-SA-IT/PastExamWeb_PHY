@@ -4,6 +4,7 @@
 /CONTRIBUTING.md @PingScientist
 /.github/CODEOWNERS @PingScientist
 /.github/project-governance.json @PingScientist
+/.github/production-deploy-authority.json @PingScientist
 /.github/trusted-activation/ @PingScientist
 /.github/workflows/ @PingScientist
 /scripts/ci/ @PingScientist
