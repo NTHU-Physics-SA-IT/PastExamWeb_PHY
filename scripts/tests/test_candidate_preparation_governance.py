@@ -165,6 +165,9 @@ def test_candidate_source_has_no_active_service_or_data_mutation() -> None:
         assert token not in source
     assert "docker compose" in source
     assert "config --quiet" in source
+    host_source = HOST_COMMAND.read_text(encoding="utf-8")
+    assert '--project-directory "$candidate_root"' in host_source
+    assert '--project-directory "$staging_root"' in host_source
 
 
 def test_retention_is_governance_only() -> None:

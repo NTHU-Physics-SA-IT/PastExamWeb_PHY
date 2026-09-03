@@ -996,8 +996,8 @@ def _resolved_nginx_mount_sources(
 ) -> tuple[Path, Path, Path, Path]:
     sources = _nginx_mount_sources(compose)
     expected = (
-        "../proxy/nginx.conf",
-        "../proxy/nginx.production-listeners.conf",
+        "./proxy/nginx.conf",
+        "./proxy/nginx.production-listeners.conf",
         TLS_CERTIFICATE_EXPRESSION,
         TLS_KEY_EXPRESSION,
     )
@@ -1011,6 +1011,58 @@ def _resolved_nginx_mount_sources(
         Path(compose_values["PRODUCTION_TLS_CERT_FILE"]),
         Path(compose_values["PRODUCTION_TLS_KEY_FILE"]),
     )
+
+
+def _verify_resolved_nginx_mounts(release_directory: Path) -> None:
+    compose = _load_json_stream()
+    if not isinstance(compose, dict):
+        raise ContractError("Path-resolved Compose root must be an object.")
+    if not release_directory.is_absolute():
+        raise ContractError("Immutable release directory must be absolute.")
+    try:
+        release_root = release_directory.resolve(strict=True)
+    except OSError as error:
+        raise ContractError("Immutable release directory is unavailable.") from error
+    if not release_root.is_dir() or release_directory.is_symlink():
+        raise ContractError("Immutable release directory is not a regular directory.")
+
+    nginx = _service(compose, "nginx")
+    protected_mounts = (
+        (
+            _bind_mount_source(nginx, NGINX_CONFIG_TARGET, "configuration"),
+            release_root / "proxy" / "nginx.conf",
+            "configuration",
+        ),
+        (
+            _bind_mount_source(
+                nginx, NGINX_LISTENER_TARGET, "listener configuration"
+            ),
+            release_root / "proxy" / "nginx.production-listeners.conf",
+            "listener configuration",
+        ),
+    )
+    for source_value, expected, label in protected_mounts:
+        source = Path(source_value)
+        if not source.is_absolute() or source != expected:
+            raise ContractError(
+                f"Path-resolved nginx {label} mount is outside the immutable release."
+            )
+        try:
+            resolved = source.resolve(strict=True)
+        except OSError as error:
+            raise ContractError(
+                f"Path-resolved nginx {label} source is unavailable."
+            ) from error
+        if (
+            source.is_symlink()
+            or not source.is_file()
+            or not resolved.is_relative_to(release_root)
+            or resolved != expected
+        ):
+            raise ContractError(
+                f"Path-resolved nginx {label} source is not the exact "
+                "immutable release file."
+            )
 
 
 def _mount_values(
@@ -1494,6 +1546,9 @@ def _parser() -> argparse.ArgumentParser:
     mounts.add_argument("--compose-env", type=Path, required=True)
     mounts.add_argument("--release-directory", type=Path, required=True)
 
+    resolved_mounts = subparsers.add_parser("verify-resolved-nginx-mounts")
+    resolved_mounts.add_argument("--release-directory", type=Path, required=True)
+
     release = subparsers.add_parser("verify-release")
     release.add_argument("--manifest", type=Path, required=True)
     release.add_argument("--source-sha", type=Path, required=True)
@@ -1553,6 +1608,8 @@ def main() -> int:
             _mount_values(
                 args.compose_json, args.compose_env, args.release_directory
             )
+        elif args.command == "verify-resolved-nginx-mounts":
+            _verify_resolved_nginx_mounts(args.release_directory)
         elif args.command == "verify-release":
             _verify_release(args.manifest, args.source_sha, args.release_directory)
         elif args.command == "verify-images":

@@ -125,6 +125,23 @@ validation. Required secret key names must be present and non-empty, but their
 values are discarded immediately and never enter the retained structural
 Compose model, temporary JSON, logs, receipts, or evidence.
 
+The Compose project directory is always the exact immutable release root.
+Repository-owned nginx sources therefore use release-root-relative
+`./proxy/...` bindings and must path-resolve to these exact regular,
+non-symlink files:
+
+- `/opt/pastexam-releases/<release-sha>/proxy/nginx.conf`
+- `/opt/pastexam-releases/<release-sha>/proxy/nginx.production-listeners.conf`
+
+During `ingress-contract`, activation performs a second Compose render with
+environment resolution and interpolation disabled but path resolution enabled.
+That JSON is piped directly to the mount validator and is never retained or
+printed. The validator rejects missing files, directories, symlinks, duplicate
+protected targets, parent/sibling release paths, and any other source outside
+the exact release. A successful `config --quiet` syntax check alone is not bind
+source authority. This gate runs before PostgreSQL backup, the MinIO manifest,
+or application cutover in both preflight-only and activation execution.
+
 The supported DigitalOcean edge terminates Cloudflare Origin TLS inside
 `pastexam-nginx` and has this explicit topology:
 

@@ -200,7 +200,8 @@ if not isinstance(data.get("prepared_at"), str) or not re.fullmatch(
 PY
 
   local configured_images
-  configured_images="$(docker compose --env-file "$production_compose_env" \
+  configured_images="$(docker compose --project-directory "$candidate_root" \
+    --env-file "$production_compose_env" \
     --env-file "$candidate_compose_env" \
     --file "$candidate_root/docker/docker-compose.prod.yml" config --images)"
   printf '%s\n' "$configured_images" | grep -Fxq "$frontend_image"
@@ -285,7 +286,8 @@ PY
   printf '# Immutable images for release %s\nFRONTEND_IMAGE=%s\nBACKEND_IMAGE=%s\n' \
     "$release_sha" "$frontend_image" "$backend_image" >"$staging_root/compose.prod.env"
   chmod 600 "$staging_root/compose.prod.env"
-  docker compose --env-file "$production_compose_env" \
+  docker compose --project-directory "$staging_root" \
+    --env-file "$production_compose_env" \
     --env-file "$staging_root/compose.prod.env" \
     --file "$staging_root/docker/docker-compose.prod.yml" config --quiet
 
