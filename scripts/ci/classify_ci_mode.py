@@ -76,6 +76,7 @@ FINAL_FULL_PREFIXES = (
 
 GOVERNANCE_EXACT_PATHS = frozenset(
     {
+        ".github/production-deploy-authority.json",
         ".github/project-governance.json",
         "scripts/validate-compose-safety.sh",
         "scripts/package-production-candidate.sh",

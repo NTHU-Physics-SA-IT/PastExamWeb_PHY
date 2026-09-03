@@ -291,14 +291,28 @@ ordinary activation.
 
 `.github/workflows/preflight-production.yml` is a separate manual protected
 operation for reviewing an exact-current-main production candidate before any
-activation is authorized. It repeats the merger-bound human identity gate and
-binds the authoritative Main Full run, immutable image authority, and candidate
-receipt before entering the protected `production` Environment. After approval
-it re-locks current main and the same Main Full run, repeats merger-bound
-authorization, and uses the restricted production identity only for `status`
-and one `preflight` command. The workflow validates and retains only the
-sanitized preflight evidence; it creates no deployment request and cannot start,
-resume, or roll back an activation.
+activation is authorized. It checks the fixed, repository-versioned production
+deploy authority in `.github/production-deploy-authority.json` and binds the
+authoritative Main Full run, immutable image authority, and candidate receipt
+before entering the protected `production` Environment. After approval it
+re-locks current main and the same Main Full run, repeats deploy authorization,
+and uses the restricted production identity only for `status` and one
+`preflight` command. The workflow validates and retains only the sanitized
+preflight evidence; it creates no deployment request and cannot start, resume,
+or roll back an activation.
+
+The initial authorized deployers are `chou-chuan-chuan`, `PingScientist`, and
+`Jasper-hsury`. The original workflow actor and current triggering actor must be
+the same valid non-bot login and must be a member of that exact allowlist. The
+authorized deployer does not need to be the current-main pull request merger.
+The merger remains mandatory audited provenance: current main must still be a
+normal two-parent merge bound to exactly one merged pull request into this
+repository's `main`, and `merged_by` must still be a human GitHub user.
+Allowlist membership grants no authority over a stale, old, or arbitrary SHA.
+Adding or removing deployers requires changing the authority file through the
+normal protected pull-request and merge path. General repository write,
+review, admin, CODEOWNERS, branch-protection, or Environment-reviewer status
+does not imply production deploy authority.
 
 A successful preflight means only that the host reported the exact candidate
 eligible at that time. It is neither activation authorization nor deployment
@@ -311,9 +325,9 @@ only. Before approval it binds the requested exact current-main SHA to one
 authoritative successful Main Full run, immutable image authority, and the
 candidate receipt. The mutation-capable job uses the protected `production`
 Environment and exactly its four activation SSH secrets. After approval it
-rechecks current main and the same Main Full authority before contacting the
-restricted host identity. Workflow concurrency never cancels an in-progress
-production mutation.
+rechecks current main, the same Main Full authority, and the allowlisted actor
+authority before contacting the restricted host identity. Workflow concurrency
+never cancels an in-progress production mutation.
 
 The host controller stores canonical active authority at
 `/var/lib/pastexam-deployments/active.json`, durable request state under
@@ -372,7 +386,11 @@ authority and separate authorization rather than reuse of the failed request.
 Rollback is a separate manual protected workflow. It accepts only the
 canonical previous exact SHA, requires the database revision to remain
 unchanged, performs no Alembic downgrade, and never runs automatically in
-response to a generic assertion failure.
+response to a generic assertion failure. Its deployment actor authorization is
+bound to the exact current protected `main` workflow source before and after the
+Environment boundary, while its rollback target remains the independently
+validated canonical retained previous release. The current-main authority SHA
+must not be replaced by the rollback target SHA for this actor check.
 
 `PRODUCTION_DEPLOY_ENABLED=false` remains the repository governance setting;
 it does not expose or authorize the host controller. Actual authority is the

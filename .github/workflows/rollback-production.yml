@@ -11,6 +11,7 @@ on:
 permissions:
   actions: read
   contents: read
+  pull-requests: read
 
 concurrency:
   group: production-activation
@@ -39,6 +40,21 @@ jobs:
           test "$GITHUB_REF" = refs/heads/main
           git fetch --no-tags origin main
           test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
+
+      - name: Require production deploy authority
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AUTHORITY_SHA: ${{ github.sha }}
+          ORIGINAL_ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          python3 scripts/ci/validate_production_deploy_authority.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --authority-sha "$AUTHORITY_SHA" \
+            --base-branch main \
+            --actor "$ORIGINAL_ACTOR" \
+            --triggering-actor "$TRIGGERING_ACTOR" \
+            --authority-file .github/production-deploy-authority.json
 
       - name: Resolve target's authoritative Main Full
         id: full
@@ -98,6 +114,21 @@ jobs:
           set -euo pipefail
           git fetch --no-tags origin main
           test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
+
+      - name: Revalidate production deploy authority after approval
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AUTHORITY_SHA: ${{ github.sha }}
+          ORIGINAL_ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          python3 scripts/ci/validate_production_deploy_authority.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --authority-sha "$AUTHORITY_SHA" \
+            --base-branch main \
+            --actor "$ORIGINAL_ACTOR" \
+            --triggering-actor "$TRIGGERING_ACTOR" \
+            --authority-file .github/production-deploy-authority.json
 
       - name: Configure restricted production SSH identity
         env:
