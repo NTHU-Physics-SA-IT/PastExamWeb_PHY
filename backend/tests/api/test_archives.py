@@ -614,18 +614,47 @@ async def test_transferred_archive_republish_and_option_two_reapproval_preserve_
                 "subject": "Historical correction while down",
                 "name": "Snapshot while down",
                 "professor": "Snapshot professor while down",
+                "academic_year": 2028,
+                "archive_type": "midterm",
+                "has_answers": True,
             },
         )
         assert edited_while_down.status_code == 200
+        assert edited_while_down.json()["name"] == "Snapshot while down"
+        assert edited_while_down.json()["professor"] == "Snapshot professor while down"
+        assert edited_while_down.json()["academic_year"] == 2028
+        assert edited_while_down.json()["archive_type"] == ArchiveType.MIDTERM.value
+        assert edited_while_down.json()["has_answers"] is True
         republished = await client.post(
             f"/archives/admin/submissions/{submission.id}/republish",
             json={"expected_status": "takedown"},
         )
         assert republished.status_code == 200
+        assert republished.json()["created_archive_id"] == archive_id
 
         async with session_maker() as session:
             after_republish = await session.get(Archive, archive_id)
             assert after_republish.course_id == course_b.id
+            assert after_republish.name == "Snapshot while down"
+            assert after_republish.professor == "Snapshot professor while down"
+            assert after_republish.academic_year == 2028
+            assert after_republish.archive_type == ArchiveType.MIDTERM
+            assert after_republish.has_answers is True
+            assert after_republish.object_name == submission.object_name
+            assert after_republish.uploader_id == requester.id
+
+        public_after_republish = await client.get(
+            f"/courses/public/{course_b.id}/archives"
+        )
+        assert public_after_republish.status_code == 200
+        published = next(
+            item for item in public_after_republish.json() if item["id"] == archive_id
+        )
+        assert published["name"] == "Snapshot while down"
+        assert published["professor"] == "Snapshot professor while down"
+        assert published["academic_year"] == 2028
+        assert published["archive_type"] == ArchiveType.MIDTERM.value
+        assert published["has_answers"] is True
 
         rejected = await client.post(
             f"/archives/admin/submissions/{submission.id}/reject",
@@ -660,7 +689,23 @@ async def test_transferred_archive_republish_and_option_two_reapproval_preserve_
             assert stored_archive.academic_year == 2029
             assert stored_archive.archive_type == ArchiveType.QUIZ
             assert stored_archive.has_answers is True
-            assert stored_submission.subject == "Historical proposed course remains history"
+            assert (
+                stored_submission.subject
+                == "Historical proposed course remains history"
+            )
+
+        public_after_reapproval = await client.get(
+            f"/courses/public/{course_b.id}/archives"
+        )
+        assert public_after_reapproval.status_code == 200
+        reapproved_archive = next(
+            item for item in public_after_reapproval.json() if item["id"] == archive_id
+        )
+        assert reapproved_archive["name"] == "Reapproved corrected exam"
+        assert reapproved_archive["professor"] == "Reapproved corrected professor"
+        assert reapproved_archive["academic_year"] == 2029
+        assert reapproved_archive["archive_type"] == ArchiveType.QUIZ.value
+        assert reapproved_archive["has_answers"] is True
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:

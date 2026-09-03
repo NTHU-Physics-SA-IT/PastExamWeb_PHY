@@ -186,12 +186,15 @@ commit corrected metadata and then fail the move. Neither surface changes any
 linked ArchiveSubmission field. The Review Center submission editor remains a
 separate surface governed by the direct-edit matrix above.
 
-Republish uses the exact linked Archive and therefore preserves its current
-Course placement. Reapproval under the `rejected → approved` edge also preserves
-the exact linked Archive placement; it applies editable non-placement snapshot
-corrections to that Archive without re-resolving the originally proposed
-Course. Only first approval of an unlinked submission uses proposed parent
-metadata and may create missing Category or Course rows.
+Republish uses the exact linked Archive, restores approved/public state, and
+applies the latest permitted non-placement exam metadata from the Submission
+snapshot to that Archive. Its current Course placement remains authoritative
+and unchanged; Course transfer remains a separate operation. Reapproval under
+the `rejected → approved` edge uses the same non-placement metadata
+synchronization and also preserves the exact linked Archive placement without
+re-resolving the originally proposed Course. Only first approval of an unlinked
+submission uses proposed parent metadata and may create missing Category or
+Course rows.
 
 | Value | Canonical Chinese label |
 | --- | --- |

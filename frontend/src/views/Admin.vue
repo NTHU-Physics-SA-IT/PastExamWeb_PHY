@@ -4069,7 +4069,7 @@
         @update:visible="showArchiveRequestPreview = $event"
         :previewUrl="archiveRequestPreviewUrl"
         :title="selectedArchiveRequest?.name || ''"
-        :academicYear="formatAcademicTerm(selectedArchiveRequest?.academic_year)"
+        :academicYear="selectedArchiveRequest?.academic_year"
         :archiveType="selectedArchiveRequest?.archive_type || ''"
         :courseName="localizedSubmissionCourseName(selectedArchiveRequest)"
         :professorName="selectedArchiveRequest?.professor || ''"
@@ -5061,6 +5061,7 @@ import {
 import { trackEvent, EVENTS } from '../utils/analytics'
 import { STORAGE_KEYS, getLocalItem, setLocalItem } from '../utils/storage'
 import { formatCourseDisplayName, normalizeCourseSearchText } from '../utils/courseText'
+import { formatAcademicTerm as formatCanonicalAcademicTerm } from '../utils/academicTerm'
 import {
   localizedNthuDepartmentName,
   localizedNthuDepartmentOptions,
@@ -7061,12 +7062,7 @@ const getArchiveSubmissionKindClass = (item) => {
 const formatAcademicTerm = (value) => {
   const numericValue = Number(value)
   if (!numericValue) return ''
-  if (numericValue >= 1000 && numericValue < 2000) {
-    const year = Math.floor(numericValue / 10)
-    const semester = numericValue % 10
-    return t(semester === 1 ? '{year}上學期' : '{year}下學期', { year })
-  }
-  return t('{value} 年', { value: numericValue })
+  return formatCanonicalAcademicTerm(numericValue, t) || t('{value} 年', { value: numericValue })
 }
 
 const resetNotificationForm = () => {

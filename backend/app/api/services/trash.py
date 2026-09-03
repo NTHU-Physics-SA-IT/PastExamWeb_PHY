@@ -494,9 +494,9 @@ def _dedupe_trash_items(items: list[TrashItem]) -> list[TrashItem]:
 def _format_academic_term(value: int | None) -> str | None:
     if not value:
         return None
-    if 1000 <= value < 2000:
-        year = value // 10
-        semester = value % 10
+    year = value // 10
+    semester = value % 10
+    if year > 0 and semester in (1, 2):
         return f"{year}{'上' if semester == 1 else '下'}學期"
     return f"{value} 年"
 

@@ -887,6 +887,24 @@ describe('AdminView', () => {
     expect(wrapper.vm.comparisonArchives).toEqual(comparisons)
   })
 
+  it('uses canonical pre-100 academic terms in review presentation and search', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    const request = {
+      id: 7099,
+      status: 'takedown',
+      subject: '普通物理（二）',
+      name: 'final',
+      professor: '王老師',
+      academic_year: 992,
+    }
+
+    expect(wrapper.vm.formatAcademicTerm(request.academic_year)).toBe('99下學期')
+    expect(wrapper.vm.getReviewSearchHaystack(request)).toContain('99下學期')
+
+    wrapper.unmount()
+  })
+
   it('sends an annotation-only diff when an approved review note changes', async () => {
     const request = {
       id: 7050,

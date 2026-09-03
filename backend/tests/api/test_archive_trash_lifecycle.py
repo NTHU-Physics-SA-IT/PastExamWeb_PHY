@@ -8,6 +8,7 @@ from sqlmodel import select
 from app.api.services.archive_submission_lifecycle import (
     LIFECYCLE_ARCHIVE_TRASHED,
 )
+from app.api.services.trash import _format_academic_term
 from app.main import app
 from app.models.models import (
     Archive,
@@ -27,6 +28,18 @@ def _override_admin(user_id: int):
         return UserRoles(user_id=user_id, is_admin=True)
 
     return _get_current_user
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (992, "99下學期"),
+        (1002, "100下學期"),
+        (1003, "1003 年"),
+    ],
+)
+def test_format_academic_term_uses_semester_suffix(value: int, expected: str):
+    assert _format_academic_term(value) == expected
 
 
 async def _create_approved_pair(

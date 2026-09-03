@@ -143,6 +143,15 @@ function mountDialog(props = {}) {
 }
 
 describe('UploadArchiveDialog', () => {
+  it('formats pre-100 academic term selections', () => {
+    const wrapper = mountDialog()
+
+    expect(wrapper.vm.formatSemester(992)).toBe('99下學期')
+    expect(wrapper.vm.formatSemester(1002)).toBe('100下學期')
+
+    wrapper.unmount()
+  })
+
   it('preserves the backend category and course ordering contract', async () => {
     const wrapper = mountDialog({
       courseCategories: [

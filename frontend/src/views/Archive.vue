@@ -838,6 +838,7 @@ import { useTheme } from '../utils/useTheme'
 import { trackEvent, EVENTS } from '../utils/analytics'
 import { isUnauthorizedError } from '../utils/http'
 import { formatCourseDisplayName, normalizeCourseSearchText } from '../utils/courseText'
+import { formatAcademicTerm as formatCanonicalAcademicTerm } from '../utils/academicTerm'
 import {
   courseMatchesSearch,
   localizedCategoryLabel,
@@ -1304,12 +1305,7 @@ const latestAcademicTerm = computed(() => {
 function formatAcademicTerm(value) {
   const numericValue = Number(value)
   if (!numericValue) return ''
-  if (numericValue >= 1000 && numericValue < 2000) {
-    const year = Math.floor(numericValue / 10)
-    const semester = numericValue % 10
-    return t(semester === 1 ? '{year}上學期' : '{year}下學期', { year })
-  }
-  return t('{year} 年', { year: numericValue })
+  return formatCanonicalAcademicTerm(numericValue, t) || t('{year} 年', { year: numericValue })
 }
 
 function formatSourceSubmissionIds(archive) {

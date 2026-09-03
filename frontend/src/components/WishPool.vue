@@ -260,6 +260,7 @@ import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { homepageSloganService, wishService } from '@/api'
 import { getCurrentUser } from '@/utils/auth'
+import { formatAcademicTerm as formatCanonicalAcademicTerm } from '@/utils/academicTerm'
 import {
   appendResponsiveWishPositions,
   assignWishCentralityScores,
@@ -323,12 +324,7 @@ const semesterLabel = (wish) =>
   wish?.academic_year == null ? t('不限學期') : formatSemester(wish.academic_year)
 function formatSemester(value) {
   const numericValue = Number(value)
-  if (numericValue >= 1000 && numericValue < 2000) {
-    const year = Math.floor(numericValue / 10)
-    const semester = numericValue % 10
-    return t(semester === 1 ? '{year}上學期' : '{year}下學期', { year })
-  }
-  return `${value}`
+  return formatCanonicalAcademicTerm(numericValue, t) || `${value}`
 }
 const reportTarget = computed(() => ({
   id: selected.value?.id,
