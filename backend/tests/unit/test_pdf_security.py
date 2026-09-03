@@ -1,5 +1,6 @@
 import asyncio
 import io
+import logging
 import os
 import sys
 from pathlib import Path
@@ -332,6 +333,41 @@ async def test_malformed_helper_result_is_sanitized(tmp_path: Path) -> None:
         )
     assert error.value.code == "helper_failure"
     assert error.value.public_detail == "Invalid or unsupported PDF file"
+
+
+@pytest.mark.asyncio
+async def test_validation_rejection_logs_only_bounded_metadata(
+    caplog, tmp_path: Path
+) -> None:
+    private_detail = "private parser detail and /tmp/private-name.pdf"
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "import json; "
+            f"print(json.dumps({{'status': 'rejected', 'code': {private_detail!r}}}))"
+        ),
+    ]
+
+    with (
+        caplog.at_level(logging.INFO, logger=pdf_security.logger.name),
+        pytest.raises(PdfValidationError) as error,
+    ):
+        await pdf_security.validate_staged_pdf(
+            _pdf_path(tmp_path),
+            command=command,
+        )
+
+    assert error.value.code == private_detail
+    record = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "pdf_validation_rejected"
+    )
+    assert record.code == "unclassified"
+    assert record.duration_ms >= 0
+    assert record.parser_lock_wait_ms >= 0
+    assert private_detail not in caplog.text
 
 
 @pytest.mark.asyncio

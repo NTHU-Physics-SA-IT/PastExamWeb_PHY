@@ -32,6 +32,42 @@ _WORKER_HELPER_LOCKS: weakref.WeakKeyDictionary[
 
 logger = logging.getLogger(__name__)
 
+_BOUNDED_REJECTION_CODES = frozenset(
+    {
+        "encrypted",
+        "file_too_large",
+        "forbidden_feature",
+        "helper_failure",
+        "invalid_pdf",
+        "object_limit",
+        "page_limit",
+        "syntax_warning",
+        "validation_timeout",
+        "wrong_extension",
+    }
+)
+
+
+def _bounded_rejection_code(code: str) -> str:
+    return code if code in _BOUNDED_REJECTION_CODES else "unclassified"
+
+
+def _log_pdf_security_event(
+    event: str,
+    *,
+    code: str | None = None,
+    duration_ms: int | None = None,
+    parser_lock_wait_ms: int | None = None,
+) -> None:
+    fields: dict[str, str | int] = {"event": event}
+    if code is not None:
+        fields["code"] = _bounded_rejection_code(code)
+    if duration_ms is not None:
+        fields["duration_ms"] = max(duration_ms, 0)
+    if parser_lock_wait_ms is not None:
+        fields["parser_lock_wait_ms"] = max(parser_lock_wait_ms, 0)
+    logger.info(event, extra=fields)
+
 
 def _worker_helper_lock() -> asyncio.Lock:
     loop = asyncio.get_running_loop()
@@ -141,7 +177,11 @@ async def stage_pdf_upload(upload: UploadFile) -> StagedPdf:
 async def validated_pdf_upload(upload: UploadFile) -> AsyncIterator[StagedPdf]:
     staged: StagedPdf | None = None
     try:
-        staged = await stage_pdf_upload(upload)
+        try:
+            staged = await stage_pdf_upload(upload)
+        except PdfValidationError as exc:
+            _log_pdf_security_event("pdf_validation_rejected", code=exc.code)
+            raise
         await validate_staged_pdf(staged.path)
         yield staged
     finally:
@@ -162,22 +202,41 @@ async def validate_staged_pdf(
 ) -> PdfInspection:
     loop = asyncio.get_running_loop()
     worker_lock = _worker_helper_lock()
+    started_at = loop.time()
     deadline = loop.time() + timeout_seconds
     try:
         await asyncio.wait_for(
             worker_lock.acquire(), timeout=max(deadline - loop.time(), 0)
         )
     except TimeoutError as exc:
+        duration_ms = round((loop.time() - started_at) * 1000)
+        _log_pdf_security_event(
+            "pdf_validation_rejected",
+            code="validation_timeout",
+            duration_ms=duration_ms,
+            parser_lock_wait_ms=duration_ms,
+        )
         raise PdfValidationError(
             "validation_timeout", "Invalid or unsupported PDF file"
         ) from exc
 
+    lock_acquired_at = loop.time()
+    parser_lock_wait_ms = round((lock_acquired_at - started_at) * 1000)
     try:
-        return await _validate_staged_pdf_locked(
-            path,
-            deadline=deadline,
-            command=command,
-        )
+        try:
+            return await _validate_staged_pdf_locked(
+                path,
+                deadline=deadline,
+                command=command,
+            )
+        except PdfValidationError as exc:
+            _log_pdf_security_event(
+                "pdf_validation_rejected",
+                code=exc.code,
+                duration_ms=round((loop.time() - started_at) * 1000),
+                parser_lock_wait_ms=parser_lock_wait_ms,
+            )
+            raise
     finally:
         worker_lock.release()
 
