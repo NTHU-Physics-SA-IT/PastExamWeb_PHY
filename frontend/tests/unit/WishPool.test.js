@@ -399,6 +399,7 @@ describe('Wish Pool focused interactions', () => {
 
     const wrapper = await mountPool()
     expect(wrapper.vm.semesterLabel(sampleWish)).toBe('114上學期')
+    expect(wrapper.vm.semesterLabel({ ...sampleWish, academic_year: 992 })).toBe('99下學期')
     expect(wrapper.vm.semesterLabel(anySemesterWish)).toBe('不限學期')
 
     await wrapper.vm.loadMore()

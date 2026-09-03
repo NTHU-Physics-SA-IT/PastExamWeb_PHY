@@ -592,7 +592,7 @@
       @update:visible="showUploadPreview = $event"
       :previewUrl="uploadPreviewUrl"
       :title="form.file ? form.file.name : ''"
-      :academicYear="formatSemester(form.academicYear)"
+      :academicYear="form.academicYear"
       :archiveType="form.type || ''"
       :courseName="effectiveSubject || ''"
       :professorName="
@@ -617,6 +617,7 @@ import { PDFDocument } from 'pdf-lib'
 import { trackEvent, EVENTS } from '../utils/analytics'
 import { isUnauthorizedError } from '../utils/http'
 import { formatCourseDisplayName } from '../utils/courseText'
+import { formatAcademicTerm as formatCanonicalAcademicTerm } from '../utils/academicTerm'
 import { localizedCategoryName, localizedCourseName } from '../utils/localizedCatalog'
 
 const MAX_PDF_SIZE_BYTES = 20 * 1024 * 1024
@@ -851,12 +852,7 @@ function validateFilename() {
 function formatSemester(value) {
   const numericValue = Number(value)
   if (!numericValue) return ''
-  if (numericValue >= 1000 && numericValue < 2000) {
-    const year = Math.floor(numericValue / 10)
-    const semester = numericValue % 10
-    return t(semester === 1 ? '{year}上學期' : '{year}下學期', { year })
-  }
-  return `${numericValue}`
+  return formatCanonicalAcademicTerm(numericValue, t) || `${numericValue}`
 }
 
 function getCategoryName(code) {

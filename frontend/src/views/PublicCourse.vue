@@ -86,6 +86,7 @@ import { useI18n } from 'vue-i18n'
 import { courseService } from '../api'
 import { SITE_URL, setSeo } from '../utils/seo'
 import { localizedCategoryName, localizedCourseName } from '../utils/localizedCatalog'
+import { formatAcademicTerm } from '../utils/academicTerm'
 
 const route = useRoute()
 const { t, locale } = useI18n()
@@ -126,7 +127,7 @@ const professorCount = computed(
 )
 
 function formatAcademicYear(value) {
-  return t('{year} 學年度', { year: value })
+  return formatAcademicTerm(value, t) || t('{year} 學年度', { year: value })
 }
 
 function findCourse(courseId, categories, coursesByCategory) {

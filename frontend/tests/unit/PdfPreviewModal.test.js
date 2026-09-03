@@ -108,6 +108,30 @@ describe('PdfPreviewModal', () => {
     wrapper.unmount()
   })
 
+  it('formats raw pre-100 academic term metadata', () => {
+    const wrapper = mount(PdfPreviewModal, {
+      props: {
+        visible: true,
+        previewUrl: '',
+        academicYear: 992,
+      },
+      global: {
+        stubs: {
+          Dialog: stubComponent,
+          ProgressSpinner: stubComponent,
+          Button: stubComponent,
+        },
+      },
+    })
+
+    expect(wrapper.vm.metaTextItems).toContainEqual({
+      key: 'year',
+      icon: 'pi-calendar',
+      value: '99下學期',
+    })
+    wrapper.unmount()
+  })
+
   it('handles loading lifecycle for pdf task', async () => {
     const wrapper = mount(PdfPreviewModal, {
       props: {

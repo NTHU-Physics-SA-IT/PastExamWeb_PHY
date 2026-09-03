@@ -1482,7 +1482,7 @@
           </div>
           <div>
             <dt>{{ $t('學期／年度') }}</dt>
-            <dd>{{ selectedArchiveReport.academic_year }}</dd>
+            <dd>{{ formatReportAcademicTerm(selectedArchiveReport.academic_year) }}</dd>
           </div>
           <div>
             <dt>{{ $t('授課教師') }}</dt>
@@ -1597,6 +1597,7 @@ import { ADMIN_PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import { ARCHIVE_REPORT_REASONS } from '@/constants/archiveReport'
 import { getMessageTemplate } from '@/i18n'
 import { getCurrentUser } from '@/utils/auth'
+import { formatAcademicTerm as formatCanonicalAcademicTerm } from '@/utils/academicTerm'
 import { localizedCourseSnapshotName } from '@/utils/localizedCatalog'
 import { formatRelativeOrAbsoluteDateTime } from '@/utils/time'
 
@@ -2443,14 +2444,17 @@ const formatWishTargetSummary = (value) =>
       if (!term) return part
       if (term.toLowerCase() === 'any') return t('不限學期')
       const numericValue = Number(term)
-      const year = Math.floor(numericValue / 10)
-      const semester = numericValue % 10
-      if (numericValue >= 1000 && numericValue < 2000 && (semester === 1 || semester === 2)) {
-        return t(semester === 1 ? '{year}上學期' : '{year}下學期', { year })
-      }
-      return t('{value} 年', { value: numericValue })
+      return (
+        formatCanonicalAcademicTerm(numericValue, t) || t('{value} 年', { value: numericValue })
+      )
     })
     .join(' · ')
+
+const formatReportAcademicTerm = (value) => {
+  const numericValue = Number(value)
+  if (!numericValue) return '—'
+  return formatCanonicalAcademicTerm(numericValue, t) || t('{value} 年', { value: numericValue })
+}
 
 function syncCardLayout(event) {
   isCardLayout.value = event.matches

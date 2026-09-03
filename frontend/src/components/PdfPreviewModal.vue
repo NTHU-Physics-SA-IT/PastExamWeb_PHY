@@ -226,6 +226,7 @@ import ArchiveDiscussionPanel from './ArchiveDiscussionPanel.vue'
 import ArchiveReportPanel from './ArchiveReportPanel.vue'
 import { getBooleanPreference } from '../utils/usePreferences'
 import { STORAGE_KEYS } from '../utils/storage'
+import { formatAcademicTerm } from '../utils/academicTerm'
 
 const DESKTOP_DEFAULT_OPEN_KEY = STORAGE_KEYS.local.DISCUSSION_DESKTOP_DEFAULT_OPEN
 const { t } = useI18n()
@@ -334,7 +335,8 @@ const metaTextItems = computed(() => {
   if (props.academicYear instanceof Date) {
     year = String(props.academicYear.getFullYear())
   } else if (props.academicYear !== null && props.academicYear !== undefined) {
-    year = String(props.academicYear).trim()
+    const rawYear = String(props.academicYear).trim()
+    year = formatAcademicTerm(rawYear, t) || rawYear
   }
 
   const courseName = (props.courseName || '').trim()

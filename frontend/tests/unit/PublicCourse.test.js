@@ -117,6 +117,50 @@ describe('PublicCourse', () => {
     wrapper.unmount()
   })
 
+  it('formats academic term codes in public headings and SEO metadata', async () => {
+    courseServiceMock.listPublicCategories.mockResolvedValue({
+      data: [{ key: 'fundamental', name: '基礎課程', label: '基礎' }],
+    })
+    courseServiceMock.listPublicCourses.mockResolvedValue({
+      data: { fundamental: [{ id: 42, name: '普通物理(一)', order_index: 0 }] },
+    })
+    courseServiceMock.getPublicCourseArchives.mockResolvedValue({
+      data: [
+        {
+          id: 7,
+          name: '期末考',
+          academic_year: 992,
+          archive_type: 'final',
+          professor: '王教授',
+          has_answers: true,
+        },
+        {
+          id: 8,
+          name: '期中考',
+          academic_year: 1002,
+          archive_type: 'midterm',
+          professor: '李教授',
+          has_answers: false,
+        },
+      ],
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('99下學期')
+    expect(wrapper.text()).toContain('100下學期')
+    const itemList = setSeoMock.mock.calls
+      .at(-1)[0]
+      .jsonLd.find((item) => item['@type'] === 'ItemList')
+    expect(itemList.itemListElement.map(({ name }) => name)).toEqual([
+      '99下學期 期末考 期末考',
+      '100下學期 期中考 期中考',
+    ])
+
+    wrapper.unmount()
+  })
+
   it('renders an active course with no public archives and keeps it out of the index', async () => {
     courseServiceMock.listPublicCategories.mockResolvedValue({
       data: [{ key: 'fundamental', name: '基礎課程', label: '基礎' }],

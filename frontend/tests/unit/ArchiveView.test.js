@@ -234,6 +234,40 @@ describe('ArchiveView', () => {
     anchorClickSpy.mockRestore()
   })
 
+  it('formats pre-100 and 100-plus academic term groups without changing raw ordering', async () => {
+    getCourseArchivesMock.mockReset()
+    getCourseArchivesMock.mockResolvedValue({
+      data: [
+        { ...baseArchives[0], id: 'term-992', academic_year: 992 },
+        { ...baseArchives[1], id: 'term-1002', academic_year: 1002 },
+      ],
+    })
+    const wrapper = mount(ArchiveView, {
+      global: {
+        provide: {
+          toast: { add: toastAddMock },
+          confirm: { require: confirmRequireMock },
+          sidebarVisible: ref(true),
+        },
+        stubs: componentStubs,
+      },
+    })
+
+    await flushPromises()
+    wrapper.vm.filterBySubject({ label: 'Calculus I', id: 'c1' })
+    await flushPromises()
+
+    expect(wrapper.vm.groupedArchives.map(({ year }) => year)).toEqual([1002, 992])
+    expect(wrapper.text()).toContain('99下學期')
+    expect(wrapper.text()).toContain('100下學期')
+    expect(wrapper.vm.years).toEqual([
+      { name: '100下學期', code: '1002' },
+      { name: '99下學期', code: '992' },
+    ])
+
+    wrapper.unmount()
+  })
+
   it('renders each archive when exam metadata matches but ids differ', async () => {
     const matchingArchives = [
       {

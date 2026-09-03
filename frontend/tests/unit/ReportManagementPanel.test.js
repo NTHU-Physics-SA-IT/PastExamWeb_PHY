@@ -244,7 +244,7 @@ describe('ReportManagementPanel', () => {
       created_at: '2026-08-18T01:00:00Z',
       reason: 'misinformation',
       wish_title: '普通物理期中考',
-      target_summary: '普通物理 · 王老師 · term:1141 · midterm1',
+      target_summary: '普通物理 · 王老師 · term:992 · midterm1',
       status: 'pending',
       admin_response: null,
     }
@@ -265,7 +265,7 @@ describe('ReportManagementPanel', () => {
     const target = wrapper
       .findAll('.report-review__meta > div')
       .find((item) => item.get('dt').text() === '許願目標')
-    expect(target.get('dd').text()).toBe('普通物理 · 王老師 · 114上學期 · midterm1')
+    expect(target.get('dd').text()).toBe('普通物理 · 王老師 · 99下學期 · midterm1')
     expect(target.get('dd').text()).not.toContain(report.wish_title)
     expect(target.get('dd').text()).not.toContain('term:')
 
@@ -514,7 +514,7 @@ describe('ReportManagementPanel', () => {
         course_name: 'Course',
         archive_name: 'Exam',
         archive_id_snapshot: 99,
-        academic_year: 2026,
+        academic_year: 992,
         professor: 'Professor',
         source_exists: true,
         source_state: 'available',
@@ -525,6 +525,11 @@ describe('ReportManagementPanel', () => {
     })
     await wrapper.vm.openArchiveReport(72)
     await flushPromises()
+
+    const academicTerm = wrapper
+      .findAll('.report-review__meta > div')
+      .find((item) => item.get('dt').text() === '學期／年度')
+    expect(academicTerm.get('dd').text()).toBe('99下學期')
 
     fields = wrapper.findAll('.report-review__content-field')
     blocks = wrapper.findAll('.report-review__content-block')
