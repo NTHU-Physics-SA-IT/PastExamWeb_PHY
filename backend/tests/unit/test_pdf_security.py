@@ -600,6 +600,7 @@ def test_file_attachment_annotation_is_removed_by_sanitizer(tmp_path: Path) -> N
     assert classified["findings"] == ["embedded_files", "file_attachment"]
     destination = tmp_path / "sanitized.pdf"
     pdf_security._sanitize_pdf(source, destination)
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o600
     assert pdf_security._inspect_pdf(destination)["pages"] == 1
     with pikepdf.open(destination, attempt_recovery=False) as pdf:
         assert "/Annots" not in pdf.pages[0].obj

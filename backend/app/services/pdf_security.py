@@ -896,6 +896,7 @@ def _sanitize_pdf(source: Path, destination: Path) -> dict[str, Any]:
             remove_attachments(pdf)
             _remove_file_attachment_annotations(pdf, pikepdf)
             pdf.save(destination, recompress_flate=True)
+            os.chmod(destination, 0o600)
     except pikepdf.PasswordError as exc:
         raise _PdfPolicyViolation("encrypted") from exc
     except pikepdf.PdfError as exc:
