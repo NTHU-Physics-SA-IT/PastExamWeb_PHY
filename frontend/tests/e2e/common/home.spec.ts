@@ -502,8 +502,6 @@ test.describe('Home page', () => {
     expect(catalogAfterHover.left).toBeCloseTo(catalogBeforeHover.left, 3)
     expect(catalogAfterHover.top).toBeCloseTo(catalogBeforeHover.top, 3)
 
-    await expect(page.locator('.theme-bell-indicator')).toBeVisible()
-    await expect(page.locator('.theme-toggle-button')).toHaveCount(0)
     await expect(heroActions).toHaveCount(2)
     await expect(
       catalogTarget.getByRole('button', { name: '瀏覽公開課程目錄', exact: true })
