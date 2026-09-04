@@ -1,5 +1,8 @@
 <template>
-  <main class="public-catalog">
+  <main
+    class="public-catalog"
+    :class="{ 'public-catalog-christmas': effectiveTheme === 'christmas' }"
+  >
     <nav class="breadcrumbs" :aria-label="$t('麵包屑導覽')">
       <RouterLink to="/">{{ $t('首頁') }}</RouterLink>
       <span aria-hidden="true">/</span>
@@ -74,6 +77,7 @@ import { useI18n } from 'vue-i18n'
 
 import { courseService } from '../api'
 import { SITE_URL, setSeo } from '../utils/seo'
+import { useTheme } from '../utils/useTheme'
 import {
   courseMatchesSearch,
   localizedCategoryLabel,
@@ -82,6 +86,7 @@ import {
 } from '../utils/localizedCatalog'
 
 const { t } = useI18n()
+const { effectiveTheme } = useTheme()
 
 const categories = ref([])
 const coursesByCategory = ref({})

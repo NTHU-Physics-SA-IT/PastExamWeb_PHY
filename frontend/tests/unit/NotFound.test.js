@@ -14,6 +14,22 @@ const componentStubs = {
   },
 }
 
+const contrastRatio = (foreground, background) => {
+  const luminance = (hex) => {
+    const channels = hex
+      .slice(1)
+      .match(/.{2}/g)
+      .map((channel) => Number.parseInt(channel, 16) / 255)
+      .map((channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4))
+
+    return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
+  }
+
+  const lighter = Math.max(luminance(foreground), luminance(background))
+  const darker = Math.min(luminance(foreground), luminance(background))
+  return (lighter + 0.05) / (darker + 0.05)
+}
+
 function mountView() {
   return mount(NotFound, {
     attachTo: document.body,
@@ -53,5 +69,23 @@ describe('NotFound view', () => {
     expect(notFoundSource).toContain('background: var(--bg-primary)')
     expect(notFoundSource).not.toContain('physics-background')
     expect(notFoundSource).not.toContain('getFieldBgSvg')
+  })
+
+  it('keeps Classic surfaces and adds an owner-scoped Christmas continuity contract', () => {
+    expect(notFoundSource).toContain('.not-found-card')
+    expect(notFoundSource).toContain("html[data-effective-theme='christmas'] .not-found")
+    expect(notFoundSource).toContain('background: transparent')
+    expect(notFoundSource).toContain('background: #293f52')
+    expect(notFoundSource).toContain('background: #3e5f72')
+    expect(notFoundSource).toContain('border-left: 0.25rem solid #793941')
+    expect(notFoundSource).toContain('color: #f8f2e8')
+    expect(notFoundSource).toContain('color: #f5eedc')
+    expect(notFoundSource).not.toContain('@keyframes')
+    expect(notFoundSource).not.toContain('@media')
+  })
+
+  it('uses readable existing Christmas palette pairings', () => {
+    expect(contrastRatio('#F8F2E8', '#293F52')).toBeGreaterThanOrEqual(4.5)
+    expect(contrastRatio('#F5EEDC', '#3E5F72')).toBeGreaterThanOrEqual(4.5)
   })
 })

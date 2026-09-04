@@ -1,5 +1,8 @@
 <template>
-  <main class="public-course">
+  <main
+    class="public-course"
+    :class="{ 'public-course-christmas': effectiveTheme === 'christmas' }"
+  >
     <nav class="breadcrumbs" :aria-label="$t('麵包屑導覽')">
       <RouterLink to="/">{{ $t('首頁') }}</RouterLink>
       <span aria-hidden="true">/</span>
@@ -87,9 +90,11 @@ import { courseService } from '../api'
 import { SITE_URL, setSeo } from '../utils/seo'
 import { localizedCategoryName, localizedCourseName } from '../utils/localizedCatalog'
 import { formatAcademicTerm } from '../utils/academicTerm'
+import { useTheme } from '../utils/useTheme'
 
 const route = useRoute()
 const { t, locale } = useI18n()
+const { effectiveTheme } = useTheme()
 const course = ref(null)
 const category = ref(null)
 const archives = ref([])

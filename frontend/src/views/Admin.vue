@@ -2,7 +2,7 @@
   <div class="h-full px-2 md:px-4 admin-container">
     <div class="card h-full flex flex-col">
       <Tabs :value="currentTab" class="flex-1" @update:value="handleTabChange">
-        <TabList>
+        <TabList class="admin-primary-tab-list">
           <Tab value="3">
             <span class="admin-tab-label">
               <span>{{ $t('審核中心') }}</span>
@@ -63,7 +63,9 @@
                 </div>
               </Message>
               <section class="admin-section mb-5">
-                <div class="admin-toolbar admin-toolbar--course admin-toolbar--section mb-3">
+                <div
+                  class="admin-toolbar admin-toolbar--course admin-toolbar--section course-category-toolbar mb-3"
+                >
                   <div>
                     <h3 class="m-0">{{ $t('課程分類') }}</h3>
                     <p class="m-0 text-sm text-500">
@@ -72,10 +74,9 @@
                   </div>
                   <div class="admin-toolbar__actions">
                     <Button
-                      class="admin-toolbar__button"
+                      class="review-refresh-button course-category-add-button admin-toolbar__button"
                       :label="$t('新增分類')"
                       icon="pi pi-plus"
-                      severity="success"
                       outlined
                       @click="openCreateCategoryDialog"
                     />
@@ -155,6 +156,7 @@
                     <template #body="{ data }">
                       <div class="admin-card-actions">
                         <Button
+                          class="course-category-outline-action"
                           icon="pi pi-pencil"
                           :label="$t('編輯')"
                           :aria-label="$t('編輯分類')"
@@ -164,6 +166,7 @@
                           @click="openEditCategoryDialog(data)"
                         />
                         <Button
+                          class="course-category-outline-action"
                           :icon="data.is_active ? 'pi pi-eye-slash' : 'pi pi-check'"
                           :label="data.is_active ? $t('停用') : $t('啟用')"
                           :aria-label="data.is_active ? $t('停用分類') : $t('啟用分類')"
@@ -174,7 +177,7 @@
                           @click="confirmToggleCategory(data)"
                         />
                         <Button
-                          class="admin-danger-outline-button"
+                          class="course-category-outline-action admin-danger-outline-button"
                           icon="pi pi-trash"
                           :label="$t('刪除')"
                           :aria-label="$t('刪除分類')"
@@ -266,6 +269,7 @@
                       class="admin-card-actions admin-mobile-card-actions category-card-actions"
                     >
                       <Button
+                        class="course-category-outline-action"
                         icon="pi pi-pencil"
                         :label="$t('編輯')"
                         :aria-label="$t('編輯分類')"
@@ -275,6 +279,7 @@
                         @click="openEditCategoryDialog(category)"
                       />
                       <Button
+                        class="course-category-outline-action"
                         :icon="category.is_active ? 'pi pi-eye-slash' : 'pi pi-check'"
                         :label="category.is_active ? $t('停用') : $t('啟用')"
                         :aria-label="category.is_active ? $t('停用分類') : $t('啟用分類')"
@@ -285,7 +290,7 @@
                         @click="confirmToggleCategory(category)"
                       />
                       <Button
-                        class="admin-danger-outline-button"
+                        class="course-category-outline-action admin-danger-outline-button"
                         icon="pi pi-trash"
                         :label="$t('刪除')"
                         :aria-label="$t('刪除分類')"
@@ -300,7 +305,7 @@
                 </div>
               </section>
 
-              <div class="admin-toolbar admin-toolbar--course mb-4">
+              <div class="admin-toolbar admin-toolbar--course course-search-toolbar mb-4">
                 <div class="admin-toolbar__filters">
                   <div class="admin-toolbar__search relative w-full md:w-auto">
                     <i class="pi pi-search search-icon"></i>
@@ -330,7 +335,7 @@
                     icon="pi pi-plus"
                     severity="success"
                     @click="openCreateDialog"
-                    class="admin-toolbar__button w-full md:w-auto"
+                    class="course-download-action admin-toolbar__button w-full md:w-auto"
                   />
                 </div>
               </div>
@@ -405,8 +410,9 @@
                   <template #body="{ data }">
                     <div class="admin-card-actions">
                       <Button
+                        class="course-download-action"
                         icon="pi pi-pencil"
-                        severity="warning"
+                        severity="success"
                         size="small"
                         @click="openEditDialog(data)"
                         :label="$t('編輯')"
@@ -414,10 +420,11 @@
                         :title="$t('編輯課程')"
                       />
                       <Button
-                        class="admin-danger-solid-button"
+                        class="course-delete-action"
                         icon="pi pi-trash"
                         severity="danger"
                         size="small"
+                        outlined
                         @click="confirmDeleteCourse(data)"
                         :label="$t('刪除')"
                         :aria-label="$t('刪除課程')"
@@ -487,8 +494,9 @@
                     class="admin-card-actions admin-mobile-card-actions course-card-actions admin-tablet-actions"
                   >
                     <Button
+                      class="course-download-action"
                       icon="pi pi-pencil"
-                      severity="warning"
+                      severity="success"
                       size="small"
                       @click="openEditDialog(course)"
                       :label="$t('編輯')"
@@ -496,10 +504,11 @@
                       :title="$t('編輯課程')"
                     />
                     <Button
-                      class="admin-danger-solid-button"
+                      class="course-delete-action"
                       icon="pi pi-trash"
                       severity="danger"
                       size="small"
+                      outlined
                       @click="confirmDeleteCourse(course)"
                       :label="$t('刪除')"
                       :aria-label="$t('刪除課程')"
@@ -541,9 +550,11 @@
                     </p>
                   </div>
                   <Button
+                    class="user-download-action nthu-access-policy-save-action review-action-republish"
                     :label="$t('儲存登入範圍')"
                     icon="pi pi-save"
                     size="small"
+                    severity="success"
                     :loading="nthuAccessPolicySaving"
                     :disabled="nthuAccessPolicyLoading || !isNthuAccessPolicyValid"
                     @click="saveNthuAccessPolicy"
@@ -992,12 +1003,12 @@
                       @click="clearContributorLevelFilter"
                     />
                     <Button
+                      class="contributor-level-settings-button review-action-preview"
                       :label="$t('等級設定')"
                       icon="pi pi-cog"
                       severity="secondary"
                       size="small"
                       outlined
-                      class="contributor-level-settings-button"
                       @click="openContributorLevelSettingsDialog"
                     />
                     <button
@@ -1057,7 +1068,7 @@
                 </TabList>
               </Tabs>
 
-              <div class="admin-toolbar admin-toolbar--users mb-4">
+              <div class="user-search-toolbar admin-toolbar admin-toolbar--users mb-4">
                 <div class="admin-toolbar__filters">
                   <div class="admin-toolbar__search relative w-full md:w-auto">
                     <i class="pi pi-search search-icon"></i>
@@ -1110,11 +1121,12 @@
                 </div>
                 <div class="admin-toolbar__actions">
                   <Button
+                    class="user-download-action admin-toolbar__button w-full md:w-auto review-action-republish"
                     :label="$t('新增使用者')"
                     icon="pi pi-plus"
                     severity="success"
+                    size="small"
                     @click="openCreateUserDialog"
-                    class="admin-toolbar__button w-full md:w-auto"
                   />
                 </div>
               </div>
@@ -1235,17 +1247,20 @@
                   <template #body="{ data }">
                     <div class="user-management-table-actions">
                       <Button
+                        class="user-preview-action review-action-preview"
                         icon="pi pi-eye"
                         severity="secondary"
                         size="small"
+                        outlined
                         @click="openUserDataStats(data)"
                         :label="$t('查看')"
                         :aria-label="$t('查看使用者資料統計')"
                         :title="$t('查看使用者資料統計')"
                       />
                       <Button
+                        class="user-download-action review-action-republish"
                         icon="pi pi-pencil"
-                        severity="warning"
+                        severity="success"
                         size="small"
                         @click="openEditUserDialog(data)"
                         :label="$t('編輯')"
@@ -1253,8 +1268,9 @@
                         :title="$t('編輯使用者')"
                       />
                       <Button
+                        class="user-reset-action review-takedown-action"
                         icon="pi pi-key"
-                        severity="info"
+                        severity="secondary"
                         size="small"
                         @click="openResetPasswordDialog(data)"
                         :label="$t('重設密碼')"
@@ -1263,10 +1279,11 @@
                         :disabled="!data.is_local"
                       />
                       <Button
-                        class="admin-danger-solid-button"
+                        class="user-admin-delete-action admin-danger-outline-button review-action-delete"
                         icon="pi pi-trash"
                         severity="danger"
                         size="small"
+                        outlined
                         @click="confirmDeleteUser(data)"
                         :label="$t('刪除')"
                         :aria-label="$t('刪除使用者')"
@@ -1330,17 +1347,20 @@
                     class="admin-card-actions admin-mobile-card-actions user-management-card-actions admin-tablet-actions"
                   >
                     <Button
+                      class="user-preview-action review-action-preview"
                       icon="pi pi-eye"
                       severity="secondary"
                       size="small"
+                      outlined
                       @click="openUserDataStats(user)"
                       :label="$t('查看')"
                       :aria-label="$t('查看使用者資料統計')"
                       :title="$t('查看使用者資料統計')"
                     />
                     <Button
+                      class="user-download-action review-action-republish"
                       icon="pi pi-pencil"
-                      severity="warning"
+                      severity="success"
                       size="small"
                       @click="openEditUserDialog(user)"
                       :label="$t('編輯')"
@@ -1348,8 +1368,9 @@
                       :title="$t('編輯使用者')"
                     />
                     <Button
+                      class="user-reset-action review-takedown-action"
                       icon="pi pi-key"
-                      severity="info"
+                      severity="secondary"
                       size="small"
                       @click="openResetPasswordDialog(user)"
                       :label="$t('重設密碼')"
@@ -1358,10 +1379,11 @@
                       :disabled="!user.is_local"
                     />
                     <Button
-                      class="admin-danger-solid-button"
+                      class="user-admin-delete-action admin-danger-outline-button review-action-delete"
                       icon="pi pi-trash"
                       severity="danger"
                       size="small"
+                      outlined
                       @click="confirmDeleteUser(user)"
                       :label="$t('刪除')"
                       :aria-label="$t('刪除使用者')"
@@ -1409,11 +1431,14 @@
                     />
                   </span>
                 </Tab>
+                <Tab value="festival-themes">{{ $t('節日主題管理') }}</Tab>
               </TabList>
               <TabPanels>
                 <TabPanel value="announcements">
                   <div class="p-2 md:p-4">
-                    <div class="admin-toolbar admin-toolbar--announcement mb-4">
+                    <div
+                      class="admin-toolbar admin-toolbar--announcement announcement-search-toolbar mb-4"
+                    >
                       <div class="admin-toolbar__filters">
                         <div class="admin-toolbar__search relative w-full md:w-auto">
                           <i class="pi pi-search search-icon"></i>
@@ -1443,7 +1468,7 @@
                           icon="pi pi-plus"
                           severity="success"
                           @click="openNotificationCreateDialog"
-                          class="admin-toolbar__button w-full md:w-auto"
+                          class="admin-toolbar__button announcement-download-action w-full md:w-auto"
                         />
                       </div>
                     </div>
@@ -1575,8 +1600,9 @@
                         <template #body="{ data }">
                           <div class="admin-card-actions">
                             <Button
+                              class="announcement-download-action"
                               icon="pi pi-pencil"
-                              severity="warning"
+                              severity="success"
                               size="small"
                               @click="openNotificationEditDialog(data)"
                               :label="$t('編輯')"
@@ -1584,9 +1610,10 @@
                               :title="$t('編輯公告')"
                             />
                             <Button
-                              class="admin-danger-solid-button"
+                              class="announcement-delete-action"
                               icon="pi pi-trash"
                               severity="danger"
+                              outlined
                               size="small"
                               @click="confirmDeleteNotification(data)"
                               :label="$t('刪除')"
@@ -1658,8 +1685,9 @@
                           class="admin-card-actions admin-mobile-card-actions announcement-mobile-actions admin-tablet-actions"
                         >
                           <Button
+                            class="announcement-download-action"
                             icon="pi pi-pencil"
-                            severity="warning"
+                            severity="success"
                             size="small"
                             @click="openNotificationEditDialog(notification)"
                             :label="$t('編輯')"
@@ -1667,9 +1695,10 @@
                             :title="$t('編輯公告')"
                           />
                           <Button
-                            class="admin-danger-solid-button"
+                            class="announcement-delete-action"
                             icon="pi pi-trash"
                             severity="danger"
+                            outlined
                             size="small"
                             @click="confirmDeleteNotification(notification)"
                             :label="$t('刪除')"
@@ -1698,6 +1727,13 @@
                     <HomepageSloganManagementPanel
                       v-if="announcementManagementTab === 'homepage-slogans'"
                       @attention-change="loadAdminAttentionSummary"
+                    />
+                  </div>
+                </TabPanel>
+                <TabPanel value="festival-themes">
+                  <div class="p-2 md:p-4">
+                    <FestivalThemeManagementPanel
+                      v-if="announcementManagementTab === 'festival-themes'"
                     />
                   </div>
                 </TabPanel>
@@ -1959,7 +1995,7 @@
                   />
                 </div>
               </div>
-              <Tabs v-model:value="activeReviewGroup" class="mb-4">
+              <Tabs v-model:value="activeReviewGroup" class="review-group-tabs mb-4">
                 <TabList>
                   <Tab value="new">
                     <span class="admin-tab-label">
@@ -2370,7 +2406,7 @@
                         </div>
                         <div class="admin-card-actions review-card-actions">
                           <Button
-                            class="review-action-button"
+                            class="review-action-button review-action-preview"
                             :label="$t('查看/編輯')"
                             icon="pi pi-search"
                             :aria-label="$t('查看/編輯')"
@@ -2393,6 +2429,7 @@
                                 'review-action-button--reject': action.key === 'reject',
                                 'review-action-button--delete': action.key === 'delete',
                                 'review-takedown-action': action.key === 'takedown',
+                                'review-action-republish': action.key === 'republish',
                                 'review-action-reject': action.key === 'reject',
                                 'admin-danger-solid-button': action.key === 'reject',
                                 'admin-danger-outline-button': action.key === 'delete',
@@ -2730,7 +2767,7 @@
                         </div>
                         <div class="admin-card-actions review-card-actions">
                           <Button
-                            class="review-action-button"
+                            class="review-action-button review-action-preview"
                             :label="$t('查看/編輯')"
                             icon="pi pi-search"
                             :aria-label="$t('查看/編輯')"
@@ -2753,6 +2790,7 @@
                                 'review-action-button--reject': action.key === 'reject',
                                 'review-action-button--delete': action.key === 'delete',
                                 'review-takedown-action': action.key === 'takedown',
+                                'review-action-republish': action.key === 'republish',
                                 'review-action-reject': action.key === 'reject',
                                 'admin-danger-solid-button': action.key === 'reject',
                                 'admin-danger-outline-button': action.key === 'delete',
@@ -2807,14 +2845,14 @@
                   </div>
                   <div class="admin-toolbar__actions admin-toolbar__actions--trash">
                     <Button
-                      class="admin-toolbar__button"
+                      class="trash-refresh-action review-refresh-button admin-toolbar__button"
                       icon="pi pi-refresh"
                       :label="$t('重新整理')"
                       outlined
                       @click="loadTrashItems"
                     />
                     <Button
-                      class="admin-toolbar__button"
+                      class="trash-preview-action review-action-preview admin-toolbar__button"
                       icon="pi pi-sitemap"
                       :label="getTrashRelationButtonLabel()"
                       outlined
@@ -2828,7 +2866,7 @@
                       @click="toggleTrashRelationHierarchy"
                     />
                     <Button
-                      class="admin-toolbar__button"
+                      class="trash-preview-action review-action-preview admin-toolbar__button"
                       icon="pi pi-info-circle"
                       :label="$t('依賴與阻擋說明')"
                       outlined
@@ -2837,7 +2875,7 @@
                       @click="showTrashDependencyHelpDialog = true"
                     />
                     <Button
-                      class="admin-toolbar__button admin-toolbar__button--danger"
+                      class="trash-admin-delete-action admin-danger-outline-button review-action-delete admin-toolbar__button admin-toolbar__button--danger"
                       icon="pi pi-times-circle"
                       :label="$t('清空目前範圍')"
                       severity="danger"
@@ -3072,16 +3110,16 @@
                     <div class="admin-card-actions">
                       <Button
                         v-if="canRestoreTrashItem(data)"
+                        class="trash-restore-action review-action-republish"
                         icon="pi pi-undo"
                         :label="$t('還原')"
                         size="small"
                         severity="success"
-                        outlined
                         @click="confirmRestoreTrashItem(data)"
                       />
                       <Button
                         v-if="canPermanentDeleteTrashItem(data)"
-                        class="trash-action-button trash-action-button--delete trash-action-permanent-delete admin-danger-outline-button"
+                        class="trash-action-button trash-action-button--delete trash-action-permanent-delete trash-admin-delete-action admin-danger-outline-button review-action-delete"
                         icon="pi pi-trash"
                         :label="$t('永久刪除')"
                         :aria-label="$t('永久刪除')"
@@ -3099,24 +3137,27 @@
                       </span>
                       <Button
                         v-if="canRefreshPermanentDeletion(data)"
+                        class="trash-refresh-action review-refresh-button"
                         icon="pi pi-refresh"
                         :label="$t('更新狀態')"
                         size="small"
                         severity="secondary"
-                        text
+                        outlined
                         @click="refreshPermanentDeletionStatus(data)"
                       />
                       <Button
                         v-if="canInspectPermanentDeletion(data)"
+                        class="trash-preview-action review-action-preview"
                         icon="pi pi-info-circle"
                         :label="$t('查看原因')"
                         size="small"
                         severity="secondary"
-                        text
+                        outlined
                         @click="inspectPermanentDeletionReason(data)"
                       />
                       <Button
                         v-if="canRetryPermanentDeletion(data)"
+                        class="trash-admin-delete-action admin-danger-outline-button review-action-delete"
                         icon="pi pi-replay"
                         :label="$t('重新嘗試永久刪除')"
                         size="small"
@@ -3229,18 +3270,18 @@
                     <section class="trash-mobile-card-actions">
                       <Button
                         v-if="canRestoreTrashItem(data)"
+                        class="trash-restore-action review-action-republish"
                         icon="pi pi-undo"
                         :label="$t('還原')"
                         :aria-label="$t('還原')"
                         :title="$t('還原')"
                         size="small"
                         severity="success"
-                        outlined
                         @click="confirmRestoreTrashItem(data)"
                       />
                       <Button
                         v-if="canPermanentDeleteTrashItem(data)"
-                        class="trash-action-button trash-action-button--delete trash-action-permanent-delete admin-danger-outline-button"
+                        class="trash-action-button trash-action-button--delete trash-action-permanent-delete trash-admin-delete-action admin-danger-outline-button review-action-delete"
                         icon="pi pi-trash"
                         :label="$t('永久刪除')"
                         :aria-label="$t('永久刪除')"
@@ -3258,24 +3299,27 @@
                       </span>
                       <Button
                         v-if="canRefreshPermanentDeletion(data)"
+                        class="trash-refresh-action review-refresh-button"
                         icon="pi pi-refresh"
                         :label="$t('更新狀態')"
                         size="small"
                         severity="secondary"
-                        text
+                        outlined
                         @click="refreshPermanentDeletionStatus(data)"
                       />
                       <Button
                         v-if="canInspectPermanentDeletion(data)"
+                        class="trash-preview-action review-action-preview"
                         icon="pi pi-info-circle"
                         :label="$t('查看原因')"
                         size="small"
                         severity="secondary"
-                        text
+                        outlined
                         @click="inspectPermanentDeletionReason(data)"
                       />
                       <Button
                         v-if="canRetryPermanentDeletion(data)"
+                        class="trash-admin-delete-action admin-danger-outline-button review-action-delete"
                         icon="pi pi-replay"
                         :label="$t('重新嘗試永久刪除')"
                         size="small"
@@ -3328,9 +3372,11 @@
                     </div>
                   </div>
                   <Button
-                    class="backup-card__action"
+                    class="backup-card__action backup-download-action review-action-republish"
                     :label="$t('建立並下載 ZIP')"
                     icon="pi pi-download"
+                    severity="success"
+                    size="small"
                     :loading="backupDownloading"
                     :disabled="backupDownloading"
                     @click="downloadArchiveBackup"
@@ -3391,6 +3437,7 @@
 
       <Dialog
         :visible="showCourseDialog"
+        class="admin-owned-dialog"
         @update:visible="showCourseDialog = $event"
         :modal="true"
         :draggable="false"
@@ -3447,15 +3494,20 @@
 
         <div class="flex pt-6 justify-end gap-2.5">
           <Button
+            class="course-dialog-cancel-action review-action-preview"
             :label="$t('取消')"
             icon="pi pi-times"
             severity="secondary"
+            outlined
+            size="small"
             @click="closeCourseDialog"
           />
           <Button
+            class="course-dialog-save-action review-action-republish"
             :label="editingCourse ? $t('更新') : $t('新增')"
             :icon="editingCourse ? 'pi pi-check' : 'pi pi-plus'"
             severity="success"
+            size="small"
             @click="saveCourse"
             :loading="saveLoading"
           />
@@ -3464,6 +3516,7 @@
 
       <Dialog
         :visible="showCategoryDialog"
+        class="admin-owned-dialog"
         @update:visible="showCategoryDialog = $event"
         :modal="true"
         :draggable="false"
@@ -3588,7 +3641,7 @@
       <Dialog
         v-model:visible="showArchiveRequestDialog"
         :header="$t('考古題投稿詳情')"
-        class="submission-typography-dialog"
+        class="admin-owned-dialog submission-typography-dialog"
         modal
         :draggable="false"
         :style="{ width: '760px', maxWidth: '96vw' }"
@@ -4049,6 +4102,7 @@
                 'review-action-button--reject': action.key === 'reject',
                 'review-action-button--delete': action.key === 'delete',
                 'review-takedown-action': action.key === 'takedown',
+                'review-action-republish': action.key === 'republish',
                 'review-action-reject': action.key === 'reject',
                 'admin-danger-solid-button': action.key === 'reject',
                 'admin-danger-outline-button': action.key === 'delete',
@@ -4083,6 +4137,7 @@
 
       <Dialog
         v-model:visible="showComparePreview"
+        class="admin-owned-dialog"
         modal
         maximizable
         :draggable="false"
@@ -4130,7 +4185,7 @@
         :closable="!contributorLevelSettingsSaving"
         :closeOnEscape="!contributorLevelSettingsSaving"
         :header="$t('投稿等級設定')"
-        class="contributor-level-settings-modal"
+        class="admin-owned-dialog contributor-level-settings-modal"
         :style="{ width: 'min(54rem, calc(100vw - 2rem))', maxHeight: 'min(90dvh, 48rem)' }"
         :contentStyle="{
           padding: 0,
@@ -4228,7 +4283,7 @@
         modal
         :draggable="false"
         :header="$t('使用者資料統計')"
-        class="submission-typography-dialog user-data-stats-dialog"
+        class="admin-owned-dialog submission-typography-dialog user-data-stats-dialog"
         :style="{ width: 'min(760px, 96vw)', maxHeight: '90vh' }"
         :pt="{
           content: { class: 'user-data-stats-dialog__content' },
@@ -4457,9 +4512,11 @@
         </div>
         <template #footer>
           <Button
-            class="user-data-stats-dialog__close"
+            class="user-data-stats-dialog__close review-action-preview"
             :label="$t('關閉')"
             severity="secondary"
+            size="small"
+            outlined
             @click="closeUserDataStatsDialog"
           />
         </template>
@@ -4467,6 +4524,7 @@
 
       <Dialog
         :visible="showUserDialog"
+        class="admin-owned-dialog"
         @update:visible="showUserDialog = $event"
         :modal="true"
         :draggable="false"
@@ -4546,15 +4604,20 @@
 
         <div class="flex pt-6 justify-end gap-2.5">
           <Button
+            class="user-dialog-cancel-action review-action-preview"
             :label="$t('取消')"
             icon="pi pi-times"
             severity="secondary"
+            outlined
+            size="small"
             @click="closeUserDialog"
           />
           <Button
+            class="user-dialog-save-action review-action-republish"
             :label="editingUser ? $t('更新') : $t('新增')"
             :icon="editingUser ? 'pi pi-check' : 'pi pi-plus'"
             severity="success"
+            size="small"
             @click="saveUser"
             :loading="userSaveLoading"
           />
@@ -4563,6 +4626,7 @@
 
       <Dialog
         :visible="showResetPasswordDialog"
+        class="admin-owned-dialog"
         @update:visible="showResetPasswordDialog = $event"
         @hide="closeResetPasswordDialog"
         :modal="true"
@@ -4644,15 +4708,20 @@
 
         <div class="flex pt-6 justify-end gap-2.5">
           <Button
+            class="reset-password-dialog-cancel-action review-action-preview"
             :label="$t('取消')"
             icon="pi pi-times"
             severity="secondary"
+            outlined
+            size="small"
             @click="closeResetPasswordDialog"
           />
           <Button
+            class="reset-password-dialog-confirm-action review-action-republish"
             :label="$t('確認重設')"
             icon="pi pi-key"
             severity="success"
+            size="small"
             @click="resetPassword"
             :loading="resetPasswordLoading"
           />
@@ -4660,6 +4729,7 @@
       </Dialog>
       <Dialog
         :visible="showNotificationDialog"
+        class="admin-owned-dialog"
         @update:visible="showNotificationDialog = $event"
         :modal="true"
         :draggable="false"
@@ -4792,15 +4862,20 @@
 
         <div class="flex pt-6 justify-end gap-2.5">
           <Button
+            class="announcement-dialog-cancel-action review-action-preview"
             :label="$t('取消')"
             icon="pi pi-times"
             severity="secondary"
+            outlined
+            size="small"
             @click="closeNotificationDialog"
           />
           <Button
+            class="announcement-dialog-save-action review-action-republish"
             :label="editingNotification ? $t('更新') : $t('新增')"
             :icon="editingNotification ? 'pi pi-check' : 'pi pi-plus'"
             severity="success"
+            size="small"
             @click="saveNotification"
             :loading="notificationSaveLoading"
           />
@@ -4809,6 +4884,7 @@
 
       <Dialog
         v-model:visible="showTrashDependencyHelpDialog"
+        class="admin-owned-dialog"
         :modal="true"
         :draggable="false"
         :closeOnEscape="true"
@@ -5083,6 +5159,7 @@ import ContributorLevelBadge from '../components/ContributorLevelBadge.vue'
 import UserOnlineDurationChart from '../components/UserOnlineDurationChart.vue'
 import ReportManagementPanel from '../components/admin/ReportManagementPanel.vue'
 import HomepageSloganManagementPanel from '../components/admin/HomepageSloganManagementPanel.vue'
+import FestivalThemeManagementPanel from '../components/admin/FestivalThemeManagementPanel.vue'
 import {
   SUBMISSION_LEVELS,
   getContributorLevelPalette,
@@ -8431,11 +8508,19 @@ const getTrashBulkResultMessage = (data) => {
   return parts.join('；') || t('沒有可永久刪除的項目')
 }
 
+const TRASH_CONFIRM_PREVIEW_CLASS =
+  'review-action-preview p-button-secondary p-button-outlined p-button-sm'
+const TRASH_CONFIRM_RESTORE_CLASS = 'review-action-republish p-button-success p-button-sm'
+const TRASH_CONFIRM_DELETE_CLASS =
+  'admin-danger-outline-button review-action-delete p-button-danger p-button-outlined p-button-sm'
+
 const confirmRestoreTrashItem = (item) => {
   confirm.require({
     message: t('確定要還原「{name}」嗎？', { name: getTrashDisplayName(item) }),
     header: t('確認還原'),
     icon: 'pi pi-undo',
+    rejectClass: TRASH_CONFIRM_PREVIEW_CLASS,
+    acceptClass: TRASH_CONFIRM_RESTORE_CLASS,
     accept: () => restoreTrashItem(item),
   })
 }
@@ -8469,7 +8554,8 @@ const confirmPermanentDeleteTrashItem = (item) => {
     }),
     header: t('確認永久刪除'),
     icon: 'pi pi-exclamation-triangle',
-    acceptClass: 'p-button-danger',
+    rejectClass: TRASH_CONFIRM_PREVIEW_CLASS,
+    acceptClass: TRASH_CONFIRM_DELETE_CLASS,
     accept: () => permanentlyDeleteTrashItem(item),
   })
 }
@@ -8622,7 +8708,8 @@ const confirmBulkDeleteTrash = () => {
     }),
     header: t('確認清空目前範圍'),
     icon: 'pi pi-exclamation-triangle',
-    acceptClass: 'p-button-danger',
+    rejectClass: TRASH_CONFIRM_PREVIEW_CLASS,
+    acceptClass: TRASH_CONFIRM_DELETE_CLASS,
     accept: bulkDeleteTrashScope,
   })
 }
@@ -10063,6 +10150,9 @@ watch(userStatisticsChartElement, observeStatisticsChartElement)
 watch(reviewSubmissionChartElement, observeStatisticsChartElement)
 
 onMounted(() => {
+  if (typeof document !== 'undefined') {
+    document.documentElement.classList.add('admin-page-active')
+  }
   void loadAdminAttentionSummary()
   if (typeof window === 'undefined') return
   updateStatisticsFontScale()
@@ -10097,6 +10187,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (typeof document !== 'undefined') {
+    document.documentElement.classList.remove('admin-page-active')
+  }
   permanentDeletionPollTimers.forEach((timer) => globalThis.clearTimeout(timer))
   permanentDeletionPollTimers.clear()
   if (typeof window !== 'undefined') {
@@ -11487,6 +11580,10 @@ onBeforeUnmount(() => {
 }
 
 .admin-toolbar__actions .review-refresh-button {
+  margin-left: 0;
+}
+
+.trash-center .review-refresh-button {
   margin-left: 0;
 }
 
@@ -16609,6 +16706,1080 @@ onBeforeUnmount(() => {
 </style>
 
 <style>
+html[data-effective-theme='christmas'].admin-page-active {
+  --admin-christmas-structural-surface: #293f52;
+  --admin-christmas-content-surface: #3e5f72;
+  --admin-christmas-tab-hover-surface: #365968;
+  --admin-christmas-tab-active-surface: #426878;
+}
+
+html[data-effective-theme='christmas'] .admin-container {
+  --bg-primary: var(--admin-christmas-content-surface);
+  --bg-secondary: var(--admin-christmas-structural-surface);
+  --surface-card: var(--admin-christmas-content-surface);
+  --surface-ground: var(--admin-christmas-structural-surface);
+  --panel-bg: var(--admin-christmas-content-surface);
+  --border-color: rgba(222, 199, 142, 0.3);
+  --text-color: #f5eedc;
+  --text-color-secondary: #c5d5d2;
+  --text-primary: #f8f2e8;
+  --text-secondary: #c5d5d2;
+  --p-tabs-tabpanel-background: transparent;
+  --p-tabs-tablist-background: transparent;
+  --p-content-background: var(--admin-christmas-content-surface);
+  --p-content-color: #f5eedc;
+  --p-form-field-background: var(--admin-christmas-structural-surface);
+  --p-form-field-color: #f8f2e8;
+  --p-form-field-placeholder-color: rgba(197, 213, 210, 0.74);
+  --p-form-field-border-color: rgba(222, 199, 142, 0.38);
+  --p-datatable-header-cell-background: var(--admin-christmas-structural-surface);
+  --p-datatable-row-background: var(--admin-christmas-content-surface);
+  --p-datatable-row-color: #f5eedc;
+  min-height: 100%;
+  color: var(--text-primary);
+  background: transparent !important;
+  color-scheme: dark;
+}
+
+html[data-effective-theme='christmas'] .admin-container > .card,
+html[data-effective-theme='christmas'] .admin-container .p-tabs,
+html[data-effective-theme='christmas'] .admin-container .p-tablist,
+html[data-effective-theme='christmas'] .admin-container .p-tablist-content,
+html[data-effective-theme='christmas'] .admin-container .p-tabpanels,
+html[data-effective-theme='christmas'] .admin-container .p-tabpanel {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'] .admin-container .p-tablist-tab-list {
+  border-color: rgba(222, 199, 142, 0.3);
+  background: var(--admin-christmas-structural-surface);
+  background-image: none;
+}
+
+html[data-effective-theme='christmas'] .admin-container .p-tab {
+  border-color: transparent;
+  color: #c5d5d2;
+  background: transparent;
+  background-image: none;
+}
+
+html[data-effective-theme='christmas'] .admin-container .p-tab:hover {
+  color: #f8f2e8;
+  background: var(--admin-christmas-tab-hover-surface);
+  background-image: none;
+}
+
+html[data-effective-theme='christmas'] .admin-container .p-tab.p-tab-active,
+html[data-effective-theme='christmas'] .admin-container .p-tab[data-p-active='true'] {
+  color: #f8f2e8;
+  background: var(--admin-christmas-tab-active-surface);
+  background-image: none;
+}
+
+html[data-effective-theme='christmas'] .admin-container .p-tablist-active-bar {
+  background: #dec78e;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .review-center
+  .review-search-toolbar.admin-toolbar--review {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .review-center
+  .review-group-tabs
+  .p-tablist-tab-list {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .admin-primary-tab-list
+  .p-tablist-tab-list {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-category-toolbar.admin-toolbar,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-search-toolbar.admin-toolbar {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .admin-toolbar--trash-shell.admin-toolbar,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .admin-toolbar--trash.admin-toolbar {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .announcement-management-tabs
+  .p-tablist-tab-list,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .announcement-search-toolbar.admin-toolbar,
+html[data-effective-theme='christmas'].admin-page-active .admin-container .slogan-filters,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .user-search-toolbar.admin-toolbar,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .user-source-tabs
+  .p-tablist-tab-list {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'] .admin-container .admin-insights-card,
+html[data-effective-theme='christmas'] .admin-container .backup-card,
+html[data-effective-theme='christmas'] .admin-container .backup-information-block,
+html[data-effective-theme='christmas'] .admin-container .backup-file-guidance,
+html[data-effective-theme='christmas'] .admin-container .theme-table-wrap,
+html[data-effective-theme='christmas'] .admin-container .slogan-overview,
+html[data-effective-theme='christmas'] .admin-container .slogan-overview__table,
+html[data-effective-theme='christmas'] .admin-container .admin-mobile-card,
+html[data-effective-theme='christmas'] .admin-container .trash-mobile-card,
+html[data-effective-theme='christmas'] .admin-container .report-mobile-card-content {
+  border-color: rgba(222, 199, 142, 0.3);
+  color: #f5eedc;
+  background: var(--admin-christmas-content-surface);
+  background-image: none;
+}
+
+html[data-effective-theme='christmas'] .admin-container .admin-toolbar,
+html[data-effective-theme='christmas'] .admin-container .admin-toolbar--section,
+html[data-effective-theme='christmas'] .admin-container .review-section-header,
+html[data-effective-theme='christmas'] .admin-container .backup-card__header,
+html[data-effective-theme='christmas'] .admin-container .slogan-overview__header,
+html[data-effective-theme='christmas'] .admin-container .theme-table th,
+html[data-effective-theme='christmas'] .admin-container .p-datatable-thead > tr > th {
+  border-color: rgba(222, 199, 142, 0.32);
+  color: #f8f2e8;
+  background: var(--admin-christmas-structural-surface) !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active .admin-container .backup-card,
+html[data-effective-theme='christmas'].admin-page-active .admin-container .backup-card__header,
+html[data-effective-theme='christmas'].admin-page-active .admin-container .backup-card__icon,
+html[data-effective-theme='christmas'].admin-page-active .admin-container .backup-information-block,
+html[data-effective-theme='christmas'].admin-page-active .admin-container .backup-file-guidance {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .review-center
+  .review-section-header,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .review-center
+  .review-request-table
+  .p-datatable-thead
+  > tr
+  > th {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .notification-management-table
+  .p-datatable-thead
+  > tr
+  > th,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .slogan-table
+  .p-datatable-thead
+  > tr
+  > th,
+html[data-effective-theme='christmas'].admin-page-active .admin-container .slogan-overview__header,
+html[data-effective-theme='christmas'].admin-page-active .admin-container .theme-table th {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .trash-table
+  .p-datatable-thead
+  > tr
+  > th {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'] .admin-container .theme-table,
+html[data-effective-theme='christmas'] .admin-container .theme-table td,
+html[data-effective-theme='christmas'] .admin-container .p-datatable,
+html[data-effective-theme='christmas'] .admin-container .p-datatable-table-container,
+html[data-effective-theme='christmas'] .admin-container .p-datatable-table,
+html[data-effective-theme='christmas'] .admin-container .p-datatable-tbody,
+html[data-effective-theme='christmas'] .admin-container .p-datatable-tbody > tr,
+html[data-effective-theme='christmas'] .admin-container .p-datatable-tbody > tr > td,
+html[data-effective-theme='christmas'] .admin-container .p-paginator {
+  border-color: rgba(222, 199, 142, 0.24);
+  color: #f5eedc;
+  background: var(--admin-christmas-content-surface) !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'] .admin-container .p-inputtext,
+html[data-effective-theme='christmas'] .admin-container .p-textarea,
+html[data-effective-theme='christmas'] .admin-container .p-select,
+html[data-effective-theme='christmas'] .admin-container .p-multiselect,
+html[data-effective-theme='christmas'] .admin-container .p-datepicker-input,
+html[data-effective-theme='christmas'] .admin-container .p-password-input {
+  border-color: rgba(222, 199, 142, 0.38);
+  color: #f8f2e8;
+  background: var(--admin-christmas-structural-surface) !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'] .admin-container .p-inputtext::placeholder,
+html[data-effective-theme='christmas'] .admin-container .p-textarea::placeholder,
+html[data-effective-theme='christmas'] .admin-container .p-select-label.p-placeholder,
+html[data-effective-theme='christmas'] .admin-container .p-multiselect-label.p-placeholder {
+  color: rgba(197, 213, 210, 0.74);
+}
+
+html[data-effective-theme='christmas'] .admin-container .p-select-label,
+html[data-effective-theme='christmas'] .admin-container .p-select-dropdown,
+html[data-effective-theme='christmas'] .admin-container .p-multiselect-label,
+html[data-effective-theme='christmas'] .admin-container .p-multiselect-dropdown,
+html[data-effective-theme='christmas'] .admin-container .text-500,
+html[data-effective-theme='christmas'] .admin-container .text-color-secondary {
+  color: #c5d5d2 !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .trash-type-chip.soft-badge,
+html[data-effective-theme='christmas'].admin-page-active
+  .trash-dependency-chip--relation.soft-badge {
+  --soft-badge-bg: rgba(41, 78, 100, 0.9);
+  --soft-badge-border: rgba(215, 237, 245, 0.72);
+  --soft-badge-color: #e5f4f9;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .trash-center
+  .soft-badge.review-status-deleted {
+  --soft-badge-bg: rgba(111, 41, 55, 0.92);
+  --soft-badge-border: rgba(255, 154, 174, 0.8);
+  --soft-badge-color: #ffe1e7;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .trash-dependency-chip--restore-blocked.soft-badge {
+  --soft-badge-bg: rgba(104, 78, 24, 0.9);
+  --soft-badge-border: rgba(251, 215, 120, 0.78);
+  --soft-badge-color: #fff2c3;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .trash-dependency-chip--delete-blocked.soft-badge {
+  --soft-badge-bg: rgba(105, 54, 43, 0.9);
+  --soft-badge-border: rgba(243, 167, 133, 0.78);
+  --soft-badge-color: #ffe4d6;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .trash-dependency-chip--cascade.soft-badge {
+  --soft-badge-bg: rgba(66, 67, 104, 0.92);
+  --soft-badge-border: rgba(184, 186, 246, 0.76);
+  --soft-badge-color: #f0f0ff;
+}
+
+html[data-effective-theme='christmas'].admin-page-active .trash-dependency-chip--clear.soft-badge {
+  --soft-badge-bg: rgba(31, 91, 59, 0.9);
+  --soft-badge-border: rgba(142, 230, 173, 0.76);
+  --soft-badge-color: #e1fae8;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .review-center
+  .soft-badge.review-status-approved {
+  --soft-badge-bg: rgba(30, 112, 68, 0.88);
+  --soft-badge-border: rgba(142, 230, 173, 0.72);
+  --soft-badge-color: #ddfbe7;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .review-center
+  .soft-badge.review-status-takedown {
+  --soft-badge-bg: #293f52;
+  --soft-badge-border: rgba(197, 213, 210, 0.68);
+  --soft-badge-color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .review-center
+  .review-admin-upload-chip.soft-badge {
+  --soft-badge-bg: #294e64;
+  --soft-badge-border: rgba(215, 237, 245, 0.72);
+  --soft-badge-color: #e5f4f9;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .review-center
+  .soft-badge.soft-badge--new-course-category {
+  --soft-badge-bg: #275b65;
+  --soft-badge-border: rgba(155, 234, 221, 0.78);
+  --soft-badge-color: #e3faf6;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .review-center
+  .review-card-action-note--info.review-card-action-note,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .review-center
+  .review-card-action-note--info.review-card-action-note
+  .pi,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .review-center
+  .review-card-action-note--info.review-card-action-note
+  .review-card-action-note__text {
+  color: #e5f4f9 !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .review-center
+  .review-card-action-note--info.review-card-action-note {
+  border-color: rgba(173, 220, 238, 0.76) !important;
+  background: rgba(41, 63, 82, 0.9) !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .p-paginator
+  .p-paginator-current,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .p-paginator
+  .p-paginator-rpp-dropdown
+  .p-select-label {
+  color: #f8f2e8 !important;
+  opacity: 1;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .p-paginator
+  .p-paginator-page:not(.p-paginator-page-selected),
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .p-paginator
+  .p-paginator-first:not(:disabled),
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .p-paginator
+  .p-paginator-prev:not(:disabled),
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .p-paginator
+  .p-paginator-next:not(:disabled),
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .p-paginator
+  .p-paginator-last:not(:disabled) {
+  color: #f8f2e8 !important;
+  opacity: 1;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .p-paginator
+  .p-paginator-first:disabled,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .p-paginator
+  .p-paginator-prev:disabled,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .p-paginator
+  .p-paginator-next:disabled,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .p-paginator
+  .p-paginator-last:disabled {
+  color: #c5d5d2 !important;
+  opacity: 0.72;
+}
+
+html[data-effective-theme='christmas'] .admin-container .p-inputtext:focus,
+html[data-effective-theme='christmas'] .admin-container .p-textarea:focus,
+html[data-effective-theme='christmas'] .admin-container .p-select:focus-within,
+html[data-effective-theme='christmas'] .admin-container .p-multiselect:focus-within {
+  border-color: #dec78e;
+  box-shadow: 0 0 0 2px rgba(222, 199, 142, 0.16);
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .review-center
+  .review-refresh-button.p-button:not(:disabled):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .review-center
+  .review-refresh-button.p-button:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .trash-center
+  .trash-refresh-action.p-button:not(:disabled):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .trash-center
+  .trash-refresh-action.p-button:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-category-add-button.p-button:not(:disabled):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-category-add-button.p-button:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-category-outline-action.p-button:not(:disabled):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-category-outline-action.p-button:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9) !important;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34) !important;
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-category-outline-action.p-button,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-download-action.p-button,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-delete-action.p-button {
+  transition:
+    border-color 0.18s ease,
+    color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    text-shadow 0.18s ease;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-download-action.p-button {
+  border-color: rgba(127, 188, 145, 0.82) !important;
+  color: #f5fff7 !important;
+  background: linear-gradient(135deg, #3d8a64, #2d6c52) !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-download-action.p-button:not(:disabled):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-download-action.p-button:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9) !important;
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #479b70, #347b5c) !important;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34) !important;
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-delete-action.p-button {
+  border-color: rgba(207, 119, 128, 0.78) !important;
+  color: #fff0ee !important;
+  background: linear-gradient(135deg, #8a3d47, #70313a) !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-delete-action.p-button:not(:disabled):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-delete-action.p-button:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9) !important;
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #9b4752, #7f3741) !important;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34) !important;
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-category-outline-action.p-button:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-download-action.p-button:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .course-delete-action.p-button:focus-visible {
+  outline: 2px solid rgba(238, 211, 142, 0.72);
+  outline-offset: 2px;
+}
+
+html[data-effective-theme='christmas'].admin-page-active body .p-dialog.admin-owned-dialog {
+  --bg-primary: var(--admin-christmas-content-surface);
+  --bg-secondary: var(--admin-christmas-structural-surface);
+  --surface-card: var(--admin-christmas-content-surface);
+  --surface-ground: var(--admin-christmas-structural-surface);
+  --border-color: rgba(222, 199, 142, 0.32);
+  --text-color: #f5eedc;
+  --text-color-secondary: #c5d5d2;
+  --text-primary: #f8f2e8;
+  --text-secondary: #c5d5d2;
+  overflow: hidden;
+  border: 1px solid rgba(222, 199, 142, 0.36);
+  color: #f5eedc;
+  background: var(--admin-christmas-content-surface) !important;
+  background-image: none !important;
+  color-scheme: dark;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .p-dialog-header {
+  border-bottom: 1px solid rgba(222, 199, 142, 0.32);
+  color: #f8f2e8;
+  background: var(--admin-christmas-structural-surface) !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .p-dialog-title,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .p-dialog-close-button {
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .p-dialog-content,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .p-dialog-footer {
+  border-color: rgba(222, 199, 142, 0.24);
+  color: #f5eedc;
+  background: var(--admin-christmas-content-surface) !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .trash-dependency-help-section,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .trash-dependency-help-label-card,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .trash-dependency-help-flow-card,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .trash-dependency-help-flow {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .p-inputtext,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .p-textarea,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .p-select,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .p-multiselect,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .p-datepicker-input,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .p-password-input,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .p-steplist,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .p-steppanels,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog
+  .p-steppanel {
+  border-color: rgba(222, 199, 142, 0.36);
+  color: #f8f2e8;
+  background: var(--admin-christmas-structural-surface) !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog.user-data-stats-dialog {
+  --bg-primary: #f5eedc;
+  --bg-secondary: #eadfd9;
+  --surface-card: #f5eedc;
+  --surface-ground: #eadfd9;
+  --border-color: rgba(107, 53, 60, 0.2);
+  --text-color: #173d37;
+  --text-color-secondary: rgba(23, 61, 55, 0.72);
+  --text-primary: #173d37;
+  --text-secondary: rgba(23, 61, 55, 0.72);
+  border: 1px solid rgba(222, 199, 142, 0.46);
+  color: #173d37;
+  background: #f5eedc !important;
+  background-image: none !important;
+  color-scheme: light;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog.user-data-stats-dialog
+  .p-dialog-header,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog.user-data-stats-dialog
+  .p-dialog-content,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog.user-data-stats-dialog
+  .p-dialog-footer {
+  border-color: rgba(107, 53, 60, 0.2);
+  color: #173d37;
+  background: #f5eedc !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog.user-data-stats-dialog
+  .p-dialog-title,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog.user-data-stats-dialog
+  .p-dialog-close-button,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog.user-data-stats-dialog
+  h3,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog.user-data-stats-dialog
+  h4,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog.user-data-stats-dialog
+  strong {
+  color: #173d37;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog.user-data-stats-dialog
+  .user-duration-card,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog.user-data-stats-dialog
+  .user-submission-summary,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog.user-data-stats-dialog
+  .user-submission-overview,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog.user-data-stats-dialog
+  .user-submission-distribution,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog.user-data-stats-dialog
+  .user-submission-record {
+  border-color: rgba(107, 53, 60, 0.2);
+  background: #eadfd9 !important;
+  background-image: none !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog.user-data-stats-dialog
+  .user-submission-status-card {
+  border-color: rgba(107, 53, 60, 0.2);
+  color: rgba(23, 61, 55, 0.72);
+  background: #f5eedc !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog.user-data-stats-dialog
+  .p-inputtext,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-dialog.admin-owned-dialog.user-data-stats-dialog
+  .p-select {
+  border-color: rgba(107, 53, 60, 0.26);
+  color: #173d37;
+  background: #fffaf0 !important;
+  background-image: none !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active body .p-select-overlay,
+html[data-effective-theme='christmas'].admin-page-active body .p-multiselect-overlay,
+html[data-effective-theme='christmas'].admin-page-active body .p-autocomplete-overlay,
+html[data-effective-theme='christmas'].admin-page-active body .p-datepicker-panel,
+html[data-effective-theme='christmas'].admin-page-active body .p-popover {
+  border-color: rgba(222, 199, 142, 0.36);
+  color: #f5eedc;
+  background: var(--admin-christmas-content-surface) !important;
+  background-image: none !important;
+  color-scheme: dark;
+}
+
+html[data-effective-theme='christmas'].admin-page-active body .p-select-option,
+html[data-effective-theme='christmas'].admin-page-active body .p-multiselect-option,
+html[data-effective-theme='christmas'].admin-page-active body .p-autocomplete-option,
+html[data-effective-theme='christmas'].admin-page-active body .p-datepicker-day,
+html[data-effective-theme='christmas'].admin-page-active body .p-datepicker-month,
+html[data-effective-theme='christmas'].admin-page-active body .p-datepicker-year {
+  color: #f5eedc;
+  background: transparent;
+}
+
+html[data-effective-theme='christmas'].admin-page-active body .p-select-option:hover,
+html[data-effective-theme='christmas'].admin-page-active
+  body
+  .p-select-option.p-select-option-selected,
+html[data-effective-theme='christmas'].admin-page-active body .p-multiselect-option:hover,
+html[data-effective-theme='christmas'].admin-page-active body .p-autocomplete-option:hover,
+html[data-effective-theme='christmas'].admin-page-active body .p-datepicker-day:hover {
+  color: #f8f2e8;
+  background: var(--christmas-semester-surface);
+}
+
+html[data-effective-theme='christmas'].admin-page-active .review-action-preview.p-button,
+html[data-effective-theme='christmas'].admin-page-active .review-action-republish.p-button,
+html[data-effective-theme='christmas'].admin-page-active .review-takedown-action.p-button {
+  transition:
+    border-color 0.18s ease,
+    color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    text-shadow 0.18s ease;
+}
+
+html[data-effective-theme='christmas'].admin-page-active .review-action-preview.p-button {
+  border-color: rgba(225, 246, 252, 0.96) !important;
+  color: #245368 !important;
+  background: #d7edf5 !important;
+  background-image: none !important;
+  box-shadow: 0 0.38rem 0.9rem rgba(6, 35, 49, 0.18);
+}
+
+html[data-effective-theme='christmas'].admin-page-active .review-action-preview.p-button:hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .review-action-preview.p-button:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9) !important;
+  color: #173846 !important;
+  background: #e5f4f9 !important;
+  background-image: none !important;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+html[data-effective-theme='christmas'].admin-page-active .review-action-republish.p-button {
+  border-color: rgba(127, 188, 145, 0.82) !important;
+  color: #f5fff7 !important;
+  background: linear-gradient(135deg, #3d8a64, #2d6c52) !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active .review-action-republish.p-button:hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .review-action-republish.p-button:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9) !important;
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #479b70, #347b5c) !important;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .review-action-preview.p-button:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .review-action-republish.p-button:focus-visible {
+  outline: 2px solid rgba(238, 211, 142, 0.72);
+  outline-offset: 2px;
+}
+
+html[data-effective-theme='christmas'].admin-page-active .review-takedown-action.p-button {
+  border-color: rgba(143, 183, 202, 0.82) !important;
+  color: #f5f8fa !important;
+  background: #365968 !important;
+  background-image: none !important;
+  box-shadow: 0 0.38rem 0.9rem rgba(6, 35, 49, 0.18);
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .review-takedown-action.p-button:not(:disabled):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .review-takedown-action.p-button:focus-visible {
+  border-color: rgba(177, 211, 226, 0.9) !important;
+  color: #ffffff !important;
+  background: #426878 !important;
+  background-image: none !important;
+  box-shadow:
+    0 0 0.3rem rgba(126, 190, 219, 0.42),
+    0 0 0.68rem rgba(91, 159, 190, 0.28);
+  text-shadow: none;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .review-takedown-action.p-button:not(:disabled):active {
+  border-color: rgba(143, 183, 202, 0.9) !important;
+  background: #293f52 !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .review-takedown-action.p-button:focus-visible {
+  outline: 2px solid rgba(169, 207, 224, 0.78);
+  outline-offset: 2px;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .review-takedown-action.p-button:not(:disabled):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .review-takedown-action.p-button:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .review-action-reject.p-button.p-button-danger:not(:disabled):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .review-action-reject.p-button.p-button-danger:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .review-action-delete.p-button.p-button-danger:not(:disabled):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .review-action-delete.p-button.p-button-danger:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9) !important;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34) !important;
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .review-action-reject.p-button.p-button-danger:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .review-action-delete.p-button.p-button-danger:focus-visible {
+  outline: 2px solid rgba(238, 211, 142, 0.72);
+  outline-offset: 2px;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .announcement-download-action.p-button,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .theme-download-action.p-button,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .announcement-delete-action.p-button,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .slogan-preview-action.p-button {
+  transition:
+    border-color 0.18s ease,
+    color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    text-shadow 0.18s ease;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .announcement-download-action.p-button,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .theme-download-action.p-button {
+  border-color: rgba(127, 188, 145, 0.82) !important;
+  color: #f5fff7 !important;
+  background: linear-gradient(135deg, #3d8a64, #2d6c52) !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .announcement-download-action.p-button:not(:disabled):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .announcement-download-action.p-button:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .theme-download-action.p-button:not(:disabled):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .theme-download-action.p-button:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9) !important;
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #479b70, #347b5c) !important;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34) !important;
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .slogan-preview-action.p-button {
+  border-color: rgba(225, 246, 252, 0.96) !important;
+  color: #245368 !important;
+  background: #d7edf5 !important;
+  background-image: none !important;
+  box-shadow: 0 0.38rem 0.9rem rgba(6, 35, 49, 0.18);
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .slogan-preview-action.p-button:not(:disabled):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .slogan-preview-action.p-button:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9) !important;
+  color: #173846 !important;
+  background: #e5f4f9 !important;
+  background-image: none !important;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34) !important;
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .announcement-delete-action.p-button {
+  border-color: rgba(207, 119, 128, 0.78) !important;
+  color: #fff0ee !important;
+  background: linear-gradient(135deg, #8a3d47, #70313a) !important;
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .announcement-delete-action.p-button:not(:disabled):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .announcement-delete-action.p-button:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9) !important;
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #9b4752, #7f3741) !important;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34) !important;
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .slogan-refresh-action.p-button:not(:disabled):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .slogan-refresh-action.p-button:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .slogan-admin-delete-action.p-button.p-button-danger:not(:disabled):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .slogan-admin-delete-action.p-button.p-button-danger:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .theme-admin-delete-action.p-button.p-button-danger:not(:disabled):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .theme-admin-delete-action.p-button.p-button-danger:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9) !important;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34) !important;
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .announcement-download-action.p-button:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .theme-download-action.p-button:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .announcement-delete-action.p-button:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .slogan-preview-action.p-button:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .slogan-refresh-action.p-button:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .slogan-admin-delete-action.p-button.p-button-danger:focus-visible,
+html[data-effective-theme='christmas'].admin-page-active
+  .admin-container
+  .theme-admin-delete-action.p-button.p-button-danger:focus-visible {
+  outline: 2px solid rgba(238, 211, 142, 0.72);
+  outline-offset: 2px;
+}
+
 html.dark .review-action-reject.p-button.p-button-danger {
   border-color: var(--p-red-600, #dc2626) !important;
   background: var(--p-red-600, #dc2626) !important;

@@ -2,6 +2,8 @@
   <Dialog
     :visible="localVisible"
     @update:visible="localVisible = $event"
+    class="pdf-preview-dialog"
+    :class="{ 'pdf-preview-dialog-christmas': christmas }"
     :style="{ width: 'min(1200px, 95vw)', height: 'min(90vh, 90dvh)' }"
     :contentStyle="{ flex: '1 1 auto', overflow: 'clip' }"
     :modal="true"
@@ -49,6 +51,18 @@
         @click="maximizeCallback"
       />
     </template>
+    <template #closebutton="{ closeCallback }">
+      <Button
+        icon="pi pi-times"
+        severity="secondary"
+        text
+        rounded
+        class="pdf-preview-close-button"
+        :aria-label="$t('關閉')"
+        style="width: 2.5rem; height: 2.5rem; padding: 0"
+        @click="closeCallback"
+      />
+    </template>
     <template #header>
       <div class="flex align-items-center gap-2.5">
         <i class="pi pi-file-pdf text-2xl" />
@@ -58,7 +72,7 @@
           </div>
           <div
             v-if="metaTextItems.length && !isMobile"
-            class="text-sm mt-1 flex flex-wrap gap-3"
+            class="pdf-preview-meta text-sm mt-1 flex flex-wrap gap-3"
             style="color: var(--text-secondary)"
           >
             <span v-for="item in metaTextItems" :key="item.key" class="flex align-items-center">
@@ -136,6 +150,7 @@
         v-if="showDownload"
         :label="$t('下載')"
         icon="pi pi-download"
+        class="pdf-preview-download-button"
         @click="handleDownload"
         severity="success"
         :loading="downloading"
@@ -154,6 +169,8 @@
     :style="{ width: 'min(520px, 95vw)', height: 'min(90vh, 90dvh)' }"
     :contentStyle="{ flex: '1 1 auto' }"
     :autoFocus="false"
+    class="pdf-preview-discussion-dialog"
+    :class="{ 'pdf-preview-discussion-dialog-christmas': christmas }"
   >
     <template #header>
       <div class="flex align-items-center gap-2.5">
@@ -287,6 +304,10 @@ const props = defineProps({
   showDiscussion: {
     type: Boolean,
     default: true,
+  },
+  christmas: {
+    type: Boolean,
+    default: false,
   },
 })
 

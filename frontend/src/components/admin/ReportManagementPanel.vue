@@ -1,5 +1,9 @@
 <template>
-  <section class="report-management admin-management-typography" :aria-label="$t('回報管理')">
+  <section
+    class="report-management admin-management-typography"
+    :class="{ 'report-management--christmas': effectiveTheme === 'christmas' }"
+    :aria-label="$t('回報管理')"
+  >
     <Tabs v-model:value="activeReportTab" class="mb-4">
       <TabList>
         <Tab value="archive">
@@ -60,6 +64,7 @@
         </div>
         <div class="report-section__actions">
           <Button
+            class="report-preview-action review-action-preview"
             as="a"
             href="https://github.com/NTHU-Physics-SA-IT/PastExamWeb_PHY/issues"
             target="_blank"
@@ -70,6 +75,7 @@
             size="small"
           />
           <Button
+            class="report-refresh-action review-refresh-button"
             icon="pi pi-refresh"
             :label="$t('重新整理')"
             outlined
@@ -105,7 +111,7 @@
           @change="applySystemFilters"
         />
         <Button
-          class="report-filter-submit"
+          class="report-filter-submit report-refresh-action review-refresh-button"
           :label="$t('搜尋')"
           icon="pi pi-search"
           outlined
@@ -212,6 +218,7 @@
               <footer class="report-mobile-card__footer">
                 <div class="report-row-actions">
                   <Button
+                    class="report-preview-action review-action-preview"
                     :label="$t('檢視')"
                     icon="pi pi-search"
                     :aria-label="$t('檢視系統問題回報')"
@@ -223,6 +230,7 @@
                     @click="openSystemReport(data)"
                   />
                   <Button
+                    class="report-admin-delete-action admin-danger-outline-button review-action-delete"
                     :label="$t('刪除')"
                     icon="pi pi-trash"
                     severity="danger"
@@ -272,6 +280,7 @@
             ><footer v-if="!isCardLayout" class="report-desktop-actions">
               <div class="report-row-actions">
                 <Button
+                  class="report-preview-action review-action-preview"
                   :label="$t('檢視')"
                   icon="pi pi-search"
                   :aria-label="$t('檢視系統問題回報')"
@@ -283,6 +292,7 @@
                   @click="openSystemReport(data)"
                 />
                 <Button
+                  class="report-admin-delete-action admin-danger-outline-button review-action-delete"
                   :label="$t('刪除')"
                   icon="pi pi-trash"
                   severity="danger"
@@ -300,7 +310,7 @@
 
       <Dialog
         v-model:visible="systemDetailVisible"
-        class="report-management-dialog"
+        class="report-management-dialog report-management-panel-dialog"
         modal
         :header="$t('系統問題回報詳情')"
         :style="{ width: '680px', maxWidth: '94vw' }"
@@ -365,14 +375,19 @@
           <div class="report-review__actions">
             <span class="report-review__spacer" />
             <Button
+              class="report-preview-action review-action-preview"
               :label="$t('關閉')"
               severity="secondary"
+              size="small"
               outlined
               @click="systemDetailVisible = false"
             />
             <Button
+              class="report-download-action review-action-republish"
               :label="$t('儲存')"
               icon="pi pi-save"
+              severity="success"
+              size="small"
               :loading="systemReadSaving"
               :disabled="systemReadSaving"
               @click="saveSystemReadState"
@@ -421,7 +436,7 @@
           @change="applyCommentFilters"
         />
         <Button
-          class="report-filter-submit"
+          class="report-filter-submit report-refresh-action review-refresh-button"
           :label="$t('搜尋')"
           icon="pi pi-search"
           outlined
@@ -548,6 +563,7 @@
               <footer class="report-mobile-card__footer">
                 <div class="report-row-actions">
                   <Button
+                    class="report-preview-action review-action-preview"
                     :label="isFinal(data.status) ? $t('檢視') : $t('檢視／審核')"
                     icon="pi pi-search"
                     :aria-label="$t('檢視或審核留言回報')"
@@ -557,6 +573,7 @@
                     @click="openCommentReport(data.id)"
                   />
                   <Button
+                    class="report-admin-delete-action admin-danger-outline-button review-action-delete"
                     :label="$t('刪除')"
                     icon="pi pi-trash"
                     severity="danger"
@@ -647,6 +664,7 @@
             ><footer v-if="!isCardLayout" class="report-desktop-actions">
               <div class="report-row-actions">
                 <Button
+                  class="report-preview-action review-action-preview"
                   :label="isFinal(data.status) ? $t('檢視') : $t('檢視／審核')"
                   icon="pi pi-search"
                   :aria-label="$t('檢視或審核留言回報')"
@@ -656,6 +674,7 @@
                   @click="openCommentReport(data.id)"
                 />
                 <Button
+                  class="report-admin-delete-action admin-danger-outline-button review-action-delete"
                   :label="$t('刪除')"
                   icon="pi pi-trash"
                   severity="danger"
@@ -712,7 +731,7 @@
           @change="applyArchiveFilters"
         />
         <Button
-          class="report-filter-submit"
+          class="report-filter-submit report-refresh-action review-refresh-button"
           :label="$t('搜尋')"
           icon="pi pi-search"
           outlined
@@ -828,6 +847,7 @@
               <footer class="report-mobile-card__footer">
                 <div class="report-row-actions">
                   <Button
+                    class="report-preview-action review-action-preview"
                     :label="isFinal(data.status) ? $t('檢視') : $t('檢視／審核')"
                     icon="pi pi-search"
                     :aria-label="$t('檢視或審核考古題回報')"
@@ -837,6 +857,7 @@
                     @click="openArchiveReport(data.id)"
                   />
                   <Button
+                    class="report-admin-delete-action admin-danger-outline-button review-action-delete"
                     :label="$t('刪除')"
                     icon="pi pi-trash"
                     severity="danger"
@@ -904,6 +925,7 @@
           <template #body="{ data }">
             <div v-if="!isCardLayout" class="report-row-actions">
               <Button
+                class="report-preview-action review-action-preview"
                 :label="isFinal(data.status) ? $t('檢視') : $t('檢視／審核')"
                 icon="pi pi-search"
                 :aria-label="$t('檢視或審核考古題回報')"
@@ -913,6 +935,7 @@
                 @click="openArchiveReport(data.id)"
               />
               <Button
+                class="report-admin-delete-action admin-danger-outline-button review-action-delete"
                 :label="$t('刪除')"
                 icon="pi pi-trash"
                 severity="danger"
@@ -958,7 +981,7 @@
           @change="applyWishFilters"
         />
         <Button
-          class="report-filter-submit"
+          class="report-filter-submit report-refresh-action review-refresh-button"
           :label="$t('搜尋')"
           icon="pi pi-search"
           outlined
@@ -1077,6 +1100,7 @@
               <footer class="report-mobile-card__footer">
                 <div class="report-row-actions">
                   <Button
+                    class="report-preview-action review-action-preview"
                     :label="isFinal(data.status) ? $t('檢視') : $t('檢視／審核')"
                     icon="pi pi-search"
                     :aria-label="$t('檢視或審核許願回報')"
@@ -1086,6 +1110,7 @@
                     @click="openWishReport(data.id)"
                   />
                   <Button
+                    class="report-admin-delete-action admin-danger-outline-button review-action-delete"
                     :label="$t('刪除')"
                     icon="pi pi-trash"
                     severity="danger"
@@ -1172,6 +1197,7 @@
             ><footer v-if="!isCardLayout" class="report-desktop-actions">
               <div class="report-row-actions">
                 <Button
+                  class="report-preview-action review-action-preview"
                   :label="isFinal(data.status) ? $t('檢視') : $t('檢視／審核')"
                   icon="pi pi-search"
                   :aria-label="$t('檢視或審核許願回報')"
@@ -1180,6 +1206,7 @@
                   outlined
                   @click="openWishReport(data.id)"
                 /><Button
+                  class="report-admin-delete-action admin-danger-outline-button review-action-delete"
                   :label="$t('刪除')"
                   icon="pi pi-trash"
                   :aria-label="$t('刪除許願回報')"
@@ -1199,7 +1226,7 @@
 
     <Dialog
       v-model:visible="wishReviewVisible"
-      class="report-management-dialog"
+      class="report-management-dialog report-management-panel-dialog"
       modal
       :header="$t('許願回報審核')"
       :style="{ width: '720px', maxWidth: '94vw' }"
@@ -1277,14 +1304,19 @@
         </div>
         <div class="report-review__actions">
           <Button
+            class="report-preview-action review-action-preview"
             :label="$t('關閉')"
             severity="secondary"
-            text
+            size="small"
+            outlined
             @click="wishReviewVisible = false"
           /><Button
             v-if="!isFinal(selectedWishReport.status)"
+            class="report-download-action review-action-republish"
             :label="$t('確認送出')"
             icon="pi pi-check"
+            severity="success"
+            size="small"
             :loading="wishReviewSaving"
             :disabled="!['upheld', 'dismissed'].includes(wishReviewForm.status)"
             @click="confirmSaveWishReview"
@@ -1295,7 +1327,7 @@
 
     <Dialog
       v-model:visible="reviewVisible"
-      class="report-management-dialog"
+      class="report-management-dialog report-management-panel-dialog"
       modal
       :header="$t('留言回報審核')"
       :style="{ width: '720px', maxWidth: '94vw' }"
@@ -1418,24 +1450,31 @@
         </label>
         <div class="report-review__actions">
           <Button
+            class="report-preview-action review-action-preview"
             :label="$t('前往來源')"
             icon="pi pi-external-link"
             severity="secondary"
-            text
+            size="small"
+            outlined
             :disabled="!selectedReport.source_exists"
             @click="openReportSource"
           />
           <span class="report-review__spacer" />
           <Button
+            class="report-preview-action review-action-preview"
             :label="$t('關閉')"
             severity="secondary"
+            size="small"
             outlined
             @click="reviewVisible = false"
           />
           <Button
             v-if="!isFinal(selectedReport.status)"
+            class="report-download-action review-action-republish"
             :label="$t('儲存審核')"
             icon="pi pi-check"
+            severity="success"
+            size="small"
             :loading="reviewSaving"
             :disabled="!canSaveReview"
             @click="confirmSaveReview"
@@ -1446,7 +1485,7 @@
 
     <Dialog
       v-model:visible="archiveReviewVisible"
-      class="report-management-dialog"
+      class="report-management-dialog report-management-panel-dialog"
       modal
       :header="$t('考古題回報審核')"
       :style="{ width: '760px', maxWidth: '94vw' }"
@@ -1558,24 +1597,31 @@
         </label>
         <div class="report-review__actions">
           <Button
+            class="report-preview-action review-action-preview"
             :label="$t('前往來源')"
             icon="pi pi-external-link"
             severity="secondary"
-            text
+            size="small"
+            outlined
             :disabled="!selectedArchiveReport.source_exists"
             @click="openArchiveReportSource"
           />
           <span class="report-review__spacer" />
           <Button
+            class="report-preview-action review-action-preview"
             :label="$t('關閉')"
             severity="secondary"
+            size="small"
             outlined
             @click="archiveReviewVisible = false"
           />
           <Button
             v-if="!isFinal(selectedArchiveReport.status)"
+            class="report-download-action review-action-republish"
             :label="$t('儲存審核')"
             icon="pi pi-check"
+            severity="success"
+            size="small"
             :loading="archiveReviewSaving"
             :disabled="!canSaveArchiveReview"
             @click="confirmSaveArchiveReview"
@@ -1599,7 +1645,14 @@ import { getMessageTemplate } from '@/i18n'
 import { getCurrentUser } from '@/utils/auth'
 import { formatAcademicTerm as formatCanonicalAcademicTerm } from '@/utils/academicTerm'
 import { localizedCourseSnapshotName } from '@/utils/localizedCatalog'
+import { useTheme } from '@/utils/useTheme'
 import { formatRelativeOrAbsoluteDateTime } from '@/utils/time'
+
+const REPORT_CONFIRM_PREVIEW_CLASS =
+  'review-action-preview p-button-secondary p-button-outlined p-button-sm'
+const REPORT_CONFIRM_DOWNLOAD_CLASS = 'review-action-republish p-button-success p-button-sm'
+const REPORT_CONFIRM_DELETE_CLASS =
+  'admin-danger-outline-button review-action-delete p-button-danger p-button-outlined p-button-sm'
 
 const props = defineProps({
   attentionCounts: {
@@ -1619,6 +1672,7 @@ const confirm = useConfirm()
 const toast = useToast()
 const router = useRouter()
 const { t } = useI18n()
+const { effectiveTheme } = useTheme()
 const paginationReportTemplate = computed(() =>
   getMessageTemplate('第 {currentPage} / {totalPages} 頁，共 {totalRecords} 筆')
 )
@@ -1956,7 +2010,9 @@ function confirmSaveWishReview() {
     message: t('審核結果與管理員答覆送出後將無法修改。'),
     icon: 'pi pi-question-circle',
     rejectLabel: t('取消'),
+    rejectClass: REPORT_CONFIRM_PREVIEW_CLASS,
     acceptLabel: t('確認送出'),
+    acceptClass: REPORT_CONFIRM_DOWNLOAD_CLASS,
     defaultFocus: 'reject',
     accept: saveWishReview,
   })
@@ -1995,8 +2051,9 @@ function confirmDeleteWishReport(report) {
     message: t('回報會移至垃圾桶，可由管理員在垃圾桶中還原或永久刪除。'),
     icon: 'pi pi-exclamation-triangle',
     rejectLabel: t('取消'),
+    rejectClass: REPORT_CONFIRM_PREVIEW_CLASS,
     acceptLabel: t('刪除'),
-    acceptClass: 'p-button-danger',
+    acceptClass: REPORT_CONFIRM_DELETE_CLASS,
     defaultFocus: 'reject',
     accept: () => removeWishReport(report),
   })
@@ -2042,8 +2099,9 @@ function confirmDeleteSystemIssue(item) {
     message: t('回報會移至垃圾桶，可由管理員在垃圾桶中還原或永久刪除。'),
     icon: 'pi pi-exclamation-triangle',
     rejectLabel: t('取消'),
+    rejectClass: REPORT_CONFIRM_PREVIEW_CLASS,
     acceptLabel: t('刪除'),
-    acceptClass: 'p-button-danger',
+    acceptClass: REPORT_CONFIRM_DELETE_CLASS,
     accept: () => deleteSystemIssue(item),
   })
 }
@@ -2132,8 +2190,9 @@ function confirmDeleteCommentReport(item) {
     message: t('回報會移至垃圾桶，可由管理員在垃圾桶中還原或永久刪除。'),
     icon: 'pi pi-exclamation-triangle',
     rejectLabel: t('取消'),
+    rejectClass: REPORT_CONFIRM_PREVIEW_CLASS,
     acceptLabel: t('刪除'),
-    acceptClass: 'p-button-danger',
+    acceptClass: REPORT_CONFIRM_DELETE_CLASS,
     accept: () => deleteCommentReport(item),
   })
 }
@@ -2203,8 +2262,9 @@ function confirmSaveReview() {
     message: message.join('\n'),
     icon: deletesComment ? 'pi pi-exclamation-triangle' : 'pi pi-question-circle',
     rejectLabel: t('取消'),
+    rejectClass: REPORT_CONFIRM_PREVIEW_CLASS,
     acceptLabel: t('確認送出'),
-    acceptClass: deletesComment ? 'p-button-danger' : 'p-button-primary',
+    acceptClass: deletesComment ? REPORT_CONFIRM_DELETE_CLASS : REPORT_CONFIRM_DOWNLOAD_CLASS,
     defaultFocus: 'reject',
     accept: saveReview,
   })
@@ -2266,8 +2326,9 @@ function confirmDeleteArchiveReport(item) {
     message: t('回報會移至垃圾桶；考古題、投稿與 PDF 不會受到影響。'),
     icon: 'pi pi-exclamation-triangle',
     rejectLabel: t('取消'),
+    rejectClass: REPORT_CONFIRM_PREVIEW_CLASS,
     acceptLabel: t('刪除'),
-    acceptClass: 'p-button-danger',
+    acceptClass: REPORT_CONFIRM_DELETE_CLASS,
     accept: () => deleteArchiveReport(item),
   })
 }
@@ -2335,7 +2396,9 @@ function confirmSaveArchiveReview() {
       : t('送出後將通知回報者，審核結果無法修改。'),
     icon: takesDown ? 'pi pi-exclamation-triangle' : 'pi pi-question-circle',
     rejectLabel: t('取消'),
+    rejectClass: REPORT_CONFIRM_PREVIEW_CLASS,
     acceptLabel: t('確認送出'),
+    acceptClass: REPORT_CONFIRM_DOWNLOAD_CLASS,
     defaultFocus: 'reject',
     accept: saveArchiveReview,
   })
@@ -2952,6 +3015,479 @@ onBeforeUnmount(teardownCardLayout)
 .system-read-state-tag {
   white-space: nowrap;
 }
+
+/* Report-specific details layered onto the shared Admin Christmas presentation. */
+.report-management--christmas {
+  --report-christmas-structural-surface: var(--admin-christmas-structural-surface, #293f52);
+  --report-christmas-content-surface: var(--admin-christmas-content-surface, #3e5f72);
+  --report-christmas-tab-hover-surface: var(--admin-christmas-tab-hover-surface, #365968);
+  --report-christmas-tab-active-surface: var(--admin-christmas-tab-active-surface, #426878);
+  --report-christmas-row-hover-surface: var(--admin-christmas-tab-active-surface, #426878);
+  --report-christmas-deep-pine: var(--christmas-semester-surface, #173f3a);
+  --report-christmas-secondary-green: var(--christmas-semester-surface, #173f3a);
+  --report-christmas-active-green: var(--christmas-archive-card-surface, #2c594d);
+  --report-christmas-muted-burgundy: #793941;
+  --report-christmas-antique-gold: #dec78e;
+  --report-christmas-warm-ivory: #f5eedc;
+  --report-christmas-strong-ivory: #f8f2e8;
+  --report-christmas-dark-surface: var(--christmas-archive-card-surface, #2c594d);
+  --report-christmas-muted-text: #c5d5d2;
+  --report-christmas-border: rgba(222, 199, 142, 0.38);
+  --bg-primary: var(--report-christmas-content-surface);
+  --bg-secondary: var(--report-christmas-structural-surface);
+  --border-color: var(--report-christmas-border);
+  --text-color: var(--report-christmas-warm-ivory);
+  --text-color-secondary: var(--report-christmas-muted-text);
+  --text-primary: var(--report-christmas-warm-ivory);
+  --text-secondary: var(--report-christmas-muted-text);
+  color: var(--report-christmas-warm-ivory);
+  background: transparent;
+  background-image: none;
+  color-scheme: dark;
+}
+
+.report-management--christmas :deep(.p-tabs),
+.report-management--christmas :deep(.p-tablist),
+.report-management--christmas :deep(.p-tablist-content) {
+  color: var(--report-christmas-strong-ivory);
+  background: transparent;
+}
+
+.report-management--christmas :deep(.p-tablist-tab-list) {
+  border-color: var(--report-christmas-border);
+  background: transparent !important;
+  background-image: none !important;
+}
+
+.report-management--christmas :deep(.p-tab) {
+  border-color: transparent;
+  color: var(--report-christmas-muted-text);
+  background: transparent;
+  background-image: none;
+  box-shadow: none;
+}
+
+.report-management--christmas :deep(.p-tab:hover) {
+  color: var(--report-christmas-strong-ivory);
+  background: var(--report-christmas-tab-hover-surface);
+  background-image: none;
+}
+
+.report-management--christmas :deep(.p-tab.p-tab-active),
+.report-management--christmas :deep(.p-tab[data-p-active='true']) {
+  border-color: var(--report-christmas-antique-gold);
+  color: var(--report-christmas-strong-ivory);
+  background: var(--report-christmas-tab-active-surface);
+  background-image: none;
+}
+
+.report-management--christmas :deep(.p-tablist-active-bar) {
+  height: 2px;
+  background: var(--report-christmas-antique-gold);
+}
+
+.report-management--christmas .report-section {
+  border-bottom-color: var(--report-christmas-border);
+}
+
+.report-management--christmas .report-management__filters {
+  padding: 0.75rem;
+  border: 1px solid var(--report-christmas-border);
+  border-radius: var(--content-border-radius);
+  background: transparent !important;
+  background-image: none !important;
+}
+
+.report-management--christmas .report-management__filters :deep(.p-inputtext),
+.report-management--christmas .report-management__filters :deep(.p-select) {
+  border-color: var(--report-christmas-border);
+  color: var(--report-christmas-strong-ivory);
+  background: var(--report-christmas-structural-surface);
+  background-image: none;
+  box-shadow: none;
+}
+
+.report-management--christmas .report-management__filters :deep(.p-inputtext::placeholder),
+.report-management--christmas .report-management__filters :deep(.p-select-label.p-placeholder) {
+  color: color-mix(in srgb, var(--report-christmas-muted-text) 72%, transparent);
+}
+
+.report-management--christmas .report-management__filters :deep(.p-select-label),
+.report-management--christmas .report-management__filters :deep(.p-select-dropdown) {
+  color: var(--report-christmas-strong-ivory);
+}
+
+.report-management--christmas .report-management__filters :deep(.p-inputtext:focus),
+.report-management--christmas .report-management__filters :deep(.p-select:focus-within),
+.report-management--christmas .report-management__filters :deep(.p-select.p-focus) {
+  border-color: var(--report-christmas-antique-gold);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--report-christmas-antique-gold) 14%, transparent);
+}
+
+.report-management--christmas :deep(.report-management__table),
+.report-management--christmas :deep(.report-management__table .p-datatable-table-container),
+.report-management--christmas :deep(.report-management__table .p-datatable-table),
+.report-management--christmas :deep(.report-management__table .p-datatable-tbody) {
+  color: var(--report-christmas-strong-ivory);
+  background: var(--report-christmas-content-surface);
+  background-image: none;
+}
+
+.report-management--christmas :deep(.report-management__table .p-datatable-thead > tr > th) {
+  border-color: var(--report-christmas-border);
+  color: var(--report-christmas-warm-ivory);
+  background: var(--report-christmas-structural-surface);
+  background-image: none;
+  box-shadow: none;
+}
+
+.report-management--christmas :deep(.report-management__table .p-sortable-column-icon) {
+  color: var(--report-christmas-antique-gold);
+}
+
+.report-management--christmas :deep(.report-management__table .p-datatable-tbody > tr),
+.report-management--christmas :deep(.report-management__table .p-datatable-tbody > tr > td) {
+  border-color: var(--report-christmas-border);
+  color: var(--report-christmas-strong-ivory);
+  background: var(--report-christmas-content-surface) !important;
+  background-image: none !important;
+  box-shadow: none;
+}
+
+.report-management--christmas :deep(.report-management__table .p-datatable-tbody > tr:hover),
+.report-management--christmas :deep(.report-management__table .p-datatable-tbody > tr:hover > td) {
+  background: var(--report-christmas-row-hover-surface) !important;
+  background-image: none !important;
+}
+
+.report-management--christmas :deep(.report-management__table .p-paginator) {
+  border-color: var(--report-christmas-border);
+  color: var(--report-christmas-muted-text);
+  background: var(--report-christmas-content-surface);
+  background-image: none;
+}
+
+.report-management--christmas :deep(.report-management__table .p-paginator button),
+.report-management--christmas :deep(.report-management__table .p-paginator .p-select) {
+  border-color: transparent;
+  color: var(--report-christmas-muted-text);
+  background: transparent;
+}
+
+.report-management--christmas :deep(.report-management__table .p-paginator-page-selected) {
+  border-color: var(--report-christmas-border);
+  color: var(--report-christmas-strong-ivory);
+  background: var(--report-christmas-active-green);
+}
+
+.report-management--christmas :deep(.report-management__table .p-datatable-loading-overlay) {
+  color: var(--report-christmas-antique-gold);
+  background: color-mix(in srgb, var(--report-christmas-content-surface) 84%, transparent);
+}
+
+.report-management--christmas .report-mobile-summary-preview,
+.report-management--christmas .system-report-detail__read-state {
+  border-color: var(--report-christmas-border);
+  background: var(--report-christmas-content-surface);
+  background-image: none;
+}
+
+.report-management--christmas
+  :deep(
+    .p-button:not(.p-button-danger):not(.report-preview-action):not(.report-download-action):not(
+        .report-refresh-action
+      )
+  ) {
+  border-color: var(--report-christmas-border);
+  color: var(--report-christmas-warm-ivory);
+  background-color: var(--report-christmas-secondary-green);
+  background-image: none;
+  box-shadow: none;
+}
+
+.report-management--christmas
+  :deep(
+    .p-button:not(.p-button-danger):not(.report-preview-action):not(.report-download-action):not(
+        .report-refresh-action
+      ):not(:disabled):hover
+  ),
+.report-management--christmas
+  :deep(
+    .p-button:not(.p-button-danger):not(.report-preview-action):not(.report-download-action):not(
+        .report-refresh-action
+      ):focus-visible
+  ) {
+  border-color: var(--report-christmas-antique-gold);
+  color: var(--report-christmas-strong-ivory);
+  background-color: var(--report-christmas-active-green);
+  background-image: none;
+}
+
+.report-management--christmas :deep(.report-refresh-action.p-button) {
+  transition:
+    border-color 0.18s ease,
+    color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    text-shadow 0.18s ease;
+}
+
+.report-management--christmas :deep(.report-refresh-action.p-button:not(:disabled):hover),
+.report-management--christmas :deep(.report-refresh-action.p-button:focus-visible) {
+  border-color: rgba(255, 226, 143, 0.9) !important;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34) !important;
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+.report-management--christmas :deep(.p-button.p-button-danger) {
+  border-color: color-mix(in srgb, var(--report-christmas-warm-ivory) 28%, transparent);
+  color: var(--report-christmas-warm-ivory);
+  background-color: var(--report-christmas-muted-burgundy);
+  background-image: none;
+  box-shadow: none;
+}
+
+.report-management--christmas :deep(.p-button:focus-visible) {
+  outline: 2px solid var(--report-christmas-antique-gold);
+  outline-offset: 2px;
+}
+
+:global(html[data-effective-theme='christmas'] body .p-dialog.report-management-panel-dialog) {
+  --report-christmas-structural-surface: var(--admin-christmas-structural-surface, #293f52);
+  --report-christmas-content-surface: var(--admin-christmas-content-surface, #3e5f72);
+  --report-christmas-deep-pine: var(--christmas-semester-surface, #173f3a);
+  --report-christmas-secondary-green: var(--christmas-semester-surface, #173f3a);
+  --report-christmas-active-green: var(--christmas-archive-card-surface, #2c594d);
+  --report-christmas-muted-burgundy: #793941;
+  --report-christmas-antique-gold: #dec78e;
+  --report-christmas-warm-ivory: #f5eedc;
+  --report-christmas-strong-ivory: #f8f2e8;
+  --report-christmas-dark-surface: var(--christmas-archive-card-surface, #2c594d);
+  --report-christmas-muted-text: #c5d5d2;
+  --report-christmas-border: rgba(222, 199, 142, 0.38);
+  overflow: hidden;
+  border: 1px solid var(--report-christmas-border);
+  color: var(--report-christmas-strong-ivory);
+  background: var(--report-christmas-content-surface);
+  background-image: none;
+  box-shadow: 0 1.5rem 4rem
+    color-mix(in srgb, var(--report-christmas-dark-surface) 72%, transparent);
+  color-scheme: dark;
+}
+
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .p-dialog-header
+) {
+  border-bottom: 1px solid var(--report-christmas-border);
+  color: var(--report-christmas-warm-ivory);
+  background: var(--report-christmas-structural-surface);
+  background-image: none;
+}
+
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .p-dialog-title
+),
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .p-dialog-close-button
+) {
+  color: var(--report-christmas-warm-ivory);
+}
+
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .p-dialog-close-button:hover
+),
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .p-dialog-close-button:focus-visible
+) {
+  color: var(--report-christmas-strong-ivory);
+  background: var(--report-christmas-active-green);
+}
+
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .p-dialog-content
+),
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .p-dialog-footer
+) {
+  color: var(--report-christmas-strong-ivory);
+  background: var(--report-christmas-content-surface);
+  background-image: none;
+}
+
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .report-review__content-block
+),
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .system-report-detail__read-state
+) {
+  border-color: var(--report-christmas-border);
+  background: var(--report-christmas-content-surface);
+  background-image: none;
+}
+
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .report-review__meta
+    dt
+),
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .report-review__meta
+    dd
+    small
+),
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .report-review__field
+    > small
+),
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .system-report-detail__read-state
+    small
+) {
+  color: var(--report-christmas-muted-text);
+}
+
+:global(
+  html[data-effective-theme='christmas'] body .p-dialog.report-management-panel-dialog .p-inputtext
+),
+:global(
+  html[data-effective-theme='christmas'] body .p-dialog.report-management-panel-dialog .p-textarea
+),
+:global(
+  html[data-effective-theme='christmas'] body .p-dialog.report-management-panel-dialog .p-select
+) {
+  border-color: var(--report-christmas-border);
+  color: var(--report-christmas-strong-ivory);
+  background: var(--report-christmas-structural-surface) !important;
+  background-image: none !important;
+  box-shadow: none;
+}
+
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .p-inputtext::placeholder
+),
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .p-textarea::placeholder
+) {
+  color: color-mix(in srgb, var(--report-christmas-muted-text) 72%, transparent);
+}
+
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .p-select-label
+),
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .p-select-dropdown
+) {
+  color: var(--report-christmas-strong-ivory);
+}
+
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .p-inputtext:focus
+),
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .p-textarea:focus
+),
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .p-select:focus-within
+) {
+  border-color: var(--report-christmas-antique-gold);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--report-christmas-antique-gold) 14%, transparent);
+}
+
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .p-button:not(.p-button-danger):not(.report-preview-action):not(.report-download-action)
+) {
+  border-color: var(--report-christmas-border);
+  color: var(--report-christmas-warm-ivory);
+  background-color: var(--report-christmas-secondary-green);
+  background-image: none;
+}
+
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .p-button.p-button-danger
+) {
+  border-color: color-mix(in srgb, var(--report-christmas-warm-ivory) 28%, transparent);
+  color: var(--report-christmas-warm-ivory);
+  background-color: var(--report-christmas-muted-burgundy);
+  background-image: none;
+}
+
+:global(
+  html[data-effective-theme='christmas']
+    body
+    .p-dialog.report-management-panel-dialog
+    .p-button:focus-visible
+) {
+  outline: 2px solid var(--report-christmas-antique-gold);
+  outline-offset: 2px;
+}
+
 @media (max-width: 1399.98px) {
   .report-section__header:not(.report-section__header--system) {
     align-items: flex-start;

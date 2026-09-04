@@ -74,6 +74,215 @@ body {
   font-size: var(--app-font-size-base);
 }
 
+/*
+ * Shared Christmas background authority. The four static atmosphere layers are kept
+ * behind application content; the existing snowfall remains a separate environment effect.
+ */
+html[data-effective-theme='christmas'] {
+  --christmas-page-background-color: #426878;
+  --christmas-page-background-gradient: linear-gradient(
+    135deg,
+    #426878 0%,
+    #3d6272 52%,
+    #365968 100%
+  );
+  --christmas-semester-surface: #173f3a;
+  --christmas-archive-card-surface: #2c594d;
+}
+
+#app.app-christmas-frosted-window {
+  --christmas-background-snow-strength: 0.75;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: var(--christmas-page-background-color);
+  background-image: var(--christmas-page-background-gradient);
+}
+
+/* Layer 2 — two distant, diffuse warm lights. */
+#app.app-christmas-frosted-window::before {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background:
+    radial-gradient(
+      ellipse 48% 42% at 78% 22%,
+      rgba(214, 181, 104, 0.14) 0%,
+      rgba(214, 181, 104, 0.055) 34%,
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 42% 38% at 18% 76%,
+      rgba(255, 241, 214, 0.07) 0%,
+      rgba(255, 241, 214, 0.026) 36%,
+      transparent 74%
+    );
+  content: '';
+  pointer-events: none;
+}
+
+/* Layer 3 — a nearly transparent glass veil, cleanest through the center. */
+#app.app-christmas-frosted-window::after {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  background:
+    radial-gradient(
+      ellipse 62% 60% at 50% 47%,
+      rgba(255, 255, 255, 0.006) 0%,
+      rgba(255, 255, 255, 0.012) 54%,
+      rgba(255, 255, 255, 0.025) 100%
+    ),
+    linear-gradient(118deg, rgba(214, 232, 234, 0.018), rgba(255, 255, 255, 0.004) 58%);
+  content: '';
+  pointer-events: none;
+}
+
+#app.app-christmas-frosted-window > .navbar,
+#app.app-christmas-frosted-window > .content-container {
+  position: relative;
+  z-index: 3;
+}
+
+#app.app-christmas-frosted-window > .content-container {
+  isolation: isolate;
+}
+
+#app.app-christmas-frosted-window > .content-container > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Layer 4 — irregular edge frost with the central reading field left clear. */
+#app.app-christmas-frosted-window > .content-container::before {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 42% 13% at 48% 0%, rgba(255, 255, 255, 0.052), transparent 76%),
+    radial-gradient(ellipse 22% 24% at 4% 0%, rgba(255, 255, 255, 0.08), transparent 78%),
+    radial-gradient(ellipse 18% 27% at 96% 0%, rgba(255, 255, 255, 0.072), transparent 80%),
+    radial-gradient(ellipse 10% 58% at 0% 43%, rgba(255, 255, 255, 0.061), transparent 82%),
+    radial-gradient(ellipse 9% 54% at 100% 38%, rgba(255, 255, 255, 0.056), transparent 82%),
+    radial-gradient(ellipse 15% 13% at 4% 100%, rgba(255, 255, 255, 0.034), transparent 82%),
+    radial-gradient(ellipse 14% 12% at 97% 100%, rgba(255, 255, 255, 0.03), transparent 84%);
+  content: '';
+  pointer-events: none;
+}
+
+/* Existing background snowfall, relocated to the shared app host and visually subdued. */
+.app-christmas-frosted-window > .christmas-snowfall {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  overflow: hidden;
+  contain: strict;
+  opacity: var(--christmas-background-snow-strength);
+  pointer-events: none;
+}
+
+.app-christmas-frosted-window .christmas-background-snowflake {
+  position: absolute;
+  top: -1rem;
+  left: var(--snow-left);
+  width: var(--snow-size);
+  height: var(--snow-size);
+  border-radius: 50%;
+  background: rgba(248, 253, 255, 0.98);
+  filter: blur(var(--snow-blur));
+  opacity: 0;
+  pointer-events: none;
+  animation: christmasBackgroundSnowfall var(--snow-duration) linear var(--snow-delay) infinite;
+  will-change: transform;
+}
+
+.app-christmas-frosted-window .christmas-decorative-snowflake {
+  position: absolute;
+  top: -2rem;
+  left: var(--flake-left);
+  color: rgba(248, 253, 255, 0.94);
+  font-family: 'Arial Unicode MS', 'Noto Sans Symbols 2', sans-serif;
+  font-size: var(--flake-size);
+  font-weight: 400;
+  line-height: 1;
+  text-shadow: 0 0 0.42rem rgba(218, 243, 250, 0.42);
+  filter: blur(var(--flake-blur));
+  opacity: var(--flake-opacity-high);
+  pointer-events: none;
+  animation:
+    christmasDecorativeSnowfall var(--flake-duration) linear var(--flake-delay) infinite,
+    christmasSnowflakeFlicker var(--flake-flicker-duration) ease-in-out var(--flake-flicker-delay)
+      infinite alternate;
+  will-change: transform, opacity;
+}
+
+@keyframes christmasBackgroundSnowfall {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -7vh, 0) rotate(0deg);
+  }
+
+  8% {
+    opacity: var(--snow-opacity);
+  }
+
+  42% {
+    transform: translate3d(var(--snow-drift-mid), 43vh, 0) rotate(var(--snow-rotation-mid));
+  }
+
+  76% {
+    opacity: var(--snow-opacity);
+    transform: translate3d(var(--snow-drift-return), 79vh, 0) rotate(var(--snow-rotation-late));
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--snow-drift-end), 110vh, 0) rotate(var(--snow-rotation));
+  }
+}
+
+@keyframes christmasDecorativeSnowfall {
+  0% {
+    transform: translate3d(0, -8vh, 0) rotate(0deg);
+  }
+
+  43% {
+    transform: translate3d(var(--flake-drift-mid), 45vh, 0) rotate(var(--flake-rotation-mid));
+  }
+
+  78% {
+    transform: translate3d(var(--flake-drift-return), 82vh, 0) rotate(var(--flake-rotation-late));
+  }
+
+  100% {
+    transform: translate3d(var(--flake-drift-end), 112vh, 0) rotate(var(--flake-rotation));
+  }
+}
+
+@keyframes christmasSnowflakeFlicker {
+  from {
+    opacity: var(--flake-opacity-low);
+  }
+
+  to {
+    opacity: var(--flake-opacity-high);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-christmas-frosted-window .christmas-background-snowflake,
+  .app-christmas-frosted-window .christmas-decorative-snowflake {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .app-christmas-frosted-window .christmas-background-snowflake:nth-child(n + 49),
+  .app-christmas-frosted-window .christmas-decorative-snowflake:nth-of-type(n + 85) {
+    display: none;
+  }
+}
+
 .p-error {
   color: var(--p-form-field-invalid-placeholder-color);
 }
@@ -1574,4 +1783,1091 @@ html.dark {
 .p-component,
 .p-component * {
   transition: none !important;
+}
+
+/* Shared Christmas button snow: geometry is supplied once per button by the snow engine. */
+html[data-effective-theme='christmas'] [data-christmas-button-snow='true'] {
+  position: relative;
+  isolation: isolate;
+  overflow: visible;
+}
+
+html[data-effective-theme='christmas'] [data-christmas-button-snow='true']::after {
+  position: absolute;
+  z-index: 3;
+  top: calc(var(--christmas-snow-depth) * -0.48 + var(--christmas-snow-edge-offset));
+  right: -0.06rem;
+  left: -0.06rem;
+  height: var(--christmas-snow-depth);
+  border-radius: 52% 48% 42% 58% / 82% 84% 34% 30%;
+  background:
+    radial-gradient(
+      ellipse var(--christmas-snow-radius-1) var(--christmas-snow-height-1) at
+        var(--christmas-snow-x-1) 100%,
+      rgba(255, 255, 255, 0.98) 0 66%,
+      transparent 69%
+    ),
+    radial-gradient(
+      ellipse var(--christmas-snow-radius-2) var(--christmas-snow-height-2) at
+        var(--christmas-snow-x-2) 100%,
+      rgba(250, 253, 252, 0.98) 0 67%,
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse var(--christmas-snow-radius-3) var(--christmas-snow-height-3) at
+        var(--christmas-snow-x-3) 100%,
+      rgba(255, 255, 255, 0.99) 0 68%,
+      transparent 71%
+    ),
+    radial-gradient(
+      ellipse var(--christmas-snow-radius-4) var(--christmas-snow-height-4) at
+        var(--christmas-snow-x-4) 100%,
+      rgba(248, 252, 251, 0.98) 0 66%,
+      transparent 69%
+    ),
+    radial-gradient(
+      ellipse var(--christmas-snow-radius-5) var(--christmas-snow-height-5) at
+        var(--christmas-snow-x-5) 100%,
+      rgba(255, 255, 255, 0.98) 0 67%,
+      transparent 70%
+    ),
+    linear-gradient(
+      to bottom,
+      transparent 0 37%,
+      rgba(255, 255, 255, 0.98) 39% 72%,
+      rgba(239, 246, 244, 0.96) 100%
+    );
+  box-shadow: 0 0.09rem 0.12rem rgba(18, 44, 50, 0.15);
+  content: '';
+  pointer-events: none;
+}
+
+.christmas-button-snow-particle {
+  position: absolute;
+  z-index: 4;
+  top: calc(var(--christmas-snow-depth, 0.3rem) * -0.16);
+  left: var(--christmas-particle-x);
+  width: var(--christmas-particle-size);
+  height: var(--christmas-particle-size);
+  border-radius: 48% 52% 58% 42%;
+  background: rgba(252, 254, 253, 0.98);
+  box-shadow: 0 0.06rem 0.12rem rgba(228, 241, 239, 0.34);
+  opacity: var(--christmas-particle-opacity);
+  pointer-events: none;
+  transform: translate3d(-50%, 0, 0) rotate(0deg);
+  animation: christmasButtonSnowParticle var(--christmas-particle-duration)
+    cubic-bezier(0.22, 0.7, 0.34, 1) var(--christmas-particle-delay) both;
+  will-change: transform, opacity;
+}
+
+@keyframes christmasButtonSnowParticle {
+  0% {
+    opacity: var(--christmas-particle-opacity);
+    transform: translate3d(-50%, 0, 0) rotate(0deg);
+  }
+
+  72% {
+    opacity: calc(var(--christmas-particle-opacity) * 0.64);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(
+        calc(-50% + var(--christmas-particle-drift)),
+        var(--christmas-particle-fall),
+        0
+      )
+      rotate(var(--christmas-particle-rotation));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .christmas-button-snow-particle {
+    display: none;
+    animation: none;
+  }
+}
+
+/* Christmas presentation for the shared local-login dialog only. */
+body .p-dialog.login-dialog-christmas {
+  overflow: hidden;
+  border: 1px solid rgba(222, 199, 142, 0.42);
+  border-radius: 0.9rem;
+  background: #f5eedc;
+  box-shadow:
+    0 1.5rem 4rem rgba(2, 13, 18, 0.46),
+    0 0 0 1px rgba(245, 238, 220, 0.08);
+}
+
+body .p-dialog.login-dialog-christmas .p-dialog-header {
+  position: relative;
+  padding-bottom: 1.15rem;
+  border-bottom: 0;
+  color: #f8f2e8;
+  background: linear-gradient(135deg, #17483f 0%, #103a34 46%, #60353a 72%, #793941 100%);
+}
+
+body .p-dialog.login-dialog-christmas .p-dialog-header::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 0.42rem;
+  background: linear-gradient(180deg, #f5eedc 0%, #eee4d2 100%);
+  clip-path: polygon(0 0, 100% 0, 100% 72%, 78% 84%, 56% 74%, 34% 88%, 13% 76%, 0 84%);
+  content: '';
+  pointer-events: none;
+}
+
+body .p-dialog.login-dialog-christmas .p-dialog-title {
+  color: #f8f2e8;
+  letter-spacing: 0.04em;
+}
+
+body .p-dialog.login-dialog-christmas .p-dialog-close-button {
+  color: #f5eedc;
+  background: rgba(245, 238, 220, 0.08);
+}
+
+body .p-dialog.login-dialog-christmas .p-dialog-close-button:hover {
+  color: #ffffff;
+  background: rgba(245, 238, 220, 0.15);
+}
+
+body .p-dialog.login-dialog-christmas .p-dialog-content {
+  color: #173d37;
+  background:
+    radial-gradient(circle at 100% 0, rgba(202, 171, 100, 0.12), transparent 42%), #f5eedc;
+}
+
+body .p-dialog.login-dialog-christmas .p-floatlabel label {
+  color: #526b64;
+  background: #f5eedc;
+}
+
+body .p-dialog.login-dialog-christmas .p-inputtext,
+body .p-dialog.login-dialog-christmas .p-password-input {
+  border-color: rgba(23, 72, 63, 0.34);
+  color: #173d37;
+  background: rgba(255, 253, 247, 0.88);
+}
+
+body .p-dialog.login-dialog-christmas .p-inputtext:focus,
+body .p-dialog.login-dialog-christmas .p-password-input:focus {
+  border-color: #a88743;
+  box-shadow: 0 0 0 0.16rem rgba(168, 135, 67, 0.18);
+}
+
+body .p-dialog.login-dialog-christmas .p-button-primary {
+  border-color: #6b353c;
+  color: #f8f2e8;
+  background: linear-gradient(135deg, #793941 0%, #60353a 100%);
+  box-shadow: 0 0.35rem 0.8rem rgba(68, 27, 31, 0.18);
+}
+
+body .p-dialog.login-dialog-christmas .p-button-primary:hover,
+body .p-dialog.login-dialog-christmas .p-button-primary:focus-visible {
+  border-color: #c5a660;
+  background: linear-gradient(135deg, #83434a 0%, #673239 100%);
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+body .p-dialog.wish-slogan-dialog-christmas .p-button.wish-slogan-cancel-button {
+  border-color: rgba(225, 246, 252, 0.96);
+  color: #245368;
+  background: #d7edf5;
+  box-shadow: 0 0.38rem 0.9rem rgba(6, 35, 49, 0.18);
+}
+
+body
+  .p-dialog.wish-slogan-dialog-christmas
+  .p-button.wish-slogan-cancel-button:not(:disabled):hover,
+body .p-dialog.wish-slogan-dialog-christmas .p-button.wish-slogan-cancel-button:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9);
+  color: #173846;
+  background: #e5f4f9;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+body .p-dialog.wish-slogan-dialog-christmas .p-button.wish-slogan-cancel-button:focus-visible {
+  outline: 2px solid rgba(238, 211, 142, 0.72);
+  outline-offset: 2px;
+}
+
+body .p-dialog.wish-slogan-dialog-christmas .p-button.wish-slogan-confirm-button {
+  border-color: rgba(127, 188, 145, 0.82);
+  color: #f5fff7;
+  background: linear-gradient(135deg, #3d8a64, #2d6c52);
+  transition:
+    border-color 0.18s ease,
+    color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    text-shadow 0.18s ease;
+}
+
+body
+  .p-dialog.wish-slogan-dialog-christmas
+  .p-button.wish-slogan-confirm-button:not(:disabled):hover,
+body .p-dialog.wish-slogan-dialog-christmas .p-button.wish-slogan-confirm-button:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9);
+  color: #ffffff;
+  background: linear-gradient(135deg, #479b70, #347b5c);
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+body .p-dialog.wish-slogan-dialog-christmas .p-button.wish-slogan-confirm-button:focus-visible {
+  outline: 2px solid rgba(238, 211, 142, 0.72);
+  outline-offset: 2px;
+}
+
+/* Login-inspired Christmas presentation for the Archive edit dialog only. */
+body .p-dialog.archive-edit-dialog-christmas {
+  overflow: hidden;
+  border: 1px solid rgba(222, 199, 142, 0.46);
+  border-radius: 0.9rem;
+  color: #173d37;
+  background: #f5eedc;
+  box-shadow:
+    0 1.5rem 4rem rgba(2, 13, 18, 0.48),
+    0 0 0 1px rgba(245, 238, 220, 0.08);
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-dialog-header {
+  position: relative;
+  padding-bottom: 1.15rem;
+  border-bottom: 0;
+  color: #f8f2e8;
+  background: linear-gradient(135deg, #17483f 0%, #103a34 46%, #60353a 72%, #793941 100%);
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-dialog-header::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 0.42rem;
+  background: linear-gradient(180deg, #f5eedc 0%, #eee4d2 100%);
+  clip-path: polygon(0 0, 100% 0, 100% 72%, 78% 84%, 56% 74%, 34% 88%, 13% 76%, 0 84%);
+  content: '';
+  pointer-events: none;
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-dialog-title {
+  color: #f8f2e8;
+  letter-spacing: 0.04em;
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-dialog-close-button {
+  border: 1px solid rgba(222, 199, 142, 0.2);
+  color: #f5eedc;
+  background: rgba(245, 238, 220, 0.08);
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-dialog-close-button:hover,
+body .p-dialog.archive-edit-dialog-christmas .p-dialog-close-button:focus-visible {
+  border-color: rgba(222, 199, 142, 0.68);
+  color: #fffdf7;
+  background: rgba(197, 166, 96, 0.17);
+  box-shadow: 0 0 0 0.14rem rgba(222, 199, 142, 0.15);
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-dialog-content {
+  color: #173d37;
+  background:
+    radial-gradient(circle at 100% 0, rgba(202, 171, 100, 0.12), transparent 42%), #f5eedc;
+}
+
+body .p-dialog.archive-edit-dialog-christmas label {
+  color: #294f47;
+  font-weight: 650;
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-inputtext,
+body .p-dialog.archive-edit-dialog-christmas .p-select {
+  border-color: rgba(23, 72, 63, 0.34);
+  color: #173d37;
+  background: rgba(255, 253, 247, 0.9);
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-inputtext::placeholder,
+body .p-dialog.archive-edit-dialog-christmas .p-select-label.p-placeholder {
+  color: #71827d;
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-inputtext:focus,
+body .p-dialog.archive-edit-dialog-christmas .p-select:focus-within {
+  border-color: #a88743;
+  box-shadow: 0 0 0 0.16rem rgba(168, 135, 67, 0.18);
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-autocomplete-dropdown,
+body .p-dialog.archive-edit-dialog-christmas .p-datepicker-dropdown,
+body .p-dialog.archive-edit-dialog-christmas .p-select-dropdown {
+  border-color: rgba(23, 72, 63, 0.24);
+  color: #315e54;
+  background: rgba(238, 228, 210, 0.62);
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-checkbox-box {
+  border-color: rgba(23, 72, 63, 0.4);
+  background: rgba(255, 253, 247, 0.9);
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-checkbox-checked .p-checkbox-box {
+  border-color: #17483f;
+  color: #f8f2e8;
+  background: #17483f;
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-divider::before {
+  border-color: rgba(168, 135, 67, 0.24);
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-button.archive-edit-cancel-button,
+body .p-dialog.archive-upload-dialog-christmas .p-button.archive-upload-back-button {
+  border-color: rgba(225, 246, 252, 0.96);
+  color: #245368;
+  background: #d7edf5;
+  box-shadow: 0 0.38rem 0.9rem rgba(6, 35, 49, 0.18);
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-button.archive-edit-cancel-button:hover,
+body .p-dialog.archive-edit-dialog-christmas .p-button.archive-edit-cancel-button:focus-visible,
+body .p-dialog.archive-upload-dialog-christmas .p-button.archive-upload-back-button:hover,
+body .p-dialog.archive-upload-dialog-christmas .p-button.archive-upload-back-button:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9);
+  color: #173846;
+  background: #e5f4f9;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-button.archive-edit-save-button {
+  border-color: rgba(127, 188, 145, 0.82);
+  color: #f5fff7;
+  background: linear-gradient(135deg, #3d8a64, #2d6c52);
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-button.archive-edit-save-button:hover,
+body .p-dialog.archive-edit-dialog-christmas .p-button.archive-edit-save-button:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9);
+  color: #ffffff;
+  background: linear-gradient(135deg, #479b70, #347b5c);
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+body .p-dialog.archive-edit-dialog-christmas .p-button.archive-edit-cancel-button:focus-visible,
+body .p-dialog.archive-edit-dialog-christmas .p-button.archive-edit-save-button:focus-visible,
+body .p-dialog.archive-upload-dialog-christmas .p-button.archive-upload-back-button:focus-visible {
+  outline: 2px solid rgba(238, 211, 142, 0.72);
+  outline-offset: 2px;
+}
+
+/* The upload wizard opts into the edit dialog's Christmas shell above. */
+body .p-dialog.archive-upload-dialog-christmas .p-dialog-content {
+  background: #f5eedc !important;
+}
+
+body .p-dialog.my-submissions-dialog-christmas {
+  overflow: hidden;
+  border: 1px solid rgba(222, 199, 142, 0.46);
+  border-radius: 0.9rem;
+  background: #f5eedc;
+}
+
+body .p-dialog.my-submissions-dialog-christmas .p-dialog-header,
+body .p-dialog.my-submissions-dialog-christmas .p-dialog-content {
+  color: #173d37;
+  background: #f5eedc !important;
+}
+
+body .p-dialog.my-submissions-dialog-christmas .submission-summary,
+body .p-dialog.my-submissions-dialog-christmas .submission-status-card,
+body .p-dialog.my-submissions-dialog-christmas .submission-empty {
+  border-color: rgba(107, 53, 60, 0.2);
+  background: #eadfd9;
+  box-shadow: inset 0 1px 0 rgba(255, 253, 247, 0.55);
+}
+
+body .p-dialog.wish-detail-dialog-christmas {
+  overflow: hidden;
+  border: 1px solid rgba(222, 199, 142, 0.46);
+  border-radius: 0.9rem;
+  background: #f5eedc;
+}
+
+body .p-dialog.wish-detail-dialog-christmas .p-dialog-header,
+body .p-dialog.wish-detail-dialog-christmas .p-dialog-content {
+  color: #173d37;
+  background: #f5eedc !important;
+}
+
+body .p-dialog.wish-detail-dialog-christmas .p-button.wish-detail-help-button {
+  border-color: rgba(127, 188, 145, 0.82);
+  color: #f5fff7;
+  background: linear-gradient(135deg, #3d8a64, #2d6c52);
+  transition:
+    border-color 0.18s ease,
+    color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    text-shadow 0.18s ease;
+}
+
+body .p-dialog.wish-detail-dialog-christmas .p-button.wish-detail-delete-button {
+  border-color: rgba(207, 119, 128, 0.78);
+  color: #fff0ee;
+  background: linear-gradient(135deg, #8a3d47, #70313a);
+  transition:
+    border-color 0.18s ease,
+    color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    text-shadow 0.18s ease;
+}
+
+body .p-dialog.wish-detail-dialog-christmas .p-button.wish-detail-help-button:not(:disabled):hover,
+body .p-dialog.wish-detail-dialog-christmas .p-button.wish-detail-help-button:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9);
+  color: #ffffff;
+  background: linear-gradient(135deg, #479b70, #347b5c);
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+body
+  .p-dialog.wish-detail-dialog-christmas
+  .p-button.wish-detail-delete-button:not(:disabled):hover,
+body .p-dialog.wish-detail-dialog-christmas .p-button.wish-detail-delete-button:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9);
+  color: #ffffff;
+  background: linear-gradient(135deg, #9b4752, #7f3741);
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+body .p-dialog.wish-detail-dialog-christmas .p-button.wish-detail-help-button:focus-visible,
+body .p-dialog.wish-detail-dialog-christmas .p-button.wish-detail-delete-button:focus-visible {
+  outline: 2px solid rgba(238, 211, 142, 0.72);
+  outline-offset: 2px;
+}
+
+body .p-dialog.archive-upload-dialog-christmas .p-stepper,
+body .p-dialog.archive-upload-dialog-christmas .p-steplist,
+body .p-dialog.archive-upload-dialog-christmas .p-steppanels,
+body .p-dialog.archive-upload-dialog-christmas .p-steppanel {
+  color: #294f47;
+  background: #f5eedc !important;
+}
+
+body .p-dialog.archive-upload-dialog-christmas .p-steplist {
+  border-color: rgba(168, 135, 67, 0.22);
+}
+
+body .p-dialog.archive-upload-dialog-christmas .p-step-header::after {
+  display: none;
+  content: none;
+}
+
+body .p-dialog.archive-upload-dialog-christmas .p-step-header > .christmas-button-snow-particle {
+  display: none;
+}
+
+body .p-dialog.archive-upload-dialog-christmas .p-button.archive-upload-file-picker-button::after {
+  display: none;
+  content: none;
+}
+
+body
+  .p-dialog.archive-upload-dialog-christmas
+  .p-button.archive-upload-file-picker-button
+  > .christmas-button-snow-particle {
+  display: none;
+}
+
+body .p-dialog.archive-upload-dialog-christmas .p-stepper-separator {
+  background: rgba(168, 135, 67, 0.22);
+}
+
+body .p-dialog.archive-upload-dialog-christmas .p-step-number {
+  border-color: rgba(23, 72, 63, 0.25);
+  color: #526b64;
+  background: rgba(255, 253, 247, 0.88);
+}
+
+body .p-dialog.archive-upload-dialog-christmas .p-step-title {
+  color: #526b64;
+}
+
+body .p-dialog.archive-upload-dialog-christmas .p-step-active .p-step-number {
+  border-color: rgba(168, 135, 67, 0.72);
+  color: #f8f2e8;
+  background: #17483f;
+}
+
+body .p-dialog.archive-upload-dialog-christmas .p-step-active .p-step-title {
+  color: #17483f;
+}
+
+body .p-dialog.archive-upload-dialog-christmas .request-mode-panel,
+body .p-dialog.archive-upload-dialog-christmas .new-category-grid,
+body .p-dialog.archive-upload-dialog-christmas .semester-picker {
+  border-color: rgba(23, 72, 63, 0.22);
+  color: #294f47;
+  background: rgba(255, 253, 247, 0.62);
+}
+
+body .p-dialog.archive-upload-dialog-christmas .p-fileupload {
+  border-color: rgba(23, 72, 63, 0.22);
+  color: #294f47;
+  background: #f5eedc !important;
+}
+
+body .p-dialog.archive-upload-dialog-christmas .surface-ground,
+body .p-dialog.archive-upload-dialog-christmas .surface-50 {
+  border-color: rgba(23, 72, 63, 0.2) !important;
+  color: #294f47 !important;
+  background: rgba(255, 253, 247, 0.7) !important;
+}
+
+body .p-dialog.archive-upload-dialog-christmas .p-fileupload-header,
+body .p-dialog.archive-upload-dialog-christmas .p-fileupload .surface-50,
+body .p-dialog.archive-upload-dialog-christmas .p-fileupload-content {
+  border-color: rgba(23, 72, 63, 0.2) !important;
+  color: #294f47 !important;
+  background: #f5eedc !important;
+}
+
+body .p-dialog.archive-upload-dialog-christmas .semester-picker-value {
+  border-color: rgba(168, 135, 67, 0.2);
+  color: #294f47;
+}
+
+body .p-dialog.archive-upload-dialog-christmas .semester-year {
+  color: #526b64;
+}
+
+body .p-dialog.archive-upload-dialog-christmas .semester-option {
+  border-color: rgba(23, 72, 63, 0.26);
+  color: #294f47;
+  background: rgba(255, 253, 247, 0.88);
+}
+
+body .p-dialog.archive-upload-dialog-christmas .semester-option:hover {
+  border-color: #a88743;
+  color: #173d37;
+  background: rgba(222, 199, 142, 0.2);
+}
+
+body .p-dialog.archive-upload-dialog-christmas .semester-option.selected {
+  border-color: rgba(168, 135, 67, 0.72);
+  color: #f8f2e8;
+  background: #345b52;
+  box-shadow: 0 0 0 1px rgba(168, 135, 67, 0.18);
+}
+
+body .p-dialog.archive-upload-dialog-christmas .p-button.archive-upload-next-button {
+  border-color: rgba(127, 188, 145, 0.82);
+  color: #f5fff7;
+  background: linear-gradient(135deg, #3d8a64, #2d6c52);
+  box-shadow: 0 0.38rem 0.9rem rgba(6, 35, 49, 0.18);
+}
+
+body
+  .p-dialog.archive-upload-dialog-christmas
+  .p-button.archive-upload-next-button:not(:disabled):hover,
+body .p-dialog.archive-upload-dialog-christmas .p-button.archive-upload-next-button:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9);
+  color: #ffffff;
+  background: linear-gradient(135deg, #479b70, #347b5c);
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+body .p-dialog.archive-upload-dialog-christmas .p-button.archive-upload-next-button:focus-visible {
+  outline: 2px solid rgba(238, 211, 142, 0.72);
+  outline-offset: 2px;
+}
+
+body .archive-edit-overlay-christmas {
+  border: 1px solid rgba(222, 199, 142, 0.46);
+  color: #294f47;
+  background: #f5eedc;
+  box-shadow:
+    0 0.85rem 2rem rgba(2, 13, 18, 0.24),
+    0 0 0 1px rgba(245, 238, 220, 0.12);
+}
+
+body .archive-edit-overlay-christmas .p-datepicker-header,
+body .archive-edit-overlay-christmas .p-select-header {
+  border-color: rgba(168, 135, 67, 0.22);
+  color: #173d37;
+  background: #f5eedc;
+}
+
+body .archive-edit-overlay-christmas .p-datepicker-decade,
+body .archive-edit-overlay-christmas .p-datepicker-year,
+body .archive-edit-overlay-christmas .p-datepicker-month,
+body .archive-edit-overlay-christmas .p-datepicker-day,
+body .archive-edit-overlay-christmas .p-select-option,
+body .archive-edit-overlay-christmas .p-autocomplete-option,
+body .archive-edit-overlay-christmas .p-select-empty-message,
+body .archive-edit-overlay-christmas .p-autocomplete-empty-message {
+  color: #294f47;
+}
+
+body .archive-edit-overlay-christmas .p-datepicker-prev-button,
+body .archive-edit-overlay-christmas .p-datepicker-next-button,
+body .archive-edit-overlay-christmas .p-datepicker-select-month,
+body .archive-edit-overlay-christmas .p-datepicker-select-year {
+  color: #315e54;
+}
+
+body .archive-edit-overlay-christmas .p-datepicker-year:not(.p-datepicker-year-selected):hover,
+body .archive-edit-overlay-christmas .p-datepicker-month:not(.p-datepicker-month-selected):hover,
+body .archive-edit-overlay-christmas .p-datepicker-day:not(.p-datepicker-day-selected):hover,
+body .archive-edit-overlay-christmas .p-select-option:not(.p-select-option-selected):hover,
+body .archive-edit-overlay-christmas .p-select-option.p-focus:not(.p-select-option-selected),
+body
+  .archive-edit-overlay-christmas
+  .p-autocomplete-option:not(.p-autocomplete-option-selected):hover,
+body
+  .archive-edit-overlay-christmas
+  .p-autocomplete-option.p-focus:not(.p-autocomplete-option-selected) {
+  color: #173d37;
+  background: rgba(168, 135, 67, 0.14);
+}
+
+body .archive-edit-overlay-christmas .p-datepicker-year-selected,
+body .archive-edit-overlay-christmas .p-datepicker-month-selected,
+body .archive-edit-overlay-christmas .p-datepicker-day-selected,
+body .archive-edit-overlay-christmas .p-select-option-selected,
+body .archive-edit-overlay-christmas .p-autocomplete-option-selected {
+  color: #f8f2e8;
+  background: #345b52;
+}
+
+/* Christmas archive filters are intentionally light against the dark night panel. */
+body .archive-filter-overlay-christmas {
+  border: 1px solid rgba(188, 151, 76, 0.68);
+  color: #294f47;
+  background: #e7dcc4;
+  box-shadow:
+    0 0.85rem 2rem rgba(2, 13, 18, 0.28),
+    0 0 0 1px rgba(245, 238, 220, 0.14);
+}
+
+body .archive-filter-overlay-christmas .p-select-header {
+  border-color: rgba(168, 135, 67, 0.24);
+  background: #ddd0b5;
+}
+
+body .archive-filter-overlay-christmas .p-select-filter {
+  border-color: rgba(69, 99, 91, 0.36);
+  color: #294f47;
+  background: #f4eddf;
+}
+
+body .archive-filter-overlay-christmas .p-select-filter:focus {
+  border-color: #c0953e;
+  box-shadow: 0 0 0 2px rgba(255, 226, 143, 0.3);
+}
+
+body .archive-filter-overlay-christmas .p-select-filter-icon,
+body .archive-filter-overlay-christmas .p-select-option,
+body .archive-filter-overlay-christmas .p-select-empty-message {
+  color: #294f47;
+}
+
+body .archive-filter-overlay-christmas .p-select-option:not(.p-select-option-selected):hover,
+body .archive-filter-overlay-christmas .p-select-option.p-focus:not(.p-select-option-selected) {
+  color: #173d37;
+  background: rgba(168, 135, 67, 0.17);
+}
+
+body .archive-filter-overlay-christmas .p-select-option-selected {
+  color: #fff8e8;
+  background: #713b42;
+}
+
+/* Opt-in Christmas presentation for the Archive PDF preview flow. */
+body .p-dialog.pdf-preview-dialog-christmas,
+body .p-dialog.pdf-preview-discussion-dialog-christmas {
+  --bg-primary: #fffdf7;
+  --bg-secondary: #f1e9d9;
+  --border-color: rgba(23, 72, 63, 0.22);
+  --text-color: #173d37;
+  --text-primary: #173d37;
+  --text-secondary: #526b64;
+  --primary-color: #17483f;
+  overflow: hidden;
+  border: 1px solid rgba(222, 199, 142, 0.48);
+  border-radius: 0.9rem;
+  color: var(--text-primary);
+  background: #f5eedc;
+  box-shadow:
+    0 1.6rem 4.5rem rgba(1, 11, 18, 0.58),
+    0 0 0 1px rgba(245, 238, 220, 0.07);
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .p-dialog-header,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-dialog-header {
+  position: relative;
+  padding-bottom: 1.15rem;
+  border-bottom: 0;
+  color: #f8f2e8;
+  background: linear-gradient(105deg, #174a42 0%, #113747 54%, #60353a 82%, #793941 100%);
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .p-dialog-header .pi,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-dialog-header .pi {
+  color: #dec78e;
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .pdf-preview-meta {
+  color: rgba(245, 238, 220, 0.82) !important;
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .pdf-preview-close-button .pi {
+  color: #f5eedc;
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .p-dialog-header .p-button,
+body .p-dialog.pdf-preview-dialog-christmas .p-dialog-close-button,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-dialog-header .p-button,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-dialog-close-button {
+  color: #f5eedc;
+  background: rgba(245, 238, 220, 0.07);
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .p-dialog-header .p-button:hover,
+body .p-dialog.pdf-preview-dialog-christmas .p-dialog-header .p-button:focus-visible,
+body .p-dialog.pdf-preview-dialog-christmas .p-dialog-close-button:hover,
+body .p-dialog.pdf-preview-dialog-christmas .p-dialog-close-button:focus-visible,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-dialog-header .p-button:hover,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-dialog-header .p-button:focus-visible,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-dialog-close-button:hover,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-dialog-close-button:focus-visible {
+  color: #fff9e9;
+  background: rgba(222, 199, 142, 0.15);
+  box-shadow: 0 0 0.52rem rgba(255, 209, 72, 0.34);
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .p-dialog-content,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-dialog-content {
+  color: var(--text-primary);
+  background:
+    radial-gradient(circle at 100% 0, rgba(202, 171, 100, 0.13), transparent 38%),
+    radial-gradient(circle at 0 100%, rgba(23, 72, 63, 0.08), transparent 34%),
+    linear-gradient(145deg, #fffdf7 0%, #f5eedc 100%);
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .p-dialog-footer,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-dialog-footer {
+  border-top: 0;
+  color: var(--text-primary);
+  background: linear-gradient(90deg, #f5eedc 0%, #eee4d2 100%);
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .pdf-container {
+  border: 1px solid rgba(23, 72, 63, 0.24);
+  background: #e7dfd2;
+  box-shadow:
+    0 0.8rem 2rem rgba(55, 42, 27, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.62);
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .discussion-panel,
+body .p-dialog.pdf-preview-dialog-christmas .archive-report-panel,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .discussion-panel,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .archive-report-panel {
+  border-color: rgba(23, 72, 63, 0.22);
+  color: #173d37;
+  background: rgba(255, 253, 247, 0.9);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .discussion-header,
+body .p-dialog.pdf-preview-dialog-christmas .discussion-footer,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .discussion-header,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .discussion-footer {
+  border-color: rgba(23, 72, 63, 0.18);
+  background: rgba(238, 228, 210, 0.58);
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .p-inputtext,
+body .p-dialog.pdf-preview-dialog-christmas .p-textarea,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-inputtext,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-textarea {
+  border-color: rgba(23, 72, 63, 0.3);
+  color: #173d37;
+  background: rgba(255, 253, 247, 0.94);
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .p-inputtext::placeholder,
+body .p-dialog.pdf-preview-dialog-christmas .p-textarea::placeholder,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-inputtext::placeholder,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-textarea::placeholder {
+  color: rgba(82, 107, 100, 0.72);
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .p-inputtext:focus,
+body .p-dialog.pdf-preview-dialog-christmas .p-textarea:focus,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-inputtext:focus,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-textarea:focus {
+  border-color: #a88743;
+  box-shadow: 0 0 0 0.14rem rgba(168, 135, 67, 0.18);
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .p-button.discussion-submit-button,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-button.discussion-submit-button {
+  border-color: rgba(225, 246, 252, 0.96);
+  color: #245368;
+  background: #d7edf5;
+  box-shadow: 0 0.38rem 0.9rem rgba(6, 35, 49, 0.18);
+  transition:
+    border-color 0.18s ease,
+    color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    text-shadow 0.18s ease;
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .p-button.discussion-submit-button:hover,
+body .p-dialog.pdf-preview-dialog-christmas .p-button.discussion-submit-button:focus-visible,
+body .p-dialog.pdf-preview-discussion-dialog-christmas .p-button.discussion-submit-button:hover,
+body
+  .p-dialog.pdf-preview-discussion-dialog-christmas
+  .p-button.discussion-submit-button:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9);
+  color: #173846;
+  background: #e5f4f9;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .p-button.discussion-submit-button:focus-visible,
+body
+  .p-dialog.pdf-preview-discussion-dialog-christmas
+  .p-button.discussion-submit-button:focus-visible {
+  outline: 2px solid rgba(238, 211, 142, 0.72);
+  outline-offset: 2px;
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .p-button.pdf-preview-download-button {
+  border-color: rgba(127, 188, 145, 0.82);
+  color: #f5fff7;
+  background: linear-gradient(135deg, #3d8a64, #2d6c52);
+  transition:
+    border-color 0.18s ease,
+    color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    text-shadow 0.18s ease;
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .p-button.pdf-preview-download-button:hover,
+body .p-dialog.pdf-preview-dialog-christmas .p-button.pdf-preview-download-button:focus-visible {
+  border-color: rgba(255, 226, 143, 0.9);
+  color: #ffffff;
+  background: linear-gradient(135deg, #479b70, #347b5c);
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+body .p-dialog.pdf-preview-dialog-christmas .p-button.pdf-preview-download-button:focus-visible {
+  outline: 2px solid rgba(238, 211, 142, 0.72);
+  outline-offset: 2px;
+}
+
+/* Christmas presentation for the two public course surfaces. */
+html[data-effective-theme='christmas'] .public-catalog.public-catalog-christmas,
+html[data-effective-theme='christmas'] .public-course.public-course-christmas {
+  --christmas-public-ink: #f5eedc;
+  --christmas-public-muted: #c5d5d2;
+  --christmas-public-gold: #dec78e;
+  position: relative;
+  z-index: 0;
+  min-height: 100%;
+  color: var(--christmas-public-ink);
+  isolation: isolate;
+}
+
+html[data-effective-theme='christmas'] .public-catalog.public-catalog-christmas::before,
+html[data-effective-theme='christmas'] .public-course.public-course-christmas::before {
+  position: fixed;
+  z-index: -2;
+  inset: var(--navbar-height) 0 0;
+  background:
+    radial-gradient(circle at 76% 30%, rgba(66, 104, 120, 0.34), transparent 34%),
+    radial-gradient(circle at 18% 84%, rgba(23, 72, 63, 0.24), transparent 38%),
+    linear-gradient(135deg, #071b25 0%, #102d3a 54%, #244958 100%);
+  content: '';
+  pointer-events: none;
+}
+
+html[data-effective-theme='christmas'] .public-catalog.public-catalog-christmas::after,
+html[data-effective-theme='christmas'] .public-course.public-course-christmas::after {
+  position: fixed;
+  z-index: -1;
+  inset: var(--navbar-height) 0 0;
+  background-image:
+    radial-gradient(circle, rgba(248, 252, 251, 0.46) 0 1px, transparent 1.5px),
+    radial-gradient(circle, rgba(222, 199, 142, 0.2) 0 1px, transparent 1.5px);
+  background-position:
+    0 0,
+    3.6rem 2.8rem;
+  background-size:
+    8.5rem 9.25rem,
+    11rem 10rem;
+  content: '';
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+html[data-effective-theme='christmas'] .public-catalog-christmas .breadcrumbs,
+html[data-effective-theme='christmas'] .public-course-christmas .breadcrumbs,
+html[data-effective-theme='christmas'] .public-catalog-christmas .catalog-header > p,
+html[data-effective-theme='christmas'] .public-course-christmas .course-header > p,
+html[data-effective-theme='christmas'] .public-catalog-christmas .category-header > span,
+html[data-effective-theme='christmas'] .public-course-christmas .group-header span,
+html[data-effective-theme='christmas'] .public-course-christmas .archive-card dt {
+  color: var(--christmas-public-muted);
+}
+
+html[data-effective-theme='christmas'] .public-catalog-christmas .eyebrow,
+html[data-effective-theme='christmas'] .public-catalog-christmas .category-label,
+html[data-effective-theme='christmas'] .public-course-christmas .eyebrow,
+html[data-effective-theme='christmas'] .public-catalog-christmas .breadcrumbs a:hover,
+html[data-effective-theme='christmas'] .public-course-christmas .breadcrumbs a:hover {
+  color: var(--christmas-public-gold);
+}
+
+html[data-effective-theme='christmas'] .public-catalog-christmas .catalog-search input {
+  border-color: rgba(222, 199, 142, 0.3);
+  color: var(--christmas-public-ink);
+  background: rgba(16, 58, 52, 0.72);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.04);
+}
+
+html[data-effective-theme='christmas']
+  .public-catalog-christmas
+  .catalog-search
+  input::placeholder {
+  color: rgba(197, 213, 210, 0.7);
+}
+
+html[data-effective-theme='christmas'] .public-catalog-christmas .catalog-search input:focus {
+  border-color: #dec78e;
+  outline: 2px solid rgba(222, 199, 142, 0.22);
+  outline-offset: 2px;
+}
+
+html[data-effective-theme='christmas'] .public-catalog-christmas .course-card,
+html[data-effective-theme='christmas'] .public-course-christmas .archive-card {
+  position: relative;
+  border-color: rgba(243, 235, 221, 0.16);
+  border-left: 3px solid rgba(202, 171, 100, 0.68);
+  color: var(--christmas-public-ink);
+  background: linear-gradient(145deg, rgba(23, 72, 63, 0.96) 0%, rgba(16, 58, 52, 0.96) 100%);
+  box-shadow: 0 0.75rem 1.8rem rgba(2, 13, 18, 0.18);
+  isolation: isolate;
+  overflow: hidden;
+}
+
+html[data-effective-theme='christmas'] .public-catalog-christmas .course-card::before,
+html[data-effective-theme='christmas'] .public-course-christmas .archive-card::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 auto;
+  height: 0.48rem;
+  background: linear-gradient(180deg, #f5eedc 0%, #eee4d2 100%);
+  clip-path: polygon(0 0, 100% 0, 100% 76%, 78% 84%, 56% 76%, 34% 86%, 13% 78%, 0 83%);
+  content: '';
+  filter: drop-shadow(0 0.08rem 0.08rem rgba(22, 15, 12, 0.12));
+  pointer-events: none;
+}
+
+html[data-effective-theme='christmas'] .public-catalog-christmas .course-card:nth-child(4n + 3),
+html[data-effective-theme='christmas'] .public-course-christmas .archive-card:nth-child(4n + 3) {
+  background: linear-gradient(145deg, rgba(121, 57, 65, 0.96) 0%, rgba(96, 53, 58, 0.96) 100%);
+}
+
+html[data-effective-theme='christmas'] .public-catalog-christmas .course-card:hover {
+  border-color: rgba(222, 199, 142, 0.5);
+  border-left-color: #dec78e;
+  box-shadow: 0 1rem 2.2rem rgba(2, 13, 18, 0.26);
+}
+
+html[data-effective-theme='christmas'] .public-catalog-christmas .course-card-link i,
+html[data-effective-theme='christmas'] .public-course-christmas .archive-type {
+  color: var(--christmas-public-gold);
+}
+
+html[data-effective-theme='christmas'] .public-course-christmas .archive-type {
+  border: 1px solid rgba(222, 199, 142, 0.2);
+  background: rgba(222, 199, 142, 0.1);
+}
+
+html[data-effective-theme='christmas'] .public-course-christmas .course-summary {
+  color: var(--christmas-public-gold);
+}
+
+html[data-effective-theme='christmas'] .public-catalog-christmas .empty-state,
+html[data-effective-theme='christmas'] .public-catalog-christmas .error-message,
+html[data-effective-theme='christmas'] .public-course-christmas .empty-state,
+html[data-effective-theme='christmas'] .public-course-christmas .error-message {
+  border-color: rgba(222, 199, 142, 0.32);
+  color: #173d37;
+  background:
+    radial-gradient(circle at 100% 0, rgba(202, 171, 100, 0.13), transparent 44%),
+    rgba(245, 238, 220, 0.95);
+  box-shadow: 0 0.8rem 2rem rgba(2, 13, 18, 0.18);
+}
+
+html[data-effective-theme='christmas'] .public-catalog-christmas .empty-state p,
+html[data-effective-theme='christmas'] .public-catalog-christmas .error-message p,
+html[data-effective-theme='christmas'] .public-course-christmas .empty-state p,
+html[data-effective-theme='christmas'] .public-course-christmas .error-message p {
+  color: #526b64;
+}
+
+html[data-effective-theme='christmas'] .public-catalog-christmas .retry-button,
+html[data-effective-theme='christmas'] .public-course-christmas .error-message a {
+  border-color: #793941;
+  color: #f8f2e8;
+  background: #673239;
+}
+
+html[data-effective-theme='christmas'] .public-catalog-christmas .retry-button:focus-visible,
+html[data-effective-theme='christmas'] .public-catalog-christmas .course-card a:focus-visible,
+html[data-effective-theme='christmas'] .public-catalog-christmas .breadcrumbs a:focus-visible,
+html[data-effective-theme='christmas'] .public-course-christmas .breadcrumbs a:focus-visible,
+html[data-effective-theme='christmas'] .public-course-christmas .error-message a:focus-visible {
+  outline-color: #dec78e;
 }

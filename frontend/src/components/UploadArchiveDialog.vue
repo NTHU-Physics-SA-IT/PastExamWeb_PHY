@@ -3,6 +3,11 @@
     <Dialog
       :visible="modelValue"
       @update:visible="$emit('update:modelValue', $event)"
+      class="archive-upload-dialog"
+      :class="{
+        'archive-upload-dialog-christmas': christmas,
+        'archive-edit-dialog-christmas': christmas,
+      }"
       :modal="true"
       :draggable="false"
       :closeOnEscape="false"
@@ -18,10 +23,12 @@
       </template>
       <Stepper :value="uploadStep" @update:value="uploadStep = $event" linear>
         <StepList>
-          <Step value="1">{{ $t('選擇課程') }}</Step>
-          <Step value="2">{{ $t('考試資訊') }}</Step>
-          <Step value="3">{{ isWishMode ? $t('許願標題') : $t('上傳檔案') }}</Step>
-          <Step value="4">{{ $t('確認資訊') }}</Step>
+          <Step value="1" :pt="christmasStepPt">{{ $t('選擇課程') }}</Step>
+          <Step value="2" :pt="christmasStepPt">{{ $t('考試資訊') }}</Step>
+          <Step value="3" :pt="christmasStepPt">{{
+            isWishMode ? $t('許願標題') : $t('上傳檔案')
+          }}</Step>
+          <Step value="4" :pt="christmasStepPt">{{ $t('確認資訊') }}</Step>
         </StepList>
 
         <StepPanels>
@@ -147,6 +154,9 @@
                   :placeholder="$t('選擇課程類別')"
                   class="w-full"
                   :disabled="form.requestNewCategory || Boolean(sourceWishId)"
+                  :panelClass="{
+                    'archive-edit-overlay-christmas': christmas,
+                  }"
                 />
                 <small v-if="form.requestNewCategory" class="text-gray-500">
                   {{ $t('已改為申請新分類，這份考古會歸到上方的新分類。') }}
@@ -190,6 +200,9 @@
                   :placeholder="$t('選擇課程名稱')"
                   class="w-full"
                   :disabled="!form.category || Boolean(sourceWishId)"
+                  :panelClass="{
+                    'archive-edit-overlay-christmas': christmas,
+                  }"
                   filter
                   showClear
                 >
@@ -218,6 +231,9 @@
                   :placeholder="$t('搜尋或輸入授課教授')"
                   class="w-full"
                   :disabled="!effectiveSubject || Boolean(sourceWishId)"
+                  :panelClass="{
+                    'archive-edit-overlay-christmas': christmas,
+                  }"
                   dropdown
                   completeOnFocus
                   :minLength="0"
@@ -236,6 +252,8 @@
               <Button
                 :label="$t('下一步')"
                 icon="pi pi-arrow-right"
+                class="archive-upload-next-button"
+                :data-christmas-snow-control="christmas ? 'true' : undefined"
                 @click="activateCallback('2')"
                 :disabled="!canGoToStep2"
               />
@@ -298,6 +316,9 @@
                   :placeholder="$t('選擇考試類型')"
                   class="w-full"
                   :disabled="Boolean(sourceWishId)"
+                  :panelClass="{
+                    'archive-edit-overlay-christmas': christmas,
+                  }"
                 />
               </div>
 
@@ -313,6 +334,9 @@
                   :placeholder="$t('選擇次數')"
                   class="w-full"
                   :disabled="Boolean(sourceWishId)"
+                  :panelClass="{
+                    'archive-edit-overlay-christmas': christmas,
+                  }"
                 />
                 <small class="text-gray-500">
                   {{
@@ -381,12 +405,15 @@
               <Button
                 :label="$t('上一步')"
                 icon="pi pi-arrow-left"
+                class="archive-upload-back-button"
                 severity="secondary"
                 @click="activateCallback('1')"
               />
               <Button
                 :label="$t('下一步')"
                 icon="pi pi-arrow-right"
+                class="archive-upload-next-button"
+                :data-christmas-snow-control="christmas ? 'true' : undefined"
                 @click="activateCallback('3')"
                 :disabled="!canGoToStep3"
               />
@@ -438,6 +465,8 @@
                       <Button
                         @click="chooseCallback()"
                         icon="pi pi-file-pdf"
+                        class="archive-upload-file-picker-button"
+                        :data-christmas-snow="christmas ? 'off' : undefined"
                         rounded
                         outlined
                         severity="secondary"
@@ -512,12 +541,15 @@
               <Button
                 :label="$t('上一步')"
                 icon="pi pi-arrow-left"
+                class="archive-upload-back-button"
                 severity="secondary"
                 @click="activateCallback('2')"
               />
               <Button
                 :label="$t('下一步')"
                 icon="pi pi-arrow-right"
+                class="archive-upload-next-button"
+                :data-christmas-snow-control="christmas ? 'true' : undefined"
                 @click="activateCallback('4')"
                 :disabled="isWishMode ? !form.wishTitle.trim() : !isEditMode && !form.file"
               />
@@ -595,6 +627,7 @@
               <Button
                 :label="$t('上一步')"
                 icon="pi pi-arrow-left"
+                class="archive-upload-back-button"
                 severity="secondary"
                 @click="activateCallback('3')"
               />
@@ -626,6 +659,7 @@
     <PdfPreviewModal
       :visible="showUploadPreview"
       @update:visible="showUploadPreview = $event"
+      :christmas="christmas && !isWishMode"
       :previewUrl="uploadPreviewUrl"
       :title="
         previewingCurrentFile
@@ -679,6 +713,7 @@ const props = defineProps({
   sourceWishId: { type: Number, default: null },
   mode: { type: String, default: 'upload' },
   submissionId: { type: Number, default: null },
+  christmas: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue', 'upload-success', 'stale'])
@@ -688,6 +723,11 @@ const { t } = useI18n()
 const NEW_CATEGORY_REQUIRES_COURSE_MESSAGE = '新增分類必須同時申請新增課程。'
 const isWishMode = computed(() => props.mode === 'wish')
 const isEditMode = computed(() => props.mode === 'edit')
+const christmasStepPt = computed(() => ({
+  header: {
+    'data-christmas-snow': props.christmas ? 'off' : undefined,
+  },
+}))
 const dialogTitle = computed(() =>
   isWishMode.value
     ? t('新增考古許願')

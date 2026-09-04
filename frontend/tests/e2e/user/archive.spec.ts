@@ -5,6 +5,502 @@ import { clickWhenVisible } from '../support/ui'
 import { createConsoleErrorCollector } from '../support/consoleDiagnostics'
 
 test.describe('User › Archive browsing', () => {
+  test('renders the requested Christmas archive surfaces and navbar-blue snow background', async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 1920, height: 1080 })
+    await page.route('**/api/theme-management/active-theme', (route) =>
+      route.fulfill({
+        status: 200,
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ active_theme: 'christmas' }),
+      })
+    )
+    await page.route('**/api/auth/heartbeat', (route) =>
+      route.fulfill({ status: 200, headers: JSON_HEADERS, body: JSON.stringify({}) })
+    )
+    await page.route('**/api/notifications/active', (route) =>
+      route.fulfill({ status: 200, headers: JSON_HEADERS, body: JSON.stringify([]) })
+    )
+    await page.route('**/api/notifications/unread-summary**', (route) =>
+      route.fulfill({
+        status: 200,
+        headers: JSON_HEADERS,
+        body: JSON.stringify({
+          announcements: [],
+          personal_notifications: [],
+          counts: { announcements: 0, personal_notifications: 0, total: 0 },
+        }),
+      })
+    )
+    await page.route('**/api/courses', (route) =>
+      route.fulfill({
+        status: 200,
+        headers: JSON_HEADERS,
+        body: JSON.stringify({
+          fundamental: [
+            { id: 101, name: '普通物理(一)' },
+            { id: 102, name: '電磁學' },
+            { id: 103, name: '量子力學' },
+          ],
+          required: [],
+          experience: [],
+          optional: [],
+          graduate: [],
+          'math-department': [],
+        }),
+      })
+    )
+    await page.route('**/api/courses/categories', (route) =>
+      route.fulfill({ status: 200, headers: JSON_HEADERS, body: JSON.stringify([]) })
+    )
+    await page.route('**/api/courses/101/archives', (route) =>
+      route.fulfill({
+        status: 200,
+        headers: JSON_HEADERS,
+        body: JSON.stringify([
+          {
+            id: 201,
+            academic_year: 1142,
+            name: 'final',
+            archive_type: 'final',
+            professor: '王教授',
+            has_answers: true,
+            download_count: 12,
+            uploader_id: 9,
+          },
+          {
+            id: 202,
+            academic_year: 1142,
+            name: 'quiz2',
+            archive_type: 'quiz',
+            professor: '王教授',
+            has_answers: false,
+            download_count: 4,
+            uploader_id: 10,
+          },
+          {
+            id: 203,
+            academic_year: 1141,
+            name: 'midterm2',
+            archive_type: 'midterm',
+            professor: '李教授',
+            has_answers: true,
+            download_count: 27,
+            uploader_id: 11,
+          },
+        ]),
+      })
+    )
+
+    await page.goto('/archive')
+    await expect(page).toHaveURL(/\/archive$/)
+    await expect(page.locator('.card.navbar-christmas')).toBeVisible()
+
+    const christmasApp = page.locator('#app.app-christmas-frosted-window')
+    const snowfall = christmasApp.locator(':scope > .christmas-snowfall')
+    await expect(christmasApp).toBeVisible()
+    await expect(snowfall).toBeVisible()
+    await expect(snowfall.locator('.christmas-background-snowflake')).toHaveCount(72)
+    await expect(snowfall.locator('.christmas-decorative-snowflake')).toHaveCount(18)
+
+    const searchInput = page.getByPlaceholder('搜尋課程')
+    await searchInput.fill('普通物理')
+    const courseButton = page.getByRole('button', { name: '普通物理(一)', exact: true })
+    await clickWhenVisible(courseButton)
+    await searchInput.fill('')
+
+    const selectedCourseItem = page.locator('.active-course-menu-item').first()
+    const selectedCourseContent = selectedCourseItem.locator('.p-panelmenu-item-content')
+    const selectedCourseLink = selectedCourseItem.locator('.p-panelmenu-item-link')
+    const desktopSidebar = page.locator('.archive-christmas .sidebar')
+    const desktopUploadSection = desktopSidebar.locator('.upload-section')
+    const subjectHeader = page.locator('.archive-christmas .subject-header')
+
+    const semesterHeaders = page.locator('.p-accordionheader')
+    const semesterHeader = semesterHeaders.first()
+    const semesterPanel = page.locator('.p-accordionpanel').first()
+    const semesterContentOuter = page.locator('.p-accordioncontent').first()
+    const semesterContent = page.locator('.p-accordioncontent-content').first()
+    const archiveCards = page.locator('.archive-record-card')
+    await expect(selectedCourseLink).toBeVisible()
+    await expect(subjectHeader).toBeVisible()
+    await expect(semesterHeader).toBeVisible()
+    await expect(semesterHeaders).toHaveCount(2)
+    await expect(semesterHeaders).toContainText(['114下學期', '114上學期'])
+    await expect(archiveCards).toHaveCount(3)
+    await expect(archiveCards).toContainText(['final', 'quiz2', 'midterm2'])
+
+    const selectedCourseStyles = await Promise.all(
+      [selectedCourseItem, selectedCourseContent, selectedCourseLink].map((locator) =>
+        locator.evaluate((element) => {
+          const style = getComputedStyle(element)
+          return {
+            color: style.backgroundColor,
+            image: style.backgroundImage,
+            beforeImage: getComputedStyle(element, '::before').backgroundImage,
+            afterImage: getComputedStyle(element, '::after').backgroundImage,
+            shadow: style.boxShadow,
+            backdrop: style.backdropFilter,
+            filter: style.filter,
+          }
+        })
+      )
+    )
+    const desktopSidebarStyle = await desktopSidebar.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return {
+        color: style.backgroundColor,
+        image: style.backgroundImage,
+        borderRightColor: style.borderRightColor,
+        shadow: style.boxShadow,
+      }
+    })
+    const desktopUploadSectionStyle = await desktopUploadSection.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return {
+        color: style.backgroundColor,
+        image: style.backgroundImage,
+        borderTopColor: style.borderTopColor,
+      }
+    })
+    const subjectHeaderStyle = await subjectHeader.evaluate((element) => {
+      const style = getComputedStyle(element)
+      const afterStyle = getComputedStyle(element, '::after')
+      return {
+        color: style.backgroundColor,
+        image: style.backgroundImage,
+        borderBottomColor: style.borderBottomColor,
+        shadow: style.boxShadow,
+        afterContent: afterStyle.content,
+        afterImage: afterStyle.backgroundImage,
+      }
+    })
+    const christmasAppStyle = await christmasApp.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { color: style.backgroundColor, image: style.backgroundImage }
+    })
+    const snowfallStyle = await snowfall.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return {
+        opacity: style.opacity,
+        pointerEvents: style.pointerEvents,
+        position: style.position,
+        zIndex: style.zIndex,
+      }
+    })
+    const navbarStyle = await page.locator('.card.navbar-christmas').evaluate((element) => {
+      const style = getComputedStyle(element)
+      return {
+        color: style.backgroundColor,
+        image: style.backgroundImage,
+        beforeImage: getComputedStyle(element, '::before').backgroundImage,
+        afterImage: getComputedStyle(element, '::after').backgroundImage,
+        shadow: style.boxShadow,
+      }
+    })
+    const navbarMenubarStyle = await page
+      .locator('.card.navbar-christmas .p-menubar')
+      .evaluate((element) => {
+        const style = getComputedStyle(element)
+        return { color: style.backgroundColor, image: style.backgroundImage }
+      })
+    const semesterStyles = await semesterHeaders.evaluateAll((elements) =>
+      elements.map((element) => {
+        const style = getComputedStyle(element)
+        return {
+          color: style.backgroundColor,
+          image: style.backgroundImage,
+          beforeImage: getComputedStyle(element, '::before').backgroundImage,
+          afterImage: getComputedStyle(element, '::after').backgroundImage,
+          shadow: style.boxShadow,
+        }
+      })
+    )
+    const archiveCardStyles = await archiveCards.evaluateAll((elements) =>
+      elements.map((element) => {
+        const style = getComputedStyle(element)
+        return {
+          color: style.backgroundColor,
+          image: style.backgroundImage,
+          beforeImage: getComputedStyle(element, '::before').backgroundImage,
+          afterImage: getComputedStyle(element, '::after').backgroundImage,
+          shadow: style.boxShadow,
+        }
+      })
+    )
+    const semesterPanelStyles = await Promise.all(
+      [semesterPanel, semesterContentOuter, semesterContent].map((locator) =>
+        locator.evaluate((element) => {
+          const style = getComputedStyle(element)
+          return {
+            color: style.backgroundColor,
+            image: style.backgroundImage,
+            beforeImage: getComputedStyle(element, '::before').backgroundImage,
+            afterImage: getComputedStyle(element, '::after').backgroundImage,
+            shadow: style.boxShadow,
+            backdrop: style.backdropFilter,
+            filter: style.filter,
+          }
+        })
+      )
+    )
+
+    expect(selectedCourseStyles[0]).toEqual({
+      color: christmasAppStyle.color,
+      image: christmasAppStyle.image,
+      beforeImage: 'none',
+      afterImage: 'none',
+      shadow: 'none',
+      backdrop: 'none',
+      filter: 'none',
+    })
+    expect(selectedCourseStyles.slice(1)).toEqual([
+      {
+        color: 'rgba(0, 0, 0, 0)',
+        image: 'none',
+        beforeImage: 'none',
+        afterImage: 'none',
+        shadow: 'none',
+        backdrop: 'none',
+        filter: 'none',
+      },
+      {
+        color: 'rgba(0, 0, 0, 0)',
+        image: 'none',
+        beforeImage: 'none',
+        afterImage: 'none',
+        shadow: 'none',
+        backdrop: 'none',
+        filter: 'none',
+      },
+    ])
+    expect(desktopSidebarStyle).toEqual({
+      color: 'rgba(0, 0, 0, 0)',
+      image: 'none',
+      borderRightColor: 'rgba(0, 0, 0, 0)',
+      shadow: 'none',
+    })
+    expect(desktopUploadSectionStyle).toEqual({
+      color: 'rgba(0, 0, 0, 0)',
+      image: 'none',
+      borderTopColor: 'rgba(0, 0, 0, 0)',
+    })
+    expect(subjectHeaderStyle).toEqual({
+      color: 'rgba(0, 0, 0, 0)',
+      image: 'none',
+      borderBottomColor: 'rgba(0, 0, 0, 0)',
+      shadow: 'none',
+      afterContent: 'none',
+      afterImage: 'none',
+    })
+    expect(christmasAppStyle.color).toBe('rgb(66, 104, 120)')
+    expect(christmasAppStyle.image).toContain('linear-gradient')
+    expect(christmasAppStyle.image).toContain('rgb(66, 104, 120)')
+    expect(snowfallStyle).toEqual({
+      opacity: '0.75',
+      pointerEvents: 'none',
+      position: 'absolute',
+      zIndex: '1',
+    })
+    expect(navbarStyle).toEqual({
+      color: 'rgb(66, 104, 120)',
+      image: 'none',
+      beforeImage: 'none',
+      afterImage: 'none',
+      shadow: 'none',
+    })
+    expect(navbarMenubarStyle).toEqual({ color: 'rgb(66, 104, 120)', image: 'none' })
+    expect(semesterStyles).toEqual([
+      {
+        color: 'rgb(23, 63, 58)',
+        image: 'none',
+        beforeImage: 'none',
+        afterImage: 'none',
+        shadow: 'none',
+      },
+      {
+        color: 'rgb(23, 63, 58)',
+        image: 'none',
+        beforeImage: 'none',
+        afterImage: 'none',
+        shadow: 'none',
+      },
+    ])
+    expect(archiveCardStyles).toEqual([
+      {
+        color: 'rgb(44, 89, 77)',
+        image: 'none',
+        beforeImage: 'none',
+        afterImage: 'none',
+        shadow: 'none',
+      },
+      {
+        color: 'rgb(44, 89, 77)',
+        image: 'none',
+        beforeImage: 'none',
+        afterImage: 'none',
+        shadow: 'none',
+      },
+      {
+        color: 'rgb(44, 89, 77)',
+        image: 'none',
+        beforeImage: 'none',
+        afterImage: 'none',
+        shadow: 'none',
+      },
+    ])
+    expect(semesterPanelStyles).toEqual([
+      {
+        color: 'rgb(16, 47, 53)',
+        image: 'none',
+        beforeImage: 'none',
+        afterImage: 'none',
+        shadow: 'none',
+        backdrop: 'none',
+        filter: 'none',
+      },
+      {
+        color: 'rgb(16, 47, 53)',
+        image: 'none',
+        beforeImage: 'none',
+        afterImage: 'none',
+        shadow: 'none',
+        backdrop: 'none',
+        filter: 'none',
+      },
+      {
+        color: 'rgb(16, 47, 53)',
+        image: 'none',
+        beforeImage: 'none',
+        afterImage: 'none',
+        shadow: 'none',
+        backdrop: 'none',
+        filter: 'none',
+      },
+    ])
+
+    const unselectedCourseColors = await page
+      .locator('.p-panelmenu-item:not(.active-course-menu-item) .p-panelmenu-item-link')
+      .evaluateAll((elements) =>
+        elements.map((element) => getComputedStyle(element).backgroundColor)
+      )
+    expect(unselectedCourseColors.length).toBeGreaterThanOrEqual(2)
+    expect(unselectedCourseColors).not.toContain('rgb(44, 89, 77)')
+
+    const badgeStyles = await page.locator('.exam-type-tag').evaluateAll((elements) =>
+      elements.map((element) => ({
+        className: element.className,
+        color: getComputedStyle(element).backgroundColor,
+      }))
+    )
+    expect(badgeStyles.map(({ className }) => className)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('exam-type-tag--final'),
+        expect.stringContaining('exam-type-tag--quiz'),
+        expect.stringContaining('exam-type-tag--midterm'),
+      ])
+    )
+    expect(new Set(badgeStyles.map(({ color }) => color)).size).toBe(3)
+
+    const archiveActions = page.locator('.archive-record-actions .archive-action-neutral')
+    await expect(archiveActions).toHaveCount(6)
+    expect(
+      await archiveActions.evaluateAll((elements) => elements.map((element) => element.className))
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('archive-action-preview'),
+        expect.stringContaining('archive-action-download'),
+      ])
+    )
+    await page.screenshot({
+      path: testInfo.outputPath('christmas-selected-course-solid-and-darker-terms.png'),
+      fullPage: true,
+    })
+
+    const viewports = [
+      { width: 390, height: 844 },
+      { width: 834, height: 1210 },
+      { width: 1024, height: 768 },
+      { width: 1440, height: 900 },
+    ]
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport)
+      await page.waitForTimeout(50)
+
+      if (viewport.width < 768) {
+        const mobileDrawer = page.locator('.mobile-drawer-christmas')
+        if (!(await mobileDrawer.isVisible())) {
+          await page.locator('.sidebar-toggle').click()
+        }
+        await expect(mobileDrawer).toBeVisible()
+        expect(
+          await mobileDrawer.locator('.p-drawer-content').evaluate((element) => {
+            const style = getComputedStyle(element)
+            return { color: style.backgroundColor, image: style.backgroundImage }
+          })
+        ).toEqual({ color: christmasAppStyle.color, image: christmasAppStyle.image })
+        expect(
+          await mobileDrawer.locator('.mobile-upload-section').evaluate((element) => {
+            const style = getComputedStyle(element)
+            return {
+              color: style.backgroundColor,
+              image: style.backgroundImage,
+              borderTopColor: style.borderTopColor,
+              shadow: style.boxShadow,
+            }
+          })
+        ).toEqual({
+          color: 'rgba(0, 0, 0, 0)',
+          image: 'none',
+          borderTopColor: 'rgba(0, 0, 0, 0)',
+          shadow: 'none',
+        })
+        const mobileSearchInput = mobileDrawer.getByPlaceholder('搜尋課程')
+        await mobileSearchInput.fill('普通物理')
+        const mobileSelectedCourse = mobileDrawer.locator('.active-course-search-result').first()
+        await expect(mobileSelectedCourse).toBeVisible()
+        expect(
+          await mobileSelectedCourse.evaluate((element) => ({
+            color: getComputedStyle(element).backgroundColor,
+            image: getComputedStyle(element).backgroundImage,
+            beforeImage: getComputedStyle(element, '::before').backgroundImage,
+            afterImage: getComputedStyle(element, '::after').backgroundImage,
+          }))
+        ).toEqual({
+          color: christmasAppStyle.color,
+          image: christmasAppStyle.image,
+          beforeImage: 'none',
+          afterImage: 'none',
+        })
+        await mobileSearchInput.fill('')
+        await page.keyboard.press('Escape')
+        await expect(mobileDrawer).toBeHidden()
+      }
+
+      await expect(semesterHeaders).toHaveCount(2)
+      await expect(archiveCards).toHaveCount(3)
+      await expect(page.locator('.archive-record-card h3')).toContainText([
+        'final',
+        'quiz2',
+        'midterm2',
+      ])
+      expect(
+        await page.evaluate(() => ({
+          documentOverflow:
+            document.documentElement.scrollWidth > document.documentElement.clientWidth,
+          bodyOverflow: document.body.scrollWidth > document.body.clientWidth,
+        }))
+      ).toEqual({ documentOverflow: false, bodyOverflow: false })
+      await page.screenshot({
+        path: testInfo.outputPath(`christmas-archive-${viewport.width}x${viewport.height}.png`),
+        fullPage: true,
+      })
+    }
+
+    await page.screenshot({ path: testInfo.outputPath('christmas-solid-archive-surfaces.png') })
+  })
+
   test('restricts admin area and supports archive browsing', async ({ page }) => {
     const coursesResponse = {
       fundamental: [
@@ -122,19 +618,16 @@ test.describe('User › Archive browsing', () => {
       })
     })
 
-    await page.route(
-      '**/api/courses/101/archives/201/discussion/ws-ticket',
-      async (route) => {
-        wsTicketRequestCount += 1
-        expect(route.request().method()).toBe('POST')
-        expect(route.request().headers().authorization).toMatch(/^Bearer /)
-        await route.fulfill({
-          status: 200,
-          headers: JSON_HEADERS,
-          body: JSON.stringify({ ticket: 'w'.repeat(43), expires_in: 30 }),
-        })
-      }
-    )
+    await page.route('**/api/courses/101/archives/201/discussion/ws-ticket', async (route) => {
+      wsTicketRequestCount += 1
+      expect(route.request().method()).toBe('POST')
+      expect(route.request().headers().authorization).toMatch(/^Bearer /)
+      await route.fulfill({
+        status: 200,
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ ticket: 'w'.repeat(43), expires_in: 30 }),
+      })
+    })
 
     let downloadEndpointCalled = false
     await page.route('**/api/courses/101/archives/201/download', async (route) => {

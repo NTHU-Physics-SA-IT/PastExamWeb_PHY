@@ -6,6 +6,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { Fragment, h } from 'vue'
 import ReportManagementPanel from '@/components/admin/ReportManagementPanel.vue'
 import reportManagementSource from '@/components/admin/ReportManagementPanel.vue?raw'
+import homepageSloganSource from '@/components/admin/HomepageSloganManagementPanel.vue?raw'
 import { ADMIN_PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 
 const adminStylesSource = readFileSync(resolve(process.cwd(), 'src/style.css'), 'utf8')
@@ -1103,7 +1104,8 @@ describe('ReportManagementPanel', () => {
 
     const options = mocks.confirm.mock.calls[0][0]
     expect(options.message).toContain('被回報留言將永久刪除，無法復原，也不會進入垃圾桶。')
-    expect(options.acceptClass).toBe('p-button-danger')
+    expect(options.acceptClass).toContain('review-action-delete')
+    expect(options.acceptClass).toContain('p-button-danger')
     expect(mocks.reviewComment).not.toHaveBeenCalled()
   })
 
@@ -1129,7 +1131,11 @@ describe('ReportManagementPanel', () => {
   })
 
   it('scopes personalized font tokens across report lists, controls, and dialogs', () => {
-    expect(reportManagementSource.match(/class="report-management-dialog"/g)).toHaveLength(4)
+    expect(
+      reportManagementSource.match(
+        /class="report-management-dialog report-management-panel-dialog"/g
+      )
+    ).toHaveLength(4)
     expect(adminStylesSource).toMatch(
       /\.admin-management-typography \.p-inputtext[\s\S]*?font-size:\s*var\(--app-font-size-sm\) !important;/
     )
@@ -1143,6 +1149,142 @@ describe('ReportManagementPanel', () => {
     expect(adminStylesSource).toContain('font-size: var(--app-control-font-size) !important;')
     expect(adminStylesSource).toContain('font-size: var(--app-font-size-xs) !important;')
     expect(sharedReviewStyles).not.toMatch(/font-size:\s*(?:0\.\d+|1\.05|2)rem/)
+  })
+
+  it('layers report-specific Christmas details onto the shared Admin skin', () => {
+    const christmasStyles = reportManagementSource.slice(
+      reportManagementSource.indexOf(
+        '/* Report-specific details layered onto the shared Admin Christmas presentation.'
+      ),
+      reportManagementSource.indexOf('@media (max-width: 1399.98px)')
+    )
+
+    expect(reportManagementSource).toContain(
+      ":class=\"{ 'report-management--christmas': effectiveTheme === 'christmas' }\""
+    )
+    expect(christmasStyles).toContain('.report-management--christmas')
+    expect(christmasStyles).toContain(
+      '--report-christmas-structural-surface: var(--admin-christmas-structural-surface, #293f52);'
+    )
+    expect(christmasStyles).toContain(
+      '--report-christmas-content-surface: var(--admin-christmas-content-surface, #3e5f72);'
+    )
+    expect(christmasStyles).toContain(
+      '--report-christmas-tab-hover-surface: var(--admin-christmas-tab-hover-surface, #365968);'
+    )
+    expect(christmasStyles).toContain(
+      '--report-christmas-tab-active-surface: var(--admin-christmas-tab-active-surface, #426878);'
+    )
+    expect(christmasStyles).toContain(
+      '--report-christmas-row-hover-surface: var(--admin-christmas-tab-active-surface, #426878);'
+    )
+    expect(christmasStyles).toContain('--report-christmas-secondary-green:')
+    expect(christmasStyles).toContain('--report-christmas-active-green:')
+    expect(christmasStyles).not.toMatch(
+      /:global\(html\[data-effective-theme='christmas'\]\)\s+\.report-management\s+:deep/
+    )
+    expect(christmasStyles).toContain('.p-tab.p-tab-active')
+    expect(christmasStyles).toContain('.report-management__filters')
+    expect(christmasStyles).toContain('.report-management__table .p-datatable-thead > tr > th')
+    expect(christmasStyles).toContain('.report-management__table .p-datatable-tbody > tr')
+    expect(christmasStyles).toContain('.report-mobile-summary-preview')
+    expect(christmasStyles).toMatch(
+      /\.report-management--christmas\s*\{[\s\S]*?background:\s*transparent;/
+    )
+    expect(christmasStyles).toMatch(
+      /\.p-tablist-tab-list\)\s*\{[\s\S]*?background:\s*transparent !important;[\s\S]*?background-image:\s*none !important;/
+    )
+    expect(christmasStyles).toMatch(
+      /\.report-management--christmas \.report-management__filters\s*\{[\s\S]*?background:\s*transparent !important;[\s\S]*?background-image:\s*none !important;/
+    )
+    expect(christmasStyles).toMatch(
+      /\.report-management--christmas \.report-management__filters :deep\(\.p-inputtext\)[\s\S]*?background:\s*var\(--report-christmas-structural-surface\);/
+    )
+    expect(christmasStyles).toMatch(
+      /\.p-datatable-thead > tr > th\)[\s\S]*?background:\s*var\(--report-christmas-structural-surface\);/
+    )
+    expect(christmasStyles).toMatch(
+      /\.p-datatable-tbody > tr > td\)[\s\S]*?background:\s*var\(--report-christmas-content-surface\)/
+    )
+    expect(christmasStyles).toMatch(
+      /\.p-datatable-tbody > tr:hover\)[\s\S]*?background:\s*var\(--report-christmas-row-hover-surface\) !important;/
+    )
+    expect(christmasStyles).toMatch(
+      /\.p-tab:hover\)[\s\S]*?background:\s*var\(--report-christmas-tab-hover-surface\);/
+    )
+    expect(christmasStyles).toMatch(
+      /\.p-tab\.p-tab-active\)[\s\S]*?background:\s*var\(--report-christmas-tab-active-surface\);/
+    )
+    expect(christmasStyles).toMatch(
+      /\.p-button:not\(\.p-button-danger\):not\(\.report-preview-action\)[\s\S]*?background-color:\s*var\(--report-christmas-secondary-green\);/
+    )
+    expect(christmasStyles).toMatch(
+      /\.report-refresh-action\.p-button:not\(:disabled\):hover\)[\s\S]*?rgba\(255, 218, 94, 0\.58\)/
+    )
+    expect(christmasStyles).not.toMatch(/\.report-mobile-card-content\s*\{/)
+    expect(christmasStyles).toContain('.p-dialog.report-management-panel-dialog')
+    expect(christmasStyles).toContain('background-image: none;')
+    expect(christmasStyles).not.toContain('linear-gradient(')
+    expect(christmasStyles).not.toContain('radial-gradient(')
+    expect(christmasStyles).not.toContain('animation:')
+    expect(christmasStyles).not.toContain('isChristmas')
+    expect(christmasStyles).not.toContain('localStorage')
+    expect(reportManagementSource).not.toContain('christmasButtonSnow')
+    expect(homepageSloganSource).not.toContain('report-management-panel-dialog')
+  })
+
+  it('preserves report structure, semantic tags, actions, and responsive authority', () => {
+    expect(reportManagementSource.match(/<Tab value=/g)).toHaveLength(4)
+    expect(reportManagementSource.match(/class="report-management__filters/g)).toHaveLength(4)
+    expect(reportManagementSource.match(/class="report-management__table/g)).toHaveLength(4)
+    expect(
+      reportManagementSource.match(/class="report-mobile-card report-mobile-card-content"/g)
+    ).toHaveLength(4)
+    expect(reportManagementSource).toContain(':severity="statusSeverity(data.status)"')
+    expect(reportManagementSource).toContain('@click="confirmSaveReview"')
+    expect(reportManagementSource).toContain('@click="confirmSaveArchiveReview"')
+    expect(reportManagementSource).toContain('@click="confirmSaveWishReview"')
+    expect(reportManagementSource.match(/breakpoint="1399\.98px"/g)).toHaveLength(4)
+    expect(reportManagementSource).not.toContain('@media (max-width: 899px)')
+  })
+
+  it('maps every report action to the established Admin Christmas button roles', () => {
+    expect(
+      reportManagementSource.match(/class="[^"]*report-refresh-action review-refresh-button[^"]*"/g)
+    ).toHaveLength(5)
+    expect(
+      reportManagementSource.match(/class="report-preview-action review-action-preview"/g)
+    ).toHaveLength(15)
+    expect(
+      reportManagementSource.match(/class="report-download-action review-action-republish"/g)
+    ).toHaveLength(4)
+    expect(
+      reportManagementSource.match(
+        /class="report-admin-delete-action admin-danger-outline-button review-action-delete"/g
+      )
+    ).toHaveLength(8)
+
+    expect(reportManagementSource).toMatch(
+      /const REPORT_CONFIRM_PREVIEW_CLASS\s*=\s*\n?\s*'review-action-preview p-button-secondary p-button-outlined p-button-sm'/
+    )
+    expect(reportManagementSource).toContain(
+      "const REPORT_CONFIRM_DOWNLOAD_CLASS = 'review-action-republish p-button-success p-button-sm'"
+    )
+    expect(reportManagementSource).toMatch(
+      /const REPORT_CONFIRM_DELETE_CLASS\s*=\s*\n?\s*'admin-danger-outline-button review-action-delete p-button-danger p-button-outlined p-button-sm'/
+    )
+    expect(reportManagementSource.match(/rejectClass: REPORT_CONFIRM_PREVIEW_CLASS/g)).toHaveLength(
+      7
+    )
+    expect(reportManagementSource.match(/acceptClass: REPORT_CONFIRM_DELETE_CLASS/g)).toHaveLength(
+      4
+    )
+    expect(
+      reportManagementSource.match(/acceptClass: REPORT_CONFIRM_DOWNLOAD_CLASS/g)
+    ).toHaveLength(2)
+    expect(reportManagementSource).toMatch(
+      /acceptClass:\s*deletesComment\s*\?\s*REPORT_CONFIRM_DELETE_CLASS\s*:\s*REPORT_CONFIRM_DOWNLOAD_CLASS/
+    )
   })
 
   it('keeps system report header actions inline until its section is narrow', () => {
@@ -1196,7 +1338,7 @@ describe('ReportManagementPanel', () => {
     expect(
       reportManagementSource.match(/class="report-filter-select report-filter-select--secondary"/g)
     ).toHaveLength(3)
-    expect(reportManagementSource.match(/class="report-filter-submit"/g)).toHaveLength(4)
+    expect(reportManagementSource.match(/class="[^"]*report-filter-submit[^"]*"/g)).toHaveLength(4)
     expect(reportManagementSource).toContain('container-name: report-section;')
     expect(reportManagementSource).toContain(
       "grid-template-areas: 'search primary secondary submit';"

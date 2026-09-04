@@ -1,6 +1,6 @@
-import type { Locator, Page } from '@playwright/test'
-import { adminTest as test, expect } from '../support/adminTest'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { JSON_HEADERS } from '../support/constants'
+import { buildJwt } from '../support/jwt'
 
 const systemReport = {
   id: 11,
@@ -84,9 +84,18 @@ ${'archive-detail-without-spaces-'.repeat(10)}`,
 ]
 
 async function mockReportManagement(page: Page) {
-  await page.addInitScript(() => {
-    window.localStorage.setItem('admin-current-tab', '5')
+  const token = buildJwt({
+    uid: 1,
+    email: 'admin@example.com',
+    name: 'Admin',
+    is_admin: true,
+    exp: Math.floor(Date.now() / 1000) + 3600,
   })
+  await page.addInitScript((value: string) => {
+    window.sessionStorage.setItem('auth-token', value)
+    window.localStorage.setItem('auth-token', value)
+    window.localStorage.setItem('admin-current-tab', '5')
+  }, token)
   await page.route('**/api/**', async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname
@@ -190,6 +199,68 @@ async function expectVisibleContentFrame(frame: Locator, expectedText: string) {
   expect(style.overflow).toBe('hidden')
 }
 
+async function readRuntimeStyle(locator: Locator) {
+  return locator.evaluate((element) => {
+    const properties = [
+      'background-color',
+      'background-image',
+      'color',
+      'border-color',
+      'box-shadow',
+    ]
+    const computed = window.getComputedStyle(element)
+    const summarize = (style: CSSStyleDeclaration) => ({
+      backgroundColor: style.backgroundColor,
+      backgroundImage: style.backgroundImage,
+      color: style.color,
+      borderColor: style.borderColor,
+      boxShadow: style.boxShadow,
+    })
+    const matchedRules: Array<{ selector: string; declarations: Record<string, string> }> = []
+    const visitRules = (rules: CSSRuleList) => {
+      for (const rule of Array.from(rules)) {
+        if (rule instanceof CSSStyleRule) {
+          let matches
+          try {
+            matches = element.matches(rule.selectorText)
+          } catch {
+            continue
+          }
+          if (!matches) continue
+          const declarations = Object.fromEntries(
+            properties
+              .map((property) => [property, rule.style.getPropertyValue(property)])
+              .filter(([, value]) => value)
+          )
+          if (Object.keys(declarations).length > 0) {
+            matchedRules.push({ selector: rule.selectorText, declarations })
+          }
+        } else if ('cssRules' in rule) {
+          visitRules((rule as CSSGroupingRule).cssRules)
+        }
+      }
+    }
+    for (const sheet of Array.from(document.styleSheets)) {
+      try {
+        visitRules(sheet.cssRules)
+      } catch {
+        // The app's styles are same-origin; ignore unrelated inaccessible sheets.
+      }
+    }
+    return {
+      computed: summarize(computed),
+      before: summarize(window.getComputedStyle(element, '::before')),
+      after: summarize(window.getComputedStyle(element, '::after')),
+      matchedReportRules: matchedRules.filter((rule) =>
+        /report-management|report-filter|report-row-actions/.test(rule.selector)
+      ),
+      matchedOtherRules: matchedRules.filter(
+        (rule) => !/report-management|report-filter|report-row-actions/.test(rule.selector)
+      ),
+    }
+  })
+}
+
 test.beforeEach(async ({ page }) => {
   await mockReportManagement(page)
 })
@@ -287,5 +358,210 @@ test('uses one responsive boundary and renders populated archive cards', async (
     await expect(firstCard).toContainText('--')
     await expect(firstCard.getByRole('button', { name: '檢視或審核考古題回報' })).toBeVisible()
     await expect(firstCard.getByRole('button', { name: '刪除考古題回報' })).toBeVisible()
+  }
+})
+
+test('applies the shared Archive Christmas hierarchy to Admin report surfaces at runtime', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.route('**/api/theme-management/active-theme', (route) =>
+    route.fulfill({
+      status: 200,
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ active_theme: 'christmas' }),
+    })
+  )
+  await page.goto('/admin', { waitUntil: 'networkidle' })
+  await expect(page.locator('html')).toHaveAttribute('data-effective-theme', 'christmas')
+
+  const adminPage = await readRuntimeStyle(page.locator('.admin-container'))
+  const appShell = await readRuntimeStyle(page.locator('#app'))
+  const root = page.locator('.report-management')
+  const archiveSection = page.locator('.report-section').filter({ hasText: '考古題回報' })
+  const filters = archiveSection.locator('.report-management__filters')
+  const table = archiveSection.locator('.report-management__archive-table')
+  const actionButton = table.getByRole('button', { name: '檢視或審核考古題回報' }).first()
+  const dangerButton = table.getByRole('button', { name: '刪除考古題回報' }).first()
+  const styles = {
+    reportRoot: await readRuntimeStyle(root),
+    inactiveTab: await readRuntimeStyle(root.getByRole('tab', { name: '留言回報' })),
+    activeTab: await readRuntimeStyle(root.getByRole('tab', { name: '考古題回報' })),
+    filterPanel: await readRuntimeStyle(filters),
+    searchInput: await readRuntimeStyle(filters.locator('.p-inputtext')),
+    statusSelect: await readRuntimeStyle(filters.locator('.p-select').nth(0)),
+    reasonSelect: await readRuntimeStyle(filters.locator('.p-select').nth(1)),
+    searchButton: await readRuntimeStyle(filters.getByRole('button', { name: '搜尋' })),
+    tableWrapper: await readRuntimeStyle(table),
+    tableHeader: await readRuntimeStyle(table.locator('.p-datatable-thead > tr > th').first()),
+    tableBody: await readRuntimeStyle(table.locator('.p-datatable-tbody')),
+    tableRow: await readRuntimeStyle(table.locator('.p-datatable-tbody > tr').first()),
+    tableCell: await readRuntimeStyle(table.locator('.p-datatable-tbody > tr > td').first()),
+    paginator: await readRuntimeStyle(table.locator('.p-paginator')),
+    actionButton: await readRuntimeStyle(actionButton),
+    dangerButton: await readRuntimeStyle(dangerButton),
+  }
+
+  expect(adminPage.computed).toMatchObject({
+    backgroundColor: 'rgba(0, 0, 0, 0)',
+    backgroundImage: 'none',
+  })
+  expect(appShell.computed.backgroundColor).toBe('rgb(66, 104, 120)')
+  expect(appShell.computed.backgroundImage).toContain('linear-gradient')
+  expect(styles.reportRoot.computed).toMatchObject({
+    backgroundColor: 'rgba(0, 0, 0, 0)',
+    backgroundImage: 'none',
+    color: 'rgb(245, 238, 220)',
+  })
+  expect(styles.inactiveTab.computed).toMatchObject({
+    backgroundColor: 'rgba(0, 0, 0, 0)',
+    backgroundImage: 'none',
+    color: 'rgb(197, 213, 210)',
+  })
+  expect(styles.activeTab.computed).toMatchObject({
+    backgroundColor: 'rgb(44, 89, 77)',
+    backgroundImage: 'none',
+    color: 'rgb(248, 242, 232)',
+    borderColor: 'rgb(222, 199, 142)',
+  })
+  expect(styles.filterPanel.computed).toMatchObject({
+    backgroundColor: 'rgb(44, 89, 77)',
+    backgroundImage: 'none',
+    borderColor: 'rgba(222, 199, 142, 0.38)',
+  })
+  for (const control of [styles.searchInput, styles.statusSelect, styles.reasonSelect]) {
+    expect(control.computed).toMatchObject({
+      backgroundColor: 'rgb(23, 63, 58)',
+      backgroundImage: 'none',
+      color: 'rgb(248, 242, 232)',
+      borderColor: 'rgba(222, 199, 142, 0.38)',
+    })
+  }
+  for (const button of [styles.searchButton, styles.actionButton]) {
+    expect(button.computed).toMatchObject({
+      backgroundColor: 'rgb(23, 63, 58)',
+      backgroundImage: 'none',
+      color: 'rgb(245, 238, 220)',
+      borderColor: 'rgba(222, 199, 142, 0.38)',
+    })
+  }
+  expect(styles.dangerButton.computed).toMatchObject({
+    backgroundColor: 'rgb(121, 57, 65)',
+    backgroundImage: 'none',
+    color: 'rgb(245, 238, 220)',
+  })
+  expect(styles.tableWrapper.computed.backgroundColor).toBe('rgb(44, 89, 77)')
+  expect(styles.tableHeader.computed).toMatchObject({
+    backgroundColor: 'rgb(23, 63, 58)',
+    backgroundImage: 'none',
+    color: 'rgb(245, 238, 220)',
+    borderColor: 'rgba(222, 199, 142, 0.38)',
+  })
+  for (const bodySurface of [styles.tableBody, styles.tableRow, styles.tableCell]) {
+    expect(bodySurface.computed.backgroundColor).toBe('rgb(44, 89, 77)')
+    expect(bodySurface.computed.backgroundImage).toBe('none')
+  }
+  expect(styles.tableHeader.computed.backgroundColor).not.toBe(
+    styles.tableRow.computed.backgroundColor
+  )
+  expect(styles.paginator.computed).toMatchObject({
+    backgroundColor: 'rgb(44, 89, 77)',
+    backgroundImage: 'none',
+    color: 'rgb(197, 213, 210)',
+    borderColor: 'rgba(222, 199, 142, 0.38)',
+  })
+  for (const surface of Object.values(styles)) {
+    expect(
+      surface.matchedReportRules.some((rule) =>
+        rule.selector.includes('report-management--christmas')
+      )
+    ).toBe(true)
+  }
+  expect(styles.actionButton.after.backgroundImage).toContain('radial-gradient')
+
+  await testInfo.attach('report-christmas-1440x900', {
+    body: await page.screenshot(),
+    contentType: 'image/png',
+  })
+
+  await actionButton.click()
+  const dialog = page.getByRole('dialog', { name: '考古題回報審核' })
+  await expect(dialog).toBeVisible()
+  const dialogStyle = await readRuntimeStyle(dialog)
+  expect(dialogStyle.computed).toMatchObject({
+    backgroundColor: 'rgb(44, 89, 77)',
+    backgroundImage: 'none',
+    color: 'rgb(248, 242, 232)',
+    borderColor: 'rgba(222, 199, 142, 0.38)',
+  })
+  expect(
+    dialogStyle.matchedReportRules.some(
+      (rule) =>
+        rule.selector.includes('report-management-panel-dialog') &&
+        rule.selector.includes('data-effective-theme')
+    )
+  ).toBe(true)
+  await dialog.getByRole('button', { name: '關閉' }).click()
+})
+
+test('keeps responsive Christmas report cards bounded with their row-owned surface', async ({
+  page,
+}, testInfo) => {
+  await page.route('**/api/theme-management/active-theme', (route) =>
+    route.fulfill({
+      status: 200,
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ active_theme: 'christmas' }),
+    })
+  )
+  await page.goto('/admin', { waitUntil: 'networkidle' })
+  await expect(page.locator('html')).toHaveAttribute('data-effective-theme', 'christmas')
+
+  const root = page.locator('.report-management')
+  const archiveSection = page.locator('.report-section').filter({ hasText: '考古題回報' })
+  const table = archiveSection.locator('.report-management__archive-table')
+
+  for (const viewport of [
+    { width: 1024, height: 768 },
+    { width: 834, height: 1210 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(viewport)
+    const row = table.locator('.p-datatable-tbody > tr').first()
+    const card = row.locator('.report-mobile-card-content')
+    await expect(card).toBeVisible()
+    const rowStyle = await readRuntimeStyle(row)
+    const cardStyle = await readRuntimeStyle(card)
+    expect(rowStyle.computed).toMatchObject({
+      backgroundColor: 'rgb(44, 89, 77)',
+      backgroundImage: 'none',
+      borderColor: 'rgba(222, 199, 142, 0.38)',
+    })
+    expect(
+      rowStyle.matchedReportRules.some((rule) =>
+        rule.selector.includes('report-management--christmas')
+      )
+    ).toBe(true)
+    expect(cardStyle.computed).toMatchObject({
+      backgroundColor: 'rgb(44, 89, 77)',
+      backgroundImage: 'none',
+    })
+    const geometry = await root.evaluate((element) => {
+      const rect = element.getBoundingClientRect()
+      return {
+        left: rect.left,
+        right: rect.right,
+        viewportWidth: window.innerWidth,
+        scrollWidth: element.scrollWidth,
+        clientWidth: element.clientWidth,
+      }
+    })
+    expect(geometry.left).toBeGreaterThanOrEqual(-1)
+    expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth + 1)
+    expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1)
+    await testInfo.attach(`report-christmas-${viewport.width}x${viewport.height}`, {
+      body: await page.screenshot(),
+      contentType: 'image/png',
+    })
   }
 })

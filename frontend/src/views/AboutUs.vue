@@ -1,5 +1,8 @@
 <template>
-  <main class="about-us-page">
+  <main
+    class="about-us-page"
+    :class="{ 'about-us-page--christmas': effectiveTheme === 'christmas' }"
+  >
     <section class="about-us-shell">
       <header class="about-us-header">
         <div>
@@ -11,6 +14,8 @@
             v-if="isAdmin"
             :label="$t('新增關於我們內容')"
             icon="pi pi-plus"
+            severity="success"
+            class="about-us-add-action review-action-republish"
             @click="openCreate"
           />
           <nav
@@ -89,7 +94,8 @@
                   :label="$t('編輯')"
                   icon="pi pi-pencil"
                   size="small"
-                  text
+                  outlined
+                  class="about-us-edit-action review-action-preview"
                   @click="openEdit(currentEntry)"
                 />
                 <Button
@@ -97,7 +103,8 @@
                   icon="pi pi-trash"
                   severity="danger"
                   size="small"
-                  text
+                  outlined
+                  class="about-us-delete-action review-action-delete"
                   @click="requestDelete(currentEntry)"
                 />
               </div>
@@ -117,6 +124,7 @@
       :draggable="false"
       :header="editingEntry ? $t('編輯關於我們內容') : $t('新增關於我們內容')"
       :style="{ width: '720px', maxWidth: '94vw' }"
+      :class="{ 'about-us-editor-dialog--christmas': effectiveTheme === 'christmas' }"
     >
       <form class="about-us-form" @submit.prevent="saveEntry">
         <div class="field">
@@ -176,9 +184,18 @@
             type="button"
             :label="$t('取消')"
             severity="secondary"
+            outlined
+            class="about-us-dialog-cancel-action review-action-preview"
             @click="dialogVisible = false"
           />
-          <Button type="submit" :label="$t('儲存')" icon="pi pi-check" :loading="saving" />
+          <Button
+            type="submit"
+            :label="$t('儲存')"
+            icon="pi pi-check"
+            severity="success"
+            class="about-us-dialog-save-action review-action-republish"
+            :loading="saving"
+          />
         </div>
       </form>
     </Dialog>
@@ -191,8 +208,10 @@ import { useI18n } from 'vue-i18n'
 import { aboutUsService } from '@/api'
 import { getCurrentUser } from '@/utils/auth.js'
 import { renderMarkdown } from '@/utils/markdown.js'
+import { useTheme } from '@/utils/useTheme'
 
 const { t, locale } = useI18n()
+const { effectiveTheme } = useTheme()
 const isAdmin = Boolean(getCurrentUser()?.is_admin)
 const entries = ref([])
 const currentEntryIndex = ref(0)
@@ -646,6 +665,85 @@ onMounted(loadEntries)
   background: var(--bg-secondary);
 }
 
+.about-us-page--christmas {
+  color: #f8f2e8;
+}
+
+.about-us-page--christmas .about-us-header h1,
+.about-us-page--christmas .about-us-header p,
+.about-us-page--christmas .about-us-control-label,
+.about-us-page--christmas .about-us-state,
+.about-us-page--christmas .about-us-empty :deep(.p-card-content),
+.about-us-page--christmas :deep(.markdown-content),
+.about-us-page--christmas :deep(.markdown-content h1),
+.about-us-page--christmas :deep(.markdown-content h2),
+.about-us-page--christmas :deep(.markdown-content h3) {
+  color: #f8f2e8;
+}
+
+.about-us-page--christmas .about-us-header p,
+.about-us-page--christmas .about-us-control-label {
+  color: #c5d5d2;
+}
+
+.about-us-page--christmas .about-us-entry,
+.about-us-page--christmas .about-us-empty,
+.about-us-page--christmas .about-us-entry :deep(.p-card),
+.about-us-page--christmas .about-us-empty :deep(.p-card),
+.about-us-page--christmas .about-us-entry :deep(.p-card-body),
+.about-us-page--christmas .about-us-empty :deep(.p-card-body),
+.about-us-page--christmas .about-us-entry :deep(.p-card-content),
+.about-us-page--christmas .about-us-empty :deep(.p-card-content) {
+  border-color: rgba(222, 199, 142, 0.38);
+  background: transparent;
+  box-shadow: none;
+}
+
+.about-us-page--christmas .about-us-empty :deep(.p-card-content) {
+  min-height: 12rem;
+  border: 1px solid rgba(222, 199, 142, 0.38);
+  border-radius: 0.75rem;
+  background: rgba(41, 63, 82, 0.32);
+}
+
+.about-us-page--christmas .about-us-entry :deep(.p-card-body) {
+  border: 1px solid rgba(222, 199, 142, 0.38);
+  border-radius: 0.75rem;
+  background: rgba(41, 63, 82, 0.36);
+}
+
+.about-us-page--christmas .about-us-entry-actions,
+.about-us-page--christmas :deep(.markdown-content hr) {
+  border-color: rgba(222, 199, 142, 0.38);
+}
+
+.about-us-page--christmas :deep(.review-action-preview.p-button) {
+  border-color: rgba(225, 246, 252, 0.96);
+  background: #d7edf5;
+  color: #245368;
+}
+
+.about-us-page--christmas :deep(.review-action-republish.p-button) {
+  border-color: rgba(127, 188, 145, 0.82);
+  background: linear-gradient(180deg, #3d8a64 0%, #2d6c52 100%);
+  color: #f5fff7;
+}
+
+.about-us-page--christmas :deep(.review-action-delete.p-button) {
+  border-color: rgba(244, 141, 151, 0.82);
+  background: rgba(116, 38, 50, 0.82);
+  color: #fff2f3;
+}
+
+.about-us-page--christmas :deep(.review-action-preview.p-button:hover),
+.about-us-page--christmas :deep(.review-action-republish.p-button:hover),
+.about-us-page--christmas :deep(.review-action-delete.p-button:hover) {
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
 @media (max-width: 640px) {
   .about-us-header,
   .about-us-entry-actions {
@@ -673,5 +771,138 @@ onMounted(loadEntries)
   :deep(.markdown-content blockquote) {
     padding: 0.8rem 0.9rem;
   }
+}
+</style>
+
+<style>
+html[data-effective-theme='christmas'] body .p-dialog.about-us-editor-dialog--christmas {
+  border: 1px solid rgba(222, 199, 142, 0.46);
+  background: #3e5f72;
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas'] body .about-us-editor-dialog--christmas .p-dialog-header {
+  border-bottom: 1px solid rgba(222, 199, 142, 0.38);
+  background: #293f52;
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas'] body .about-us-editor-dialog--christmas .p-dialog-content,
+html[data-effective-theme='christmas'] body .about-us-editor-dialog--christmas .p-dialog-footer {
+  background: #3e5f72;
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .about-us-editor-dialog--christmas
+  .p-dialog-close-button {
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas'] body .about-us-editor-dialog--christmas label,
+html[data-effective-theme='christmas'] body .about-us-editor-dialog--christmas h3 {
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .about-us-editor-dialog--christmas
+  .about-us-editor-hint {
+  color: #c5d5d2;
+}
+
+html[data-effective-theme='christmas'] body .about-us-editor-dialog--christmas .p-textarea {
+  border-color: rgba(222, 199, 142, 0.42);
+  background: #293f52;
+  color: #f8f2e8;
+  caret-color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas'] body .about-us-editor-dialog--christmas .p-textarea:focus {
+  border-color: #f0c96f;
+  box-shadow: 0 0 0 0.16rem rgba(240, 201, 111, 0.22);
+}
+
+html[data-effective-theme='christmas'] body .about-us-editor-dialog--christmas .about-us-preview {
+  border-color: rgba(222, 199, 142, 0.38);
+  background: rgba(41, 63, 82, 0.58);
+}
+
+html[data-effective-theme='christmas']
+  body
+  .about-us-editor-dialog--christmas
+  .about-us-preview
+  .markdown-content {
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .about-us-editor-dialog--christmas
+  .about-us-preview
+  .markdown-content
+  :is(h1, h2, h3, h4, h5, h6, p, li, strong, em, blockquote, pre, code) {
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .about-us-editor-dialog--christmas
+  .about-us-preview
+  .markdown-content
+  :is(blockquote, pre, code) {
+  border-color: rgba(222, 199, 142, 0.38);
+  background: rgba(30, 51, 68, 0.74);
+}
+
+html[data-effective-theme='christmas']
+  body
+  .about-us-editor-dialog--christmas
+  .about-us-preview
+  .markdown-content
+  a {
+  color: #bfe9ff;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .about-us-editor-dialog--christmas
+  .about-us-preview
+  .markdown-content
+  hr {
+  border-top-color: rgba(222, 199, 142, 0.45);
+}
+
+html[data-effective-theme='christmas']
+  body
+  .about-us-editor-dialog--christmas
+  .review-action-preview.p-button {
+  border-color: rgba(225, 246, 252, 0.96);
+  background: #d7edf5;
+  color: #245368;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .about-us-editor-dialog--christmas
+  .review-action-republish.p-button {
+  border-color: rgba(127, 188, 145, 0.82);
+  background: linear-gradient(180deg, #3d8a64 0%, #2d6c52 100%);
+  color: #f5fff7;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .about-us-editor-dialog--christmas
+  .review-action-preview.p-button:hover,
+html[data-effective-theme='christmas']
+  body
+  .about-us-editor-dialog--christmas
+  .review-action-republish.p-button:hover {
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
 }
 </style>

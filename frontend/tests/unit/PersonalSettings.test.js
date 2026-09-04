@@ -96,6 +96,37 @@ describe('PersonalSettings account visibility', () => {
     )
   })
 
+  it('uses the Christmas settings palette and established archive action styles', () => {
+    expect(personalSettingsSource).toContain(
+      ":class=\"{ 'personal-settings-page--christmas': effectiveTheme === 'christmas' }\""
+    )
+    expect(personalSettingsSource).toContain('class="w-full personal-settings-language-select"')
+    expect(personalSettingsSource).toContain('overlayClass="personal-settings-language-overlay"')
+    expect(personalSettingsSource).toContain(
+      'personal-settings-preview-action review-action-preview'
+    )
+    expect(personalSettingsSource).toContain(
+      'personal-settings-download-action review-action-republish'
+    )
+    expect(personalSettingsSource).toContain('personal-settings-delete-action review-action-delete')
+    expect(personalSettingsSource).toContain(
+      'password-save-button personal-settings-download-action review-action-republish'
+    )
+    expect(personalSettingsSource).toMatch(
+      /\.personal-settings-page--christmas\s*\{[\s\S]*?background:\s*transparent\s*!important;/
+    )
+    expect(personalSettingsSource).not.toContain(
+      ":global(html[data-effective-theme='christmas']) .personal-settings-page"
+    )
+    expect(personalSettingsSource).toMatch(
+      /\.settings-nav-item\.active\s*\{[\s\S]*?background:\s*#245c80;/
+    )
+    expect(personalSettingsSource).toContain('--personal-settings-christmas-field: #293f52;')
+    expect(personalSettingsSource).toContain(
+      'background: linear-gradient(135deg, #3d8a64, #2d6c52) !important;'
+    )
+  })
+
   it.each([
     [50, 45],
     [100, 90],
