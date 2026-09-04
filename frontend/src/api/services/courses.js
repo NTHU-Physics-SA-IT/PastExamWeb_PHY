@@ -21,8 +21,11 @@ export const courseService = {
     return api.get('/courses/categories')
   },
 
-  getCourseArchives(courseId) {
-    return api.get(`/courses/${courseId}/archives`)
+  getCourseArchives(courseId, { includeOwnerPending = false } = {}) {
+    if (!includeOwnerPending) return api.get(`/courses/${courseId}/archives`)
+    return api.get(`/courses/${courseId}/archives`, {
+      params: { include_owner_pending: true },
+    })
   },
 
   getAllCourses() {

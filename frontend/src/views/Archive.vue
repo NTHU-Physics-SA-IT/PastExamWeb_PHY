@@ -319,7 +319,7 @@
                       <div class="archive-card-grid">
                         <article
                           v-for="data in group.list"
-                          :key="data.id"
+                          :key="archiveRowKey(data)"
                           class="archive-record-card"
                         >
                           <div class="archive-record-content">
@@ -331,10 +331,20 @@
                                 >
                                   {{ archiveTypeConfig[data.type]?.name || data.type }}
                                 </Tag>
-                                <h3>{{ data.name }}</h3>
+                                <div class="archive-record-name-group">
+                                  <h3>{{ data.name }}</h3>
+                                  <Tag
+                                    v-if="isPendingSubmission(data)"
+                                    severity="warning"
+                                    class="soft-badge soft-badge--pending archive-pending-badge"
+                                  >
+                                    {{ $t('待審核') }}
+                                  </Tag>
+                                </div>
                               </div>
                               <div class="archive-record-actions">
                                 <Button
+                                  v-if="canPreviewArchive(data)"
                                   icon="pi pi-eye"
                                   @click="previewArchive(data)"
                                   size="small"
@@ -346,12 +356,13 @@
                                   class="archive-action-preview"
                                 />
                                 <Button
+                                  v-if="!isPendingSubmission(data)"
                                   icon="pi pi-download"
                                   @click="downloadArchive(data)"
                                   size="small"
                                   severity="success"
                                   :label="$t('下載')"
-                                  :loading="downloadingId === data.id"
+                                  :loading="downloadingId === data.archiveId"
                                   :aria-label="$t('下載')"
                                   :title="$t('下載')"
                                   class="archive-action-download"
@@ -385,11 +396,14 @@
                             <div class="archive-record-line archive-record-meta-line">
                               <span>{{ data.professor }}</span>
                               <span>{{ formatAnswerStatus(data) }}</span>
-                              <span>{{
+                              <span v-if="!isPendingSubmission(data)">{{
                                 $t('{count} 次下載', {
                                   count: formatDownloadCount(data.downloadCount),
                                 })
                               }}</span>
+                              <span v-if="isPendingSubmission(data)">
+                                {{ $t('投稿編號：{ids}', { ids: `#${data.submissionId}` }) }}
+                              </span>
                               <span v-if="formatSourceSubmissionIds(data)">
                                 {{
                                   $t('投稿編號：{ids}', { ids: formatSourceSubmissionIds(data) })
@@ -423,7 +437,7 @@
             :visible="showPreview"
             @update:visible="showPreview = $event"
             :courseId="selectedCourse"
-            :archiveId="selectedArchive?.id"
+            :archiveId="selectedArchive?.archiveId"
             :previewUrl="selectedArchive?.previewUrl"
             :title="selectedArchive?.name || ''"
             :academicYear="selectedArchive?.year"
@@ -433,6 +447,7 @@
             :loading="previewLoading"
             :error="previewError"
             :errorMessage="previewErrorMessage"
+            :showDownload="!isPendingSubmission(selectedArchive)"
             @hide="closePreview"
             @error="handlePreviewError"
             @download="handlePreviewDownload"
@@ -453,6 +468,17 @@
             :coursesList="coursesList"
             :courseCategories="courseCategories"
             @upload-success="handleWishCreated"
+          />
+
+          <UploadArchiveDialog
+            v-model="showPendingEditDialog"
+            mode="edit"
+            :submissionId="pendingEditSubmission?.submissionId || null"
+            :coursesList="coursesList"
+            :courseCategories="courseCategories"
+            :prefill="pendingEditSubmission"
+            @upload-success="handlePendingEditSuccess"
+            @stale="handlePendingEditStale"
           />
 
           <Dialog
@@ -888,6 +914,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', checkDevice)
+  revokePendingPreviewUrl()
   if (searchDebounceTimer) {
     clearTimeout(searchDebounceTimer)
   }
@@ -947,6 +974,8 @@ const selectedSubject = ref(null)
 const selectedCourse = ref(null)
 const showUploadDialog = ref(false)
 const showWishDialog = ref(false)
+const showPendingEditDialog = ref(false)
+const pendingEditSubmission = ref(null)
 const wishPoolActive = ref(false)
 const wishUploadPrefill = ref(null)
 const showSubmissionStatusDialog = ref(false)
@@ -1560,25 +1589,42 @@ function filterBySubject(course) {
 async function fetchArchives() {
   try {
     loading.value = true
-    const response = await courseService.getCourseArchives(selectedCourse.value)
+    const includeOwnerPending = isAuthenticatedRef.value && !isAdmin.value
+    const response = await courseService.getCourseArchives(selectedCourse.value, {
+      includeOwnerPending,
+    })
     const archiveRows = Array.isArray(response.data) ? response.data : []
     if (!Array.isArray(response.data)) {
       throw new Error('Archive list response is not an array')
     }
-    archives.value = archiveRows.filter(isVisibleArchiveRow).map((archive) => ({
-      id: archive.id,
-      year: archive.academic_year || '',
-      name: archive.name || t('未命名考古題'),
-      type: archive.archive_type || 'other',
-      professor: archive.professor || '—',
-      hasAnswers: Boolean(archive.has_answers),
-      subject: selectedSubject.value,
-      uploader_id: archive.uploader_id || null,
-      downloadCount: Number(archive.download_count || 0),
-      sourceSubmissionIds: Array.isArray(archive.source_submission_ids)
-        ? archive.source_submission_ids
-        : [],
-    }))
+    archives.value = archiveRows.filter(isVisibleArchiveRow).map((archive) => {
+      const pending = archive.item_kind === 'pending_submission'
+      const archiveId = pending ? null : (archive.archive_id ?? archive.id)
+      return {
+        itemKind: pending ? 'pending_submission' : 'archive',
+        id: archiveId,
+        archiveId,
+        submissionId: pending ? archive.submission_id : null,
+        courseId: pending ? archive.course_id : selectedCourse.value,
+        year: archive.academic_year || '',
+        name: archive.name || t('未命名考古題'),
+        type: archive.archive_type || 'other',
+        professor: archive.professor || '—',
+        hasAnswers: Boolean(archive.has_answers),
+        subject: selectedSubject.value,
+        category: getCategoryKeyForCourse(pending ? archive.course_id : selectedCourse.value),
+        uploader_id: pending ? null : archive.uploader_id || null,
+        downloadCount: pending ? null : Number(archive.download_count || 0),
+        sourceSubmissionIds: pending
+          ? []
+          : Array.isArray(archive.source_submission_ids)
+            ? archive.source_submission_ids
+            : [],
+        canPreview: pending ? archive.can_preview === true : true,
+        canEdit: pending ? archive.can_edit === true : false,
+        canWithdraw: pending ? archive.can_withdraw === true : false,
+      }
+    })
 
     const uniqueYears = new Set()
     const uniqueProfessors = new Set()
@@ -1634,15 +1680,33 @@ const downloadingId = ref(null)
 
 function isVisibleArchiveRow(archive) {
   const status = String(archive?.status || archive?.state || '').toLowerCase()
+  const identity =
+    archive?.item_kind === 'pending_submission'
+      ? archive?.submission_id
+      : (archive?.archive_id ?? archive?.id)
   return (
     archive &&
-    archive.id !== null &&
-    archive.id !== undefined &&
+    identity !== null &&
+    identity !== undefined &&
     !archive.deleted_at &&
     !archive.deletedAt &&
     !archive.is_deleted &&
     !['deleted', 'removed', 'trashed'].includes(status)
   )
+}
+
+function isPendingSubmission(archive) {
+  return archive?.itemKind === 'pending_submission'
+}
+
+function archiveRowKey(archive) {
+  return isPendingSubmission(archive)
+    ? `pending-submission:${archive.submissionId}`
+    : `archive:${archive.archiveId}`
+}
+
+function canPreviewArchive(archive) {
+  return isPendingSubmission(archive) ? archive.canPreview : Boolean(archive?.archiveId)
 }
 
 async function syncArchiveDownloadCount(archiveId) {
@@ -1654,10 +1718,13 @@ async function syncArchiveDownloadCount(archiveId) {
   try {
     const response = await courseService.getCourseArchives(selectedCourse.value)
     const serverRows = Array.isArray(response.data) ? response.data : []
-    const serverMap = new Map(serverRows.filter(isVisibleArchiveRow).map((item) => [item.id, item]))
+    const serverMap = new Map(
+      serverRows.filter(isVisibleArchiveRow).map((item) => [item.archive_id ?? item.id, item])
+    )
 
     archives.value = archives.value.map((archive) => {
-      const serverArchive = serverMap.get(archive.id)
+      if (isPendingSubmission(archive)) return archive
+      const serverArchive = serverMap.get(archive.archiveId)
       if (!serverArchive || serverArchive.download_count === archive.downloadCount) {
         return archive
       }
@@ -1668,7 +1735,7 @@ async function syncArchiveDownloadCount(archiveId) {
     })
 
     const serverArchive = serverMap.get(archiveId)
-    if (serverArchive && selectedArchive.value?.id === archiveId) {
+    if (serverArchive && selectedArchive.value?.archiveId === archiveId) {
       selectedArchive.value = {
         ...selectedArchive.value,
         downloadCount: serverArchive.download_count,
@@ -1706,9 +1773,12 @@ function startNativeDownload(url, fileName) {
 
 async function downloadArchive(archive) {
   try {
-    downloadingId.value = archive.id
+    downloadingId.value = archive.archiveId
 
-    const { data } = await archiveService.getArchiveDownloadUrl(selectedCourse.value, archive.id)
+    const { data } = await archiveService.getArchiveDownloadUrl(
+      selectedCourse.value,
+      archive.archiveId
+    )
 
     const fileName = `${archive.year}_${selectedSubject.value}_${archive.professor}_${archive.name}.pdf`
     startNativeDownload(data.url, fileName)
@@ -1729,7 +1799,7 @@ async function downloadArchive(archive) {
       life: 3000,
     })
 
-    await syncArchiveDownloadCount(archive.id)
+    await syncArchiveDownloadCount(archive.archiveId)
   } catch (error) {
     console.error('Download error:', error)
     if (isUnauthorizedError(error)) {
@@ -1750,6 +1820,7 @@ async function downloadArchive(archive) {
 const previewLoading = ref(false)
 const previewError = ref(false)
 const previewErrorMessage = ref(t('無法載入預覽'))
+const pendingPreviewUrl = ref('')
 let previewRequestId = 0
 
 async function previewArchive(archive) {
@@ -1764,12 +1835,19 @@ async function previewArchive(archive) {
       previewUrl: '',
     }
 
-    const { data } = await archiveService.getArchivePreviewUrl(selectedCourse.value, archive.id)
-    if (requestId !== previewRequestId || !showPreview.value) return
-
-    selectedArchive.value = {
-      ...archive,
-      previewUrl: data.url,
+    if (isPendingSubmission(archive)) {
+      const { data } = await archiveService.getOwnerPendingPreviewFile(archive.submissionId)
+      if (requestId !== previewRequestId || !showPreview.value) return
+      revokePendingPreviewUrl()
+      pendingPreviewUrl.value = URL.createObjectURL(data)
+      selectedArchive.value = { ...archive, previewUrl: pendingPreviewUrl.value }
+    } else {
+      const { data } = await archiveService.getArchivePreviewUrl(
+        selectedCourse.value,
+        archive.archiveId
+      )
+      if (requestId !== previewRequestId || !showPreview.value) return
+      selectedArchive.value = { ...archive, previewUrl: data.url }
     }
 
     trackEvent(EVENTS.PREVIEW_ARCHIVE, {
@@ -1782,6 +1860,11 @@ async function previewArchive(archive) {
   } catch (error) {
     if (requestId !== previewRequestId) return
     console.error('Preview error:', error)
+    if (isPendingSubmission(archive) && isOwnerPendingStaleError(error)) {
+      closePreview()
+      await refreshOwnerPendingArchive(t('投稿狀態已變更，無法再預覽'))
+      return
+    }
     previewError.value = true
     const isMissingFile = error.response?.status === 404
     previewErrorMessage.value = isMissingFile ? t('檔案缺失') : t('無法載入預覽')
@@ -1807,9 +1890,16 @@ function handlePreviewError() {
 
 function closePreview() {
   previewRequestId += 1
+  revokePendingPreviewUrl()
   showPreview.value = false
   selectedArchive.value = null
   previewError.value = false
+}
+
+function revokePendingPreviewUrl() {
+  if (!pendingPreviewUrl.value) return
+  URL.revokeObjectURL(pendingPreviewUrl.value)
+  pendingPreviewUrl.value = ''
 }
 
 function getCategoryName(code) {
@@ -1889,30 +1979,77 @@ const allAvailableCoursesForTransfer = computed(() => {
 const availableCoursesForTransfer = ref([])
 
 const canDeleteArchive = (archive) => {
+  if (isPendingSubmission(archive)) return archive.canWithdraw
   const currentUser = getCurrentUser()
   if (!currentUser) return false
 
   return isAdmin.value || (archive.uploader_id && archive.uploader_id === currentUser.id)
 }
 
-const canEditArchive = () => {
-  return isAdmin.value
+const canEditArchive = (archive) => {
+  return isPendingSubmission(archive) ? archive.canEdit : isAdmin.value
 }
 
 const confirmDelete = (archive) => {
+  const pending = isPendingSubmission(archive)
   confirm.require({
-    message: t('確定要刪除此考古題嗎？'),
-    header: t('確認刪除'),
+    message: pending ? t('確定要刪除並撤回這筆待審核投稿嗎？') : t('確定要刪除此考古題嗎？'),
+    header: pending ? t('刪除待審核投稿') : t('確認刪除'),
     icon: 'pi pi-exclamation-triangle',
     accept: () => {
-      deleteArchive(archive)
+      if (pending) void withdrawPendingSubmission(archive)
+      else void deleteArchive(archive)
     },
   })
 }
 
+function isOwnerPendingStaleError(error) {
+  return (
+    error?.response?.status === 409 &&
+    error?.response?.data?.detail?.code === 'archive_submission_stale_state'
+  )
+}
+
+async function refreshOwnerPendingArchive(message) {
+  shouldResetPanels.value = true
+  await fetchArchives()
+  toast.add({
+    severity: 'warn',
+    summary: t('投稿狀態已變更'),
+    detail: message,
+    life: 4000,
+  })
+}
+
+const withdrawPendingSubmission = async (archive) => {
+  try {
+    await archiveService.withdrawOwnerPendingSubmission(archive.submissionId)
+    shouldResetPanels.value = true
+    await fetchArchives()
+    toast.add({
+      severity: 'success',
+      summary: t('刪除成功'),
+      detail: t('待審核投稿已刪除並撤回'),
+      life: 3000,
+    })
+  } catch (error) {
+    if (isOwnerPendingStaleError(error)) {
+      await refreshOwnerPendingArchive(t('投稿狀態已變更，無法再刪除'))
+      return
+    }
+    if (isUnauthorizedError(error)) return
+    toast.add({
+      severity: 'error',
+      summary: t('刪除失敗'),
+      detail: t('發生錯誤，請稍後再試'),
+      life: 3000,
+    })
+  }
+}
+
 const deleteArchive = async (archive) => {
   try {
-    await archiveService.deleteArchive(selectedCourse.value, archive.id)
+    await archiveService.deleteArchive(selectedCourse.value, archive.archiveId)
 
     trackEvent(EVENTS.DELETE_ARCHIVE, {
       archiveName: archive.name,
@@ -1945,6 +2082,21 @@ const deleteArchive = async (archive) => {
 }
 
 const openEditDialog = async (archive) => {
+  if (isPendingSubmission(archive)) {
+    pendingEditSubmission.value = {
+      submissionId: archive.submissionId,
+      course_id: archive.courseId,
+      category: archive.category,
+      subject: archive.subject,
+      professor: archive.professor,
+      academic_year: archive.year,
+      archive_type: archive.type,
+      name: archive.name,
+      has_answers: archive.hasAnswers,
+    }
+    showPendingEditDialog.value = true
+    return
+  }
   try {
     const response = await courseService.getCourseArchives(selectedCourse.value)
     const archiveData = response.data
@@ -1962,7 +2114,7 @@ const openEditDialog = async (archive) => {
       }))
 
     editForm.value = {
-      id: archive.id,
+      id: archive.archiveId,
       name: archive.name,
       professor: archive.professor,
       type: archive.type,
@@ -2144,6 +2296,20 @@ async function handleUploadSuccess() {
   }
 }
 
+async function handlePendingEditSuccess() {
+  showPendingEditDialog.value = false
+  pendingEditSubmission.value = null
+  shouldResetPanels.value = true
+  await fetchArchives()
+}
+
+async function handlePendingEditStale() {
+  showPendingEditDialog.value = false
+  pendingEditSubmission.value = null
+  shouldResetPanels.value = true
+  await fetchArchives()
+}
+
 function handleWishCreated() {
   showWishDialog.value = false
   wishPoolActive.value = false
@@ -2176,12 +2342,12 @@ function toggleSidebar() {
 }
 
 async function handlePreviewDownload(onComplete) {
-  if (!selectedArchive.value) return
+  if (!selectedArchive.value || isPendingSubmission(selectedArchive.value)) return
 
   try {
     const { data } = await archiveService.getArchiveDownloadUrl(
       selectedCourse.value,
-      selectedArchive.value.id
+      selectedArchive.value.archiveId
     )
 
     const fileName = `${selectedArchive.value.year}_${selectedSubject.value}_${selectedArchive.value.professor}_${selectedArchive.value.name}.pdf`
@@ -2203,7 +2369,7 @@ async function handlePreviewDownload(onComplete) {
       life: 3000,
     })
 
-    await syncArchiveDownloadCount(selectedArchive.value.id)
+    await syncArchiveDownloadCount(selectedArchive.value.archiveId)
   } catch (error) {
     console.error('Download error:', error)
     if (isUnauthorizedError(error)) {
@@ -2859,6 +3025,18 @@ const mobileMenuItems = computed(() => {
   flex: 1 1 16rem;
   min-width: 0;
   gap: 0.55rem;
+}
+
+.archive-record-name-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.archive-record-name-group h3 {
+  margin: 0;
 }
 
 .archive-record-card h3 {

@@ -68,6 +68,11 @@ describe('API service wrappers', () => {
     courseService.getCourseArchives('course-1')
     expect(getMock).toHaveBeenCalledWith('/courses/course-1/archives')
 
+    courseService.getCourseArchives('course-1', { includeOwnerPending: true })
+    expect(getMock).toHaveBeenCalledWith('/courses/course-1/archives', {
+      params: { include_owner_pending: true },
+    })
+
     courseService.getAllCourses()
     expect(getMock).toHaveBeenCalledWith('/courses/admin/courses')
 
@@ -107,6 +112,43 @@ describe('API service wrappers', () => {
 
     archiveService.deleteArchive('course-1', 'arch-1')
     expect(deleteMock).toHaveBeenCalledWith('/courses/course-1/archives/arch-1')
+
+    archiveService.getOwnerPendingPreviewFile(41)
+    expect(getMock).toHaveBeenCalledWith('/archives/submissions/41/pending/preview-file', {
+      responseType: 'blob',
+    })
+
+    archiveService.withdrawOwnerPendingSubmission(41)
+    expect(postMock).toHaveBeenCalledWith('/archives/submissions/41/withdraw')
+
+    const replacementFile = new File(['pdf'], 'replacement.pdf', { type: 'application/pdf' })
+    archiveService.editOwnerPendingSubmission(41, {
+      course_id: 9,
+      professor: 'Prof. Lin',
+      academic_year: 1141,
+      archive_type: 'midterm',
+      sequence: 2,
+      has_answers: true,
+      owner_id: 999,
+      status: 'approved',
+      object_name: 'forbidden.pdf',
+      file: replacementFile,
+    })
+    const [, pendingEditBody, pendingEditConfig] = patchMock.mock.calls.at(-1)
+    expect(patchMock.mock.calls.at(-1)[0]).toBe('/archives/submissions/41/pending')
+    expect(Object.fromEntries(pendingEditBody.entries())).toEqual({
+      course_id: '9',
+      professor: 'Prof. Lin',
+      academic_year: '1141',
+      archive_type: 'midterm',
+      sequence: '2',
+      has_answers: 'true',
+      file: replacementFile,
+    })
+    expect(pendingEditConfig).toEqual({
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 30_000,
+    })
 
     archiveService.updateArchive('course-1', 'arch-1', { name: 'Exam' })
     expect(patchMock).toHaveBeenCalledWith(

@@ -22,6 +22,8 @@ const getCourseArchivesMock = vi.hoisted(() => vi.fn())
 const getArchiveDownloadUrlMock = vi.hoisted(() => vi.fn())
 const getArchivePreviewUrlMock = vi.hoisted(() => vi.fn())
 const getArchivePreviewFileMock = vi.hoisted(() => vi.fn())
+const getOwnerPendingPreviewFileMock = vi.hoisted(() => vi.fn())
+const withdrawOwnerPendingSubmissionMock = vi.hoisted(() => vi.fn())
 const deleteArchiveMock = vi.hoisted(() => vi.fn())
 const updateArchiveMock = vi.hoisted(() => vi.fn())
 const updateArchiveCourseMock = vi.hoisted(() => vi.fn())
@@ -86,6 +88,21 @@ const updatedArchives = baseArchives.map((archive, index) => ({
   download_count: archive.download_count + index + 1,
 }))
 
+const ownerPendingSubmission = {
+  item_kind: 'pending_submission',
+  submission_id: 71,
+  course_id: 'c1',
+  academic_year: 20231,
+  name: 'midterm2',
+  archive_type: 'midterm',
+  professor: 'Prof. Owner',
+  has_answers: false,
+  status: 'pending',
+  can_preview: true,
+  can_edit: true,
+  can_withdraw: true,
+}
+
 vi.mock('@/api', () => ({
   courseService: {
     listCourses: listCoursesMock,
@@ -96,6 +113,8 @@ vi.mock('@/api', () => ({
     getArchiveDownloadUrl: getArchiveDownloadUrlMock,
     getArchivePreviewUrl: getArchivePreviewUrlMock,
     getArchivePreviewFile: getArchivePreviewFileMock,
+    getOwnerPendingPreviewFile: getOwnerPendingPreviewFileMock,
+    withdrawOwnerPendingSubmission: withdrawOwnerPendingSubmissionMock,
     deleteArchive: deleteArchiveMock,
     updateArchive: updateArchiveMock,
     updateArchiveCourse: updateArchiveCourseMock,
@@ -106,17 +125,19 @@ vi.mock('@/api', () => ({
 
 vi.mock('@/components/PdfPreviewModal.vue', () => ({
   default: {
+    name: 'PdfPreviewModal',
     template: '<div><slot /></div>',
-    props: ['visible', 'previewUrl', 'courseId', 'archiveId', 'loading', 'error'],
+    props: ['visible', 'previewUrl', 'courseId', 'archiveId', 'loading', 'error', 'showDownload'],
     emits: ['update:visible', 'download', 'hide', 'error'],
   },
 }))
 
 vi.mock('@/components/UploadArchiveDialog.vue', () => ({
   default: {
-    template: '<div></div>',
-    props: ['visible'],
-    emits: ['update:visible', 'success'],
+    name: 'UploadArchiveDialog',
+    template: '<div class="upload-archive-dialog-stub"></div>',
+    props: ['modelValue', 'mode', 'submissionId', 'prefill'],
+    emits: ['update:modelValue', 'upload-success', 'stale'],
   },
 }))
 
@@ -200,6 +221,8 @@ describe('ArchiveView', () => {
       data: { url: 'https://example.com/preview.pdf' },
     })
     getArchivePreviewFileMock.mockResolvedValue({ data: new Blob(['dummy']) })
+    getOwnerPendingPreviewFileMock.mockResolvedValue({ data: new Blob(['pending']) })
+    withdrawOwnerPendingSubmissionMock.mockResolvedValue({ data: { success: true } })
     deleteArchiveMock.mockResolvedValue()
     updateArchiveMock.mockResolvedValue()
     updateArchiveCourseMock.mockResolvedValue()
@@ -221,6 +244,172 @@ describe('ArchiveView', () => {
     window.URL.revokeObjectURL = vi.fn()
     anchorClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     window.innerWidth = 1024
+  })
+
+  it('opts authenticated owners into pending rows without mixing archive and submission ids', async () => {
+    getCurrentUserMock.mockReturnValue({ id: 10, is_admin: false })
+    isAuthenticatedMock.mockReturnValue(true)
+    getCourseArchivesMock.mockReset()
+    getCourseArchivesMock.mockResolvedValue({
+      data: [
+        { ...baseArchives[0], item_kind: 'archive', archive_id: 'a1' },
+        ownerPendingSubmission,
+      ],
+    })
+
+    const wrapper = mount(ArchiveView, {
+      global: {
+        provide: {
+          toast: { add: toastAddMock },
+          confirm: { require: confirmRequireMock },
+          sidebarVisible: ref(true),
+        },
+        stubs: componentStubs,
+      },
+    })
+    await flushPromises()
+    wrapper.vm.filterBySubject({ label: 'Calculus I', id: 'c1' })
+    await flushPromises()
+
+    expect(getCourseArchivesMock).toHaveBeenLastCalledWith('c1', {
+      includeOwnerPending: true,
+    })
+    const rows = wrapper.vm.groupedArchives.flatMap((group) => group.list)
+    const pending = rows.find((row) => row.itemKind === 'pending_submission')
+    expect(pending).toMatchObject({ id: null, archiveId: null, submissionId: 71 })
+    expect(wrapper.text()).toContain('midterm2')
+    expect(wrapper.text()).toContain('待審核')
+    expect(wrapper.text()).toContain('投稿編號：#71')
+    expect(wrapper.findAll('.archive-action-preview')).toHaveLength(2)
+    expect(wrapper.findAll('.archive-action-edit')).toHaveLength(1)
+    expect(wrapper.findAll('.archive-action-delete')).toHaveLength(2)
+    expect(wrapper.findAll('.archive-action-download')).toHaveLength(1)
+
+    await wrapper.vm.previewArchive(pending)
+    expect(getOwnerPendingPreviewFileMock).toHaveBeenCalledWith(71)
+    expect(wrapper.vm.selectedArchive.previewUrl).toBe('blob:url')
+    expect(wrapper.vm.isPendingSubmission(wrapper.vm.selectedArchive)).toBe(true)
+    expect(wrapper.findComponent({ name: 'PdfPreviewModal' }).props('showDownload')).toBe(false)
+
+    await wrapper.vm.openEditDialog(pending)
+    await nextTick()
+    expect(wrapper.vm.showPendingEditDialog).toBe(true)
+    expect(wrapper.vm.pendingEditSubmission).toMatchObject({
+      submissionId: 71,
+      course_id: 'c1',
+      name: 'midterm2',
+    })
+    const editDialog = wrapper
+      .findAllComponents({ name: 'UploadArchiveDialog' })
+      .find((dialog) => dialog.props('mode') === 'edit')
+    expect(editDialog.props()).toMatchObject({ mode: 'edit', submissionId: 71 })
+
+    wrapper.vm.confirmDelete(pending)
+    await flushPromises()
+    expect(withdrawOwnerPendingSubmissionMock).toHaveBeenCalledWith(71)
+    expect(deleteArchiveMock).not.toHaveBeenCalled()
+
+    wrapper.vm.closePreview()
+    expect(window.URL.revokeObjectURL).toHaveBeenCalledWith('blob:url')
+    wrapper.unmount()
+  })
+
+  it('keeps anonymous and admin archive requests out of the owner pending overlay', async () => {
+    const mountForCurrentIdentity = () =>
+      mount(ArchiveView, {
+        global: {
+          provide: {
+            toast: { add: toastAddMock },
+            confirm: { require: confirmRequireMock },
+            sidebarVisible: ref(true),
+          },
+          stubs: componentStubs,
+        },
+      })
+
+    getCurrentUserMock.mockReturnValue(null)
+    isAuthenticatedMock.mockReturnValue(false)
+    let wrapper = mountForCurrentIdentity()
+    await flushPromises()
+    wrapper.vm.filterBySubject({ label: 'Calculus I', id: 'c1' })
+    await flushPromises()
+    expect(getCourseArchivesMock).toHaveBeenLastCalledWith('c1', {
+      includeOwnerPending: false,
+    })
+    wrapper.unmount()
+
+    getCurrentUserMock.mockReturnValue({ id: 1, is_admin: true })
+    isAuthenticatedMock.mockReturnValue(true)
+    wrapper = mountForCurrentIdentity()
+    await flushPromises()
+    wrapper.vm.filterBySubject({ label: 'Calculus I', id: 'c1' })
+    await flushPromises()
+    expect(getCourseArchivesMock).toHaveBeenLastCalledWith('c1', {
+      includeOwnerPending: false,
+    })
+    wrapper.unmount()
+  })
+
+  it('refreshes and invalidates pending actions after stale state conflicts', async () => {
+    getCurrentUserMock.mockReturnValue({ id: 10, is_admin: false })
+    isAuthenticatedMock.mockReturnValue(true)
+    getCourseArchivesMock.mockReset()
+    getCourseArchivesMock.mockResolvedValue({ data: [ownerPendingSubmission] })
+    withdrawOwnerPendingSubmissionMock.mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: { detail: { code: 'archive_submission_stale_state' } },
+      },
+    })
+    const wrapper = mount(ArchiveView, {
+      global: {
+        provide: {
+          toast: { add: toastAddMock },
+          confirm: { require: confirmRequireMock },
+          sidebarVisible: ref(true),
+        },
+        stubs: componentStubs,
+      },
+    })
+    await flushPromises()
+    wrapper.vm.filterBySubject({ label: 'Calculus I', id: 'c1' })
+    await flushPromises()
+    const pending = wrapper.vm.groupedArchives[0].list[0]
+
+    getOwnerPendingPreviewFileMock.mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: { detail: { code: 'archive_submission_stale_state' } },
+      },
+    })
+    const callsBeforePreview = getCourseArchivesMock.mock.calls.length
+    await wrapper.vm.previewArchive(pending)
+    expect(wrapper.vm.showPreview).toBe(false)
+    expect(getCourseArchivesMock.mock.calls.length).toBe(callsBeforePreview + 1)
+    expect(toastAddMock).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: '投稿狀態已變更，無法再預覽' })
+    )
+
+    const callsBeforeWithdraw = getCourseArchivesMock.mock.calls.length
+    await wrapper.vm.withdrawPendingSubmission(pending)
+    expect(getCourseArchivesMock.mock.calls.length).toBe(callsBeforeWithdraw + 1)
+    expect(toastAddMock).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: '投稿狀態已變更，無法再刪除' })
+    )
+
+    wrapper.vm.pendingEditSubmission = { submissionId: 71 }
+    wrapper.vm.showPendingEditDialog = true
+    await wrapper.vm.handlePendingEditStale()
+    expect(wrapper.vm.showPendingEditDialog).toBe(false)
+    expect(wrapper.vm.pendingEditSubmission).toBe(null)
+
+    wrapper.vm.pendingEditSubmission = { submissionId: 71 }
+    wrapper.vm.showPendingEditDialog = true
+    const callsBeforeSuccess = getCourseArchivesMock.mock.calls.length
+    await wrapper.vm.handlePendingEditSuccess()
+    expect(getCourseArchivesMock.mock.calls.length).toBe(callsBeforeSuccess + 1)
+    expect(wrapper.vm.showPendingEditDialog).toBe(false)
+    wrapper.unmount()
   })
 
   afterEach(() => {

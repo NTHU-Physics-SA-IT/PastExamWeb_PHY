@@ -7,6 +7,8 @@ const courseServiceMock = vi.hoisted(() => ({
 
 const archiveServiceMock = vi.hoisted(() => ({
   uploadArchive: vi.fn(),
+  editOwnerPendingSubmission: vi.fn(),
+  getOwnerPendingPreviewFile: vi.fn(),
 }))
 
 const wishServiceMock = vi.hoisted(() => ({
@@ -191,6 +193,10 @@ describe('UploadArchiveDialog', () => {
     trackEventMock.mockReset()
     toastAddMock.mockReset()
     archiveServiceMock.uploadArchive.mockResolvedValue()
+    archiveServiceMock.editOwnerPendingSubmission.mockReset()
+    archiveServiceMock.editOwnerPendingSubmission.mockResolvedValue({ data: {} })
+    archiveServiceMock.getOwnerPendingPreviewFile.mockReset()
+    archiveServiceMock.getOwnerPendingPreviewFile.mockResolvedValue({ data: new Blob(['current']) })
     wishServiceMock.create.mockReset()
     wishServiceMock.create.mockResolvedValue()
     courseServiceMock.getCourseArchives.mockResolvedValue({
@@ -268,6 +274,149 @@ describe('UploadArchiveDialog', () => {
     )
     expect(wrapper.emitted('upload-success')).toBeTruthy()
 
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['midterm', 'midterm2', 2],
+    ['quiz', 'quiz3', 3],
+    ['final', 'final', null],
+  ])('prefills constrained edit mode for %s submissions', async (type, name, sequence) => {
+    const wrapper = mountDialog({
+      modelValue: false,
+      mode: 'edit',
+      submissionId: 71,
+      prefill: {
+        submissionId: 71,
+        course_id: 'c1',
+        subject: 'Calculus I',
+        category: 'freshman',
+        professor: 'Prof. Lin',
+        academic_year: 1141,
+        archive_type: type,
+        name,
+        has_answers: true,
+      },
+    })
+    await wrapper.setProps({ modelValue: true })
+    await flushPromises()
+
+    expect(wrapper.vm.dialogTitle).toBe('編輯考古投稿')
+    expect(wrapper.text()).not.toContain('申請新增課程')
+    expect(wrapper.text()).not.toContain('同時申請新增課程分類')
+    expect(wrapper.vm.form).toEqual(
+      expect.objectContaining({
+        subjectId: 'c1',
+        professor: 'Prof. Lin',
+        academicYear: 1141,
+        type,
+        examNumber: sequence,
+        hasAnswers: true,
+        file: null,
+      })
+    )
+    expect(wrapper.vm.generatedFilename).toBe(name)
+    expect(wrapper.vm.canUpload).toBe(true)
+    expect(wrapper.text()).toContain('保留目前檔案')
+    wrapper.unmount()
+  })
+
+  it('submits metadata-only edits and allowlisted optional PDF replacements', async () => {
+    const wrapper = mountDialog({
+      modelValue: false,
+      mode: 'edit',
+      submissionId: 71,
+      prefill: {
+        course_id: 'c1',
+        subject: 'Calculus I',
+        category: 'freshman',
+        professor: 'Prof. Lin',
+        academic_year: 1141,
+        archive_type: 'midterm',
+        name: 'midterm2',
+        has_answers: false,
+        object_name: 'must-not-leak.pdf',
+        owner_id: 10,
+        status: 'pending',
+      },
+    })
+    await wrapper.setProps({ modelValue: true })
+    await flushPromises()
+
+    await wrapper.vm.handleUpload()
+    expect(pdfLoadMock).not.toHaveBeenCalled()
+    expect(archiveServiceMock.editOwnerPendingSubmission).toHaveBeenLastCalledWith(71, {
+      course_id: 'c1',
+      professor: 'Prof. Lin',
+      academic_year: 1141,
+      archive_type: 'midterm',
+      sequence: 2,
+      has_answers: false,
+      other_name: undefined,
+      file: undefined,
+    })
+    expect(wrapper.emitted('upload-success')).toBeTruthy()
+
+    await wrapper.setProps({ modelValue: false })
+    await wrapper.setProps({ modelValue: true })
+    await flushPromises()
+    const replacement = {
+      name: 'replacement.pdf',
+      size: 1024,
+      arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)),
+    }
+    wrapper.vm.form.file = replacement
+    wrapper.vm.previewUploadFile()
+    expect(wrapper.vm.previewingCurrentFile).toBe(false)
+    expect(wrapper.vm.uploadPreviewUrl).toBe('blob:url')
+    await wrapper.vm.handleUpload()
+    const replacementPayload = archiveServiceMock.editOwnerPendingSubmission.mock.calls.at(-1)[1]
+    expect(replacementPayload.file).toBeInstanceOf(File)
+    expect(replacementPayload.file.name).toBe('replacement.pdf')
+    expect(replacementPayload).not.toHaveProperty('object_name')
+    expect(replacementPayload).not.toHaveProperty('owner_id')
+    expect(replacementPayload).not.toHaveProperty('status')
+    wrapper.unmount()
+  })
+
+  it('previews current PDF, restores keep-current state, and cleans stale URLs', async () => {
+    const wrapper = mountDialog({
+      mode: 'edit',
+      submissionId: 71,
+      prefill: {
+        course_id: 'c1',
+        subject: 'Calculus I',
+        category: 'freshman',
+        professor: 'Prof. Lin',
+        academic_year: 1141,
+        archive_type: 'final',
+        name: 'final',
+      },
+    })
+    wrapper.vm.applyPrefill()
+    await flushPromises()
+
+    await wrapper.vm.previewCurrentFile()
+    expect(archiveServiceMock.getOwnerPendingPreviewFile).toHaveBeenCalledWith(71)
+    expect(wrapper.vm.uploadPreviewUrl).toBe('blob:url')
+
+    wrapper.vm.form.file = { name: 'replacement.pdf', size: 512 }
+    wrapper.vm.clearSelectedFile()
+    expect(wrapper.vm.form.file).toBeNull()
+
+    archiveServiceMock.editOwnerPendingSubmission.mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: { detail: { code: 'archive_submission_stale_state' } },
+      },
+    })
+    await wrapper.vm.handleUpload()
+    expect(wrapper.emitted('stale')).toBeTruthy()
+    expect(wrapper.emitted('update:modelValue').at(-1)).toEqual([false])
+    expect(globalThis.URL.revokeObjectURL).toHaveBeenCalledWith('blob:url')
+    expect(toastAddMock).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: '投稿狀態已變更，無法再編輯' })
+    )
     wrapper.unmount()
   })
 

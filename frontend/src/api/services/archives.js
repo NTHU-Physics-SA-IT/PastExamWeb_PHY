@@ -86,6 +86,38 @@ export const archiveService = {
     return api.get('/archives/submissions/me')
   },
 
+  getOwnerPendingPreviewFile(submissionId) {
+    return api.get(`/archives/submissions/${submissionId}/pending/preview-file`, {
+      responseType: 'blob',
+    })
+  },
+
+  withdrawOwnerPendingSubmission(submissionId) {
+    return api.post(`/archives/submissions/${submissionId}/withdraw`)
+  },
+
+  editOwnerPendingSubmission(submissionId, data) {
+    const formData = new FormData()
+    const allowedFields = [
+      'course_id',
+      'professor',
+      'academic_year',
+      'archive_type',
+      'sequence',
+      'has_answers',
+      'other_name',
+      'file',
+    ]
+    for (const field of allowedFields) {
+      const value = data?.[field]
+      if (value !== undefined && value !== null && value !== '') formData.append(field, value)
+    }
+    return api.patch(`/archives/submissions/${submissionId}/pending`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 30_000,
+    })
+  },
+
   listAdminSubmissions() {
     return api.get('/archives/admin/submissions')
   },
