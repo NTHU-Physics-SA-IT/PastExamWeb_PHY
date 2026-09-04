@@ -32,6 +32,9 @@ from app.services.archive_submission_links import (
     ensure_archive_submission_link_available,
     is_archive_submission_link_unique_violation,
 )
+from app.services.archive_submission_review_revision import (
+    compute_archive_submission_review_revision,
+)
 from app.utils.auth import get_current_user
 
 
@@ -154,7 +157,12 @@ async def test_approval_link_conflict_rolls_back_all_side_effects(
     try:
         response = await client.post(
             f"/archives/admin/submissions/{submission_id}/approve",
-            json={"expected_status": "pending"},
+            json={
+                "expected_status": "pending",
+                "expected_revision": compute_archive_submission_review_revision(
+                    submission
+                ),
+            },
         )
 
         assert response.status_code == 409

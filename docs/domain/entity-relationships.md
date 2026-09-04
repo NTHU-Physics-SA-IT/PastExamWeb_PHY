@@ -164,6 +164,14 @@ projection from the exact link in addition to the historical flat submission
 fields. A null projection means there is no exact current Archive to report; it
 must not be filled by guessing from names or metadata.
 
+An active existing-Course pending submission has no durable `course_id` of its
+own. Its owner-only Archive overlay may resolve the retained category and
+normalized subject snapshot against active Courses, but it may project the row
+under a Course only when that identity has exactly one active match. Zero or
+multiple matches fail closed. The existing-Course discriminator is specifically
+`requested_course_name IS NULL` and `requested_category_key IS NULL`; English
+snapshot metadata and `source_wish_id` do not change that classification.
+
 ### Current implementation and test evidence
 
 `archives.py::approve_archive_submission` owns the transaction. First approval
@@ -278,6 +286,12 @@ and a later new owner mutation fails with the stable
 `archive_submission_self_delete_consumed` conflict. Administrator and
 system/cascade deletion preserve the stored value. Read capability projection
 and frontend controls remain later application work.
+
+For an active pending existing-Course submission, the same canonical owner
+identity also governs the owner-only preview, constrained edit, and withdraw
+operations. Administrators do not acquire those owner-route capabilities from
+their role. A conflicting requester and legacy owner identity fails closed;
+client payload fields never participate in ownership resolution.
 
 ## ArchiveSubmissionEvent
 

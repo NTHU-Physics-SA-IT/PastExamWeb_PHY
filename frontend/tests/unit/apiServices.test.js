@@ -68,6 +68,11 @@ describe('API service wrappers', () => {
     courseService.getCourseArchives('course-1')
     expect(getMock).toHaveBeenCalledWith('/courses/course-1/archives')
 
+    courseService.getCourseArchives('course-1', { includeOwnerPending: true })
+    expect(getMock).toHaveBeenCalledWith('/courses/course-1/archives', {
+      params: { include_owner_pending: true },
+    })
+
     courseService.getAllCourses()
     expect(getMock).toHaveBeenCalledWith('/courses/admin/courses')
 
@@ -108,6 +113,43 @@ describe('API service wrappers', () => {
     archiveService.deleteArchive('course-1', 'arch-1')
     expect(deleteMock).toHaveBeenCalledWith('/courses/course-1/archives/arch-1')
 
+    archiveService.getOwnerPendingPreviewFile(41)
+    expect(getMock).toHaveBeenCalledWith('/archives/submissions/41/pending/preview-file', {
+      responseType: 'blob',
+    })
+
+    archiveService.withdrawOwnerPendingSubmission(41)
+    expect(postMock).toHaveBeenCalledWith('/archives/submissions/41/withdraw')
+
+    const replacementFile = new File(['pdf'], 'replacement.pdf', { type: 'application/pdf' })
+    archiveService.editOwnerPendingSubmission(41, {
+      course_id: 9,
+      professor: 'Prof. Lin',
+      academic_year: 1141,
+      archive_type: 'midterm',
+      sequence: 2,
+      has_answers: true,
+      owner_id: 999,
+      status: 'approved',
+      object_name: 'forbidden.pdf',
+      file: replacementFile,
+    })
+    const [, pendingEditBody, pendingEditConfig] = patchMock.mock.calls.at(-1)
+    expect(patchMock.mock.calls.at(-1)[0]).toBe('/archives/submissions/41/pending')
+    expect(Object.fromEntries(pendingEditBody.entries())).toEqual({
+      course_id: '9',
+      professor: 'Prof. Lin',
+      academic_year: '1141',
+      archive_type: 'midterm',
+      sequence: '2',
+      has_answers: 'true',
+      file: replacementFile,
+    })
+    expect(pendingEditConfig).toEqual({
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 30_000,
+    })
+
     archiveService.updateArchive('course-1', 'arch-1', { name: 'Exam' })
     expect(patchMock).toHaveBeenCalledWith(
       '/courses/course-1/archives/arch-1',
@@ -131,17 +173,19 @@ describe('API service wrappers', () => {
     })
   })
 
-  it('archive review requests include the current submission status', () => {
-    archiveService.approveSubmission(101, 'pending', 'approve note')
+  it('archive review requests include status and backend revision preconditions', () => {
+    archiveService.approveSubmission(101, 'pending', 'asr-v1:approve', 'approve note')
     expect(postMock).toHaveBeenLastCalledWith('/archives/admin/submissions/101/approve', {
       note: 'approve note',
       expected_status: 'pending',
+      expected_revision: 'asr-v1:approve',
     })
 
-    archiveService.rejectSubmission(102, 'approved', 'reject note')
+    archiveService.rejectSubmission(102, 'approved', 'asr-v1:reject', 'reject note')
     expect(postMock).toHaveBeenLastCalledWith('/archives/admin/submissions/102/reject', {
       note: 'reject note',
       expected_status: 'approved',
+      expected_revision: 'asr-v1:reject',
     })
 
     archiveService.takedownSubmission(103, 'pending', 'takedown note')
@@ -154,6 +198,14 @@ describe('API service wrappers', () => {
     expect(postMock).toHaveBeenLastCalledWith('/archives/admin/submissions/104/republish', {
       note: 'republish note',
       expected_status: 'takedown',
+    })
+  })
+
+  it('archive submission preview sends the backend revision precondition', () => {
+    archiveService.getSubmissionPreviewFile(105, 'asr-v1:preview')
+    expect(getMock).toHaveBeenLastCalledWith('/archives/admin/submissions/105/preview-file', {
+      params: { expected_revision: 'asr-v1:preview' },
+      responseType: 'blob',
     })
   })
 

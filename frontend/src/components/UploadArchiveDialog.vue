@@ -27,7 +27,7 @@
         <StepPanels>
           <StepPanel v-slot="{ activateCallback }" value="1">
             <div class="flex flex-column gap-4">
-              <div v-if="!sourceWishId" class="request-mode-panel">
+              <div v-if="!sourceWishId && !isEditMode" class="request-mode-panel">
                 <div class="flex align-items-start gap-2">
                   <Checkbox
                     v-model="form.requestNewCourse"
@@ -197,7 +197,7 @@
                     <div>{{ item.name }}</div>
                   </template>
                 </Select>
-                <small class="text-gray-500">{{
+                <small v-if="!isEditMode" class="text-gray-500">{{
                   $t('若課程不在列表上，請勾選「申請新增課程」。')
                 }}</small>
               </div>
@@ -405,6 +405,23 @@
               />
             </div>
             <div v-else class="flex flex-column gap-4">
+              <div v-if="isEditMode" class="current-file-panel">
+                <div>
+                  <div class="font-semibold">{{ $t('目前 PDF') }}</div>
+                  <div class="text-sm text-500 mt-1">
+                    {{ form.file ? $t('將撤換目前檔案') : $t('保留目前檔案') }}
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  icon="pi pi-eye"
+                  :label="$t('預覽目前 PDF')"
+                  severity="secondary"
+                  outlined
+                  :loading="uploadPreviewLoading && previewingCurrentFile"
+                  @click="previewCurrentFile"
+                />
+              </div>
               <FileUpload
                 ref="fileUpload"
                 accept="application/pdf"
@@ -469,7 +486,13 @@
                     <i
                       class="pi pi-cloud-upload border-2 border-round p-5 text-4xl text-500 mb-3"
                     ></i>
-                    <p class="m-0 text-600">{{ $t('將 PDF 檔案拖放至此處以上傳') }}</p>
+                    <p class="m-0 text-600">
+                      {{
+                        isEditMode
+                          ? $t('選擇新的 PDF 以撤換目前檔案')
+                          : $t('將 PDF 檔案拖放至此處以上傳')
+                      }}
+                    </p>
                     <p class="m-0 text-sm text-500 mt-2">
                       {{ $t('僅接受 PDF 檔案，檔案大小最大 20MB') }}
                     </p>
@@ -496,7 +519,7 @@
                 :label="$t('下一步')"
                 icon="pi pi-arrow-right"
                 @click="activateCallback('4')"
-                :disabled="isWishMode ? !form.wishTitle.trim() : !form.file"
+                :disabled="isWishMode ? !form.wishTitle.trim() : !isEditMode && !form.file"
               />
             </div>
           </StepPanel>
@@ -555,6 +578,10 @@
                   <strong>{{ $t('附解答：') }}</strong>
                   {{ form.hasAnswers ? $t('是') : $t('否') }}
                 </div>
+                <div v-if="isEditMode">
+                  <strong>{{ $t('PDF：') }}</strong>
+                  {{ form.file ? form.file.name : $t('保留目前檔案') }}
+                </div>
               </div>
               <p v-if="!isWishMode" class="m-0 text-sm text-color-secondary line-height-3">
                 {{
@@ -573,15 +600,17 @@
               />
               <div class="flex gap-2.5">
                 <Button
-                  v-if="!isWishMode"
+                  v-if="!isWishMode && (!isEditMode || form.file)"
                   icon="pi pi-eye"
                   :label="$t('預覽')"
                   severity="secondary"
                   @click="previewUploadFile"
                 />
                 <Button
-                  :label="isWishMode ? $t('送出許願') : $t('上傳')"
-                  :icon="isWishMode ? 'pi pi-sparkles' : 'pi pi-upload'"
+                  :label="isWishMode ? $t('送出許願') : isEditMode ? $t('儲存') : $t('上傳')"
+                  :icon="
+                    isWishMode ? 'pi pi-sparkles' : isEditMode ? 'pi pi-check' : 'pi pi-upload'
+                  "
                   severity="success"
                   @click="handleUpload"
                   :loading="uploading"
@@ -598,7 +627,11 @@
       :visible="showUploadPreview"
       @update:visible="showUploadPreview = $event"
       :previewUrl="uploadPreviewUrl"
-      :title="form.file ? form.file.name : ''"
+      :title="
+        previewingCurrentFile
+          ? `${generatedFilename || prefill?.name || ''}.pdf`
+          : form.file?.name || ''
+      "
       :academicYear="form.academicYear"
       :archiveType="form.type || ''"
       :courseName="effectiveSubject || ''"
@@ -615,7 +648,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from 'primevue/usetoast'
 import { courseService, archiveService, wishService } from '../api'
@@ -645,16 +678,24 @@ const props = defineProps({
   prefill: { type: Object, default: null },
   sourceWishId: { type: Number, default: null },
   mode: { type: String, default: 'upload' },
+  submissionId: { type: Number, default: null },
 })
 
-const emit = defineEmits(['update:modelValue', 'upload-success'])
+const emit = defineEmits(['update:modelValue', 'upload-success', 'stale'])
 
 const toast = useToast()
 const { t } = useI18n()
 const NEW_CATEGORY_REQUIRES_COURSE_MESSAGE = '新增分類必須同時申請新增課程。'
 const isWishMode = computed(() => props.mode === 'wish')
+const isEditMode = computed(() => props.mode === 'edit')
 const dialogTitle = computed(() =>
-  isWishMode.value ? t('新增考古許願') : props.sourceWishId ? t('協助上傳考古題') : t('上傳考古題')
+  isWishMode.value
+    ? t('新增考古許願')
+    : isEditMode.value
+      ? t('編輯考古投稿')
+      : props.sourceWishId
+        ? t('協助上傳考古題')
+        : t('上傳考古題')
 )
 let applyingPrefill = false
 
@@ -693,8 +734,15 @@ const showUploadPreview = ref(false)
 const uploadPreviewUrl = ref('')
 const uploadPreviewLoading = ref(false)
 const uploadPreviewError = ref(false)
+const previewingCurrentFile = ref(false)
 
 const availableProfessors = ref([])
+
+const normalizedProfessor = computed(() =>
+  typeof form.value.professor === 'string'
+    ? form.value.professor.trim()
+    : form.value.professor?.name?.trim() || ''
+)
 
 const categoryOptions = computed(() =>
   props.courseCategories.map((category) => ({
@@ -833,6 +881,18 @@ const canUpload = computed(() => {
       canGoToStep2.value &&
       canGoToStep3.value &&
       (form.value.requestNewCourse || form.value.subjectId)
+    )
+  }
+  if (isEditMode.value) {
+    return Boolean(
+      form.value.subjectId &&
+      effectiveCategory.value &&
+      effectiveSubject.value &&
+      normalizedProfessor.value &&
+      form.value.academicYear &&
+      form.value.type &&
+      generatedFilename.value &&
+      isFilenameValid.value
     )
   }
   return (
@@ -975,7 +1035,10 @@ const handleUpload = async () => {
     }
     return
   }
-  if (!form.value.file || form.value.file.size > MAX_PDF_SIZE_BYTES) {
+  if (
+    (!isEditMode.value && !form.value.file) ||
+    (form.value.file && form.value.file.size > MAX_PDF_SIZE_BYTES)
+  ) {
     fileValidationError.value = t('PDF 檔案超過 20 MB 大小上限')
     uploadStep.value = '3'
     form.value.file = null
@@ -994,22 +1057,30 @@ const handleUpload = async () => {
   try {
     uploading.value = true
 
-    const fileArrayBuffer = await form.value.file.arrayBuffer()
-    const pdfDoc = await PDFDocument.load(fileArrayBuffer)
+    const cleanFileWithName = form.value.file ? await sanitizePdf(form.value.file) : null
 
-    pdfDoc.setTitle('')
-    pdfDoc.setAuthor('')
-    pdfDoc.setSubject('')
-    pdfDoc.setKeywords([])
-    pdfDoc.setProducer('')
-    pdfDoc.setCreator('')
-    pdfDoc.setCreationDate(new Date())
-    pdfDoc.setModificationDate(new Date())
-    const pdfBytes = await pdfDoc.save()
-    const cleanFile = new Blob([pdfBytes], { type: 'application/pdf' })
-    const cleanFileWithName = new File([cleanFile], form.value.file.name, {
-      type: 'application/pdf',
-    })
+    if (isEditMode.value) {
+      await archiveService.editOwnerPendingSubmission(props.submissionId, {
+        course_id: form.value.subjectId,
+        professor: normalizedProfessor.value,
+        academic_year: form.value.academicYear,
+        archive_type: form.value.type,
+        sequence: requiresExamNumber.value ? form.value.examNumber : undefined,
+        has_answers: form.value.hasAnswers,
+        other_name: form.value.type === 'other' ? form.value.otherName : undefined,
+        file: cleanFileWithName || undefined,
+      })
+      closeUploadPreview()
+      emit('update:modelValue', false)
+      emit('upload-success')
+      toast.add({
+        severity: 'success',
+        summary: t('更新成功'),
+        detail: t('考古投稿已更新，仍在等待審核。'),
+        life: 3000,
+      })
+      return
+    }
 
     const formData = new FormData()
     formData.append('file', cleanFileWithName)
@@ -1063,6 +1134,18 @@ const handleUpload = async () => {
     }
 
     const responseDetail = error?.response?.data?.detail
+    if (isEditMode.value && responseDetail?.code === 'archive_submission_stale_state') {
+      closeUploadPreview()
+      emit('update:modelValue', false)
+      emit('stale')
+      toast.add({
+        severity: 'warn',
+        summary: t('投稿狀態已變更'),
+        detail: t('投稿狀態已變更，無法再編輯'),
+        life: 4000,
+      })
+      return
+    }
     if (responseDetail === 'File size exceeds 20MB limit') {
       fileValidationError.value = t('PDF 檔案超過 20 MB 大小上限')
       uploadStep.value = '3'
@@ -1081,12 +1164,28 @@ const handleUpload = async () => {
   }
 }
 
+async function sanitizePdf(file) {
+  const fileArrayBuffer = await file.arrayBuffer()
+  const pdfDoc = await PDFDocument.load(fileArrayBuffer)
+  pdfDoc.setTitle('')
+  pdfDoc.setAuthor('')
+  pdfDoc.setSubject('')
+  pdfDoc.setKeywords([])
+  pdfDoc.setProducer('')
+  pdfDoc.setCreator('')
+  pdfDoc.setCreationDate(new Date())
+  pdfDoc.setModificationDate(new Date())
+  const pdfBytes = await pdfDoc.save()
+  return new File([new Blob([pdfBytes], { type: 'application/pdf' })], file.name, {
+    type: 'application/pdf',
+  })
+}
+
 const onFileSelect = (event) => {
   const newFile = event.files[0]
 
-  if (fileUpload.value) {
-    fileUpload.value.clear()
-  }
+  closeUploadPreview()
+  fileUpload.value?.clear?.()
   form.value.file = null
   fileValidationError.value = ''
 
@@ -1102,18 +1201,19 @@ const onFileSelect = (event) => {
 
 function clearSelectedFile(removeFileCallback) {
   if (removeFileCallback) removeFileCallback(0)
+  closeUploadPreview()
   form.value.file = null
   fileValidationError.value = ''
-  if (fileUpload.value) {
-    fileUpload.value.clear()
-  }
+  fileUpload.value?.clear?.()
 }
 
 function previewUploadFile() {
   if (!form.value.file) return
 
+  previewingCurrentFile.value = false
   uploadPreviewLoading.value = true
   uploadPreviewError.value = false
+  closeUploadPreviewUrl()
 
   try {
     const fileUrl = URL.createObjectURL(new Blob([form.value.file], { type: 'application/pdf' }))
@@ -1139,17 +1239,59 @@ function previewUploadFile() {
   }
 }
 
+async function previewCurrentFile() {
+  if (!isEditMode.value || !props.submissionId) return
+  previewingCurrentFile.value = true
+  uploadPreviewLoading.value = true
+  uploadPreviewError.value = false
+  closeUploadPreviewUrl()
+  showUploadPreview.value = true
+
+  try {
+    const { data } = await archiveService.getOwnerPendingPreviewFile(props.submissionId)
+    uploadPreviewUrl.value = URL.createObjectURL(data)
+  } catch (error) {
+    const detail = error?.response?.data?.detail
+    if (detail?.code === 'archive_submission_stale_state') {
+      closeUploadPreview()
+      emit('update:modelValue', false)
+      emit('stale')
+      toast.add({
+        severity: 'warn',
+        summary: t('投稿狀態已變更'),
+        detail: t('投稿狀態已變更，無法再編輯'),
+        life: 4000,
+      })
+      return
+    }
+    uploadPreviewError.value = true
+    toast.add({
+      severity: 'error',
+      summary: t('預覽失敗'),
+      detail: t('無法預覽目前 PDF'),
+      life: 3000,
+    })
+  } finally {
+    uploadPreviewLoading.value = false
+  }
+}
+
 function handleUploadPreviewError() {
   uploadPreviewError.value = true
 }
 
 function closeUploadPreview() {
   showUploadPreview.value = false
+  closeUploadPreviewUrl()
+  uploadPreviewError.value = false
+  previewingCurrentFile.value = false
+}
+
+function closeUploadPreviewUrl() {
   if (uploadPreviewUrl.value) {
     URL.revokeObjectURL(uploadPreviewUrl.value)
     uploadPreviewUrl.value = ''
   }
-  uploadPreviewError.value = false
 }
 
 const searchProfessor = (event) => {
@@ -1289,6 +1431,7 @@ function applyPrefill() {
   form.value.professor = value.professor || null
   form.value.academicYear = value.academic_year || null
   form.value.type = value.archive_type || null
+  form.value.hasAnswers = Boolean(value.has_answers ?? value.hasAnswers)
   const match = /^(midterm|quiz)(\d+)$/.exec(value.name || '')
   form.value.examNumber = match ? Number(match[2]) : null
   form.value.otherName = value.archive_type === 'other' ? value.name || '' : ''
@@ -1328,12 +1471,12 @@ function resetForm() {
   availableProfessors.value = []
   uploadFormProfessors.value = []
 
-  if (fileUpload.value) {
-    fileUpload.value.clear()
-  }
+  fileUpload.value?.clear?.()
 
   closeUploadPreview()
 }
+
+onBeforeUnmount(closeUploadPreview)
 </script>
 
 <style scoped>
@@ -1366,6 +1509,17 @@ function resetForm() {
 
 .new-category-grid > :first-child {
   grid-column: 1 / -1;
+}
+
+.current-file-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem;
+  border: 1px solid var(--p-content-border-color);
+  border-radius: 8px;
+  background: var(--p-content-background);
 }
 
 @media (max-width: 640px) {

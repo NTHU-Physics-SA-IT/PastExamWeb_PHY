@@ -17,6 +17,9 @@ from app.models.models import (
     SubmissionStatus,
     UserRoles,
 )
+from app.services.archive_submission_review_revision import (
+    compute_archive_submission_review_revision,
+)
 from app.utils.auth import get_current_user
 
 
@@ -25,6 +28,13 @@ def _override_admin(user_id: int):
         return UserRoles(user_id=user_id, is_admin=True)
 
     return _get_current_user
+
+
+async def _current_review_revision(session_maker, submission_id: int) -> str:
+    async with session_maker() as session:
+        submission = await session.get(ArchiveSubmission, submission_id)
+        assert submission is not None
+        return compute_archive_submission_review_revision(submission)
 
 
 def _column_snapshot(instance) -> dict:
@@ -247,6 +257,9 @@ async def test_approve_rolls_back_new_category_course_archive_on_notification_fa
                 json={
                     "note": "must roll back",
                     "expected_status": "pending",
+                    "expected_revision": await _current_review_revision(
+                        session_maker, submission_id
+                    ),
                 },
             )
 
@@ -350,6 +363,9 @@ async def test_rejected_reapproval_rolls_back_on_notification_failure(
                 json={
                     "note": "replacement approval",
                     "expected_status": "rejected",
+                    "expected_revision": await _current_review_revision(
+                        session_maker, submission_id
+                    ),
                 },
             )
 
@@ -493,6 +509,9 @@ async def test_approve_rolls_back_existing_archive_update_on_notification_failur
                 json={
                     "note": "must not replace review",
                     "expected_status": "rejected",
+                    "expected_revision": await _current_review_revision(
+                        session_maker, submission_id
+                    ),
                 },
             )
 
@@ -593,6 +612,9 @@ async def test_approve_commits_complete_result_visible_to_new_session(
                 json={
                     "note": "complete approval",
                     "expected_status": "pending",
+                    "expected_revision": await _current_review_revision(
+                        session_maker, submission_id
+                    ),
                 },
             )
         assert response.status_code == 200
@@ -720,7 +742,12 @@ async def test_approve_invalid_course_rolls_back_without_mutation(
     try:
         response = await client.post(
             f"/archives/admin/submissions/{submission_id}/approve",
-            json={"expected_status": "pending"},
+            json={
+                "expected_status": "pending",
+                "expected_revision": await _current_review_revision(
+                    session_maker, submission_id
+                ),
+            },
         )
         assert response.status_code == 400
         assert response.json()["detail"] == "Invalid course name"
@@ -884,6 +911,9 @@ async def test_approve_failpoints_roll_back_every_parent_and_transition_write(
                     json={
                         "note": "must roll back",
                         "expected_status": "pending",
+                        "expected_revision": await _current_review_revision(
+                            session_maker, submission_id
+                        ),
                     },
                 )
         finally:
@@ -982,6 +1012,9 @@ async def test_approve_reuses_course_created_after_submission(
             json={
                 "note": "reuse the parent created after submission",
                 "expected_status": "pending",
+                "expected_revision": await _current_review_revision(
+                    session_maker, submission_id
+                ),
             },
         )
         assert response.status_code == 200

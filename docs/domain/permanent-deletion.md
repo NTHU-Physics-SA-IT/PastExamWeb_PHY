@@ -67,6 +67,29 @@ cancel, resurrection, or retry-budget reset.
 PostgreSQL is the only durable workflow ledger. MinIO answers only whether one
 recorded exact object version exists; it is not workflow authority.
 
+The same ledger and exact-version processor also support the internal
+`archive_submission_superseded_object_cleanup` operation kind. This is a
+storage-only cleanup intent, not a `TrashEntityType`, Trash item, or live-entity
+permanent deletion. Its target identity is scoped to the operation itself so
+multiple replacements of one submission can retain independent unfinished
+cleanup intents without reserving the live submission.
+
+A future PDF replacement must persist the pointer swap and the superseded
+object cleanup intent in the same caller-owned PostgreSQL transaction. The
+enqueue helper only adds and flushes the operation, operation-scoped target,
+and exact object record; it does not commit, contact MinIO, or mutate the live
+submission. Rollback therefore preserves the old pointer and removes the
+uncommitted cleanup intent together.
+
+The owner-pending replacement caller captures the old exact Version ID before
+uploading the new unique object. After that upload, it changes the live pointer
+and calls the flush-only enqueue helper inside its one PostgreSQL transaction.
+Commit failure leaves the old pointer authoritative and delegates only the new
+unreferenced object to upload compensation. Commit success may request one
+bounded immediate processing attempt; any non-completed outcome remains
+durable for the separately operated reconciler and does not turn the committed
+edit into an API failure.
+
 For every activated Trash root, permanent deletion becomes irreversible when the
 backend durably commits the `ACCEPTED` operation, targets, and exact storage
 identity. Before that commit, a pre-accept failure leaves the row restorable.
@@ -191,6 +214,16 @@ deletion effects, detaches retained `ArchiveSubmissionEvent` links, preserves
 reservations and the lease. A database failure rolls back both live-row effects
 and completion; a later process invocation recognizes already-absent storage
 and retries only database finalization.
+
+Storage-only cleanup instead rechecks immediately before every destructive
+attempt that no `Archive` or `ArchiveSubmission` references the recorded old
+key. Unavailable database authority, an external reference, storage identity
+drift, or unprovable exact absence fails closed. Completion only records that
+the superseded exact version is verified absent: it never deletes or edits an
+Archive/ArchiveSubmission, changes submission status or links, creates a Trash
+item, affects restore authority, or emits a submission notification. Ordinary
+Trash operations continue to use their existing plan, membership, and live-row
+finalization path.
 
 ## Completion and retention
 

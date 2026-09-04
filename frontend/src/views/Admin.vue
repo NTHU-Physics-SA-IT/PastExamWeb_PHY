@@ -8781,13 +8781,20 @@ const previewArchiveRequestFile = async () => {
       URL.revokeObjectURL(archiveRequestPreviewUrl.value)
       archiveRequestPreviewUrl.value = ''
     }
-    const { data } = await archiveService.getSubmissionPreviewFile(selectedArchiveRequest.value.id)
+    const { data } = await archiveService.getSubmissionPreviewFile(
+      selectedArchiveRequest.value.id,
+      selectedArchiveRequest.value.review_revision
+    )
     archiveRequestPreviewUrl.value = URL.createObjectURL(
       new Blob([data], { type: 'application/pdf' })
     )
     showArchiveRequestPreview.value = true
   } catch (error) {
     console.error(t('預覽投稿 PDF 失敗:'), error)
+    if (error?.response?.data?.detail?.code === 'archive_submission_stale_revision') {
+      await refreshStaleArchiveRequestContext()
+      return
+    }
     archiveRequestPreviewError.value = true
     if (isUnauthorizedError(error)) return
     toast.add({
@@ -8808,6 +8815,28 @@ const closeArchiveRequestPreview = () => {
     URL.revokeObjectURL(archiveRequestPreviewUrl.value)
     archiveRequestPreviewUrl.value = ''
   }
+}
+
+const refreshStaleArchiveRequestContext = async () => {
+  const submissionId = selectedArchiveRequest.value?.id
+  closeArchiveRequestPreview()
+  await loadReviewItems()
+  const refreshed = archiveRequests.value.find((item) => item.id === submissionId)
+  if (refreshed) {
+    selectedArchiveRequest.value = refreshed
+    archiveRequestEditForm.value = buildArchiveRequestEditForm(refreshed)
+    archiveRequestInitialEditForm.value = { ...archiveRequestEditForm.value }
+    await loadArchiveComparison(refreshed)
+  } else {
+    selectedArchiveRequest.value = null
+    showArchiveRequestDialog.value = false
+  }
+  toast.add({
+    severity: 'warn',
+    summary: t('投稿內容已更新'),
+    detail: t('投稿內容已更新，請重新檢視後再審核'),
+    life: 4000,
+  })
 }
 
 const handleArchiveRequestPreviewError = () => {
@@ -8835,8 +8864,11 @@ const openComparePreview = async (comparison) => {
 
   try {
     const [requestResponse, comparisonResponse] = await Promise.all([
-      archiveService.getSubmissionPreviewFile(selectedArchiveRequest.value.id),
-      archiveService.getSubmissionPreviewFile(comparison.id),
+      archiveService.getSubmissionPreviewFile(
+        selectedArchiveRequest.value.id,
+        selectedArchiveRequest.value.review_revision
+      ),
+      archiveService.getSubmissionPreviewFile(comparison.id, comparison.review_revision),
     ])
     compareRequestPreviewUrl.value = URL.createObjectURL(
       new Blob([requestResponse.data], { type: 'application/pdf' })
@@ -8846,6 +8878,12 @@ const openComparePreview = async (comparison) => {
     )
   } catch (error) {
     console.error(t('載入比對 PDF 失敗:'), error)
+    if (error?.response?.data?.detail?.code === 'archive_submission_stale_revision') {
+      showComparePreview.value = false
+      revokeComparePreviewUrls()
+      await refreshStaleArchiveRequestContext()
+      return
+    }
     comparePreviewError.value = true
     if (isUnauthorizedError(error)) return
     toast.add({
@@ -9017,15 +9055,24 @@ const reviewArchiveSubmission = async (submission, action) => {
   }
   try {
     const expectedStatus = getDirectReviewExpectedStatus(submission)
+    const expectedRevision = submission.review_revision
     let response
     if (action === 'approve') {
-      response = await archiveService.approveSubmission(submission.id, expectedStatus)
+      response = await archiveService.approveSubmission(
+        submission.id,
+        expectedStatus,
+        expectedRevision
+      )
     } else if (action === 'takedown') {
       response = await archiveService.takedownSubmission(submission.id, expectedStatus)
     } else if (action === 'republish') {
       response = await archiveService.republishSubmission(submission.id, expectedStatus)
     } else {
-      response = await archiveService.rejectSubmission(submission.id, expectedStatus)
+      response = await archiveService.rejectSubmission(
+        submission.id,
+        expectedStatus,
+        expectedRevision
+      )
     }
     const actionMessages = {
       approve: t('考古題投稿已通過'),
@@ -9053,6 +9100,10 @@ const reviewArchiveSubmission = async (submission, action) => {
   } catch (error) {
     console.error(t('審核考古題投稿失敗:'), error)
     if (isUnauthorizedError(error)) return
+    if (error?.response?.data?.detail?.code === 'archive_submission_stale_revision') {
+      await refreshStaleArchiveRequestContext()
+      return
+    }
     toast.add({
       severity: 'error',
       summary: t('錯誤'),

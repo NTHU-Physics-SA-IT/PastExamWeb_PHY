@@ -43,6 +43,7 @@ from app.db.course_categories import (
 from app.db.session import get_session
 from app.models.models import (
     Archive,
+    ArchiveCourseItemRead,
     ArchiveDiscussionLike,
     ArchiveDiscussionMessage,
     ArchiveDiscussionMessageRead,
@@ -65,6 +66,7 @@ from app.models.models import (
     CourseSubmissionRead,
     CourseSubmissionUpdate,
     CourseUpdate,
+    OwnerPendingArchiveSubmissionRead,
     PersonalNotificationType,
     PublicArchiveRead,
     SubmissionDecision,
@@ -86,6 +88,9 @@ from app.services.archive_mutation import (
 )
 from app.services.archive_submission_links import (
     validate_archive_source_submission_rows,
+)
+from app.services.archive_submission_owner_pending import (
+    is_owner_pending_overlay_eligible,
 )
 from app.services.archive_visibility import (
     public_archive_conditions,
@@ -919,9 +924,15 @@ async def reject_course_request(
     return submission
 
 
-@router.get("/{course_id}/archives", response_model=list[ArchiveRead])
+@router.get(
+    "/{course_id}/archives",
+    response_model=list[
+        ArchiveCourseItemRead | OwnerPendingArchiveSubmissionRead | ArchiveRead
+    ],
+)
 async def get_course_archives(
     course_id: int,
+    include_owner_pending: bool = Query(default=False),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
@@ -980,7 +991,7 @@ async def get_course_archives(
                     validated_sources[created_archive_id]
                 )
 
-    return [
+    archive_rows = [
         ArchiveRead.model_validate(archive).model_copy(
             update={
                 "source_submission_ids": source_submission_ids_by_archive.get(
@@ -990,6 +1001,93 @@ async def get_course_archives(
         )
         for archive in archives
     ]
+    if not include_owner_pending:
+        return archive_rows
+
+    overlay_archive_rows = [
+        ArchiveCourseItemRead(
+            **archive.model_dump(),
+            archive_id=archive.id,
+        )
+        for archive in archive_rows
+    ]
+    if current_user.is_admin:
+        return overlay_archive_rows
+
+    pending_submissions = (
+        (
+            await db.execute(
+                select(ArchiveSubmission).where(
+                    ArchiveSubmission.requester_id == current_user.user_id,
+                    or_(
+                        ArchiveSubmission.owner_id.is_(None),
+                        ArchiveSubmission.owner_id == ArchiveSubmission.requester_id,
+                    ),
+                    ArchiveSubmission.requested_course_name.is_(None),
+                    ArchiveSubmission.requested_category_key.is_(None),
+                    ArchiveSubmission.deleted_at.is_(None),
+                    ArchiveSubmission.status == SubmissionStatus.PENDING,
+                    ArchiveSubmission.created_archive_id.is_(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    active_courses = (
+        (
+            await db.execute(select(Course).where(Course.deleted_at.is_(None)))
+        )
+        .scalars()
+        .all()
+    )
+    courses_by_identity: dict[tuple[str, str], list[Course]] = {}
+    for active_course in active_courses:
+        identity = (
+            canonicalize_course_category_key(active_course.category),
+            normalize_course_search_text(active_course.name),
+        )
+        courses_by_identity.setdefault(identity, []).append(active_course)
+
+    pending_rows: list[OwnerPendingArchiveSubmissionRead] = []
+    for submission in pending_submissions:
+        if not is_owner_pending_overlay_eligible(
+            submission, user_id=current_user.user_id
+        ):
+            continue
+        matches = courses_by_identity.get(
+            (
+                canonicalize_course_category_key(submission.category),
+                normalize_course_search_text(submission.subject),
+            ),
+            [],
+        )
+        if len(matches) != 1 or matches[0].id != course_id:
+            continue
+        pending_rows.append(
+            OwnerPendingArchiveSubmissionRead(
+                submission_id=submission.id,
+                course_id=course_id,
+                name=submission.name,
+                academic_year=submission.academic_year,
+                archive_type=submission.archive_type,
+                professor=submission.professor,
+                has_answers=submission.has_answers,
+                created_at=submission.created_at,
+            )
+        )
+
+    return sorted(
+        [*overlay_archive_rows, *pending_rows],
+        key=lambda item: (
+            item.created_at,
+            item.item_kind,
+            item.archive_id
+            if isinstance(item, ArchiveCourseItemRead)
+            else item.submission_id,
+        ),
+        reverse=True,
+    )
 
 
 @router.get("/{course_id}/archives/{archive_id}/preview")

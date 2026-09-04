@@ -85,10 +85,24 @@ committed but its response was lost, retrying `approve(expected=pending)` after
 the row became `approved` is stale, not a same-target no-op. The caller reloads
 the resource; bounded Stage 5A does not add an idempotency-result ledger.
 
-The precondition is intentionally status-only. It prevents competing direct
-review requests based on one observed status, but it does not detect an ABA
-cycle such as `approved → rejected → approved`. Stage 5A does not add a
-version/revision column, ETag framework, or migration for generation tracking.
+Approve and reject additionally require the opaque `review_revision` projected
+by the administrator submission response. The backend computes this revision
+deterministically from the authoritative submission content and approval-target
+identity; it excludes lifecycle status, reviewer annotations, timestamps, and
+presentation-only fields. After acquiring the canonical lifecycle locks, the
+route first enforces `expected_status`, then recomputes and compares the current
+revision. A matching status with a mismatched revision returns
+`409 archive_submission_stale_revision` before Archive, submission, or
+notification mutation. A missing revision returns
+`428 archive_submission_revision_precondition_required`.
+
+The revision is a content precondition, not an authorization token and not
+proof that an administrator read every PDF page. It only prevents a decision
+made from an older metadata/PDF context from applying to newer authoritative
+content. Because it is content-derived rather than a generation counter, an
+exact metadata `A → B → A` cycle returns to the same revision; object keys
+are server-owned and never reused for PDF replacement. No revision column,
+ETag framework, review-session ledger, or migration is added.
 
 ### Admin review capabilities
 
@@ -234,6 +248,9 @@ The direct routes return stable error-detail codes:
 
 - missing/null: `428 archive_submission_precondition_required`;
 - expected-state mismatch: `409 archive_submission_stale_state`; and
+- missing review revision for approve/reject:
+  `428 archive_submission_revision_precondition_required`;
+- matching-state content mismatch: `409 archive_submission_stale_revision`;
 - a matching-state illegal edge: `409 archive_submission_illegal_transition`.
 
 Successful direct actions retain the existing flat submission fields. They add
@@ -674,6 +691,34 @@ and its exact Archive A; Archive A trash/restore temporarily takes down and
 restores only its exact Submission A. In both paths pair B's persisted
 lifecycle, link, and object identity remain unchanged, Archive B stays public,
 and no lifecycle notification is emitted.
+
+### Owner pending existing-Course lifecycle
+
+An authenticated non-administrator may act through the owner-pending routes
+only when the locked `ArchiveSubmission` has the canonical current owner,
+`requested_course_name IS NULL`, `requested_category_key IS NULL`,
+`status=pending`, `deleted_at IS NULL`, and `created_archive_id IS NULL`.
+Missing and non-owned identities follow the anti-IDOR not-found contract;
+wrong-kind submissions are ineligible, and a review/lifecycle winner produces
+`409 archive_submission_stale_state`. Anonymous users, administrators, other
+users, and new-Course/new-Category submissions receive no owner-pending
+capability.
+
+Owner withdraw is the reversible transition `pending -> deleted`. It records
+`previous_status=pending` and normal deletion provenance, preserves the null
+Archive link and object pointer, and does not consume
+`owner_self_delete_consumed`. Existing exact restore consequently returns the
+submission to `pending` without creating or restoring an Archive. A concurrent
+administrator transition that commits first makes withdraw stale; withdraw
+never falls through to approved-owner deletion semantics.
+
+Owner edit is a separate constrained authority, not the administrator direct
+edit surface. The server accepts only an active Course, professor, canonical
+academic term, exam kind/sequence or bounded `other` name, answer flag, and an
+optional replacement PDF. It derives Course snapshots and the standardized
+exam name, preserves ownership/reviewer/status/link/requested-parent/source-
+wish/lifecycle fields, and revalidates Help Upload target identity. The stable
+lifecycle lock and all eligibility checks occur before storage mutation.
 
 Deterministic independent-session PostgreSQL coverage closes the remaining
 submission lifecycle races. Direct review and owner/admin deletion, direct

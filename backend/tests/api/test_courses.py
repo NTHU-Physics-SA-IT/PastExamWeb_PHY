@@ -53,6 +53,9 @@ from app.models.models import (
 )
 from app.services import archive_mutation
 from app.services.archive_mutation import ArchiveMoveTargetInvariantError
+from app.services.archive_submission_review_revision import (
+    compute_archive_submission_review_revision,
+)
 from app.utils.auth import get_current_user
 from app.utils.course_text import (
     normalize_course_search_text,
@@ -183,11 +186,18 @@ async def _review_course_lifecycle_context(
     submission_id: int,
     final_status: SubmissionStatus,
 ):
+    async with session_maker() as session:
+        pending_submission = await session.get(ArchiveSubmission, submission_id)
+        expected_revision = compute_archive_submission_review_revision(
+            pending_submission
+        )
+
     approved_response = await client.post(
         f"/archives/admin/submissions/{submission_id}/approve",
         json={
             "note": "course lifecycle approval",
             "expected_status": "pending",
+            "expected_revision": expected_revision,
         },
     )
     assert approved_response.status_code == 200
@@ -199,6 +209,7 @@ async def _review_course_lifecycle_context(
             json={
                 "note": "course lifecycle rejection",
                 "expected_status": "approved",
+                "expected_revision": approved_response.json()["review_revision"],
             },
         )
         assert rejected_response.status_code == 200

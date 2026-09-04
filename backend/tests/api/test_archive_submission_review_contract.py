@@ -20,6 +20,9 @@ from app.models.models import (
     UserRoles,
 )
 from app.services import archive_submission_status as status_service
+from app.services.archive_submission_review_revision import (
+    compute_archive_submission_review_revision,
+)
 from app.utils.auth import get_current_user
 
 
@@ -214,6 +217,13 @@ async def _cleanup_review_context(
             await session.execute(delete(Archive).where(Archive.id.in_(archive_ids)))
         await session.execute(delete(Course).where(Course.id == course_id))
         await session.commit()
+
+
+async def _current_review_revision(session_maker, submission_id: int) -> str:
+    async with session_maker() as session:
+        submission = await session.get(ArchiveSubmission, submission_id)
+        assert submission is not None
+        return compute_archive_submission_review_revision(submission)
 
 
 _MISSING_BODY = object()
@@ -466,11 +476,19 @@ async def test_deleted_submission_rejects_every_direct_review_action(
         submission_status=SubmissionStatus.DELETED,
     )
     before = await _review_snapshot(session_maker, submission.id)
+    revision = await _current_review_revision(session_maker, submission.id)
     app.dependency_overrides[get_current_user] = _override_admin(admin.id)
     try:
         response = await client.post(
             f"/archives/admin/submissions/{submission.id}/{action}",
-            json={"expected_status": "deleted"},
+            json={
+                "expected_status": "deleted",
+                **(
+                    {"expected_revision": revision}
+                    if action in {"approve", "reject"}
+                    else {}
+                ),
+            },
         )
 
         assert response.status_code == 409
@@ -517,6 +535,7 @@ async def test_direct_review_same_target_actions_are_flat_response_no_ops(
         submission_status=current_status,
     )
     before = await _review_snapshot(session_maker, submission.id)
+    revision = await _current_review_revision(session_maker, submission.id)
     monkeypatch.setattr(
         archives_service,
         "enqueue_submission_status_notification",
@@ -534,6 +553,11 @@ async def test_direct_review_same_target_actions_are_flat_response_no_ops(
             json={
                 "note": "must not replace original review",
                 "expected_status": current_status.value,
+                **(
+                    {"expected_revision": revision}
+                    if action in {"approve", "reject"}
+                    else {}
+                ),
             },
         )
 
@@ -610,6 +634,7 @@ async def test_direct_review_true_transitions_return_flat_changed_response(
         submission_status=current_status,
     )
     before = await _review_snapshot(session_maker, submission.id)
+    revision = await _current_review_revision(session_maker, submission.id)
     app.dependency_overrides[get_current_user] = _override_admin(admin.id)
     try:
         response = await client.post(
@@ -617,6 +642,11 @@ async def test_direct_review_true_transitions_return_flat_changed_response(
             json={
                 "note": f"true {action}",
                 "expected_status": current_status.value,
+                **(
+                    {"expected_revision": revision}
+                    if action in {"approve", "reject"}
+                    else {}
+                ),
             },
         )
 
@@ -667,11 +697,13 @@ async def test_repeated_review_cycles_create_distinct_durable_notifications(
     app.dependency_overrides[get_current_user] = _override_admin(admin.id)
     try:
         for action, expected_status, resulting_status in transitions:
+            revision = await _current_review_revision(session_maker, submission.id)
             response = await client.post(
                 f"/archives/admin/submissions/{submission.id}/{action}",
                 json={
                     "note": f"cycle {action}",
                     "expected_status": expected_status.value,
+                    "expected_revision": revision,
                 },
             )
 
@@ -730,6 +762,205 @@ async def test_repeated_review_cycles_create_distinct_durable_notifications(
                 "status": SubmissionStatus.APPROVED.value,
                 "destination": "my_submission_status",
             }
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_review_context(
+            session_maker,
+            course_id=course.id,
+            submission_id=submission.id,
+        )
+
+
+@pytest.mark.parametrize("action", ["approve", "reject"])
+@pytest.mark.asyncio
+async def test_pending_review_requires_revision_precondition(
+    client,
+    session_maker,
+    make_user,
+    action,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    course, _, submission = await _create_review_context(
+        session_maker,
+        requester_id=requester.id,
+        reviewer_id=admin.id,
+        submission_status=SubmissionStatus.PENDING,
+    )
+    before = await _review_snapshot(session_maker, submission.id)
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        response = await client.post(
+            f"/archives/admin/submissions/{submission.id}/{action}",
+            json={"expected_status": "pending"},
+        )
+        assert response.status_code == 428
+        assert response.json()["detail"] == {
+            "code": "archive_submission_revision_precondition_required",
+            "message": "請重新載入投稿內容後再執行審核。",
+            "reload_required": True,
+        }
+        assert await _review_snapshot(session_maker, submission.id) == before
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_review_context(
+            session_maker,
+            course_id=course.id,
+            submission_id=submission.id,
+        )
+
+
+@pytest.mark.parametrize(("action", "changed_field"), [("approve", "name"), ("reject", "professor"), ("approve", "object_name")])
+@pytest.mark.asyncio
+async def test_pending_review_rejects_stale_content_revision_without_side_effects(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+    action,
+    changed_field,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    course, _, submission = await _create_review_context(
+        session_maker,
+        requester_id=requester.id,
+        reviewer_id=admin.id,
+        submission_status=SubmissionStatus.PENDING,
+    )
+    old_revision = await _current_review_revision(session_maker, submission.id)
+    async with session_maker() as session:
+        stored = await session.get(ArchiveSubmission, submission.id)
+        setattr(stored, changed_field, f"changed-{changed_field}-{uuid.uuid4().hex}")
+        await session.commit()
+    before = await _review_snapshot(session_maker, submission.id)
+    monkeypatch.setattr(
+        archives_service,
+        "enqueue_submission_status_notification",
+        _fail_if_notification_called,
+    )
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        response = await client.post(
+            f"/archives/admin/submissions/{submission.id}/{action}",
+            json={
+                "expected_status": "pending",
+                "expected_revision": old_revision,
+            },
+        )
+        assert response.status_code == 409
+        assert response.json()["detail"] == {
+            "code": "archive_submission_stale_revision",
+            "message": "投稿內容已更新，請重新檢視後再審核。",
+            "reload_required": True,
+        }
+        assert await _review_snapshot(session_maker, submission.id) == before
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_review_context(
+            session_maker,
+            course_id=course.id,
+            submission_id=submission.id,
+        )
+
+
+@pytest.mark.parametrize(
+    ("action", "resulting_status"),
+    [
+        ("approve", SubmissionStatus.APPROVED),
+        ("reject", SubmissionStatus.REJECTED),
+    ],
+)
+@pytest.mark.asyncio
+async def test_pending_review_accepts_fresh_content_revision(
+    client,
+    session_maker,
+    make_user,
+    action,
+    resulting_status,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    course, _, submission = await _create_review_context(
+        session_maker,
+        requester_id=requester.id,
+        reviewer_id=admin.id,
+        submission_status=SubmissionStatus.PENDING,
+    )
+    revision = await _current_review_revision(session_maker, submission.id)
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        response = await client.post(
+            f"/archives/admin/submissions/{submission.id}/{action}",
+            json={
+                "expected_status": "pending",
+                "expected_revision": revision,
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == resulting_status.value
+        assert response.json()["changed"] is True
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+        await _cleanup_review_context(
+            session_maker,
+            course_id=course.id,
+            submission_id=submission.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_admin_preview_checks_revision_before_reading_storage(
+    client,
+    session_maker,
+    make_user,
+    monkeypatch,
+):
+    requester = await make_user()
+    admin = await make_user(is_admin=True)
+    course, _, submission = await _create_review_context(
+        session_maker,
+        requester_id=requester.id,
+        reviewer_id=admin.id,
+        submission_status=SubmissionStatus.PENDING,
+    )
+    revision = await _current_review_revision(session_maker, submission.id)
+    reads = 0
+
+    class _ObjectResponse:
+        def read(self):
+            return b"%PDF-1.4\n%%EOF"
+
+        def close(self):
+            return None
+
+        def release_conn(self):
+            return None
+
+    class _Minio:
+        def get_object(self, _bucket, _key):
+            nonlocal reads
+            reads += 1
+            return _ObjectResponse()
+
+    monkeypatch.setattr(archives_service, "get_minio_client", _Minio)
+    app.dependency_overrides[get_current_user] = _override_admin(admin.id)
+    try:
+        stale = await client.get(
+            f"/archives/admin/submissions/{submission.id}/preview-file",
+            params={"expected_revision": "asr-v1:stale"},
+        )
+        assert stale.status_code == 409
+        assert stale.json()["detail"]["code"] == "archive_submission_stale_revision"
+        assert reads == 0
+
+        current = await client.get(
+            f"/archives/admin/submissions/{submission.id}/preview-file",
+            params={"expected_revision": revision},
+        )
+        assert current.status_code == 200
+        assert current.headers["cache-control"] == "no-store"
+        assert reads == 1
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         await _cleanup_review_context(
@@ -802,6 +1033,8 @@ async def test_admin_submission_list_projects_stable_available_actions(
             assert row["available_actions"] == actions
             assert len(row["available_actions"]) == len(set(row["available_actions"]))
             assert "changed" not in row
+            assert row["review_revision"].startswith("asr-v1:")
+            assert "object_name" not in row
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         for course_id, submission_id in contexts:

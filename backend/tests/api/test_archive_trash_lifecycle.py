@@ -20,6 +20,9 @@ from app.models.models import (
     SubmissionStatus,
     UserRoles,
 )
+from app.services.archive_submission_review_revision import (
+    compute_archive_submission_review_revision,
+)
 from app.utils.auth import get_current_user
 
 
@@ -72,12 +75,14 @@ async def _create_approved_pair(
         await session.commit()
         await session.refresh(course)
         await session.refresh(submission)
+        expected_revision = compute_archive_submission_review_revision(submission)
 
     response = await client.post(
         f"/archives/admin/submissions/{submission.id}/approve",
         json={
             "note": f"approve pair {label}",
             "expected_status": "pending",
+            "expected_revision": expected_revision,
         },
     )
     assert response.status_code == 200

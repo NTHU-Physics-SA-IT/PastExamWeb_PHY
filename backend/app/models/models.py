@@ -1,6 +1,7 @@
+import re
 from datetime import UTC, datetime
 from enum import Enum as PyEnum
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy import (
@@ -2593,6 +2594,27 @@ class ArchiveRead(BaseModel):
         from_attributes = True
 
 
+class ArchiveCourseItemRead(ArchiveRead):
+    item_kind: Literal["archive"] = "archive"
+    archive_id: int
+
+
+class OwnerPendingArchiveSubmissionRead(BaseModel):
+    item_kind: Literal["pending_submission"] = "pending_submission"
+    submission_id: int
+    course_id: int
+    name: str
+    academic_year: int
+    archive_type: ArchiveType
+    professor: str
+    has_answers: bool
+    status: Literal[SubmissionStatus.PENDING] = SubmissionStatus.PENDING
+    created_at: datetime
+    can_preview: bool = True
+    can_edit: bool = True
+    can_withdraw: bool = True
+
+
 class PublicArchiveRead(BaseModel):
     """Archive metadata that is safe to expose without authentication."""
 
@@ -2716,6 +2738,7 @@ class CourseCategoryRead(BaseModel):
 class SubmissionDecision(BaseModel):
     note: str | None = None
     expected_status: SubmissionStatus | None = None
+    expected_revision: str | None = None
 
 
 class CourseSubmissionRead(BaseModel):
@@ -2794,6 +2817,7 @@ class ArchiveSubmissionRead(BaseModel):
 class ArchiveSubmissionAdminRead(ArchiveSubmissionRead):
     current_archive: ArchiveSubmissionCurrentArchiveRead | None = None
     available_actions: list[ArchiveSubmissionAdminAction]
+    review_revision: str
 
 
 class ArchiveSubmissionActionRead(ArchiveSubmissionAdminRead):
@@ -2802,6 +2826,7 @@ class ArchiveSubmissionActionRead(ArchiveSubmissionAdminRead):
 
 class ArchiveSubmissionComparisonRead(ArchiveSubmissionRead):
     can_takedown: bool = False
+    review_revision: str
 
 
 class CourseSubmissionUpdate(BaseModel):
@@ -2826,6 +2851,56 @@ class ArchiveSubmissionUpdate(BaseModel):
     requested_category_label_en: str | None = None
     requested_category_icon: str | None = None
     review_note: str | None = None
+
+
+class OwnerPendingArchiveSubmissionEdit(BaseModel):
+    course_id: int = Field(ge=1)
+    professor: str = Field(min_length=1, max_length=200)
+    academic_year: int
+    archive_type: ArchiveType
+    sequence: int | None = Field(default=None, ge=1, le=99)
+    has_answers: bool = False
+    other_name: str | None = Field(default=None, max_length=100)
+
+    @field_validator("professor")
+    @classmethod
+    def normalize_professor(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Professor must not be blank")
+        return normalized
+
+    @field_validator("academic_year")
+    @classmethod
+    def validate_academic_term(cls, value: int) -> int:
+        year, semester = divmod(value, 10)
+        now = datetime.now(UTC)
+        current = (now.year - 1911) * 10 + (1 if now.month >= 8 or now.month == 1 else 2)
+        if year < 89 or semester not in {1, 2} or value > current:
+            raise ValueError("Academic year must be a supported ROC semester code")
+        return value
+
+    @field_validator("other_name")
+    @classmethod
+    def normalize_other_name(cls, value: str | None) -> str | None:
+        normalized = (value or "").strip().lower()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def validate_exam_identity(self):
+        numbered = self.archive_type in {ArchiveType.MIDTERM, ArchiveType.QUIZ}
+        if numbered and self.sequence is None:
+            raise ValueError("A sequence is required for midterm and quiz")
+        if not numbered and self.sequence is not None:
+            raise ValueError("Sequence is only valid for midterm and quiz")
+        if self.archive_type == ArchiveType.OTHER:
+            if self.other_name is None or re.fullmatch(
+                r"[a-z]+[0-9]*", self.other_name
+            ) is None:
+                raise ValueError("Other exam name must use lowercase letters and trailing digits")
+        elif self.other_name is not None:
+            raise ValueError("Other exam name is only valid for other exam type")
+        return self
 
 
 class PermanentDeletionRead(BaseModel):

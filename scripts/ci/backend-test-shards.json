@@ -3,6 +3,7 @@
   "shards": {
     "a": [
       "tests/unit/test_archive_submission_links.py",
+      "tests/unit/test_archive_submission_review_revision.py",
       "tests/api/test_admin_attention_summary.py",
       "tests/api/test_archive_approval_atomicity.py",
       "tests/api/test_archive_submission_lifecycle_concurrency.py",
@@ -15,6 +16,7 @@
       "tests/api/test_courses.py",
       "tests/api/test_nthu_dev_auth.py",
       "tests/api/test_nthu_access_policy_settings.py",
+      "tests/api/test_owner_pending_submission_lifecycle.py",
       "tests/api/test_permanent_deletion_reconciler.py",
       "tests/api/test_permanent_deletion_saga.py",
       "tests/api/test_public_catalog.py",
@@ -66,6 +68,7 @@
       "tests/api/test_meme.py",
       "tests/api/test_notifications.py",
       "tests/api/test_seo.py",
+      "tests/api/test_superseded_object_cleanup.py",
       "tests/api/test_wishes.py",
       "tests/integration/test_archive_submission_one_to_one_migration.py",
       "tests/integration/test_category_canonicalization_migration.py",

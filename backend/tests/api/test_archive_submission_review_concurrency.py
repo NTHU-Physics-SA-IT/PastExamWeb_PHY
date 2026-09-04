@@ -21,6 +21,9 @@ from app.models.models import (
 )
 from app.services import archive_lifecycle_locks
 from app.services import archive_submission_status as status_service
+from app.services.archive_submission_review_revision import (
+    compute_archive_submission_review_revision,
+)
 from app.utils.auth import get_current_user
 
 
@@ -31,6 +34,7 @@ class ReviewRaceContext:
     category_name: str
     course_name: str
     object_name: str
+    review_revision: str
 
 
 def _override_admin(user_id: int):
@@ -78,6 +82,7 @@ async def _create_race_context(
         category_name=category_name,
         course_name=course_name,
         object_name=object_name,
+        review_revision=compute_archive_submission_review_revision(submission),
     )
 
 
@@ -247,6 +252,7 @@ async def _run_deterministic_review_race(
     client,
     monkeypatch,
     submission_id: int,
+    review_revision: str,
     winner_action: str,
     loser_action: str,
 ):
@@ -313,6 +319,7 @@ async def _run_deterministic_review_race(
             json={
                 "note": f"winner:{winner_action}",
                 "expected_status": "pending",
+                "expected_revision": review_revision,
             },
         )
     )
@@ -324,6 +331,7 @@ async def _run_deterministic_review_race(
             json={
                 "note": f"loser:{loser_action}",
                 "expected_status": "pending",
+                "expected_revision": review_revision,
             },
         )
     )
@@ -383,6 +391,7 @@ async def test_direct_review_races_are_deterministic_first_writer_wins(
             client=client,
             monkeypatch=monkeypatch,
             submission_id=context.submission_id,
+            review_revision=context.review_revision,
             winner_action=winner_action,
             loser_action=loser_action,
         )
@@ -460,6 +469,7 @@ async def test_concurrent_approvals_reuse_one_new_category_and_course(
     admin = await make_user(name=f"shared-race-admin-{marker[:8]}", is_admin=True)
 
     submission_ids: list[int] = []
+    review_revisions: list[str] = []
     async with session_maker() as session:
         for index, object_name in enumerate(object_names):
             submission = ArchiveSubmission(
@@ -481,6 +491,9 @@ async def test_concurrent_approvals_reuse_one_new_category_and_course(
             session.add(submission)
             await session.flush()
             submission_ids.append(submission.id)
+            review_revisions.append(
+                compute_archive_submission_review_revision(submission)
+            )
         await session.commit()
 
     first_at_commit_boundary = asyncio.Event()
@@ -524,6 +537,7 @@ async def test_concurrent_approvals_reuse_one_new_category_and_course(
                 json={
                     "note": "first shared parent approval",
                     "expected_status": "pending",
+                    "expected_revision": review_revisions[0],
                 },
             )
         )
@@ -535,6 +549,7 @@ async def test_concurrent_approvals_reuse_one_new_category_and_course(
                 json={
                     "note": "second shared parent approval",
                     "expected_status": "pending",
+                    "expected_revision": review_revisions[1],
                 },
             )
         )

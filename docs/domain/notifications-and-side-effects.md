@@ -393,6 +393,35 @@ The orphan audit/cleanup also uses a separately supplied operator MinIO
 credential; its bucket-wide listing authority is not granted to normal backend
 request runtime or the permanent-deletion reconciler.
 
+For a successful future pending-submission PDF replacement, the old pointer
+must not become unreachable without durable cleanup authority. The caller owns
+one PostgreSQL transaction containing both `ArchiveSubmission.object_name`
+replacement and an internal storage-only exact-version cleanup operation for
+the superseded object. The enqueue primitive flushes without committing or
+deleting storage. After commit, the existing bounded processor may advance the
+storage-only operation; retryable, unknown, or manual-review truth remains in
+PostgreSQL. Storage-only completion has no submission lifecycle, Trash,
+restore, notification, or live-row deletion effect. This repository change
+does not activate the production reconciler; that remains a separately
+authorized operations decision.
+
+The owner replacement operation validates and sanitizes the candidate PDF
+before entering its mutation boundary, then locks and revalidates the
+submission before any MinIO write. It captures the server-owned old object's
+exact version, uploads a new unique server-owned key, and commits the metadata
+and pointer change together with the old-version cleanup intent. A failed new
+upload leaves the old pointer untouched. A failed database commit rolls back
+the pointer and intent, then applies the existing fresh-reference-checked,
+request-local compensation to the new object; compensation uncertainty is
+logged and must not be reported as durable cleanup.
+
+After a successful commit, one bounded immediate processor attempt may remove
+the superseded version. Retryable, verification-required, or manual-review
+outcomes do not roll back the successful edit because PostgreSQL already holds
+durable cleanup authority. Owner preview/edit/withdraw and their failures are
+silent: they enqueue no review notification, do not increment download count,
+and do not activate the production reconciler.
+
 ## Bulk permanent delete
 
 ### Intended invariant

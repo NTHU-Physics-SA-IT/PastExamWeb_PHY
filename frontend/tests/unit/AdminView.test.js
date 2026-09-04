@@ -194,6 +194,7 @@ const takedownSubmissionMock = vi.hoisted(() => vi.fn())
 const republishSubmissionMock = vi.hoisted(() => vi.fn())
 const updateSubmissionMock = vi.hoisted(() => vi.fn())
 const deleteSubmissionMock = vi.hoisted(() => vi.fn())
+const getSubmissionPreviewFileMock = vi.hoisted(() => vi.fn())
 const downloadArchiveBackupMock = vi.hoisted(() => vi.fn())
 const listTrashItemsMock = vi.hoisted(() => vi.fn())
 const restoreTrashItemMock = vi.hoisted(() => vi.fn())
@@ -279,6 +280,7 @@ vi.mock('@/api', () => ({
     republishSubmission: republishSubmissionMock,
     updateSubmission: updateSubmissionMock,
     deleteSubmission: deleteSubmissionMock,
+    getSubmissionPreviewFile: getSubmissionPreviewFileMock,
     downloadArchiveBackup: downloadArchiveBackupMock,
     listTrashItems: listTrashItemsMock,
     restoreTrashItem: restoreTrashItemMock,
@@ -378,6 +380,7 @@ describe('AdminView', () => {
     republishSubmissionMock.mockReset()
     updateSubmissionMock.mockReset()
     deleteSubmissionMock.mockReset()
+    getSubmissionPreviewFileMock.mockReset()
     downloadArchiveBackupMock.mockReset()
     listTrashItemsMock.mockReset()
     restoreTrashItemMock.mockReset()
@@ -391,6 +394,7 @@ describe('AdminView', () => {
     republishSubmissionMock.mockResolvedValue({ data: {} })
     updateSubmissionMock.mockResolvedValue({ data: {} })
     deleteSubmissionMock.mockResolvedValue({ data: { changed: true } })
+    getSubmissionPreviewFileMock.mockResolvedValue({ data: new Blob(['pdf']) })
     downloadArchiveBackupMock.mockResolvedValue({
       data: new Blob(['backup']),
       headers: { 'content-disposition': 'attachment; filename="PhysArchive_Backup_test.zip"' },
@@ -861,6 +865,7 @@ describe('AdminView', () => {
     const comparisons = [
       {
         id: candidateIds[0],
+        review_revision: 'asr-v1:candidate-a',
         status: 'approved',
         subject: '普通物理（一）',
         name: 'final',
@@ -869,6 +874,7 @@ describe('AdminView', () => {
       },
       {
         id: candidateIds[1],
+        review_revision: 'asr-v1:candidate-b',
         status: 'pending',
         subject: '普通物理（一）',
         name: 'final',
@@ -876,7 +882,7 @@ describe('AdminView', () => {
         academic_year: 1131,
       },
     ]
-    listSubmissionComparisonsMock.mockResolvedValueOnce({ data: comparisons })
+    listSubmissionComparisonsMock.mockResolvedValue({ data: comparisons })
     const wrapper = createWrapper()
     await flushPromises()
 
@@ -885,6 +891,36 @@ describe('AdminView', () => {
     expect(listSubmissionComparisonsMock).toHaveBeenCalledWith(currentSubmissionId)
     expect(wrapper.vm.comparisonArchives.map(({ id }) => id)).toEqual(candidateIds)
     expect(wrapper.vm.comparisonArchives).toEqual(comparisons)
+
+    await wrapper.vm.openArchiveRequestDialog({
+      id: currentSubmissionId,
+      review_revision: 'asr-v1:current',
+    })
+    Object.defineProperty(window.URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn((blob) => `blob:${blob.size}`),
+    })
+    Object.defineProperty(window.URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    })
+    getSubmissionPreviewFileMock.mockClear()
+    try {
+      await wrapper.vm.openComparePreview(comparisons[0])
+      expect(getSubmissionPreviewFileMock).toHaveBeenNthCalledWith(
+        1,
+        currentSubmissionId,
+        'asr-v1:current'
+      )
+      expect(getSubmissionPreviewFileMock).toHaveBeenNthCalledWith(
+        2,
+        candidateIds[0],
+        'asr-v1:candidate-a'
+      )
+    } finally {
+      delete window.URL.createObjectURL
+      delete window.URL.revokeObjectURL
+    }
   })
 
   it('uses canonical pre-100 academic terms in review presentation and search', async () => {
@@ -1050,15 +1086,82 @@ describe('AdminView', () => {
     const wrapper = createWrapper()
     await flushPromises()
 
-    await wrapper.vm.reviewArchiveSubmission({ id: 7101, status: 'pending' }, 'approve')
-    await wrapper.vm.reviewArchiveSubmission({ id: 7102, status: 'approved' }, 'reject')
+    await wrapper.vm.reviewArchiveSubmission(
+      { id: 7101, status: 'pending', review_revision: 'asr-v1:a' },
+      'approve'
+    )
+    await wrapper.vm.reviewArchiveSubmission(
+      { id: 7102, status: 'approved', review_revision: 'asr-v1:b' },
+      'reject'
+    )
     await wrapper.vm.reviewArchiveSubmission({ id: 7103, status: 'pending' }, 'takedown')
     await wrapper.vm.reviewArchiveSubmission({ id: 7104, status: 'takedown' }, 'republish')
 
-    expect(approveSubmissionMock).toHaveBeenCalledWith(7101, 'pending')
-    expect(rejectSubmissionMock).toHaveBeenCalledWith(7102, 'approved')
+    expect(approveSubmissionMock).toHaveBeenCalledWith(7101, 'pending', 'asr-v1:a')
+    expect(rejectSubmissionMock).toHaveBeenCalledWith(7102, 'approved', 'asr-v1:b')
     expect(takedownSubmissionMock).toHaveBeenCalledWith(7103, 'pending')
     expect(republishSubmissionMock).toHaveBeenCalledWith(7104, 'takedown')
+  })
+
+  it('sends the backend revision when previewing a review row', async () => {
+    const request = {
+      id: 7110,
+      status: 'pending',
+      review_revision: 'asr-v1:preview',
+    }
+    const wrapper = createWrapper()
+    await flushPromises()
+    await wrapper.vm.openArchiveRequestDialog(request)
+    Object.defineProperty(window.URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:review-preview'),
+    })
+    try {
+      await wrapper.vm.previewArchiveRequestFile()
+      expect(getSubmissionPreviewFileMock).toHaveBeenCalledWith(7110, 'asr-v1:preview')
+    } finally {
+      delete window.URL.createObjectURL
+    }
+  })
+
+  it('invalidates stale review context, refreshes it, and does not retry', async () => {
+    const stale = {
+      id: 7111,
+      status: 'pending',
+      review_revision: 'asr-v1:old',
+    }
+    const refreshed = {
+      ...stale,
+      name: 'updated exam',
+      review_revision: 'asr-v1:new',
+    }
+    approveSubmissionMock.mockRejectedValueOnce({
+      response: {
+        status: 409,
+        data: {
+          detail: {
+            code: 'archive_submission_stale_revision',
+            reload_required: true,
+          },
+        },
+      },
+    })
+    listAdminSubmissionsMock.mockResolvedValueOnce({ data: [refreshed] })
+    const wrapper = createWrapper()
+    await flushPromises()
+    await wrapper.vm.openArchiveRequestDialog(stale)
+
+    await wrapper.vm.reviewArchiveSubmission(stale, 'approve')
+
+    expect(approveSubmissionMock).toHaveBeenCalledOnce()
+    expect(approveSubmissionMock).toHaveBeenCalledWith(7111, 'pending', 'asr-v1:old')
+    expect(wrapper.vm.selectedArchiveRequest.review_revision).toBe('asr-v1:new')
+    expect(toastAddMock).toHaveBeenLastCalledWith({
+      severity: 'warn',
+      summary: '投稿內容已更新',
+      detail: '投稿內容已更新，請重新檢視後再審核',
+      life: 4000,
+    })
   })
 
   it('uses comparison candidate status and fails closed when row status is missing', async () => {

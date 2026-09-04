@@ -28,6 +28,9 @@ from app.models.models import (
     UserRoles,
 )
 from app.services import pdf_security
+from app.services.archive_submission_review_revision import (
+    compute_archive_submission_review_revision,
+)
 from app.utils.auth import get_current_user
 
 
@@ -118,6 +121,13 @@ async def _create_pending_review_context(
         await session.refresh(course)
         await session.refresh(submission)
     return course, submission
+
+
+async def _current_review_revision(session_maker, submission_id: int) -> str:
+    async with session_maker() as session:
+        submission = await session.get(ArchiveSubmission, submission_id)
+        assert submission is not None
+        return compute_archive_submission_review_revision(submission)
 
 
 async def _cleanup_review_context(
@@ -224,12 +234,22 @@ async def test_approval_notifies_cross_user_wish_creator_once(
 
         approved = await client.post(
             f"/archives/admin/submissions/{submission.id}/approve",
-            json={"note": "publish matching archive", "expected_status": "pending"},
+            json={
+                "note": "publish matching archive",
+                "expected_status": "pending",
+                "expected_revision": await _current_review_revision(
+                    session_maker, submission.id
+                ),
+            },
         )
         assert approved.status_code == 200
         retry = await client.post(
             f"/archives/admin/submissions/{submission.id}/approve",
-            json={"note": "retry", "expected_status": "approved"},
+            json={
+                "note": "retry",
+                "expected_status": "approved",
+                "expected_revision": approved.json()["review_revision"],
+            },
         )
         assert retry.status_code == 200
         assert retry.json()["changed"] is False
@@ -312,7 +332,13 @@ async def test_wish_notification_failure_rolls_back_archive_approval(
         with pytest.raises(RuntimeError, match="wish notification unavailable"):
             await client.post(
                 f"/archives/admin/submissions/{submission.id}/approve",
-                json={"note": "must roll back", "expected_status": "pending"},
+                json={
+                    "note": "must roll back",
+                    "expected_status": "pending",
+                    "expected_revision": await _current_review_revision(
+                        session_maker, submission.id
+                    ),
+                },
             )
         async with session_maker() as session:
             stored = await session.get(ArchiveSubmission, submission.id)
@@ -372,7 +398,13 @@ async def test_approved_submission_can_be_rejected_or_taken_down(
     try:
         approved_response = await client.post(
             f"/archives/admin/submissions/{submission.id}/approve",
-            json={"note": "initial approval", "expected_status": "pending"},
+            json={
+                "note": "initial approval",
+                "expected_status": "pending",
+                "expected_revision": await _current_review_revision(
+                    session_maker, submission.id
+                ),
+            },
         )
         assert approved_response.status_code == 200
         assert approved_response.json()["status"] == SubmissionStatus.APPROVED.value
@@ -400,6 +432,7 @@ async def test_approved_submission_can_be_rejected_or_taken_down(
             json={
                 "note": f"move to {target_status.value}",
                 "expected_status": "approved",
+                "expected_revision": approved_response.json()["review_revision"],
             },
         )
         assert response.status_code == 200
@@ -481,7 +514,13 @@ async def test_rejected_submission_can_be_approved(
     try:
         rejected_response = await client.post(
             f"/archives/admin/submissions/{submission.id}/reject",
-            json={"note": "initial rejection", "expected_status": "pending"},
+            json={
+                "note": "initial rejection",
+                "expected_status": "pending",
+                "expected_revision": await _current_review_revision(
+                    session_maker, submission.id
+                ),
+            },
         )
         assert rejected_response.status_code == 200
         assert rejected_response.json()["status"] == SubmissionStatus.REJECTED.value
@@ -506,6 +545,7 @@ async def test_rejected_submission_can_be_approved(
             json={
                 "note": "approved after rejection",
                 "expected_status": "rejected",
+                "expected_revision": rejected_response.json()["review_revision"],
             },
         )
         assert response.status_code == 200
@@ -592,7 +632,12 @@ async def test_transferred_archive_republish_and_option_two_reapproval_preserve_
     try:
         approved = await client.post(
             f"/archives/admin/submissions/{submission.id}/approve",
-            json={"expected_status": "pending"},
+            json={
+                "expected_status": "pending",
+                "expected_revision": await _current_review_revision(
+                    session_maker, submission.id
+                ),
+            },
         )
         assert approved.status_code == 200
         archive_id = approved.json()["created_archive_id"]
@@ -658,7 +703,10 @@ async def test_transferred_archive_republish_and_option_two_reapproval_preserve_
 
         rejected = await client.post(
             f"/archives/admin/submissions/{submission.id}/reject",
-            json={"expected_status": "approved"},
+            json={
+                "expected_status": "approved",
+                "expected_revision": republished.json()["review_revision"],
+            },
         )
         assert rejected.status_code == 200
         corrected = await client.put(
@@ -675,7 +723,10 @@ async def test_transferred_archive_republish_and_option_two_reapproval_preserve_
         assert corrected.status_code == 200
         reapproved = await client.post(
             f"/archives/admin/submissions/{submission.id}/approve",
-            json={"expected_status": "rejected"},
+            json={
+                "expected_status": "rejected",
+                "expected_revision": corrected.json()["review_revision"],
+            },
         )
         assert reapproved.status_code == 200
         assert reapproved.json()["current_archive"]["course_id"] == course_b.id
@@ -867,11 +918,21 @@ async def test_archive_review_statuses_create_deduplicated_notifications(
         responses = [
             await client.post(
                 f"/archives/admin/submissions/{submissions[0].id}/approve",
-                json={"expected_status": "pending"},
+                json={
+                    "expected_status": "pending",
+                    "expected_revision": await _current_review_revision(
+                        session_maker, submissions[0].id
+                    ),
+                },
             ),
             await client.post(
                 f"/archives/admin/submissions/{submissions[1].id}/reject",
-                json={"expected_status": "pending"},
+                json={
+                    "expected_status": "pending",
+                    "expected_revision": await _current_review_revision(
+                        session_maker, submissions[1].id
+                    ),
+                },
             ),
             await client.post(
                 f"/archives/admin/submissions/{submissions[2].id}/takedown",
@@ -2223,7 +2284,13 @@ async def test_review_note_survives_takedown_republish_and_explicit_changes(
     try:
         approved = await client.post(
             f"/archives/admin/submissions/{submission.id}/approve",
-            json={"note": "approval action reason", "expected_status": "pending"},
+            json={
+                "note": "approval action reason",
+                "expected_status": "pending",
+                "expected_revision": await _current_review_revision(
+                    session_maker, submission.id
+                ),
+            },
         )
         assert approved.status_code == 200
         annotated = await client.put(
