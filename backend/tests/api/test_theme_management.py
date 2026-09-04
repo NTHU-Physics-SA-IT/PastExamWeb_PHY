@@ -1,10 +1,11 @@
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 from fastapi.routing import APIRoute
 from httpx import AsyncClient
 from sqlalchemy import delete
 from sqlmodel import select
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 from app.api.services import theme_management
 from app.db.session import get_session
