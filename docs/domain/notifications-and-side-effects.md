@@ -405,6 +405,23 @@ restore, notification, or live-row deletion effect. This repository change
 does not activate the production reconciler; that remains a separately
 authorized operations decision.
 
+The owner replacement operation validates and sanitizes the candidate PDF
+before entering its mutation boundary, then locks and revalidates the
+submission before any MinIO write. It captures the server-owned old object's
+exact version, uploads a new unique server-owned key, and commits the metadata
+and pointer change together with the old-version cleanup intent. A failed new
+upload leaves the old pointer untouched. A failed database commit rolls back
+the pointer and intent, then applies the existing fresh-reference-checked,
+request-local compensation to the new object; compensation uncertainty is
+logged and must not be reported as durable cleanup.
+
+After a successful commit, one bounded immediate processor attempt may remove
+the superseded version. Retryable, verification-required, or manual-review
+outcomes do not roll back the successful edit because PostgreSQL already holds
+durable cleanup authority. Owner preview/edit/withdraw and their failures are
+silent: they enqueue no review notification, do not increment download count,
+and do not activate the production reconciler.
+
 ## Bulk permanent delete
 
 ### Intended invariant

@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from minio.error import S3Error
+from pydantic import ValidationError
 from sqlalchemy import BigInteger, and_, cast, func, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import aliased
@@ -49,6 +50,9 @@ from app.models.models import (
     ArchiveWish,
     Course,
     CourseCategoryConfig,
+    OwnerPendingArchiveSubmissionEdit,
+    OwnerPendingArchiveSubmissionRead,
+    PermanentDeletionStatus,
     SubmissionDecision,
     SubmissionStatisticsRead,
     SubmissionStatus,
@@ -66,6 +70,12 @@ from app.services.archive_submission_links import (
     ensure_archive_submission_link_available,
     is_archive_submission_link_unique_violation,
     validate_archive_source_membership,
+)
+from app.services.archive_submission_owner_pending import (
+    acquire_owner_pending_edit_locks,
+    ensure_source_wish_target_matches,
+    normalized_owner_exam_name,
+    require_owner_pending_submission,
 )
 from app.services.archive_submission_review_revision import (
     compute_archive_submission_review_revision,
@@ -88,6 +98,14 @@ from app.services.archive_submission_status import (
     take_down_archive_submission,
 )
 from app.services.pdf_security import PdfValidationError, validated_pdf_upload
+from app.services.permanent_deletion import (
+    enqueue_superseded_archive_submission_object_cleanup,
+    process_one_permanent_deletion,
+)
+from app.services.permanent_deletion_storage import (
+    ExactVersionMinioAdapter,
+    StorageSafetyError,
+)
 from app.services.wish_fulfillment import enqueue_new_wish_fulfillment_notifications
 from app.utils.auth import get_current_user
 from app.utils.course_text import (
@@ -826,6 +844,203 @@ async def _rollback_failed_upload(db: AsyncSession) -> None:
         )
 
 
+def _owner_pending_submission_read(
+    submission: ArchiveSubmission,
+    *,
+    course_id: int,
+) -> OwnerPendingArchiveSubmissionRead:
+    return OwnerPendingArchiveSubmissionRead(
+        submission_id=submission.id,
+        course_id=course_id,
+        name=submission.name,
+        academic_year=submission.academic_year,
+        archive_type=submission.archive_type,
+        professor=submission.professor,
+        has_answers=submission.has_answers,
+        created_at=submission.created_at,
+    )
+
+
+async def _apply_owner_pending_submission_edit(
+    *,
+    submission_id: int,
+    edit: OwnerPendingArchiveSubmissionEdit,
+    staged,
+    current_user: User,
+    db: AsyncSession,
+) -> OwnerPendingArchiveSubmissionRead:
+    minio_client = None
+    storage = None
+    new_object_name: str | None = None
+    new_object_written = False
+    cleanup_operation_id: int | None = None
+    committed = False
+    try:
+        locked = await acquire_owner_pending_edit_locks(
+            db,
+            submission_id=submission_id,
+            course_id=edit.course_id,
+        )
+        submission = require_owner_pending_submission(
+            locked.submission(submission_id) if locked is not None else None,
+            current_user=current_user,
+        )
+        course = locked.course(edit.course_id) if locked is not None else None
+        if course is None or course.deleted_at is not None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Course not found",
+            )
+
+        exam_name = normalized_owner_exam_name(edit)
+        await ensure_source_wish_target_matches(
+            db,
+            submission=submission,
+            course=course,
+            professor=edit.professor,
+            archive_type=edit.archive_type,
+            name=exam_name,
+        )
+
+        old_object_name: str | None = None
+        old_version_id: str | None = None
+        if staged is not None:
+            old_object_name = (submission.object_name or "").strip()
+            if not old_object_name.startswith("archive-submissions/"):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "owner_pending_storage_identity_unavailable",
+                        "message": "The current submission file identity is not replaceable.",
+                    },
+                )
+            minio_client = get_minio_client()
+            storage = ExactVersionMinioAdapter(
+                minio_client,
+                bucket_name=settings.MINIO_BUCKET_NAME,
+            )
+            try:
+                old_version_id = await asyncio.to_thread(
+                    storage.capture_version_id,
+                    old_object_name,
+                )
+            except StorageSafetyError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={
+                        "code": "owner_pending_storage_identity_unavailable",
+                        "message": "Unable to verify the current PDF version safely.",
+                    },
+                ) from exc
+
+            new_object_name = (
+                f"archive-submissions/{current_user.user_id}/{uuid.uuid4()}.pdf"
+            )
+            with staged.path.open("rb") as file_data:
+                put_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        minio_client.put_object,
+                        bucket_name=settings.MINIO_BUCKET_NAME,
+                        object_name=new_object_name,
+                        data=file_data,
+                        length=staged.size,
+                        content_type="application/pdf",
+                    )
+                )
+                try:
+                    await asyncio.shield(put_task)
+                except asyncio.CancelledError:
+                    try:
+                        await put_task
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "Owner pending replacement cancelled before storage result (%s)",
+                            type(exc).__name__,
+                        )
+                    else:
+                        new_object_written = True
+                    raise
+            new_object_written = True
+
+        submission.subject = format_course_display_name(course.name)
+        submission.category = canonicalize_course_category_key(course.category)
+        submission.requested_course_name_en = (course.name_en or "").strip() or None
+        submission.professor = edit.professor
+        submission.academic_year = edit.academic_year
+        submission.archive_type = edit.archive_type
+        submission.name = exam_name
+        submission.has_answers = edit.has_answers
+        if staged is not None:
+            submission.object_name = new_object_name
+            cleanup = await enqueue_superseded_archive_submission_object_cleanup(
+                db,
+                submission_id=submission.id,
+                bucket_name=settings.MINIO_BUCKET_NAME,
+                object_key=old_object_name,
+                version_id=old_version_id,
+                idempotency_key=(
+                    f"owner-pending-replacement:{submission.id}:{uuid.uuid4().hex}"
+                ),
+                requested_by_user_id=current_user.user_id,
+            )
+            cleanup_operation_id = int(cleanup.id)
+
+        await db.commit()
+        committed = True
+    except asyncio.CancelledError:
+        await _rollback_failed_upload(db)
+        if new_object_written and new_object_name and minio_client is not None:
+            await _compensate_failed_upload(new_object_name, minio_client)
+        raise
+    except HTTPException:
+        await _rollback_failed_upload(db)
+        if new_object_written and new_object_name and minio_client is not None:
+            await _compensate_failed_upload(new_object_name, minio_client)
+        raise
+    except Exception as exc:
+        await _rollback_failed_upload(db)
+        if new_object_written and new_object_name and minio_client is not None:
+            await _compensate_failed_upload(new_object_name, minio_client)
+        logger.error(
+            "Owner pending submission edit failed (%s)",
+            type(exc).__name__,
+            exc_info=redacted_exc_info(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to edit pending submission",
+        ) from exc
+
+    if committed and cleanup_operation_id is not None and storage is not None:
+        try:
+            cleanup_status = await process_one_permanent_deletion(
+                db,
+                operation_id=cleanup_operation_id,
+                storage=storage,
+            )
+            if cleanup_status != PermanentDeletionStatus.COMPLETED:
+                logger.warning(
+                    "Superseded submission PDF cleanup remains durable",
+                    extra={
+                        "event": "superseded_submission_pdf_cleanup_pending",
+                        "operation_id": cleanup_operation_id,
+                        "status": cleanup_status.value,
+                    },
+                )
+        except Exception as exc:  # noqa: BLE001 - committed edit remains authoritative
+            await db.rollback()
+            logger.error(
+                "Immediate superseded submission PDF cleanup failed (%s)",
+                type(exc).__name__,
+                extra={
+                    "event": "superseded_submission_pdf_cleanup_failed",
+                    "operation_id": cleanup_operation_id,
+                },
+            )
+
+    return _owner_pending_submission_read(submission, course_id=edit.course_id)
+
+
 @router.post("/upload")
 async def upload_archive(
     file: UploadFile,
@@ -1264,6 +1479,167 @@ async def list_my_archive_submissions(
         )
         for submission in result.scalars().all()
     ]
+
+
+@router.get("/submissions/{submission_id}/pending/preview-file")
+async def preview_owner_pending_archive_submission(
+    submission_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    try:
+        locked = await acquire_stable_submission_lifecycle_locks(
+            db,
+            submission_id=submission_id,
+            operation="submission_edit",
+        )
+        submission = require_owner_pending_submission(
+            locked.submission(submission_id) if locked is not None else None,
+            current_user=current_user,
+        )
+        object_name = submission.object_name
+        filename = submission.name
+        await db.rollback()
+    except Exception:
+        await db.rollback()
+        raise
+
+    try:
+        response = get_minio_client().get_object(
+            settings.MINIO_BUCKET_NAME,
+            object_name,
+        )
+        data = response.read()
+        response.close()
+        response.release_conn()
+    except S3Error as exc:
+        if exc.code in {"NoSuchKey", "NoSuchObject", "NoSuchBucket"}:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": "archive_file_missing",
+                    "message": "此筆考古題的 PDF 檔案缺失，無法預覽。",
+                },
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to load pending submission preview file from object storage",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to load pending submission preview file from object storage",
+        ) from exc
+
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}.pdf"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.post("/submissions/{submission_id}/withdraw")
+async def withdraw_owner_pending_archive_submission(
+    submission_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    try:
+        locked = await acquire_stable_submission_lifecycle_locks(
+            db,
+            submission_id=submission_id,
+            operation="submission_delete",
+        )
+        submission = require_owner_pending_submission(
+            locked.submission(submission_id) if locked is not None else None,
+            current_user=current_user,
+        )
+        result = await soft_delete_submission_with_linked_archive(
+            db,
+            submission=submission,
+            user_id=current_user.user_id,
+            reason="owner withdrew pending submission",
+            linked_archive=None,
+            exact_link_only=True,
+            consume_owner_self_delete=False,
+        )
+        await db.commit()
+        return {
+            "success": True,
+            "submission_id": submission.id,
+            "status": submission.status,
+            "previous_status": submission.previous_status,
+            "changed": result["submissions"] == 1,
+        }
+    except Exception:
+        await db.rollback()
+        raise
+
+
+@router.patch(
+    "/submissions/{submission_id}/pending",
+    response_model=OwnerPendingArchiveSubmissionRead,
+)
+async def edit_owner_pending_archive_submission(
+    submission_id: int,
+    course_id: int = Form(...),
+    professor: str = Form(...),
+    academic_year: int = Form(...),
+    archive_type: str = Form(...),
+    sequence: int | None = Form(None),
+    has_answers: bool = Form(False),
+    other_name: str | None = Form(None),
+    file: UploadFile | None = None,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_session),
+):
+    try:
+        edit = OwnerPendingArchiveSubmissionEdit(
+            course_id=course_id,
+            professor=professor,
+            academic_year=academic_year,
+            archive_type=archive_type,
+            sequence=sequence,
+            has_answers=has_answers,
+            other_name=other_name,
+        )
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=exc.errors(
+                include_url=False,
+                include_context=False,
+                include_input=False,
+            ),
+        ) from exc
+
+    if file is None:
+        return await _apply_owner_pending_submission_edit(
+            submission_id=submission_id,
+            edit=edit,
+            staged=None,
+            current_user=current_user,
+            db=db,
+        )
+
+    try:
+        async with validated_pdf_upload(file) as staged:
+            return await _apply_owner_pending_submission_edit(
+                submission_id=submission_id,
+                edit=edit,
+                staged=staged,
+                current_user=current_user,
+                db=db,
+            )
+    except PdfValidationError as exc:
+        await _rollback_failed_upload(db)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=exc.public_detail,
+        ) from exc
 
 
 @router.delete("/submissions/{submission_id}")

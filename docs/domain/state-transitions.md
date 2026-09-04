@@ -692,6 +692,34 @@ restores only its exact Submission A. In both paths pair B's persisted
 lifecycle, link, and object identity remain unchanged, Archive B stays public,
 and no lifecycle notification is emitted.
 
+### Owner pending existing-Course lifecycle
+
+An authenticated non-administrator may act through the owner-pending routes
+only when the locked `ArchiveSubmission` has the canonical current owner,
+`requested_course_name IS NULL`, `requested_category_key IS NULL`,
+`status=pending`, `deleted_at IS NULL`, and `created_archive_id IS NULL`.
+Missing and non-owned identities follow the anti-IDOR not-found contract;
+wrong-kind submissions are ineligible, and a review/lifecycle winner produces
+`409 archive_submission_stale_state`. Anonymous users, administrators, other
+users, and new-Course/new-Category submissions receive no owner-pending
+capability.
+
+Owner withdraw is the reversible transition `pending -> deleted`. It records
+`previous_status=pending` and normal deletion provenance, preserves the null
+Archive link and object pointer, and does not consume
+`owner_self_delete_consumed`. Existing exact restore consequently returns the
+submission to `pending` without creating or restoring an Archive. A concurrent
+administrator transition that commits first makes withdraw stale; withdraw
+never falls through to approved-owner deletion semantics.
+
+Owner edit is a separate constrained authority, not the administrator direct
+edit surface. The server accepts only an active Course, professor, canonical
+academic term, exam kind/sequence or bounded `other` name, answer flag, and an
+optional replacement PDF. It derives Course snapshots and the standardized
+exam name, preserves ownership/reviewer/status/link/requested-parent/source-
+wish/lifecycle fields, and revalidates Help Upload target identity. The stable
+lifecycle lock and all eligibility checks occur before storage mutation.
+
 Deterministic independent-session PostgreSQL coverage closes the remaining
 submission lifecycle races. Direct review and owner/admin deletion, direct
 review and exact restore, and system/cascade deletion and owner deletion all

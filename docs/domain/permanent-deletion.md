@@ -81,6 +81,15 @@ and exact object record; it does not commit, contact MinIO, or mutate the live
 submission. Rollback therefore preserves the old pointer and removes the
 uncommitted cleanup intent together.
 
+The owner-pending replacement caller captures the old exact Version ID before
+uploading the new unique object. After that upload, it changes the live pointer
+and calls the flush-only enqueue helper inside its one PostgreSQL transaction.
+Commit failure leaves the old pointer authoritative and delegates only the new
+unreferenced object to upload compensation. Commit success may request one
+bounded immediate processing attempt; any non-completed outcome remains
+durable for the separately operated reconciler and does not turn the committed
+edit into an API failure.
+
 For every activated Trash root, permanent deletion becomes irreversible when the
 backend durably commits the `ACCEPTED` operation, targets, and exact storage
 identity. Before that commit, a pre-accept failure leaves the row restorable.
