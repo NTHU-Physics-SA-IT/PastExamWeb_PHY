@@ -22,6 +22,7 @@ test.describe('User › Archive browsing', () => {
     let previewRouteCallCount = 0
     let previewFileRouteCallCount = 0
     let wsTicketRequestCount = 0
+    let ownerPendingQuerySeen = false
     const consoleErrors = createConsoleErrorCollector(page)
     const pageErrors: string[] = []
     page.on('pageerror', (error) => pageErrors.push(error.message))
@@ -76,7 +77,16 @@ test.describe('User › Archive browsing', () => {
       route.fulfill({ status: 200, headers: JSON_HEADERS, body: JSON.stringify([]) })
     )
 
-    await page.route('**/api/courses/101/archives', async (route) => {
+    await page.route(/\/api\/courses\/101\/archives(?:\?.*)?$/, async (route) => {
+      const requestUrl = new URL(route.request().url())
+
+      expect(requestUrl.pathname).toBe('/api/courses/101/archives')
+      const includeOwnerPending = requestUrl.searchParams.get('include_owner_pending')
+      if (includeOwnerPending !== null) {
+        expect(includeOwnerPending).toBe('true')
+        ownerPendingQuerySeen = true
+      }
+
       await route.fulfill({
         status: 200,
         headers: JSON_HEADERS,
@@ -243,6 +253,7 @@ test.describe('User › Archive browsing', () => {
       .getByRole('article')
       .filter({ has: page.getByRole('heading', { name: '期末考' }) })
     await expect(archiveCard).toBeVisible()
+    expect(ownerPendingQuerySeen).toBe(true)
     await expect(archiveCard.getByRole('button', { name: '編輯' })).toHaveCount(0)
     await expect(archiveCard.getByRole('button', { name: '刪除' })).toHaveCount(0)
 
