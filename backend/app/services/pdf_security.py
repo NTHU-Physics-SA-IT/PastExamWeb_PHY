@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import logging
+import math
 import os
 import subprocess
 import sys
@@ -12,6 +13,7 @@ import weakref
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
+from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -38,6 +40,30 @@ _FLATE_INCOMPLETE_TERMINATION_MESSAGE = (
     "input stream is complete but output may still be valid"
 )
 _ATTACHMENT_FEATURES = frozenset({"embedded_files", "file_attachment"})
+_ADDITIONAL_ACTION_EVENT_KEYS = frozenset(
+    {
+        "/Bl",
+        "/C",
+        "/D",
+        "/DP",
+        "/DS",
+        "/E",
+        "/F",
+        "/Fo",
+        "/K",
+        "/O",
+        "/PC",
+        "/PI",
+        "/PO",
+        "/PV",
+        "/U",
+        "/V",
+        "/WC",
+        "/WP",
+        "/WS",
+        "/X",
+    }
+)
 _BOUNDED_FINDINGS = frozenset(
     {
         "embedded_files",
@@ -612,25 +638,54 @@ def _object_identity(value: Any) -> tuple[str, int, int] | tuple[str, int]:
     return ("direct", id(value))
 
 
-def _is_safe_catalog_fit_open_destination(
-    owner: Any,
-    open_action: Any,
+def _is_finite_pdf_number(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float, Decimal))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
+def _nullable_finite_pdf_number(value: Any) -> bool:
+    return value is None or _is_finite_pdf_number(value)
+
+
+def _is_safe_same_document_destination(
+    destination: Any,
     pikepdf: Any,
     *,
-    catalog_identity: tuple[Any, ...],
     page_identities: set[tuple[Any, ...]],
 ) -> bool:
     try:
-        if _object_identity(owner) != catalog_identity:
+        if not isinstance(destination, pikepdf.Array):
             return False
-        if not isinstance(open_action, pikepdf.Array):
+        if _object_identity(destination)[0] != "direct" or len(destination) < 2:
             return False
-        if _object_identity(open_action)[0] != "direct" or len(open_action) != 2:
+        if _object_identity(destination[0]) not in page_identities:
             return False
-        return (
-            _object_identity(open_action[0]) in page_identities
-            and str(open_action[1]) == "/Fit"
-        )
+
+        mode = destination[1]
+        if mode in {pikepdf.Name.Fit, pikepdf.Name.FitB}:
+            return len(destination) == 2
+        if mode in {
+            pikepdf.Name.FitH,
+            pikepdf.Name.FitBH,
+            pikepdf.Name.FitV,
+            pikepdf.Name.FitBV,
+        }:
+            return len(destination) == 3 and _nullable_finite_pdf_number(destination[2])
+        if mode == pikepdf.Name.FitR:
+            return len(destination) == 6 and all(
+                _is_finite_pdf_number(item) for item in destination[2:]
+            )
+        if mode == pikepdf.Name.XYZ:
+            if len(destination) != 5 or not all(
+                _nullable_finite_pdf_number(item) for item in destination[2:4]
+            ):
+                return False
+            zoom = destination[4]
+            return zoom is None or (_is_finite_pdf_number(zoom) and zoom >= 0)
+        return False
     except (
         AttributeError,
         IndexError,
@@ -639,6 +694,74 @@ def _is_safe_catalog_fit_open_destination(
         ValueError,
         pikepdf.PdfError,
     ):
+        return False
+
+
+def _is_safe_internal_goto_action(
+    action: Any,
+    pikepdf: Any,
+    *,
+    page_identities: set[tuple[Any, ...]],
+) -> bool:
+    try:
+        if not isinstance(action, pikepdf.Dictionary):
+            return False
+        keys = {str(key) for key in action}
+        if not {"/S", "/D"}.issubset(keys) or not keys <= {"/Type", "/S", "/D"}:
+            return False
+        if action.get("/S") != pikepdf.Name.GoTo:
+            return False
+        if "/Type" in keys and action.get("/Type") != pikepdf.Name.Action:
+            return False
+        return _is_safe_same_document_destination(
+            action.get("/D"),
+            pikepdf,
+            page_identities=page_identities,
+        )
+    except (AttributeError, KeyError, TypeError, ValueError, pikepdf.PdfError):
+        return False
+
+
+def _is_safe_automatic_action(
+    value: Any,
+    pikepdf: Any,
+    *,
+    page_identities: set[tuple[Any, ...]],
+) -> bool:
+    return _is_safe_same_document_destination(
+        value,
+        pikepdf,
+        page_identities=page_identities,
+    ) or _is_safe_internal_goto_action(
+        value,
+        pikepdf,
+        page_identities=page_identities,
+    )
+
+
+def _is_safe_additional_actions(
+    actions: Any,
+    pikepdf: Any,
+    *,
+    page_identities: set[tuple[Any, ...]],
+) -> bool:
+    try:
+        if not isinstance(actions, pikepdf.Dictionary):
+            return False
+        entries = list(actions.items())
+        return (
+            bool(entries)
+            and all(str(event) in _ADDITIONAL_ACTION_EVENT_KEYS for event, _ in entries)
+            and all(
+                _is_safe_internal_goto_action(
+                    action,
+                    pikepdf,
+                    page_identities=page_identities,
+                )
+                for _event, action in entries
+            )
+        )
+    except (AttributeError, KeyError, TypeError, ValueError, pikepdf.PdfError):
         return False
 
 
@@ -660,15 +783,21 @@ def _find_forbidden_features(pdf: Any, pikepdf: Any) -> set[str]:
         if isinstance(value, (pikepdf.Dictionary, pikepdf.Stream)):
             items = list(value.items())
             keys = {str(key) for key, _item in items}
-            if "/OpenAction" in keys and not _is_safe_catalog_fit_open_destination(
-                value,
-                value.get("/OpenAction"),
+            if "/OpenAction" in keys:
+                open_action_is_safe = _object_identity(
+                    value
+                ) == catalog_identity and _is_safe_automatic_action(
+                    value.get("/OpenAction"),
+                    pikepdf,
+                    page_identities=page_identities,
+                )
+                if not open_action_is_safe:
+                    forbidden.add("open_action")
+            if "/AA" in keys and not _is_safe_additional_actions(
+                value.get("/AA"),
                 pikepdf,
-                catalog_identity=catalog_identity,
                 page_identities=page_identities,
             ):
-                forbidden.add("open_action")
-            if "/AA" in keys:
                 forbidden.add("additional_actions")
             if "/EmbeddedFiles" in keys or "/EF" in keys:
                 forbidden.add("embedded_files")

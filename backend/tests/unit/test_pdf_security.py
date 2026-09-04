@@ -124,14 +124,81 @@ def test_valid_pdf_and_explicit_uri_are_allowed(tmp_path: Path) -> None:
     assert result["qpdf_version"] == "12.3.2"
 
 
-def _add_safe_catalog_fit_open_destination(pdf, page) -> None:
-    pdf.Root.OpenAction = pikepdf.Array([page.obj, pikepdf.Name.Fit])
+_SAFE_NAVIGATION_CASES = [
+    "fit",
+    "fit-b",
+    "fit-h-null",
+    "fit-h-number",
+    "fit-bh",
+    "fit-v-null",
+    "fit-bv",
+    "fit-r",
+    "xyz-null",
+    "xyz-zero",
+    "xyz-positive",
+    "goto",
+    "additional-actions",
+]
 
 
-def test_catalog_same_document_fit_open_destination_is_allowed(
-    tmp_path: Path,
-) -> None:
-    path = _save_mutated_pdf(tmp_path, _add_safe_catalog_fit_open_destination)
+def _safe_destination(page, case: str):
+    destinations = {
+        "fit": [page.obj, pikepdf.Name.Fit],
+        "fit-b": [page.obj, pikepdf.Name.FitB],
+        "fit-h-null": [page.obj, pikepdf.Name.FitH, None],
+        "fit-h-number": [page.obj, pikepdf.Name.FitH, 120],
+        "fit-bh": [page.obj, pikepdf.Name.FitBH, 120],
+        "fit-v-null": [page.obj, pikepdf.Name.FitV, None],
+        "fit-bv": [page.obj, pikepdf.Name.FitBV, 40],
+        "fit-r": [page.obj, pikepdf.Name.FitR, 0, 0, 100, 200],
+        "xyz-null": [page.obj, pikepdf.Name.XYZ, None, None, None],
+        "xyz-zero": [page.obj, pikepdf.Name.XYZ, 10, 20, 0],
+        "xyz-positive": [page.obj, pikepdf.Name.XYZ, 10, 20, 1.5],
+    }
+    return pikepdf.Array(destinations[case])
+
+
+def _add_safe_navigation(pdf, page, case: str) -> None:
+    destination_case = (
+        case
+        if case
+        in {
+            "fit",
+            "fit-b",
+            "fit-h-null",
+            "fit-h-number",
+            "fit-bh",
+            "fit-v-null",
+            "fit-bv",
+            "fit-r",
+            "xyz-null",
+            "xyz-zero",
+            "xyz-positive",
+        }
+        else "fit"
+    )
+    destination = _safe_destination(page, destination_case)
+    if case == "goto":
+        pdf.Root.OpenAction = pikepdf.Dictionary(S=pikepdf.Name.GoTo, D=destination)
+    elif case == "additional-actions":
+        pdf.Root.AA = pikepdf.Dictionary(
+            WC=pikepdf.Dictionary(S=pikepdf.Name.GoTo, D=destination),
+            WS=pikepdf.Dictionary(
+                Type=pikepdf.Name.Action,
+                S=pikepdf.Name.GoTo,
+                D=_safe_destination(page, "xyz-null"),
+            ),
+        )
+    else:
+        pdf.Root.OpenAction = destination
+
+
+@pytest.mark.parametrize("case", _SAFE_NAVIGATION_CASES)
+def test_safe_same_document_navigation_is_allowed(tmp_path: Path, case: str) -> None:
+    path = _save_mutated_pdf(
+        tmp_path,
+        lambda pdf, page: _add_safe_navigation(pdf, page, case),
+    )
 
     classification = pdf_security._classify_pdf(path)
 
@@ -144,20 +211,38 @@ def test_catalog_same_document_fit_open_destination_is_allowed(
     [
         "javascript-action",
         "launch-action",
-        "goto-action",
-        "named-destination",
-        "string-destination",
+        "uri-action",
+        "goto-r-action",
+        "goto-e-action",
+        "import-data-action",
+        "submit-form-action",
+        "unknown-action",
+        "goto-missing-destination",
+        "goto-extra-field",
         "empty-array",
         "short-array",
         "indirect-array",
-        "fit-h-array",
-        "xyz-array",
+        "fit-h-wrong-count",
+        "unknown-mode",
+        "xyz-negative-zoom",
+        "fit-r-nonnumeric",
         "non-page-tree-object",
         "non-catalog-owner",
-        "safe-plus-additional-action",
+        "mixed-additional-actions",
+        "malformed-additional-action",
+        "unknown-additional-event",
+        "next-action-chain",
+        "safe-plus-forbidden-feature",
+        "unresolved-named-destination",
+        "legacy-named-destination",
+        "name-tree-destination",
+        "goto-named-destination",
+        "malformed-name-tree",
     ],
 )
-def test_other_open_action_forms_remain_fatal(tmp_path: Path, case: str) -> None:
+def test_unsafe_or_malformed_automatic_navigation_remains_fatal(
+    tmp_path: Path, case: str
+) -> None:
     def mutate(pdf, page) -> None:
         same_page_fit = pikepdf.Array([page.obj, pikepdf.Name.Fit])
         if case == "javascript-action":
@@ -170,45 +255,109 @@ def test_other_open_action_forms_remain_fatal(tmp_path: Path, case: str) -> None
                 S=pikepdf.Name.Launch,
                 F="external",
             )
-        elif case == "goto-action":
+        elif case == "uri-action":
+            pdf.Root.OpenAction = pikepdf.Dictionary(
+                S=pikepdf.Name.URI,
+                URI="https://example.invalid",
+            )
+        elif case in {
+            "goto-r-action",
+            "goto-e-action",
+            "import-data-action",
+            "submit-form-action",
+            "unknown-action",
+        }:
+            action_types = {
+                "goto-r-action": pikepdf.Name.GoToR,
+                "goto-e-action": pikepdf.Name.GoToE,
+                "import-data-action": pikepdf.Name.ImportData,
+                "submit-form-action": pikepdf.Name.SubmitForm,
+                "unknown-action": pikepdf.Name("/Unknown"),
+            }
+            pdf.Root.OpenAction = pikepdf.Dictionary(
+                S=action_types[case], D=same_page_fit
+            )
+        elif case == "goto-missing-destination":
+            pdf.Root.OpenAction = pikepdf.Dictionary(S=pikepdf.Name.GoTo)
+        elif case == "goto-extra-field":
             pdf.Root.OpenAction = pikepdf.Dictionary(
                 S=pikepdf.Name.GoTo,
                 D=same_page_fit,
+                F="external.pdf",
             )
-        elif case == "named-destination":
-            pdf.Root.OpenAction = pikepdf.Name("/Start")
-        elif case == "string-destination":
-            pdf.Root.OpenAction = pikepdf.String("Start")
         elif case == "empty-array":
             pdf.Root.OpenAction = pikepdf.Array()
         elif case == "short-array":
             pdf.Root.OpenAction = pikepdf.Array([page.obj])
         elif case == "indirect-array":
             pdf.Root.OpenAction = pdf.make_indirect(same_page_fit)
-        elif case == "fit-h-array":
+        elif case == "fit-h-wrong-count":
+            pdf.Root.OpenAction = pikepdf.Array([page.obj, pikepdf.Name.FitH, 0, 1])
+        elif case == "unknown-mode":
+            pdf.Root.OpenAction = pikepdf.Array([page.obj, pikepdf.Name("/Unknown")])
+        elif case == "xyz-negative-zoom":
+            pdf.Root.OpenAction = pikepdf.Array([page.obj, pikepdf.Name.XYZ, 0, 0, -1])
+        elif case == "fit-r-nonnumeric":
             pdf.Root.OpenAction = pikepdf.Array(
-                [page.obj, pikepdf.Name.FitH, 0]
-            )
-        elif case == "xyz-array":
-            pdf.Root.OpenAction = pikepdf.Array(
-                [page.obj, pikepdf.Name.XYZ, 0, 0, 1]
+                [page.obj, pikepdf.Name.FitR, 0, 0, "right", 100]
             )
         elif case == "non-page-tree-object":
-            fake_page = pdf.make_indirect(
-                pikepdf.Dictionary(Type=pikepdf.Name.Page)
-            )
+            fake_page = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name.Page))
             pdf.Root.OpenAction = pikepdf.Array([fake_page, pikepdf.Name.Fit])
         elif case == "non-catalog-owner":
             page.obj.OpenAction = same_page_fit
-        elif case == "safe-plus-additional-action":
-            pdf.Root.OpenAction = same_page_fit
+        elif case == "mixed-additional-actions":
             pdf.Root.AA = pikepdf.Dictionary(
-                O=pikepdf.Dictionary(S=pikepdf.Name.JavaScript, JS="noop")
+                WC=pikepdf.Dictionary(S=pikepdf.Name.GoTo, D=same_page_fit),
+                WS=pikepdf.Dictionary(S=pikepdf.Name.JavaScript, JS="noop"),
             )
+        elif case == "malformed-additional-action":
+            pdf.Root.AA = pikepdf.Dictionary(WC=pikepdf.String("not-an-action"))
+        elif case == "unknown-additional-event":
+            pdf.Root.AA = pikepdf.Dictionary(
+                Unknown=pikepdf.Dictionary(S=pikepdf.Name.GoTo, D=same_page_fit)
+            )
+        elif case == "next-action-chain":
+            pdf.Root.AA = pikepdf.Dictionary(
+                WC=pikepdf.Dictionary(
+                    S=pikepdf.Name.GoTo,
+                    D=same_page_fit,
+                    Next=pikepdf.Dictionary(S=pikepdf.Name.GoTo, D=same_page_fit),
+                )
+            )
+        elif case == "safe-plus-forbidden-feature":
+            pdf.Root.OpenAction = same_page_fit
+            pdf.Root.AcroForm = pikepdf.Dictionary(Fields=pikepdf.Array())
+        elif case == "unresolved-named-destination":
+            pdf.Root.OpenAction = pikepdf.Name("/Missing")
+        elif case == "legacy-named-destination":
+            pdf.Root.Dests = pikepdf.Dictionary({"/Start": same_page_fit})
+            pdf.Root.OpenAction = pikepdf.Name("/Start")
+        elif case == "name-tree-destination":
+            name_tree = pikepdf.NameTree.new(pdf)
+            name_tree["Start"] = same_page_fit
+            pdf.Root.Names = pikepdf.Dictionary(Dests=name_tree.obj)
+            pdf.Root.OpenAction = pikepdf.String("Start")
+        elif case == "goto-named-destination":
+            pdf.Root.Dests = pikepdf.Dictionary({"/Start": same_page_fit})
+            pdf.Root.OpenAction = pikepdf.Dictionary(
+                S=pikepdf.Name.GoTo,
+                D=pikepdf.Name("/Start"),
+            )
+        elif case == "malformed-name-tree":
+            pdf.Root.Names = pikepdf.Dictionary(
+                Dests=pikepdf.Dictionary(Names=pikepdf.Array(["Start"]))
+            )
+            pdf.Root.OpenAction = pikepdf.String("Start")
         else:  # pragma: no cover - the parameter list is closed above
             raise AssertionError(f"unhandled test case: {case}")
 
     _assert_rejected(_save_mutated_pdf(tmp_path, mutate), "forbidden_feature")
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_pdf_numbers_are_not_safe(value: float) -> None:
+    assert not pdf_security._is_finite_pdf_number(value)
 
 
 @pytest.mark.parametrize(
@@ -628,10 +777,14 @@ async def test_valid_pdf_fast_path_never_calls_sanitizer_and_preserves_bytes(
 
 
 @pytest.mark.asyncio
-async def test_catalog_fit_open_destination_uses_byte_identical_fast_path(
-    monkeypatch, tmp_path: Path
+@pytest.mark.parametrize("case", _SAFE_NAVIGATION_CASES)
+async def test_safe_navigation_uses_byte_identical_fast_path(
+    monkeypatch, tmp_path: Path, case: str
 ) -> None:
-    source = _save_mutated_pdf(tmp_path, _add_safe_catalog_fit_open_destination)
+    source = _save_mutated_pdf(
+        tmp_path,
+        lambda pdf, page: _add_safe_navigation(pdf, page, case),
+    )
     original = source.read_bytes()
 
     async def fallback_must_not_run(*_args, **_kwargs):
@@ -640,7 +793,7 @@ async def test_catalog_fit_open_destination_uses_byte_identical_fast_path(
     monkeypatch.setattr(pdf_security, "sanitize_staged_pdf", fallback_must_not_run)
     monkeypatch.setattr(pdf_security, "validate_staged_pdf", fallback_must_not_run)
     upload = UploadFile(
-        filename="safe-fit.pdf",
+        filename=f"safe-{case}.pdf",
         file=io.BytesIO(original),
         size=len(original),
     )
