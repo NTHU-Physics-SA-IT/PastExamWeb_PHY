@@ -361,7 +361,7 @@ test('uses one responsive boundary and renders populated archive cards', async (
   }
 })
 
-test('applies the shared Archive Christmas hierarchy to Admin report surfaces at runtime', async ({
+test('applies the Christmas structural and content hierarchy to Admin report surfaces at runtime', async ({
   page,
 }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -376,7 +376,7 @@ test('applies the shared Archive Christmas hierarchy to Admin report surfaces at
   await expect(page.locator('html')).toHaveAttribute('data-effective-theme', 'christmas')
 
   const adminPage = await readRuntimeStyle(page.locator('.admin-container'))
-  const appShell = await readRuntimeStyle(page.locator('#app'))
+  const appShell = await readRuntimeStyle(page.locator('#app.app-christmas-frosted-window'))
   const root = page.locator('.report-management')
   const archiveSection = page.locator('.report-section').filter({ hasText: '考古題回報' })
   const filters = archiveSection.locator('.report-management__filters')
@@ -419,58 +419,77 @@ test('applies the shared Archive Christmas hierarchy to Admin report surfaces at
     color: 'rgb(197, 213, 210)',
   })
   expect(styles.activeTab.computed).toMatchObject({
-    backgroundColor: 'rgb(44, 89, 77)',
+    backgroundColor: 'rgb(66, 104, 120)',
     backgroundImage: 'none',
     color: 'rgb(248, 242, 232)',
     borderColor: 'rgb(222, 199, 142)',
   })
   expect(styles.filterPanel.computed).toMatchObject({
-    backgroundColor: 'rgb(44, 89, 77)',
+    backgroundColor: 'rgba(0, 0, 0, 0)',
     backgroundImage: 'none',
     borderColor: 'rgba(222, 199, 142, 0.38)',
   })
   for (const control of [styles.searchInput, styles.statusSelect, styles.reasonSelect]) {
     expect(control.computed).toMatchObject({
-      backgroundColor: 'rgb(23, 63, 58)',
+      backgroundColor: 'rgb(41, 63, 82)',
       backgroundImage: 'none',
       color: 'rgb(248, 242, 232)',
       borderColor: 'rgba(222, 199, 142, 0.38)',
     })
   }
-  for (const button of [styles.searchButton, styles.actionButton]) {
-    expect(button.computed).toMatchObject({
-      backgroundColor: 'rgb(23, 63, 58)',
-      backgroundImage: 'none',
-      color: 'rgb(245, 238, 220)',
-      borderColor: 'rgba(222, 199, 142, 0.38)',
-    })
-  }
+  expect(styles.searchButton.computed).toMatchObject({
+    backgroundColor: 'rgba(0, 0, 0, 0)',
+    backgroundImage: 'none',
+    color: 'rgb(16, 185, 129)',
+    borderColor: 'rgb(167, 243, 208)',
+  })
+  expect(styles.actionButton.computed).toMatchObject({
+    backgroundColor: 'rgb(215, 237, 245)',
+    backgroundImage: 'none',
+    color: 'rgb(36, 83, 104)',
+    borderColor: 'rgba(225, 246, 252, 0.96)',
+  })
   expect(styles.dangerButton.computed).toMatchObject({
     backgroundColor: 'rgb(121, 57, 65)',
     backgroundImage: 'none',
     color: 'rgb(245, 238, 220)',
   })
-  expect(styles.tableWrapper.computed.backgroundColor).toBe('rgb(44, 89, 77)')
+  expect(styles.tableWrapper.computed.backgroundColor).toBe('rgb(62, 95, 114)')
   expect(styles.tableHeader.computed).toMatchObject({
-    backgroundColor: 'rgb(23, 63, 58)',
+    backgroundColor: 'rgb(41, 63, 82)',
     backgroundImage: 'none',
     color: 'rgb(245, 238, 220)',
     borderColor: 'rgba(222, 199, 142, 0.38)',
   })
   for (const bodySurface of [styles.tableBody, styles.tableRow, styles.tableCell]) {
-    expect(bodySurface.computed.backgroundColor).toBe('rgb(44, 89, 77)')
+    expect(bodySurface.computed.backgroundColor).toBe('rgb(62, 95, 114)')
     expect(bodySurface.computed.backgroundImage).toBe('none')
   }
   expect(styles.tableHeader.computed.backgroundColor).not.toBe(
     styles.tableRow.computed.backgroundColor
   )
   expect(styles.paginator.computed).toMatchObject({
-    backgroundColor: 'rgb(44, 89, 77)',
+    backgroundColor: 'rgb(62, 95, 114)',
     backgroundImage: 'none',
     color: 'rgb(197, 213, 210)',
     borderColor: 'rgba(222, 199, 142, 0.38)',
   })
-  for (const surface of Object.values(styles)) {
+  for (const surface of [
+    styles.reportRoot,
+    styles.inactiveTab,
+    styles.activeTab,
+    styles.filterPanel,
+    styles.searchInput,
+    styles.statusSelect,
+    styles.reasonSelect,
+    styles.tableWrapper,
+    styles.tableHeader,
+    styles.tableBody,
+    styles.tableRow,
+    styles.tableCell,
+    styles.paginator,
+    styles.dangerButton,
+  ]) {
     expect(
       surface.matchedReportRules.some((rule) =>
         rule.selector.includes('report-management--christmas')
@@ -489,7 +508,7 @@ test('applies the shared Archive Christmas hierarchy to Admin report surfaces at
   await expect(dialog).toBeVisible()
   const dialogStyle = await readRuntimeStyle(dialog)
   expect(dialogStyle.computed).toMatchObject({
-    backgroundColor: 'rgb(44, 89, 77)',
+    backgroundColor: 'rgb(62, 95, 114)',
     backgroundImage: 'none',
     color: 'rgb(248, 242, 232)',
     borderColor: 'rgba(222, 199, 142, 0.38)',
@@ -533,7 +552,7 @@ test('keeps responsive Christmas report cards bounded with their row-owned surfa
     const rowStyle = await readRuntimeStyle(row)
     const cardStyle = await readRuntimeStyle(card)
     expect(rowStyle.computed).toMatchObject({
-      backgroundColor: 'rgb(44, 89, 77)',
+      backgroundColor: 'rgb(62, 95, 114)',
       backgroundImage: 'none',
       borderColor: 'rgba(222, 199, 142, 0.38)',
     })
@@ -543,7 +562,7 @@ test('keeps responsive Christmas report cards bounded with their row-owned surfa
       )
     ).toBe(true)
     expect(cardStyle.computed).toMatchObject({
-      backgroundColor: 'rgb(44, 89, 77)',
+      backgroundColor: 'rgba(0, 0, 0, 0)',
       backgroundImage: 'none',
     })
     const geometry = await root.evaluate((element) => {

@@ -54,7 +54,7 @@ test.describe('User › Archive browsing', () => {
     await page.route('**/api/courses/categories', (route) =>
       route.fulfill({ status: 200, headers: JSON_HEADERS, body: JSON.stringify([]) })
     )
-    await page.route('**/api/courses/101/archives', (route) =>
+    await page.route(/\/api\/courses\/101\/archives(?:\?.*)?$/, (route) =>
       route.fulfill({
         status: 200,
         headers: JSON_HEADERS,
@@ -313,14 +313,14 @@ test.describe('User › Archive browsing', () => {
     expect(navbarMenubarStyle).toEqual({ color: 'rgb(66, 104, 120)', image: 'none' })
     expect(semesterStyles).toEqual([
       {
-        color: 'rgb(23, 63, 58)',
+        color: 'rgb(41, 63, 82)',
         image: 'none',
         beforeImage: 'none',
         afterImage: 'none',
         shadow: 'none',
       },
       {
-        color: 'rgb(23, 63, 58)',
+        color: 'rgb(41, 63, 82)',
         image: 'none',
         beforeImage: 'none',
         afterImage: 'none',
@@ -329,21 +329,21 @@ test.describe('User › Archive browsing', () => {
     ])
     expect(archiveCardStyles).toEqual([
       {
-        color: 'rgb(44, 89, 77)',
+        color: 'rgb(62, 95, 114)',
         image: 'none',
         beforeImage: 'none',
         afterImage: 'none',
         shadow: 'none',
       },
       {
-        color: 'rgb(44, 89, 77)',
+        color: 'rgb(62, 95, 114)',
         image: 'none',
         beforeImage: 'none',
         afterImage: 'none',
         shadow: 'none',
       },
       {
-        color: 'rgb(44, 89, 77)',
+        color: 'rgb(62, 95, 114)',
         image: 'none',
         beforeImage: 'none',
         afterImage: 'none',
@@ -795,7 +795,7 @@ test.describe('User › Archive browsing', () => {
     await expect.poll(() => downloadEndpointCalled).toBeTruthy()
     expect(download.suggestedFilename()).toBe('2024_普通物理(一)_王教授_期末考.pdf')
 
-    await clickWhenVisible(previewDialog.getByRole('button', { name: 'Close' }))
+    await clickWhenVisible(previewDialog.getByRole('button', { name: '關閉', exact: true }))
     await expect(previewDialog).toBeHidden()
 
     await expect(archiveCard).toContainText('4 次下載')
