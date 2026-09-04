@@ -124,6 +124,93 @@ def test_valid_pdf_and_explicit_uri_are_allowed(tmp_path: Path) -> None:
     assert result["qpdf_version"] == "12.3.2"
 
 
+def _add_safe_catalog_fit_open_destination(pdf, page) -> None:
+    pdf.Root.OpenAction = pikepdf.Array([page.obj, pikepdf.Name.Fit])
+
+
+def test_catalog_same_document_fit_open_destination_is_allowed(
+    tmp_path: Path,
+) -> None:
+    path = _save_mutated_pdf(tmp_path, _add_safe_catalog_fit_open_destination)
+
+    classification = pdf_security._classify_pdf(path)
+
+    assert classification["disposition"] == "pass"
+    assert pdf_security._inspect_pdf(path)["pages"] == 1
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "javascript-action",
+        "launch-action",
+        "goto-action",
+        "named-destination",
+        "string-destination",
+        "empty-array",
+        "short-array",
+        "indirect-array",
+        "fit-h-array",
+        "xyz-array",
+        "non-page-tree-object",
+        "non-catalog-owner",
+        "safe-plus-additional-action",
+    ],
+)
+def test_other_open_action_forms_remain_fatal(tmp_path: Path, case: str) -> None:
+    def mutate(pdf, page) -> None:
+        same_page_fit = pikepdf.Array([page.obj, pikepdf.Name.Fit])
+        if case == "javascript-action":
+            pdf.Root.OpenAction = pikepdf.Dictionary(
+                S=pikepdf.Name.JavaScript,
+                JS="noop",
+            )
+        elif case == "launch-action":
+            pdf.Root.OpenAction = pikepdf.Dictionary(
+                S=pikepdf.Name.Launch,
+                F="external",
+            )
+        elif case == "goto-action":
+            pdf.Root.OpenAction = pikepdf.Dictionary(
+                S=pikepdf.Name.GoTo,
+                D=same_page_fit,
+            )
+        elif case == "named-destination":
+            pdf.Root.OpenAction = pikepdf.Name("/Start")
+        elif case == "string-destination":
+            pdf.Root.OpenAction = pikepdf.String("Start")
+        elif case == "empty-array":
+            pdf.Root.OpenAction = pikepdf.Array()
+        elif case == "short-array":
+            pdf.Root.OpenAction = pikepdf.Array([page.obj])
+        elif case == "indirect-array":
+            pdf.Root.OpenAction = pdf.make_indirect(same_page_fit)
+        elif case == "fit-h-array":
+            pdf.Root.OpenAction = pikepdf.Array(
+                [page.obj, pikepdf.Name.FitH, 0]
+            )
+        elif case == "xyz-array":
+            pdf.Root.OpenAction = pikepdf.Array(
+                [page.obj, pikepdf.Name.XYZ, 0, 0, 1]
+            )
+        elif case == "non-page-tree-object":
+            fake_page = pdf.make_indirect(
+                pikepdf.Dictionary(Type=pikepdf.Name.Page)
+            )
+            pdf.Root.OpenAction = pikepdf.Array([fake_page, pikepdf.Name.Fit])
+        elif case == "non-catalog-owner":
+            page.obj.OpenAction = same_page_fit
+        elif case == "safe-plus-additional-action":
+            pdf.Root.OpenAction = same_page_fit
+            pdf.Root.AA = pikepdf.Dictionary(
+                O=pikepdf.Dictionary(S=pikepdf.Name.JavaScript, JS="noop")
+            )
+        else:  # pragma: no cover - the parameter list is closed above
+            raise AssertionError(f"unhandled test case: {case}")
+
+    _assert_rejected(_save_mutated_pdf(tmp_path, mutate), "forbidden_feature")
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -534,6 +621,29 @@ async def test_valid_pdf_fast_path_never_calls_sanitizer_and_preserves_bytes(
         assert candidate.path.read_bytes() == original
         assert candidate.size == len(original)
     assert candidate_path is not None and not candidate_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_catalog_fit_open_destination_uses_byte_identical_fast_path(
+    monkeypatch, tmp_path: Path
+) -> None:
+    source = _save_mutated_pdf(tmp_path, _add_safe_catalog_fit_open_destination)
+    original = source.read_bytes()
+
+    async def fallback_must_not_run(*_args, **_kwargs):
+        raise AssertionError("fallback called for a safe open destination")
+
+    monkeypatch.setattr(pdf_security, "sanitize_staged_pdf", fallback_must_not_run)
+    monkeypatch.setattr(pdf_security, "validate_staged_pdf", fallback_must_not_run)
+    upload = UploadFile(
+        filename="safe-fit.pdf",
+        file=io.BytesIO(original),
+        size=len(original),
+    )
+
+    async with pdf_security.validated_pdf_upload(upload) as candidate:
+        assert candidate.path.read_bytes() == original
+        assert candidate.size == len(original)
 
 
 @pytest.mark.asyncio

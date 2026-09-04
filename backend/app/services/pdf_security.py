@@ -612,10 +612,42 @@ def _object_identity(value: Any) -> tuple[str, int, int] | tuple[str, int]:
     return ("direct", id(value))
 
 
+def _is_safe_catalog_fit_open_destination(
+    owner: Any,
+    open_action: Any,
+    pikepdf: Any,
+    *,
+    catalog_identity: tuple[Any, ...],
+    page_identities: set[tuple[Any, ...]],
+) -> bool:
+    try:
+        if _object_identity(owner) != catalog_identity:
+            return False
+        if not isinstance(open_action, pikepdf.Array):
+            return False
+        if _object_identity(open_action)[0] != "direct" or len(open_action) != 2:
+            return False
+        return (
+            _object_identity(open_action[0]) in page_identities
+            and str(open_action[1]) == "/Fit"
+        )
+    except (
+        AttributeError,
+        IndexError,
+        KeyError,
+        TypeError,
+        ValueError,
+        pikepdf.PdfError,
+    ):
+        return False
+
+
 def _find_forbidden_features(pdf: Any, pikepdf: Any) -> set[str]:
     forbidden: set[str] = set()
     stack = list(pdf.objects)
     seen: set[tuple[Any, ...]] = set()
+    catalog_identity = _object_identity(pdf.Root)
+    page_identities = {_object_identity(page.obj) for page in pdf.pages}
 
     while stack:
         value = stack.pop()
@@ -628,7 +660,13 @@ def _find_forbidden_features(pdf: Any, pikepdf: Any) -> set[str]:
         if isinstance(value, (pikepdf.Dictionary, pikepdf.Stream)):
             items = list(value.items())
             keys = {str(key) for key, _item in items}
-            if "/OpenAction" in keys:
+            if "/OpenAction" in keys and not _is_safe_catalog_fit_open_destination(
+                value,
+                value.get("/OpenAction"),
+                pikepdf,
+                catalog_identity=catalog_identity,
+                page_identities=page_identities,
+            ):
                 forbidden.add("open_action")
             if "/AA" in keys:
                 forbidden.add("additional_actions")
