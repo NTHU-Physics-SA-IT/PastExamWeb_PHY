@@ -25,6 +25,9 @@ from app.models.models import (
 )
 from app.services import archive_lifecycle_locks
 from app.services.archive_lifecycle_locks import LifecycleResourceClass
+from app.services.archive_submission_review_revision import (
+    compute_archive_submission_review_revision,
+)
 from app.utils.auth import get_current_user
 
 _current_actor: ContextVar[UserRoles] = ContextVar("lifecycle_concurrency_actor")
@@ -254,7 +257,13 @@ async def test_direct_review_and_owner_delete_serialize(
             admin_actor,
             lambda: client.post(
                 f"/archives/admin/submissions/{submission.id}/{review_action}",
-                json={"expected_status": "approved", "note": "S3C review race"},
+                json={
+                    "expected_status": "approved",
+                    "expected_revision": compute_archive_submission_review_revision(
+                        submission
+                    ),
+                    "note": "S3C review race",
+                },
             ),
         )
 
@@ -340,7 +349,13 @@ async def test_direct_review_and_admin_delete_serialize(
             admin_actor,
             lambda: client.post(
                 f"/archives/admin/submissions/{submission.id}/{review_action}",
-                json={"expected_status": "pending", "note": "S3C admin race"},
+                json={
+                    "expected_status": "pending",
+                    "expected_revision": compute_archive_submission_review_revision(
+                        submission
+                    ),
+                    "note": "S3C admin race",
+                },
             ),
         )
 

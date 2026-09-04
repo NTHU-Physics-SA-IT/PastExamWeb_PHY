@@ -22,6 +22,7 @@ def _submission_payload():
         "has_answers": False,
         "status": "approved",
         "requester_id": 1,
+        "review_revision": f"asr-v1:{'0' * 64}",
         "created_at": datetime(2026, 1, 1, tzinfo=UTC),
     }
 

@@ -33,6 +33,9 @@ from app.services.archive_lifecycle_locks import LifecycleResourceClass
 from app.services.archive_submission_links import (
     validate_archive_source_membership,
 )
+from app.services.archive_submission_review_revision import (
+    compute_archive_submission_review_revision,
+)
 from app.services.course_lifecycle_locks import (
     CourseLifecycleOperation,
     CourseLifecycleRevalidationResult,
@@ -550,7 +553,13 @@ async def test_course_trash_and_submission_review_serialize_without_deadlock(
     async def approve():
         return await client.post(
             f"/archives/admin/submissions/{target.id}/approve",
-            json={"expected_status": "pending", "note": "course race"},
+            json={
+                "expected_status": "pending",
+                "expected_revision": compute_archive_submission_review_revision(
+                    target
+                ),
+                "note": "course race",
+            },
         )
 
     try:
@@ -1053,7 +1062,13 @@ async def test_approve_linked_uses_current_parent_plan_without_proposal_mutex(
     try:
         response = await client.post(
             f"/archives/admin/submissions/{target.id}/approve",
-            json={"expected_status": "pending", "note": "parent first"},
+            json={
+                "expected_status": "pending",
+                "expected_revision": compute_archive_submission_review_revision(
+                    target
+                ),
+                "note": "parent first",
+            },
         )
         assert response.status_code == 200
         assert trace == [
@@ -1867,7 +1882,12 @@ async def test_submission_edit_and_review_serialize_without_deadlock(
     async def approve_submission():
         return await client.post(
             f"/archives/admin/submissions/{target.id}/approve",
-            json={"expected_status": "pending"},
+            json={
+                "expected_status": "pending",
+                "expected_revision": compute_archive_submission_review_revision(
+                    target
+                ),
+            },
         )
 
     try:
@@ -1881,8 +1901,12 @@ async def test_submission_edit_and_review_serialize_without_deadlock(
             ),
         )
         assert first.status_code == 200
-        assert second.status_code == (200 if first_operation == "edit" else 409)
-        if first_operation == "review":
+        assert second.status_code == 409
+        if first_operation == "edit":
+            assert second.json()["detail"]["code"] == (
+                "archive_submission_stale_revision"
+            )
+        else:
             assert (
                 second.json()["detail"]
                 == archives_service.ARCHIVE_SUBMISSION_EDIT_FORBIDDEN_DETAIL
@@ -1899,7 +1923,11 @@ async def test_submission_edit_and_review_serialize_without_deadlock(
 
         async with session_maker() as session:
             stored = await session.get(ArchiveSubmission, target.id)
-            assert stored.status == SubmissionStatus.APPROVED
+            assert stored.status == (
+                SubmissionStatus.PENDING
+                if first_operation == "edit"
+                else SubmissionStatus.APPROVED
+            )
             assert stored.professor == (
                 "Serialized edit professor"
                 if first_operation == "edit"
@@ -2251,7 +2279,13 @@ async def test_approve_existing_and_archive_trash_serialize_without_deadlock(
     async def approve():
         return await client.post(
             f"/archives/admin/submissions/{target.id}/approve",
-            json={"expected_status": "pending", "note": "race approve"},
+            json={
+                "expected_status": "pending",
+                "expected_revision": compute_archive_submission_review_revision(
+                    target
+                ),
+                "note": "race approve",
+            },
         )
 
     async def trash():
@@ -2961,7 +2995,13 @@ async def test_review_static_multi_source_anomaly_keeps_generic_500_boundary(
         ) as non_raising_client:
             response = await non_raising_client.post(
                 f"/archives/admin/submissions/{target.id}/approve",
-                json={"expected_status": "pending", "note": "static anomaly"},
+                json={
+                    "expected_status": "pending",
+                    "expected_revision": compute_archive_submission_review_revision(
+                        target
+                    ),
+                    "note": "static anomaly",
+                },
             )
 
         assert response.status_code == 500
