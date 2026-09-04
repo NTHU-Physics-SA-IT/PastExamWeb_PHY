@@ -371,7 +371,11 @@ def test_syntax_warning_policy_rejects_even_when_open_succeeds(
         is_encrypted = False
 
         def __init__(self) -> None:
-            self.pages = [object()]
+            class WarningPage:
+                obj = pikepdf.Dictionary(Type=pikepdf.Name.Page)
+
+            self.Root = pikepdf.Dictionary(Type=pikepdf.Name.Catalog)
+            self.pages = [WarningPage()]
             self.objects = []
 
         def __enter__(self):
