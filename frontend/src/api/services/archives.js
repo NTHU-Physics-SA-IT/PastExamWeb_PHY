@@ -27,6 +27,7 @@ export const archiveService = {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
+      timeout: 30_000,
     })
   },
 

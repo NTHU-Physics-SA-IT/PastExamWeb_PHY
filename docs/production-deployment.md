@@ -411,12 +411,23 @@ The backend stages an upload with a hard byte cap before parsing and uses the
 pinned pikepdf/qpdf stack in a bounded helper process. Validation rejects
 encrypted, recovery-dependent, over-limit, embedded-file, form/XFA,
 JavaScript, launch-action, additional-action, and file-attachment documents.
-Production Linux constrains parser address space and serializes parsing across
-Uvicorn workers. Each worker admits at most one helper; with the production
-four-worker command there can be at most four helper processes (a 1 GiB sum of
-hard address-space ceilings), while the container-wide advisory lock permits
-only one helper to import pikepdf and parse at a time. Waiting helpers remain
-before the parser import. Deployment validation must continue to build the
+Ordinary valid PDFs take one strict parser pass and retain their original
+bytes. A narrowly classified attachment-related rejection may enter one
+structural sanitizer attempt, followed by mandatory strict revalidation, under
+one shared 20-second parser-processing deadline. Sanitized output remains
+bounded to 20 MiB; Linux applies the existing 256 MiB address-space ceiling,
+an output-file limit, a four-second wall limit, and bounded CPU time. A
+non-blocking container-wide sanitizer admission lock permits at most one such
+attempt, while the existing parser lock is released between inspection,
+sanitization, and revalidation. Any timeout, resource failure, unknown warning,
+or failed revalidation rejects without storage mutation or retry.
+
+Production Linux constrains parser address space and serializes pikepdf/qpdf
+work across Uvicorn workers. Each worker admits at most one helper; with the
+production four-worker command there can be at most four waiting/running helper
+processes (a 1 GiB sum of hard address-space ceilings), while the
+container-wide advisory lock permits only one helper to import pikepdf and
+parse at a time. Waiting helpers remain before the parser import. Deployment validation must continue to build the
 production backend image and run nginx syntax checks for both development and
 production configurations. Historical orphan cleanup remains a separate,
 operator-controlled operation and is never triggered by this request path.
