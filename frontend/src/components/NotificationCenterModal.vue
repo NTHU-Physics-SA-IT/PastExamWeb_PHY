@@ -7,7 +7,10 @@
       :style="{ width: 'min(820px, calc(100vw - 2rem))', maxWidth: '100%' }"
       :draggable="false"
       :blockScroll="true"
-      class="notification-center-dialog"
+      :class="[
+        'notification-center-dialog',
+        { 'notification-center-dialog--christmas': effectiveTheme === 'christmas' },
+      ]"
       :pt="{ root: { 'aria-label': $t('公告與通知'), 'aria-labelledby': null } }"
     >
       <template #header>
@@ -79,7 +82,7 @@
                         :label="$t('檢視')"
                         size="small"
                         outlined
-                        class="notification-view-button"
+                        class="notification-view-button review-action-preview"
                         @click="openAnnouncement(item)"
                       />
                     </div>
@@ -100,7 +103,7 @@
                   icon="pi pi-check-circle"
                   size="small"
                   outlined
-                  class="personal-mark-all-button"
+                  class="personal-mark-all-button review-action-republish"
                   :disabled="!counts.personal_notifications || deletingAllPersonal"
                   @click="$emit('mark-all-personal-read')"
                 />
@@ -110,7 +113,7 @@
                   severity="danger"
                   size="small"
                   outlined
-                  class="personal-delete-all-button"
+                  class="personal-delete-all-button review-action-delete"
                   :loading="deletingAllPersonal"
                   :disabled="personalNotifications.length === 0 || deletingAllPersonal"
                   @click="$emit('delete-all-personal')"
@@ -158,7 +161,7 @@
                           :label="$t('檢視')"
                           size="small"
                           outlined
-                          class="notification-view-button"
+                          class="notification-view-button review-action-preview"
                           :disabled="deletingPersonalId === item.id || deletingAllPersonal"
                           @click="openPersonal(item)"
                         />
@@ -167,7 +170,7 @@
                           severity="danger"
                           size="small"
                           outlined
-                          class="notification-delete-button"
+                          class="notification-delete-button review-action-delete"
                           :aria-label="$t('刪除通知')"
                           :title="$t('刪除通知')"
                           :loading="deletingPersonalId === item.id"
@@ -192,6 +195,7 @@
       :style="{ width: '520px', maxWidth: '90vw' }"
       :draggable="false"
       :header="selectedType === 'announcement' ? $t('公告內容') : $t('個人通知')"
+      :class="{ 'notification-detail-dialog--christmas': effectiveTheme === 'christmas' }"
     >
       <div v-if="selectedItem" class="notification-detail">
         <h3>
@@ -232,8 +236,10 @@ import {
 } from '@/utils/personalNotificationNavigation'
 import { localizedPersonalNotification } from '@/utils/personalNotificationPresentation'
 import { formatExactDateTime24h } from '@/utils/time'
+import { useTheme } from '@/utils/useTheme'
 
 const { t, locale } = useI18n()
+const { effectiveTheme } = useTheme()
 
 const props = defineProps({
   visible: Boolean,
@@ -604,6 +610,201 @@ const formatTimestamp = (value) => formatExactDateTime24h(value)
   }
   .notification-dialog-header__title {
     font-size: 1.05rem;
+  }
+}
+</style>
+
+<style>
+html[data-effective-theme='christmas'] body .p-dialog.notification-center-dialog--christmas,
+html[data-effective-theme='christmas'] body .p-dialog.notification-detail-dialog--christmas {
+  border: 1px solid rgba(222, 199, 142, 0.46);
+  background: #3e5f72;
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas'] body .notification-center-dialog--christmas .p-dialog-header,
+html[data-effective-theme='christmas']
+  body
+  .notification-detail-dialog--christmas
+  .p-dialog-header {
+  border-bottom: 1px solid rgba(222, 199, 142, 0.38);
+  background: #293f52;
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .p-dialog-content,
+html[data-effective-theme='christmas'] body .notification-center-dialog--christmas .p-dialog-footer,
+html[data-effective-theme='christmas']
+  body
+  .notification-detail-dialog--christmas
+  .p-dialog-content,
+html[data-effective-theme='christmas']
+  body
+  .notification-detail-dialog--christmas
+  .p-dialog-footer {
+  background: #3e5f72;
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .p-dialog-close-button,
+html[data-effective-theme='christmas']
+  body
+  .notification-detail-dialog--christmas
+  .p-dialog-close-button,
+html[data-effective-theme='christmas'] body .notification-detail-dialog--christmas h3,
+html[data-effective-theme='christmas'] body .notification-detail-dialog--christmas p,
+html[data-effective-theme='christmas']
+  body
+  .notification-detail-dialog--christmas
+  .markdown-content {
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .notification-center-tabs,
+html[data-effective-theme='christmas'] body .notification-center-dialog--christmas .p-tablist,
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .p-tablist-tab-list,
+html[data-effective-theme='christmas'] body .notification-center-dialog--christmas .p-tabpanels,
+html[data-effective-theme='christmas'] body .notification-center-dialog--christmas .p-tabpanel {
+  border-color: rgba(222, 199, 142, 0.38);
+  background: transparent;
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas'] body .notification-center-dialog--christmas .p-tab {
+  color: #c5d5d2;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .p-tab.p-tab-active {
+  border-color: #f0c96f;
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .notification-month-heading,
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .notification-card__type,
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .notification-card__summary,
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .notification-card
+  small,
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .personal-toolbar
+  > span,
+html[data-effective-theme='christmas'] body .notification-detail-dialog--christmas small {
+  color: #c5d5d2 !important;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .notification-month-heading::after {
+  background: rgba(222, 199, 142, 0.38);
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .notification-card {
+  border-color: rgba(222, 199, 142, 0.34);
+  background: rgba(41, 63, 82, 0.62);
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .notification-card--unread {
+  border-inline-start-color: #7cc9ed;
+  background: rgba(36, 92, 128, 0.68);
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .notification-card__title,
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .notification-empty {
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .review-action-preview.p-button {
+  border-color: rgba(225, 246, 252, 0.96);
+  background: #d7edf5;
+  color: #245368;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .review-action-republish.p-button {
+  border-color: rgba(127, 188, 145, 0.82);
+  background: linear-gradient(180deg, #3d8a64 0%, #2d6c52 100%);
+  color: #f5fff7;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .review-action-delete.p-button {
+  border-color: rgba(244, 141, 151, 0.82);
+  background: rgba(116, 38, 50, 0.82);
+  color: #fff2f3;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .review-action-preview.p-button:hover,
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .review-action-republish.p-button:hover,
+html[data-effective-theme='christmas']
+  body
+  .notification-center-dialog--christmas
+  .review-action-delete.p-button:hover {
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+@media (max-width: 640px) {
+  html[data-effective-theme='christmas'] body .p-dialog.notification-center-dialog--christmas {
+    width: calc(100vw - 1rem) !important;
+    max-width: calc(100vw - 1rem) !important;
+    max-height: calc(100dvh - 1rem);
+    overflow: hidden;
   }
 }
 </style>

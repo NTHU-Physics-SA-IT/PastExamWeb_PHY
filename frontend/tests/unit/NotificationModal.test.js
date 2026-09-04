@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import NotificationModal from '@/components/NotificationModal.vue'
+import notificationModalSource from '@/components/NotificationModal.vue?raw'
 import { setLocale } from '@/i18n'
 
 const summary = {
@@ -22,6 +23,20 @@ const summary = {
 const slotStub = { template: '<div><slot /><slot name="footer" /></div>' }
 
 describe('NotificationModal', () => {
+  it('uses a Christmas dialog surface and the shared action hierarchy', () => {
+    expect(notificationModalSource).toContain(
+      "'notification-summary-dialog--christmas': effectiveTheme === 'christmas'"
+    )
+    expect(notificationModalSource).toContain(
+      'notification-summary-view-action review-action-preview'
+    )
+    expect(notificationModalSource).toContain(
+      'notification-summary-mark-all-action review-action-republish'
+    )
+    expect(notificationModalSource).toContain('.p-dialog.notification-summary-dialog--christmas')
+    expect(notificationModalSource).toContain('background: #293f52;')
+  })
+
   it('uses English announcement content and updates when the locale changes', async () => {
     const wrapper = mount(NotificationModal, {
       props: { visible: true, summary },

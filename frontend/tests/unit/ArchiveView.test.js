@@ -32,6 +32,8 @@ const listMySubmissionsMock = vi.hoisted(() => vi.fn())
 
 const toastAddMock = vi.hoisted(() => vi.fn())
 const confirmRequireMock = vi.hoisted(() => vi.fn())
+const archiveIsDarkThemeMock = ref(false)
+const archiveEffectiveThemeMock = ref('light')
 
 let originalCreateObjectURL
 let originalRevokeObjectURL
@@ -127,7 +129,16 @@ vi.mock('@/components/PdfPreviewModal.vue', () => ({
   default: {
     name: 'PdfPreviewModal',
     template: '<div><slot /></div>',
-    props: ['visible', 'previewUrl', 'courseId', 'archiveId', 'loading', 'error', 'showDownload'],
+    props: [
+      'visible',
+      'previewUrl',
+      'courseId',
+      'archiveId',
+      'loading',
+      'error',
+      'showDownload',
+      'christmas',
+    ],
     emits: ['update:visible', 'download', 'hide', 'error'],
   },
 }))
@@ -136,7 +147,7 @@ vi.mock('@/components/UploadArchiveDialog.vue', () => ({
   default: {
     name: 'UploadArchiveDialog',
     template: '<div class="upload-archive-dialog-stub"></div>',
-    props: ['modelValue', 'mode', 'submissionId', 'prefill'],
+    props: ['modelValue', 'mode', 'submissionId', 'prefill', 'christmas'],
     emits: ['update:modelValue', 'upload-success', 'stale'],
   },
 }))
@@ -147,7 +158,10 @@ vi.mock('@/utils/auth', () => ({
 }))
 
 vi.mock('@/utils/useTheme', () => ({
-  useTheme: () => ({ isDarkTheme: ref(false) }),
+  useTheme: () => ({
+    isDarkTheme: archiveIsDarkThemeMock,
+    effectiveTheme: archiveEffectiveThemeMock,
+  }),
 }))
 
 vi.mock('@/utils/analytics', () => ({
@@ -206,6 +220,8 @@ describe('ArchiveView', () => {
     getCurrentUserMock.mockReturnValue({ id: 10, is_admin: true })
     isAuthenticatedMock.mockReturnValue(true)
     isUnauthorizedErrorMock.mockReturnValue(false)
+    archiveIsDarkThemeMock.value = false
+    archiveEffectiveThemeMock.value = 'light'
     listCoursesMock.mockResolvedValue({ data: sampleCourses })
     listCategoriesMock.mockResolvedValue({ data: [] })
     getCourseArchivesMock.mockReset()
@@ -455,6 +471,427 @@ describe('ArchiveView', () => {
     ])
 
     wrapper.unmount()
+  })
+
+  it('applies the Christmas presentation only for the active Christmas theme', async () => {
+    archiveEffectiveThemeMock.value = 'christmas'
+    const wrapper = mount(ArchiveView, {
+      global: {
+        provide: {
+          toast: { add: toastAddMock },
+          confirm: { require: confirmRequireMock },
+          sidebarVisible: ref(true),
+        },
+        stubs: componentStubs,
+      },
+    })
+
+    expect(wrapper.classes()).toContain('archive-christmas')
+    expect(wrapper.classes()).not.toContain('archive-dark')
+    expect(wrapper.get('.archive-edit-dialog').classes()).toContain('archive-edit-dialog-christmas')
+    expect(wrapper.getComponent({ name: 'PdfPreviewModal' }).props('christmas')).toBe(true)
+    expect(
+      wrapper
+        .findAllComponents({ name: 'UploadArchiveDialog' })
+        .map((dialog) => dialog.props('christmas'))
+    ).toEqual([true, true, true])
+
+    archiveEffectiveThemeMock.value = 'dark'
+    archiveIsDarkThemeMock.value = true
+    await nextTick()
+
+    expect(wrapper.classes()).not.toContain('archive-christmas')
+    expect(wrapper.classes()).toContain('archive-dark')
+    expect(wrapper.get('.archive-edit-dialog').classes()).not.toContain(
+      'archive-edit-dialog-christmas'
+    )
+    expect(wrapper.getComponent({ name: 'PdfPreviewModal' }).props('christmas')).toBe(false)
+    expect(
+      wrapper
+        .findAllComponents({ name: 'UploadArchiveDialog' })
+        .map((dialog) => dialog.props('christmas'))
+    ).toEqual([false, false, false])
+
+    wrapper.unmount()
+  })
+
+  it('uses the Route 1 information-card and unified action semantics for Christmas archives', async () => {
+    archiveEffectiveThemeMock.value = 'christmas'
+    const wrapper = mount(ArchiveView, {
+      global: {
+        provide: {
+          toast: { add: toastAddMock },
+          confirm: { require: confirmRequireMock },
+          sidebarVisible: ref(true),
+        },
+        stubs: componentStubs,
+      },
+    })
+
+    await flushPromises()
+    wrapper.vm.filterBySubject({ label: 'Calculus I', id: 'c1' })
+    await flushPromises()
+
+    const archiveCards = wrapper.findAll('.archive-record-card')
+    expect(archiveCards).toHaveLength(2)
+    expect(
+      archiveCards.every((card) => card.classes().includes('archive-record-card--information'))
+    ).toBe(true)
+
+    const examTypeTags = wrapper.findAll('.exam-type-tag')
+    expect(examTypeTags.map((tag) => tag.text())).toEqual(['期中考', '期末考'])
+
+    const neutralActions = wrapper.findAll('.archive-action-neutral')
+    expect(neutralActions).toHaveLength(6)
+    expect(neutralActions.map((action) => action.attributes('aria-label')).sort()).toEqual([
+      '下載',
+      '下載',
+      '編輯',
+      '編輯',
+      '預覽',
+      '預覽',
+    ])
+
+    const dangerActions = wrapper.findAll('.archive-action-danger')
+    expect(dangerActions).toHaveLength(2)
+    expect(dangerActions.every((action) => action.attributes('aria-label') === '刪除')).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('uses one deep blue-gray Christmas color for every academic-term header', () => {
+    const archiveViewSource = readFileSync(
+      resolve(globalThis.process.cwd(), 'src/views/Archive.vue'),
+      'utf8'
+    )
+    const semesterHeaderRule = archiveViewSource.match(
+      /\.archive-christmas :deep\(\.p-accordionheader\) \{([\s\S]*?)\n\}/
+    )
+    const semesterSnowRule = archiveViewSource.match(
+      /\.archive-christmas :deep\(\.p-accordionheader\)::before,[\s\S]*?\.archive-christmas :deep\(\.p-accordionheader\)::after \{([\s\S]*?)\n\}/
+    )
+    const semesterSurfaceRule = archiveViewSource.match(
+      /\.archive-christmas :deep\(\.p-accordionpanel\),[\s\S]*?\.archive-christmas :deep\(\.p-accordioncontent-content\) \{([\s\S]*?)\n\}/
+    )
+    const semesterSurfacePseudoRule = archiveViewSource.match(
+      /\.archive-christmas :deep\(\.p-accordionpanel\)::before,[\s\S]*?\.archive-christmas :deep\(\.p-accordioncontent-content\)::after \{([\s\S]*?)\n\}/
+    )
+
+    expect(semesterHeaderRule).not.toBeNull()
+    expect(semesterHeaderRule[1]).toContain('background: #293f52 !important;')
+    expect(semesterHeaderRule[1]).toContain('background-image: none !important;')
+    expect(semesterHeaderRule[1]).toContain('box-shadow: none !important;')
+    expect(semesterHeaderRule[1]).not.toContain('gradient')
+    expect(semesterSnowRule?.[1]).toContain('content: none !important;')
+    expect(semesterSnowRule?.[1]).toContain('background-image: none !important;')
+    expect(semesterSurfaceRule?.[1]).toContain('background: #102f35 !important;')
+    expect(semesterSurfaceRule?.[1]).toContain('background-image: none !important;')
+    expect(semesterSurfaceRule?.[1]).toContain('backdrop-filter: none !important;')
+    expect(semesterSurfaceRule?.[1]).toContain('mix-blend-mode: normal;')
+    expect(semesterSurfaceRule?.[1]).toContain('opacity: 1;')
+    expect(semesterSurfacePseudoRule?.[1]).toContain('content: none !important;')
+    expect(semesterSurfacePseudoRule?.[1]).toContain('background-image: none !important;')
+  })
+
+  it('uses the shared page gradient once for selected courses and solid blue-gray archive records', () => {
+    const archiveViewSource = readFileSync(
+      resolve(globalThis.process.cwd(), 'src/views/Archive.vue'),
+      'utf8'
+    )
+    const selectedCourseContainerRule = archiveViewSource.match(
+      /\.archive-christmas :deep\(\.active-course-menu-item\) \{([\s\S]*?)\n\}/
+    )
+    const selectedCourseRule = archiveViewSource.match(
+      /\.archive-christmas :deep\(\.active-course-menu-item \.p-panelmenu-item-content\),[\s\S]*?\.active-course-menu-item > \.p-panelmenu-item-link\) \{([\s\S]*?)\n\}/
+    )
+    const selectedSearchResultRule = archiveViewSource.match(
+      /\.archive-christmas \.active-course-search-result \{([\s\S]*?)\n\}/
+    )
+    const mobileSelectedCourseSurfaceRule = archiveViewSource.match(
+      /:global\(\.mobile-drawer\.mobile-drawer-christmas \.active-course-menu-item\),\s*:global\(\.mobile-drawer\.mobile-drawer-christmas \.active-course-search-result\) \{([\s\S]*?)\n {2}\}/
+    )
+    const mobileSelectedCourseContentRule = archiveViewSource.match(
+      /:global\(\s*\.mobile-drawer\.mobile-drawer-christmas \.active-course-menu-item \.p-panelmenu-item-content\s*\),\s*:global\(\.mobile-drawer\.mobile-drawer-christmas \.active-course-menu-item \.p-panelmenu-item-link\) \{([\s\S]*?)\n {2}\}/
+    )
+    const selectedCourseContainerPseudoRule = archiveViewSource.match(
+      /\.archive-christmas :deep\(\.active-course-menu-item\)::before,[\s\S]*?\.archive-christmas :deep\(\.active-course-menu-item\)::after \{([\s\S]*?)\n\}/
+    )
+    const selectedCoursePseudoRule = archiveViewSource.match(
+      /\.archive-christmas :deep\(\.active-course-menu-item \.p-panelmenu-item-content\)::before,[\s\S]*?\.archive-christmas \.active-course-search-result::after \{([\s\S]*?)\n\}/
+    )
+    const archiveRecordRule = archiveViewSource.match(
+      /\.archive-christmas \.archive-record-card \{([\s\S]*?)\n\}/
+    )
+
+    expect(selectedCourseContainerRule?.[1]).toContain(
+      'background-color: var(--christmas-page-background-color) !important;'
+    )
+    expect(selectedCourseContainerRule?.[1]).toContain(
+      'background-image: var(--christmas-page-background-gradient) !important;'
+    )
+    expect(selectedCourseContainerRule?.[1]).toContain('box-shadow: none !important;')
+    expect(selectedCourseContainerPseudoRule?.[1]).toContain('content: none !important;')
+    expect(selectedCourseContainerPseudoRule?.[1]).toContain('background-image: none !important;')
+    expect(selectedCourseRule?.[1]).toContain('background: transparent !important;')
+    expect(selectedCourseRule?.[1]).toContain('background-image: none !important;')
+    expect(selectedCourseRule?.[1]).toContain('box-shadow: none !important;')
+    expect(selectedCourseRule?.[1]).toContain('backdrop-filter: none !important;')
+    expect(selectedCourseRule?.[1]).toContain('filter: none !important;')
+    expect(selectedCourseRule?.[1]).not.toContain('gradient')
+    expect(selectedSearchResultRule?.[1]).toContain(
+      'background-color: var(--christmas-page-background-color) !important;'
+    )
+    expect(selectedSearchResultRule?.[1]).toContain(
+      'background-image: var(--christmas-page-background-gradient) !important;'
+    )
+    expect(selectedCoursePseudoRule?.[1]).toContain('content: none !important;')
+    expect(selectedCoursePseudoRule?.[1]).toContain('background-image: none !important;')
+    expect(mobileSelectedCourseSurfaceRule?.[1]).toContain(
+      'background-color: var(--christmas-page-background-color) !important;'
+    )
+    expect(mobileSelectedCourseSurfaceRule?.[1]).toContain(
+      'background-image: var(--christmas-page-background-gradient) !important;'
+    )
+    expect(mobileSelectedCourseSurfaceRule?.[1]).toContain('box-shadow: none !important;')
+    expect(mobileSelectedCourseContentRule?.[1]).toContain('background: transparent !important;')
+    expect(mobileSelectedCourseContentRule?.[1]).toContain('background-image: none !important;')
+    expect(archiveRecordRule?.[1]).toContain('background: #3e5f72 !important;')
+    expect(archiveRecordRule?.[1]).toContain('background-image: none !important;')
+    expect(archiveRecordRule?.[1]).toContain('box-shadow: none;')
+    expect(archiveRecordRule?.[1]).toContain('backdrop-filter: none;')
+    expect(archiveRecordRule?.[1]).toContain('filter: none;')
+    expect(archiveRecordRule?.[1]).toContain('mix-blend-mode: normal;')
+    expect(archiveRecordRule?.[1]).toContain('opacity: 1;')
+    expect(archiveRecordRule?.[1]).not.toContain('gradient')
+    expect(archiveViewSource).not.toMatch(/\.archive-record-card(?::nth|--(?:final|quiz|midterm))/)
+    expect(archiveViewSource.match(/@media/g) || []).toHaveLength(11)
+
+    const classicSemesterHeaderRule = archiveViewSource.match(
+      /(?<!archive-christmas ):deep\(\.p-accordionheader\) \{([\s\S]*?)\n\}/
+    )
+    const classicArchiveRecordRule = archiveViewSource.match(
+      /(?<!archive-christmas )\.archive-record-card \{([\s\S]*?)\n\}/
+    )
+    expect(classicSemesterHeaderRule?.[1]).toContain('background: #f0f7f4;')
+    expect(classicArchiveRecordRule?.[1]).toContain('background: #ffffff;')
+    expect(archiveViewSource).toContain('.archive-christmas .exam-type-tag--midterm {')
+    expect(archiveViewSource).toContain('.archive-christmas .exam-type-tag--quiz {')
+    expect(archiveViewSource).toContain('archive-action-preview archive-action-neutral')
+    expect(archiveViewSource).toContain('archive-action-download archive-action-neutral')
+  })
+
+  it('lets the desktop sidebar share the page background and gives the mobile drawer its gradient', () => {
+    const archiveViewSource = readFileSync(
+      resolve(globalThis.process.cwd(), 'src/views/Archive.vue'),
+      'utf8'
+    )
+    const desktopSidebarRule = archiveViewSource.match(
+      /\.archive-christmas \.sidebar \{([\s\S]*?)\n\}/
+    )
+    const mobileSidebarRule = archiveViewSource.match(
+      /:global\(\.mobile-drawer\.mobile-drawer-christmas \.p-drawer-content\),[\s\S]*?\.p-sidebar-content\) \{([\s\S]*?)\n\}/
+    )
+    const mobileSidebarShellRule = archiveViewSource.match(
+      /:global\(\.mobile-drawer\.mobile-drawer-christmas\.p-drawer\),[\s\S]*?\.p-sidebar\) \{([\s\S]*?)\n\}/
+    )
+    const desktopUploadSectionRule = archiveViewSource.match(
+      /\.archive-christmas \.upload-section \{([\s\S]*?)\n\}/
+    )
+    const mobileUploadSectionRule = archiveViewSource.match(
+      /:global\(\.mobile-drawer\.mobile-drawer-christmas \.mobile-upload-section\) \{([\s\S]*?)\n\}/
+    )
+
+    expect(desktopSidebarRule?.[1]).toContain('background: transparent;')
+    expect(desktopSidebarRule?.[1]).toContain('background-image: none;')
+    expect(desktopSidebarRule?.[1]).toContain('border-right-color: transparent;')
+    expect(desktopSidebarRule?.[1]).toContain('box-shadow: none;')
+    expect(desktopUploadSectionRule?.[1]).toContain('border-top-color: transparent;')
+    expect(desktopUploadSectionRule?.[1]).toContain('background: transparent;')
+    expect(mobileSidebarShellRule?.[1]).toContain(
+      'background-color: var(--christmas-page-background-color) !important;'
+    )
+    expect(mobileSidebarShellRule?.[1]).toContain(
+      'background-image: var(--christmas-page-background-gradient) !important;'
+    )
+    expect(mobileSidebarShellRule?.[1]).toContain('border-right-color: transparent !important;')
+    expect(mobileSidebarShellRule?.[1]).toContain('box-shadow: none;')
+    expect(mobileSidebarRule?.[1]).toContain(
+      'background-color: var(--christmas-page-background-color) !important;'
+    )
+    expect(mobileSidebarRule?.[1]).toContain(
+      'background-image: var(--christmas-page-background-gradient) !important;'
+    )
+    expect(mobileUploadSectionRule?.[1]).toContain('border-top-color: transparent !important;')
+    expect(mobileUploadSectionRule?.[1]).toContain('background: transparent !important;')
+    expect(mobileUploadSectionRule?.[1]).toContain('box-shadow: none;')
+  })
+
+  it('lets the course title bar share the continuous Christmas page background', () => {
+    const archiveViewSource = readFileSync(
+      resolve(globalThis.process.cwd(), 'src/views/Archive.vue'),
+      'utf8'
+    )
+    const subjectHeaderRule = archiveViewSource.match(
+      /\.archive-christmas \.subject-header \{([\s\S]*?)\n\}/
+    )
+    const subjectHeaderPseudoRule = archiveViewSource.match(
+      /\.archive-christmas \.subject-header::after \{([\s\S]*?)\n\}/
+    )
+
+    expect(subjectHeaderRule?.[1]).toContain('border-bottom-color: transparent;')
+    expect(subjectHeaderRule?.[1]).toContain('background: transparent;')
+    expect(subjectHeaderRule?.[1]).toContain('box-shadow: none;')
+    expect(subjectHeaderRule?.[1]).not.toContain('gradient')
+    expect(subjectHeaderPseudoRule?.[1]).toContain('content: none;')
+    expect(subjectHeaderPseudoRule?.[1]).toContain('background: none;')
+  })
+
+  it('gives every Christmas archive filter and its popup a contrasting festive palette', () => {
+    const archiveViewSource = readFileSync(
+      resolve(globalThis.process.cwd(), 'src/views/Archive.vue'),
+      'utf8'
+    )
+    const styleSource = readFileSync(resolve(globalThis.process.cwd(), 'src/style.css'), 'utf8')
+    const filterSelects = archiveViewSource.match(
+      /<Select\s+inputId="archive-filter-(?:year|professor|type)"[\s\S]*?\/>/g
+    )
+
+    expect(filterSelects).toHaveLength(3)
+    filterSelects.forEach((select) => {
+      expect(select).toContain("'archive-filter-overlay-christmas': effectiveTheme === 'christmas'")
+    })
+
+    const closedFilterRule = archiveViewSource.match(
+      /\.archive-christmas \.archive-filter-controls :deep\(\.p-select\) \{([\s\S]*?)\n\}/
+    )
+    expect(closedFilterRule?.[1]).toContain('background: #e7dcc4;')
+    expect(closedFilterRule?.[1]).toContain('color: #294f47;')
+
+    const popupRule = styleSource.match(/body \.archive-filter-overlay-christmas \{([\s\S]*?)\n\}/)
+    expect(popupRule?.[1]).toContain('background: #e7dcc4;')
+    expect(styleSource).toContain(
+      'body .archive-filter-overlay-christmas .p-select-option-selected {'
+    )
+  })
+
+  it('uses the upload dialog cream background for Christmas submission history', () => {
+    const archiveViewSource = readFileSync(
+      resolve(globalThis.process.cwd(), 'src/views/Archive.vue'),
+      'utf8'
+    )
+    const styleSource = readFileSync(resolve(globalThis.process.cwd(), 'src/style.css'), 'utf8')
+    const dialogRootRule = styleSource.match(
+      /body \.p-dialog\.my-submissions-dialog-christmas \{([\s\S]*?)\n\}/
+    )
+    const dialogSurfacesRule = styleSource.match(
+      /body \.p-dialog\.my-submissions-dialog-christmas \.p-dialog-header,[\s\S]*?\.p-dialog-content \{([\s\S]*?)\n\}/
+    )
+
+    expect(archiveViewSource).toContain(
+      "'my-submissions-dialog-christmas': effectiveTheme === 'christmas'"
+    )
+    expect(dialogRootRule?.[1]).toContain('overflow: hidden;')
+    expect(dialogRootRule?.[1]).toContain('border-radius: 0.9rem;')
+    expect(dialogRootRule?.[1]).toContain('background: #f5eedc;')
+    expect(dialogSurfacesRule?.[1]).toContain('background: #f5eedc !important;')
+    expect(dialogSurfacesRule?.[1]).toContain('color: #173d37;')
+  })
+
+  it('uses warm Christmas panels for submission history content', () => {
+    const styleSource = readFileSync(resolve(globalThis.process.cwd(), 'src/style.css'), 'utf8')
+    const contentPanelsRule = styleSource.match(
+      /body \.p-dialog\.my-submissions-dialog-christmas \.submission-summary,[\s\S]*?\.submission-empty \{([\s\S]*?)\n\}/
+    )
+
+    expect(contentPanelsRule?.[1]).toContain('background: #eadfd9;')
+    expect(contentPanelsRule?.[1]).toContain('border-color: rgba(107, 53, 60, 0.2);')
+  })
+
+  it('scopes every edit-form popup panel to the Christmas overlay presentation', () => {
+    const archiveViewSource = readFileSync(
+      resolve(globalThis.process.cwd(), 'src/views/Archive.vue'),
+      'utf8'
+    )
+    const styleSource = readFileSync(resolve(globalThis.process.cwd(), 'src/style.css'), 'utf8')
+    const overlayClassBindings = archiveViewSource.match(
+      /'archive-edit-overlay-christmas': effectiveTheme === 'christmas'/g
+    )
+
+    expect(overlayClassBindings).toHaveLength(5)
+    expect(styleSource).toContain('body .archive-edit-overlay-christmas {')
+    expect(styleSource).toContain(
+      'body .archive-edit-overlay-christmas .p-datepicker-year-selected'
+    )
+    const examTypeSelect = archiveViewSource.match(
+      /<Select\s+inputId="archive-edit-type"[\s\S]*?\/>/
+    )?.[0]
+
+    expect(examTypeSelect).toContain("'data-christmas-snow-control':")
+    expect(examTypeSelect).toContain("effectiveTheme === 'christmas' ? 'true' : undefined")
+  })
+
+  it('reuses the Christmas preview and download treatments for edit-dialog actions', () => {
+    const styleSource = readFileSync(resolve(globalThis.process.cwd(), 'src/style.css'), 'utf8')
+    const cancelRule = styleSource.match(
+      /body \.p-dialog\.archive-edit-dialog-christmas \.p-button\.archive-edit-cancel-button(?:,[^{]+)? \{([\s\S]*?)\n\}/
+    )
+    const saveRule = styleSource.match(
+      /body \.p-dialog\.archive-edit-dialog-christmas \.p-button\.archive-edit-save-button \{([\s\S]*?)\n\}/
+    )
+
+    expect(cancelRule?.[1]).toContain('background: #d7edf5;')
+    expect(cancelRule?.[1]).toContain('color: #245368;')
+    expect(saveRule?.[1]).toContain('background: linear-gradient(135deg, #3d8a64, #2d6c52);')
+    expect(saveRule?.[1]).toContain('color: #f5fff7;')
+    expect(styleSource).toContain('0 0 0.72rem rgba(255, 201, 59, 0.34)')
+  })
+
+  it('uses the Christmas download treatment for desktop and mobile secondary sidebar actions', () => {
+    const archiveViewSource = readFileSync(
+      resolve(globalThis.process.cwd(), 'src/views/Archive.vue'),
+      'utf8'
+    )
+    const sidebarActionClasses = archiveViewSource.match(
+      /class="w-full archive-sidebar-download-action"/g
+    )
+    const desktopRule = archiveViewSource.match(
+      /\.archive-christmas\s+\.upload-section\s+:deep\(\.p-button\.p-button-secondary\.p-button-outlined\.archive-sidebar-download-action\) \{([\s\S]*?)\n\}/
+    )
+    const mobileRule = archiveViewSource.match(
+      /:global\(\s*\.mobile-drawer\.mobile-drawer-christmas\s+\.mobile-upload-section\s+\.p-button\.p-button-secondary\.p-button-outlined\.archive-sidebar-download-action\s*\) \{([\s\S]*?)\n\}/
+    )
+
+    expect(sidebarActionClasses).toHaveLength(4)
+    expect(desktopRule?.[1]).toContain('background: linear-gradient(135deg, #3d8a64, #2d6c52);')
+    expect(mobileRule?.[1]).toContain(
+      'background: linear-gradient(135deg, #3d8a64, #2d6c52) !important;'
+    )
+    expect(archiveViewSource).toContain('0 0 0.34rem rgba(255, 218, 94, 0.58)')
+    expect(archiveViewSource).toContain('0 0 0.72rem rgba(255, 201, 59, 0.34)')
+  })
+
+  it('uses the standard Christmas glow for desktop and mobile upload actions', () => {
+    const archiveViewSource = readFileSync(
+      resolve(globalThis.process.cwd(), 'src/views/Archive.vue'),
+      'utf8'
+    )
+    const desktopHoverRule = archiveViewSource.match(
+      /\.archive-christmas\s+\.upload-section\s+:deep\(\.p-button\.p-button-success:hover\),[\s\S]*?\{([\s\S]*?)\n\}/
+    )
+    const mobileHoverRule = archiveViewSource.match(
+      /:global\(\.mobile-drawer\.mobile-drawer-christmas \.mobile-upload-section \.p-button-success:hover\),[\s\S]*?\{([\s\S]*?)\n\}/
+    )
+
+    expect(desktopHoverRule?.[1]).toContain('border-color: rgba(255, 226, 143, 0.9);')
+    expect(desktopHoverRule?.[1]).toContain('0 0 0.34rem rgba(255, 218, 94, 0.58)')
+    expect(desktopHoverRule?.[1]).toContain('0 0 0.72rem rgba(255, 201, 59, 0.34)')
+    expect(desktopHoverRule?.[1]).toContain('text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);')
+    expect(mobileHoverRule?.[1]).toContain('border-color: rgba(255, 226, 143, 0.9) !important;')
+    expect(mobileHoverRule?.[1]).toContain('0 0 0.34rem rgba(255, 218, 94, 0.58)')
+    expect(mobileHoverRule?.[1]).toContain('0 0 0.72rem rgba(255, 201, 59, 0.34) !important')
+    expect(mobileHoverRule?.[1]).toContain(
+      'text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62) !important;'
+    )
   })
 
   it('renders each archive when exam metadata matches but ids differ', async () => {

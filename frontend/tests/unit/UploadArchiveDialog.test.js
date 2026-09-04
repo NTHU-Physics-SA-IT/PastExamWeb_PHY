@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
@@ -159,6 +161,84 @@ describe('UploadArchiveDialog', () => {
     expect(wrapper.vm.formatSemester(1002)).toBe('100下學期')
 
     wrapper.unmount()
+  })
+
+  it('uses the edit-inspired Christmas shell and snowy glowing next actions in both modes', () => {
+    const componentSource = readFileSync(
+      resolve(globalThis.process.cwd(), 'src/components/UploadArchiveDialog.vue'),
+      'utf8'
+    )
+    const styleSource = readFileSync(resolve(globalThis.process.cwd(), 'src/style.css'), 'utf8')
+    const nextActionClasses = componentSource.match(/class="archive-upload-next-button"/g)
+    const backActionClasses = componentSource.match(/class="archive-upload-back-button"/g)
+    const snowOptIns = componentSource.match(
+      /:data-christmas-snow-control="christmas \? 'true' : undefined"/g
+    )
+    const stepSnowPtBindings = componentSource.match(/:pt="christmasStepPt"/g)
+    const stepSnowOptOut = componentSource.match(
+      /'data-christmas-snow': props\.christmas \? 'off' : undefined/g
+    )
+    const nextActionRule = styleSource.match(
+      /body \.p-dialog\.archive-upload-dialog-christmas \.p-button\.archive-upload-next-button \{([\s\S]*?)\n\}/
+    )
+    const nextActionHoverRule = styleSource.match(
+      /body\s+\.p-dialog\.archive-upload-dialog-christmas\s+\.p-button\.archive-upload-next-button:not\(:disabled\):hover,[\s\S]*?\{([\s\S]*?)\n\}/
+    )
+    const backActionRule = styleSource.match(
+      /body \.p-dialog\.archive-upload-dialog-christmas \.p-button\.archive-upload-back-button \{([\s\S]*?)\n\}/
+    )
+    const backActionHoverRule = styleSource.match(
+      /body\s+\.p-dialog\.archive-upload-dialog-christmas\s+\.p-button\.archive-upload-back-button:hover,[\s\S]*?\{([\s\S]*?)\n\}/
+    )
+    const uploadContentRule = styleSource.match(
+      /body \.p-dialog\.archive-upload-dialog-christmas \.p-dialog-content \{([\s\S]*?)\n\}/
+    )
+    const uploadStepperSurfaceRule = styleSource.match(
+      /body \.p-dialog\.archive-upload-dialog-christmas \.p-stepper,\nbody \.p-dialog\.archive-upload-dialog-christmas \.p-steplist,\nbody \.p-dialog\.archive-upload-dialog-christmas \.p-steppanels,\nbody \.p-dialog\.archive-upload-dialog-christmas \.p-steppanel \{([\s\S]*?)\n\}/
+    )
+    const stepSnowResetRule = styleSource.match(
+      /body \.p-dialog\.archive-upload-dialog-christmas \.p-step-header::after \{([\s\S]*?)\n\}/
+    )
+    const filePickerSnowResetRule = styleSource.match(
+      /body\s+\.p-dialog\.archive-upload-dialog-christmas\s+\.p-button\.archive-upload-file-picker-button::after \{([\s\S]*?)\n\}/
+    )
+    const fileUploadSurfaceRule = styleSource.match(
+      /body \.p-dialog\.archive-upload-dialog-christmas \.p-fileupload \{([\s\S]*?)\n\}/
+    )
+    const fileUploadContentRule = styleSource.match(
+      /body \.p-dialog\.archive-upload-dialog-christmas \.p-fileupload-header,[\s\S]*?\.p-fileupload-content \{([\s\S]*?)\n\}/
+    )
+
+    expect(componentSource).toContain("'archive-upload-dialog-christmas': christmas")
+    expect(componentSource).toContain("'archive-edit-dialog-christmas': christmas")
+    expect(componentSource).not.toContain(
+      "'archive-upload-dialog-christmas': christmas && !isWishMode"
+    )
+    expect(componentSource.match(/'archive-edit-overlay-christmas': christmas/g)).toHaveLength(5)
+    expect(nextActionClasses).toHaveLength(3)
+    expect(backActionClasses).toHaveLength(3)
+    expect(snowOptIns).toHaveLength(3)
+    expect(stepSnowPtBindings).toHaveLength(4)
+    expect(stepSnowOptOut).toHaveLength(1)
+    expect(nextActionRule?.[1]).toContain('background: linear-gradient(135deg, #3d8a64, #2d6c52);')
+    expect(nextActionHoverRule?.[1]).toContain('border-color: rgba(255, 226, 143, 0.9);')
+    expect(nextActionHoverRule?.[1]).toContain('0 0 0.34rem rgba(255, 218, 94, 0.58)')
+    expect(nextActionHoverRule?.[1]).toContain('0 0 0.72rem rgba(255, 201, 59, 0.34)')
+    expect(nextActionHoverRule?.[1]).toContain('text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);')
+    expect(backActionRule?.[1]).toContain('color: #245368;')
+    expect(backActionRule?.[1]).toContain('background: #d7edf5;')
+    expect(backActionHoverRule?.[1]).toContain('background: #e5f4f9;')
+    expect(backActionHoverRule?.[1]).toContain('0 0 0.34rem rgba(255, 218, 94, 0.58)')
+    expect(uploadContentRule?.[1]).toContain('background: #f5eedc !important;')
+    expect(uploadStepperSurfaceRule?.[1]).toContain('background: #f5eedc !important;')
+    expect(stepSnowResetRule?.[1]).toContain('display: none;')
+    expect(stepSnowResetRule?.[1]).toContain('content: none;')
+    expect(componentSource).toContain('class="archive-upload-file-picker-button"')
+    expect(componentSource).toContain(`:data-christmas-snow="christmas ? 'off' : undefined"`)
+    expect(filePickerSnowResetRule?.[1]).toContain('display: none;')
+    expect(filePickerSnowResetRule?.[1]).toContain('content: none;')
+    expect(fileUploadSurfaceRule?.[1]).toContain('background: #f5eedc !important;')
+    expect(fileUploadContentRule?.[1]).toContain('background: #f5eedc !important;')
   })
 
   it('preserves the backend category and course ordering contract', async () => {

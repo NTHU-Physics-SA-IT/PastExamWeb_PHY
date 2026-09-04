@@ -13,6 +13,7 @@ from app.api.services import (
     seo,
     settings,
     statistics,
+    theme_management,
     trash,
     users,
     wishes,
@@ -33,6 +34,7 @@ api_router.include_router(archives.router, prefix="/archives", tags=["archives"]
 api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(meme.router, tags=["meme"])
 api_router.include_router(statistics.router, tags=["statistics"])
+api_router.include_router(theme_management.router, tags=["theme-management"])
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
 api_router.include_router(seo.router, prefix="/seo", tags=["seo"])
 api_router.include_router(trash.router, prefix="/trash", tags=["trash"])

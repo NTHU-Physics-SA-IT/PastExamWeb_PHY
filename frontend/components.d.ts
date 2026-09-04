@@ -31,6 +31,7 @@ declare module 'vue' {
     DiscussionMessageCard: typeof import('./src/components/DiscussionMessageCard.vue')['default']
     Divider: typeof import('primevue/divider')['default']
     Drawer: typeof import('primevue/drawer')['default']
+    FestivalThemeManagementPanel: typeof import('./src/components/admin/FestivalThemeManagementPanel.vue')['default']
     FileUpload: typeof import('primevue/fileupload')['default']
     FloatLabel: typeof import('primevue/floatlabel')['default']
     HomepageSloganManagementPanel: typeof import('./src/components/admin/HomepageSloganManagementPanel.vue')['default']

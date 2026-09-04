@@ -549,6 +549,46 @@ For a NTHU OAuth User, provider-synchronized `name` and `email` remain provider-
   cannot be restored, and does not enter Trash. Submission, moderation,
   occurrence changes, and deletion create no durable notification.
 
+### Theme-management capabilities
+
+- Everyone, including anonymous visitors, may read the minimal active-theme
+  endpoint. Its response contains only the resolved site-theme ID. Only
+  administrators may read the complete theme-management capability endpoint
+  or mutate theme state.
+- The general theme is one activatable site theme that contains the existing
+  user-selectable `light` and `dark` presentation modes. Its active state is a
+  site-wide administrator choice, while each user's local mode preference
+  remains private to that user and is neither read nor mutated by this API.
+- Festival themes start from code-owned, reviewed presentation packages. The
+  Phase 1 registry contains `christmas`, whose only presentation effect is a
+  static, non-interactive snow cap on the two homepage login buttons. It does
+  not offer its own light/dark modes. Editing or deleting an inactive package
+  persists a catalog snapshot in the existing `system_settings` table; this
+  metadata persistence never creates or executes arbitrary presentation code.
+- Exactly one site theme is resolved as active: `general` or one registered
+  festival theme. With no valid setting, `general` is the default. An
+  administrator may select an inactive theme, which atomically replaces the
+  previous active theme ID in the existing `system_settings` table. Selecting
+  the already-active theme is a successful no-op, and an unknown theme ID is
+  rejected without a write.
+- Theme activation does not change any user's `light` or `dark` preference.
+  Selecting `general` removes the selected festival presentation package while
+  retaining those preferences. While `christmas` is active, it is the effective
+  theme for anonymous visitors, authenticated users, and administrators alike;
+  toggling the private light/dark preference changes only the preference that
+  will be restored after `general` becomes active again.
+- Administrators may edit the bilingual name, bilingual description, and
+  optional display-only schedule metadata of an existing festival theme. Phase
+  1 does not include scheduled activation. An inactive festival theme may be
+  deleted. Deleting the active theme is rejected with a conflict response, so
+  an administrator must activate `general` or another theme first.
+- Reading theme state performs no write. Activation changes only the single
+  active-theme setting; edit/delete changes only the catalog setting. These
+  operations create no notification, MinIO/Redis operation, scheduler,
+  real-time broadcast, audit event, or statistics effect. A failed write is
+  rolled back. Clients observe a change on their next active-theme fetch; Phase
+  1 provides no push-based refresh guarantee.
+
 ### Intended invariant
 
 - Full public-Archive data is public only to an authenticated user who may use
@@ -1011,6 +1051,10 @@ empty custom fields remains valid.
 | Submit homepage slogan candidate | Denied | Allowed | Allowed | Allowed | Denied |
 | Review/list/permanently delete homepage slogan candidates | Denied | Denied | Denied unless also admin | Allowed | Denied |
 | View selected homepage slogan | Allowed | Allowed | Allowed | Allowed | Allowed |
+| View resolved active site theme | Allowed | Allowed | Allowed | Allowed | Allowed |
+| View theme-management capabilities | Denied | Denied | Denied unless also admin | Allowed | Denied |
+| Activate `general` or one registered festival theme | Denied | Denied | Denied unless also admin | Allowed | Denied |
+| Edit or delete an inactive festival theme | Denied | Denied | Denied unless also admin | Allowed | Denied |
 | Create archive/comment report | Denied | Allowed | Allowed | Allowed | Allowed when explicitly designed |
 | Submit archive | Denied | Allowed | Allowed | Allowed | Explicit system imports only |
 | Review submission/report | Denied | Denied | Denied unless also admin | Allowed | Explicit automation only |

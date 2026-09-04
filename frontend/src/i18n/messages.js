@@ -542,6 +542,62 @@ const en = {
   投稿失敗: 'Submission failed',
   '請確認內容後再試一次。': 'Check the content and try again.',
   '首頁 slogan 管理': 'Homepage Slogan',
+  節日主題管理: 'Festival Themes',
+  'UI 預覽模式': 'UI Preview Mode',
+  '預覽模式不會儲存變更。': 'Preview mode does not save changes.',
+  '管理網站支援的一般主題，並查看節日主題功能狀態。':
+    'Review the general themes supported by the site and the status of festival themes.',
+  '管理網站支援的主題，並查看節日主題功能狀態。':
+    'Review the themes supported by the site and the status of festival themes.',
+  主題一覽: 'Theme Overview',
+  經典模式: 'Classic Mode',
+  '主題資料同時標記多個已啟用主題，請檢查資料契約。':
+    'Theme data marks multiple themes as enabled. Review the data contract.',
+  主題名稱: 'Theme Name',
+  主題簡介: 'Description',
+  深淺模式: 'Color Modes',
+  系統內建: 'Built in',
+  '最初設計的模式，有深淺色可供使用者切換。':
+    'The original theme design, with light and dark modes available for users to switch between.',
+  一般主題: 'General Themes',
+  節日主題: 'Festival Themes',
+  '一般主題由使用者自行切換，管理員不會變更全站顯示模式。':
+    'Each user chooses their own general theme. Administrators do not change the site-wide display mode.',
+  '管理員可在一般主題與節日主題中選擇一個全站啟用。':
+    'Administrators can choose one general or festival theme to enable site-wide.',
+  '一般主題包含淺色與深色模式，使用者仍可自行切換。':
+    'The general theme includes light and dark modes that each user can still switch between.',
+  一般主題支援模式: 'General theme supported modes',
+  淺色模式: 'Light Mode',
+  '清晰明亮的網站外觀。': 'A clear, bright site appearance.',
+  '適合低亮度環境的網站外觀。': 'A site appearance suited to low-light environments.',
+  由使用者自行選擇: 'Chosen by each user',
+  '節日主題會疊加在使用者選擇的一般主題之上。':
+    'Festival themes overlay the general theme selected by each user.',
+  目前尚未建立節日主題: 'No festival themes yet',
+  已啟用: 'Enabled',
+  '啟用主題失敗。': 'The theme could not be enabled.',
+  編輯節日主題: 'Edit Festival Theme',
+  支援淺色與深色模式: 'Supports light and dark modes',
+  啟用時間: 'Activation Time',
+  停用時間: 'Deactivation Time',
+  '停用時間必須晚於啟用時間。': 'Deactivation time must be later than activation time.',
+  '儲存節日主題失敗。': 'The festival theme could not be saved.',
+  '刪除節日主題失敗。': 'The festival theme could not be deleted.',
+  請先停用此主題後再刪除: 'Deactivate this theme before deleting it.',
+  '節日主題尚未具備可儲存編輯內容的後端契約。':
+    'Festival themes do not yet have a backend contract for saving edits.',
+  '節日主題尚未具備可執行刪除的後端契約。':
+    'Festival themes do not yet have a backend contract for deletion.',
+  '已啟用主題的刪除政策尚未定義。': 'The deletion policy for an active theme is not yet defined.',
+  刪除節日主題: 'Delete Festival Theme',
+  '確定要刪除「{name}」嗎？': 'Are you sure you want to delete “{name}”?',
+  '刪除後將無法復原。': 'This deletion cannot be undone.',
+  '啟用節日主題失敗。': 'The festival theme could not be enabled.',
+  '未來啟用節日主題時，將疊加於使用者目前選擇的淺色或深色主題之上。':
+    'When festival themes are introduced, they will overlay the light or dark theme currently selected by each user.',
+  載入節日主題管理資料: 'Loading theme management data',
+  '載入節日主題管理資料失敗。': 'Theme management data could not be loaded.',
   '首頁 slogan 永久刪除按鈕': 'Delete',
   '目前啟用的首頁 slogan': 'Enabled Homepage Slogans',
   '目前共 {count} 則啟用': '{count} enabled',

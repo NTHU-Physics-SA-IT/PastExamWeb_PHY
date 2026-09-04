@@ -9,6 +9,7 @@ import { discussionService } from '@/api/services/discussion.js'
 import { userService } from '@/api/services/users.js'
 import * as adminService from '@/api/services/admin.js'
 import { homepageSloganService } from '@/api/services/homepageSlogans.js'
+import { themeManagementService } from '@/api/services/themeManagement.js'
 
 const getMock = vi.hoisted(() => vi.fn())
 const postMock = vi.hoisted(() => vi.fn())
@@ -272,6 +273,30 @@ describe('API service wrappers', () => {
     })
     homepageSloganService.removeAdmin(4)
     expect(deleteMock).toHaveBeenCalledWith('/homepage-slogans/admin/4')
+  })
+
+  it('theme management service separates public state from admin mutations', () => {
+    themeManagementService.getActive()
+    expect(getMock).toHaveBeenCalledWith('/theme-management/active-theme')
+    themeManagementService.getAdmin()
+    expect(getMock).toHaveBeenCalledWith('/admin/theme-management')
+    themeManagementService.activateAdmin('mid_autumn')
+    expect(patchMock).toHaveBeenCalledWith('/admin/theme-management/active-theme', {
+      theme_id: 'mid_autumn',
+    })
+    themeManagementService.updateAdmin('christmas', { description: 'Updated' })
+    expect(patchMock).toHaveBeenCalledWith('/admin/theme-management/themes/christmas', {
+      description: 'Updated',
+    })
+    themeManagementService.removeAdmin('christmas')
+    expect(deleteMock).toHaveBeenCalledWith('/admin/theme-management/themes/christmas')
+    expect(Object.keys(themeManagementService)).toEqual([
+      'getActive',
+      'getAdmin',
+      'activateAdmin',
+      'updateAdmin',
+      'removeAdmin',
+    ])
   })
 
   it('auth service proxies', async () => {
