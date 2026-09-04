@@ -70,6 +70,12 @@ LeaseClock = Callable[[], datetime]
 EventClock = Callable[[], datetime]
 StorageFactory = Callable[[], ExactVersionMinioAdapter]
 
+ARCHIVE_SUBMISSION_SUPERSEDED_OBJECT_CLEANUP = (
+    "archive_submission_superseded_object_cleanup"
+)
+STORAGE_ONLY_CLEANUP_TARGET = "storage_only_cleanup_operation"
+STORAGE_ONLY_CLEANUP_ROLE = "cleanup_only"
+
 
 def _current_utc_time() -> datetime:
     return datetime.now(UTC)
@@ -554,6 +560,196 @@ async def _existing_operation(
     ).scalar_one_or_none()
 
 
+def _storage_only_cleanup_fingerprint(
+    *,
+    operation_id: int,
+    submission_id: int,
+    bucket_name: str,
+    object_key: str,
+    version_id: str,
+) -> str:
+    encoded = json.dumps(
+        {
+            "bucket_name": bucket_name,
+            "object_key": object_key,
+            "operation_id": operation_id,
+            "root_entity_id": submission_id,
+            "root_entity_type": ARCHIVE_SUBMISSION_SUPERSEDED_OBJECT_CLEANUP,
+            "version_id": version_id,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+async def enqueue_superseded_archive_submission_object_cleanup(
+    db: SQLModelAsyncSession,
+    *,
+    submission_id: int,
+    bucket_name: str,
+    object_key: str,
+    version_id: str,
+    idempotency_key: str,
+    requested_by_user_id: int | None,
+    now: datetime | None = None,
+) -> PermanentDeletionOperation:
+    """Flush one storage-only cleanup intent without committing caller state."""
+
+    if submission_id <= 0:
+        raise PermanentDeletionError("invalid_cleanup_submission_identity")
+    if not bucket_name.strip() or not object_key.strip() or not version_id.strip():
+        raise PermanentDeletionError("invalid_cleanup_storage_identity")
+    if not idempotency_key.strip() or len(idempotency_key) > 160:
+        raise PermanentDeletionError("invalid_acceptance_identity")
+
+    existing = await _existing_operation(db, idempotency_key)
+    if existing is not None:
+        if (
+            existing.root_entity_type
+            != ARCHIVE_SUBMISSION_SUPERSEDED_OBJECT_CLEANUP
+            or existing.root_entity_id != submission_id
+        ):
+            raise PermanentDeletionError("idempotency_identity_conflict")
+        objects = await _all(
+            db,
+            select(PermanentDeletionObject).where(
+                PermanentDeletionObject.operation_id == existing.id
+            ),
+        )
+        if len(objects) != 1 or (
+            objects[0].bucket_name,
+            objects[0].object_key,
+            objects[0].version_id,
+        ) != (bucket_name, object_key, version_id):
+            raise PermanentDeletionError("idempotency_identity_conflict")
+        return existing
+
+    timestamp = now or datetime.now(UTC)
+    operation = PermanentDeletionOperation(
+        root_entity_type=ARCHIVE_SUBMISSION_SUPERSEDED_OBJECT_CLEANUP,
+        root_entity_id=submission_id,
+        requested_by_user_id=requested_by_user_id,
+        idempotency_key=idempotency_key,
+        status=PermanentDeletionStatus.ACCEPTED,
+        accepted_at=timestamp,
+        automatic_attempt_count=0,
+        retry_deadline_at=timestamp + timedelta(hours=24),
+        next_attempt_at=timestamp,
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
+    db.add(operation)
+    await db.flush()
+    operation_id = int(operation.id)
+    fingerprint = _storage_only_cleanup_fingerprint(
+        operation_id=operation_id,
+        submission_id=submission_id,
+        bucket_name=bucket_name,
+        object_key=object_key,
+        version_id=version_id,
+    )
+    target = PermanentDeletionTarget(
+        operation_id=operation_id,
+        entity_type=STORAGE_ONLY_CLEANUP_TARGET,
+        entity_id=operation_id,
+        target_role=STORAGE_ONLY_CLEANUP_ROLE,
+        membership_fingerprint=fingerprint,
+        membership_captured_at=timestamp,
+        created_at=timestamp,
+    )
+    db.add(target)
+    await db.flush()
+    db.add(
+        PermanentDeletionObject(
+            operation_id=operation_id,
+            target_id=int(target.id),
+            bucket_name=bucket_name,
+            object_key=object_key,
+            version_id=version_id,
+            state=PermanentDeletionObjectState.CAPTURED,
+            captured_at=timestamp,
+            created_at=timestamp,
+        )
+    )
+    await db.flush()
+    return operation
+
+
+async def _validate_storage_only_cleanup(
+    db: SQLModelAsyncSession,
+    operation: PermanentDeletionOperation,
+) -> None:
+    targets = await _stored_targets(db, int(operation.id))
+    objects = await _all(
+        db,
+        select(PermanentDeletionObject).where(
+            PermanentDeletionObject.operation_id == operation.id
+        ),
+    )
+    if len(targets) != 1 or len(objects) != 1:
+        raise PermanentDeletionError("storage_cleanup_membership_drift")
+    target = targets[0]
+    object_row = objects[0]
+    expected_fingerprint = _storage_only_cleanup_fingerprint(
+        operation_id=int(operation.id),
+        submission_id=operation.root_entity_id,
+        bucket_name=object_row.bucket_name,
+        object_key=object_row.object_key,
+        version_id=object_row.version_id,
+    )
+    if (
+        target.entity_type != STORAGE_ONLY_CLEANUP_TARGET
+        or target.entity_id != operation.id
+        or target.target_role != STORAGE_ONLY_CLEANUP_ROLE
+        or target.membership_fingerprint != expected_fingerprint
+        or object_row.target_id != target.id
+    ):
+        raise PermanentDeletionError("storage_cleanup_membership_drift")
+    try:
+        archive_refs = await _all(
+            db,
+            select(Archive.id).where(Archive.object_name == object_row.object_key),
+        )
+        submission_refs = await _all(
+            db,
+            select(ArchiveSubmission.id).where(
+                ArchiveSubmission.object_name == object_row.object_key
+            ),
+        )
+    except Exception as exc:
+        raise PermanentDeletionError(
+            "storage_reference_authority_unavailable"
+        ) from exc
+    if archive_refs or submission_refs:
+        raise PermanentDeletionError("storage_cleanup_object_still_referenced")
+
+
+async def _validate_operation_membership(
+    db: SQLModelAsyncSession,
+    operation: PermanentDeletionOperation,
+) -> DeletionPlan | None:
+    if operation.root_entity_type == ARCHIVE_SUBMISSION_SUPERSEDED_OBJECT_CLEANUP:
+        await _validate_storage_only_cleanup(db, operation)
+        return None
+    return await _validate_membership(db, operation)
+
+
+def _validate_storage_adapter_identity(
+    storage: ExactVersionMinioAdapter,
+    object_row: PermanentDeletionObject,
+) -> None:
+    if storage.bucket_name != object_row.bucket_name:
+        raise StorageSafetyError("storage_bucket_identity_mismatch")
+
+
+def _is_storage_only_cleanup(operation: PermanentDeletionOperation) -> bool:
+    return (
+        operation.root_entity_type
+        == ARCHIVE_SUBMISSION_SUPERSEDED_OBJECT_CLEANUP
+    )
+
+
 async def accept_permanent_deletion(
     db: SQLModelAsyncSession,
     *,
@@ -990,7 +1186,7 @@ async def process_one_permanent_deletion(
             lease_token,
             lease_clock=lease_clock,
         )
-        await _validate_membership(db, operation)
+        await _validate_operation_membership(db, operation)
         await db.commit()
     except PermanentDeletionError as exc:
         await db.rollback()
@@ -1069,7 +1265,9 @@ async def process_one_permanent_deletion(
                 lease_token,
                 lease_clock=lease_clock,
             )
-            await _validate_membership(db, operation)
+            await _validate_operation_membership(db, operation)
+            if _is_storage_only_cleanup(operation):
+                _validate_storage_adapter_identity(storage, object_row)
             observation = storage.inspect_exact_version(
                 object_row.object_key, object_row.version_id
             )
@@ -1174,18 +1372,42 @@ async def process_one_permanent_deletion(
         await db.commit()
 
         try:
-            await _owned_operation(
+            operation = await _owned_operation(
                 db,
                 operation_id,
                 lease_token,
                 lease_clock=lease_clock,
             )
+            if _is_storage_only_cleanup(operation):
+                await _validate_storage_only_cleanup(db, operation)
+                _validate_storage_adapter_identity(storage, current_object)
             await db.commit()
         except PermanentDeletionError as exc:
             await db.rollback()
             if exc.code == "lease_lost":
                 return await _operation_status(db, operation_id)
+            if _is_storage_only_cleanup(operation):
+                return await _manual_review(
+                    db,
+                    operation_id=operation_id,
+                    lease_token=lease_token,
+                    code=exc.code,
+                    now=clock(),
+                    object_id=object_id,
+                    lease_clock=lease_clock,
+                )
             raise
+        except StorageSafetyError as exc:
+            await db.rollback()
+            return await _manual_review(
+                db,
+                operation_id=operation_id,
+                lease_token=lease_token,
+                code=exc.code,
+                now=clock(),
+                object_id=object_id,
+                lease_clock=lease_clock,
+            )
 
         try:
             result = storage.delete_exact_version(
@@ -1275,7 +1497,7 @@ async def process_one_permanent_deletion(
             lease_token,
             lease_clock=lease_clock,
         )
-        plan = await _validate_membership(db, operation)
+        plan = await _validate_operation_membership(db, operation)
         current_objects = await _all(
             db,
             select(PermanentDeletionObject).where(
@@ -1283,7 +1505,11 @@ async def process_one_permanent_deletion(
             ),
         )
         for object_row in current_objects:
-            if storage is None or storage.inspect_exact_version(
+            if storage is None:
+                raise PermanentDeletionError("final_storage_truth_unproven")
+            if _is_storage_only_cleanup(operation):
+                _validate_storage_adapter_identity(storage, object_row)
+            if storage.inspect_exact_version(
                 object_row.object_key, object_row.version_id
             ) is not ExactVersionState.VERIFIED_ABSENT:
                 raise PermanentDeletionError("final_storage_truth_unproven")
@@ -1317,7 +1543,8 @@ async def process_one_permanent_deletion(
         )
 
     try:
-        await _finalize_plan(db, plan, now=clock())
+        if plan is not None:
+            await _finalize_plan(db, plan, now=clock())
         operation = await _owned_operation(
             db,
             operation_id,

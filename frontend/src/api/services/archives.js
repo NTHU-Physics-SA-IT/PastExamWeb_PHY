@@ -8,7 +8,7 @@ const archiveSubmissionStatuses = new Set([
   'deleted',
 ])
 
-const buildReviewDecision = (expectedStatus, note) => {
+const buildReviewDecision = (expectedStatus, expectedRevision, note) => {
   const normalizedStatus = String(expectedStatus || '')
     .trim()
     .toLowerCase()
@@ -18,6 +18,7 @@ const buildReviewDecision = (expectedStatus, note) => {
   return {
     note,
     expected_status: normalizedStatus,
+    expected_revision: expectedRevision || undefined,
   }
 }
 
@@ -103,31 +104,31 @@ export const archiveService = {
     return api.delete(`/archives/submissions/${submissionId}`)
   },
 
-  approveSubmission(submissionId, expectedStatus, note = '') {
+  approveSubmission(submissionId, expectedStatus, expectedRevision, note = '') {
     return api.post(
       `/archives/admin/submissions/${submissionId}/approve`,
-      buildReviewDecision(expectedStatus, note)
+      buildReviewDecision(expectedStatus, expectedRevision, note)
     )
   },
 
-  rejectSubmission(submissionId, expectedStatus, note = '') {
+  rejectSubmission(submissionId, expectedStatus, expectedRevision, note = '') {
     return api.post(
       `/archives/admin/submissions/${submissionId}/reject`,
-      buildReviewDecision(expectedStatus, note)
+      buildReviewDecision(expectedStatus, expectedRevision, note)
     )
   },
 
   takedownSubmission(submissionId, expectedStatus, note = '') {
     return api.post(
       `/archives/admin/submissions/${submissionId}/takedown`,
-      buildReviewDecision(expectedStatus, note)
+      buildReviewDecision(expectedStatus, undefined, note)
     )
   },
 
   republishSubmission(submissionId, expectedStatus, note = '') {
     return api.post(
       `/archives/admin/submissions/${submissionId}/republish`,
-      buildReviewDecision(expectedStatus, note)
+      buildReviewDecision(expectedStatus, undefined, note)
     )
   },
 
@@ -139,8 +140,9 @@ export const archiveService = {
     return api.delete(`/archives/admin/submissions/${submissionId}`)
   },
 
-  getSubmissionPreviewFile(submissionId) {
+  getSubmissionPreviewFile(submissionId, expectedRevision) {
     return api.get(`/archives/admin/submissions/${submissionId}/preview-file`, {
+      params: { expected_revision: expectedRevision },
       responseType: 'blob',
     })
   },

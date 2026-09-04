@@ -1506,6 +1506,9 @@ const en = {
   項目已還原: 'Item restored',
   項目還原失敗: 'Item restore failed',
   '預覽投稿 PDF 失敗:': 'Failed to preview submission PDF:',
+  投稿內容已更新: 'Submission content updated',
+  '投稿內容已更新，請重新檢視後再審核':
+    'The submission was updated. Review the latest content before deciding.',
   顯示名稱是必填欄位: 'Display name is required',
   收合使用者統計圖表: 'Collapse user statistics charts',
   展開使用者統計圖表: 'Expand user statistics charts',

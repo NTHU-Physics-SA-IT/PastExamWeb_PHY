@@ -215,6 +215,8 @@ async def test_pending_submission_includes_approved_candidate_from_same_requeste
     assert [row["id"] for row in rows] == [candidate.id]
     assert rows[0]["status"] == SubmissionStatus.APPROVED.value
     assert rows[0]["can_takedown"] is True
+    assert rows[0]["review_revision"].startswith("asr-v1:")
+    assert "object_name" not in rows[0]
     assert current.id not in {row["id"] for row in rows}
 
 

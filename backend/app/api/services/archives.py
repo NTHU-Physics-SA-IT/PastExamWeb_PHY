@@ -67,6 +67,10 @@ from app.services.archive_submission_links import (
     is_archive_submission_link_unique_violation,
     validate_archive_source_membership,
 )
+from app.services.archive_submission_review_revision import (
+    compute_archive_submission_review_revision,
+    review_revision_matches,
+)
 from app.services.archive_submission_status import (
     ArchiveSubmissionExpectedStateClassification,
     ArchiveSubmissionReviewAction,
@@ -220,6 +224,11 @@ async def _serialize_archive_submission_admin(
     payload["available_actions"] = available_archive_submission_admin_actions(
         actual_status
     )
+    payload["review_revision"] = (
+        raw_payload.get("review_revision")
+        if isinstance(raw_payload, dict) and raw_payload.get("review_revision")
+        else compute_archive_submission_review_revision(raw_payload)
+    )
     return ArchiveSubmissionAdminRead.model_validate(payload)
 
 
@@ -356,6 +365,33 @@ async def _prepare_direct_archive_submission_review(
                 "reload_required": True,
             },
         )
+
+    if action in {
+        ArchiveSubmissionReviewAction.APPROVE,
+        ArchiveSubmissionReviewAction.REJECT,
+    }:
+        expected_revision = decision.expected_revision if decision else None
+        if not expected_revision:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+                detail={
+                    "code": "archive_submission_revision_precondition_required",
+                    "message": "請重新載入投稿內容後再執行審核。",
+                    "reload_required": True,
+                },
+            )
+        current_revision = compute_archive_submission_review_revision(submission)
+        if not review_revision_matches(expected_revision, current_revision):
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "archive_submission_stale_revision",
+                    "message": "投稿內容已更新，請重新檢視後再審核。",
+                    "reload_required": True,
+                },
+            )
 
     policy = classify_archive_submission_review_transition(actual_status, action)
     if policy.classification == ArchiveSubmissionTransitionClassification.ILLEGAL:
@@ -1333,6 +1369,7 @@ async def list_archive_submissions_for_admin(
                 LOWER(CAST(archive_submissions.archive_type AS TEXT)) AS archive_type,
                 archive_submissions.professor,
                 archive_submissions.has_answers,
+                archive_submissions.object_name,
                 archive_submissions.requested_course_name,
                 archive_submissions.requested_course_name_en,
                 archive_submissions.requested_category_key,
@@ -1343,6 +1380,8 @@ async def list_archive_submissions_for_admin(
                 archive_submissions.requested_category_icon,
                 LOWER(CAST(archive_submissions.status AS TEXT)) AS status,
                 archive_submissions.requester_id,
+                archive_submissions.owner_id,
+                archive_submissions.source_wish_id,
                 archive_submissions.reviewer_id,
                 reviewers.name AS reviewer_name,
                 reviewers.email AS reviewer_email,
@@ -1406,6 +1445,9 @@ async def list_archive_submissions_for_admin(
             continue
 
         row_dict["status"] = normalized_status
+        row_dict["review_revision"] = compute_archive_submission_review_revision(
+            row_dict
+        )
         if row_dict.get("subject"):
             row_dict["subject"] = format_course_display_name(row_dict["subject"])
         if row_dict.get("requested_course_name"):
@@ -1644,6 +1686,9 @@ async def list_archive_submission_comparisons(
         payload["requester_name"] = requester_name
         payload["requester_email"] = requester_email
         payload["status"] = normalized_status
+        payload["review_revision"] = compute_archive_submission_review_revision(
+            comparison
+        )
         payload["can_takedown"] = (
             ArchiveSubmissionAdminAction.TAKEDOWN
             in available_archive_submission_admin_actions(normalized_status)
@@ -1662,6 +1707,7 @@ async def list_archive_submission_comparisons(
 @router.get("/admin/submissions/{submission_id}/preview-file")
 async def get_archive_submission_preview_file(
     submission_id: int,
+    expected_revision: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_session),
 ):
@@ -1670,16 +1716,46 @@ async def get_archive_submission_preview_file(
             status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required"
         )
 
-    submission = await db.get(ArchiveSubmission, submission_id)
+    locked = await acquire_stable_submission_lifecycle_locks(
+        db,
+        submission_id=submission_id,
+        operation="submission_preview",
+    )
+    submission = locked.submission(submission_id) if locked is not None else None
     if not submission:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found"
         )
 
+    if not expected_revision:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail={
+                "code": "archive_submission_revision_precondition_required",
+                "message": "請重新載入投稿內容後再預覽。",
+                "reload_required": True,
+            },
+        )
+    current_revision = compute_archive_submission_review_revision(submission)
+    if not review_revision_matches(expected_revision, current_revision):
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "archive_submission_stale_revision",
+                "message": "投稿內容已更新，請重新檢視後再審核。",
+                "reload_required": True,
+            },
+        )
+    object_name = submission.object_name
+    filename = submission.name
+    await db.rollback()
+
     try:
         response = get_minio_client().get_object(
             settings.MINIO_BUCKET_NAME,
-            submission.object_name,
+            object_name,
         )
         data = response.read()
         response.close()
@@ -1707,7 +1783,7 @@ async def get_archive_submission_preview_file(
         iter([data]),
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f'inline; filename="{submission.name}.pdf"',
+            "Content-Disposition": f'inline; filename="{filename}.pdf"',
             "Cache-Control": "no-store",
         },
     )

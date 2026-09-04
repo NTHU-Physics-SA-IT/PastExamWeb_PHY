@@ -131,17 +131,19 @@ describe('API service wrappers', () => {
     })
   })
 
-  it('archive review requests include the current submission status', () => {
-    archiveService.approveSubmission(101, 'pending', 'approve note')
+  it('archive review requests include status and backend revision preconditions', () => {
+    archiveService.approveSubmission(101, 'pending', 'asr-v1:approve', 'approve note')
     expect(postMock).toHaveBeenLastCalledWith('/archives/admin/submissions/101/approve', {
       note: 'approve note',
       expected_status: 'pending',
+      expected_revision: 'asr-v1:approve',
     })
 
-    archiveService.rejectSubmission(102, 'approved', 'reject note')
+    archiveService.rejectSubmission(102, 'approved', 'asr-v1:reject', 'reject note')
     expect(postMock).toHaveBeenLastCalledWith('/archives/admin/submissions/102/reject', {
       note: 'reject note',
       expected_status: 'approved',
+      expected_revision: 'asr-v1:reject',
     })
 
     archiveService.takedownSubmission(103, 'pending', 'takedown note')
@@ -154,6 +156,14 @@ describe('API service wrappers', () => {
     expect(postMock).toHaveBeenLastCalledWith('/archives/admin/submissions/104/republish', {
       note: 'republish note',
       expected_status: 'takedown',
+    })
+  })
+
+  it('archive submission preview sends the backend revision precondition', () => {
+    archiveService.getSubmissionPreviewFile(105, 'asr-v1:preview')
+    expect(getMock).toHaveBeenLastCalledWith('/archives/admin/submissions/105/preview-file', {
+      params: { expected_revision: 'asr-v1:preview' },
+      responseType: 'blob',
     })
   })
 

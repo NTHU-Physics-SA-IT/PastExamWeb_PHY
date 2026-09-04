@@ -85,10 +85,24 @@ committed but its response was lost, retrying `approve(expected=pending)` after
 the row became `approved` is stale, not a same-target no-op. The caller reloads
 the resource; bounded Stage 5A does not add an idempotency-result ledger.
 
-The precondition is intentionally status-only. It prevents competing direct
-review requests based on one observed status, but it does not detect an ABA
-cycle such as `approved → rejected → approved`. Stage 5A does not add a
-version/revision column, ETag framework, or migration for generation tracking.
+Approve and reject additionally require the opaque `review_revision` projected
+by the administrator submission response. The backend computes this revision
+deterministically from the authoritative submission content and approval-target
+identity; it excludes lifecycle status, reviewer annotations, timestamps, and
+presentation-only fields. After acquiring the canonical lifecycle locks, the
+route first enforces `expected_status`, then recomputes and compares the current
+revision. A matching status with a mismatched revision returns
+`409 archive_submission_stale_revision` before Archive, submission, or
+notification mutation. A missing revision returns
+`428 archive_submission_revision_precondition_required`.
+
+The revision is a content precondition, not an authorization token and not
+proof that an administrator read every PDF page. It only prevents a decision
+made from an older metadata/PDF context from applying to newer authoritative
+content. Because it is content-derived rather than a generation counter, an
+exact metadata `A → B → A` cycle returns to the same revision; object keys
+are server-owned and never reused for PDF replacement. No revision column,
+ETag framework, review-session ledger, or migration is added.
 
 ### Admin review capabilities
 
@@ -234,6 +248,9 @@ The direct routes return stable error-detail codes:
 
 - missing/null: `428 archive_submission_precondition_required`;
 - expected-state mismatch: `409 archive_submission_stale_state`; and
+- missing review revision for approve/reject:
+  `428 archive_submission_revision_precondition_required`;
+- matching-state content mismatch: `409 archive_submission_stale_revision`;
 - a matching-state illegal edge: `409 archive_submission_illegal_transition`.
 
 Successful direct actions retain the existing flat submission fields. They add

@@ -393,6 +393,18 @@ The orphan audit/cleanup also uses a separately supplied operator MinIO
 credential; its bucket-wide listing authority is not granted to normal backend
 request runtime or the permanent-deletion reconciler.
 
+For a successful future pending-submission PDF replacement, the old pointer
+must not become unreachable without durable cleanup authority. The caller owns
+one PostgreSQL transaction containing both `ArchiveSubmission.object_name`
+replacement and an internal storage-only exact-version cleanup operation for
+the superseded object. The enqueue primitive flushes without committing or
+deleting storage. After commit, the existing bounded processor may advance the
+storage-only operation; retryable, unknown, or manual-review truth remains in
+PostgreSQL. Storage-only completion has no submission lifecycle, Trash,
+restore, notification, or live-row deletion effect. This repository change
+does not activate the production reconciler; that remains a separately
+authorized operations decision.
+
 ## Bulk permanent delete
 
 ### Intended invariant

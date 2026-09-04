@@ -2716,6 +2716,7 @@ class CourseCategoryRead(BaseModel):
 class SubmissionDecision(BaseModel):
     note: str | None = None
     expected_status: SubmissionStatus | None = None
+    expected_revision: str | None = None
 
 
 class CourseSubmissionRead(BaseModel):
@@ -2794,6 +2795,7 @@ class ArchiveSubmissionRead(BaseModel):
 class ArchiveSubmissionAdminRead(ArchiveSubmissionRead):
     current_archive: ArchiveSubmissionCurrentArchiveRead | None = None
     available_actions: list[ArchiveSubmissionAdminAction]
+    review_revision: str
 
 
 class ArchiveSubmissionActionRead(ArchiveSubmissionAdminRead):
@@ -2802,6 +2804,7 @@ class ArchiveSubmissionActionRead(ArchiveSubmissionAdminRead):
 
 class ArchiveSubmissionComparisonRead(ArchiveSubmissionRead):
     can_takedown: bool = False
+    review_revision: str
 
 
 class CourseSubmissionUpdate(BaseModel):
