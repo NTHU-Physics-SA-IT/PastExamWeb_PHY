@@ -35,48 +35,33 @@ const viewports = [
   { label: 'desktop', width: 1440, height: 900 },
 ]
 
-const waitForStableDocument = async (page: Page) => {
-  let timeOrigin = await page.evaluate(() => performance.timeOrigin)
-  let stableSince = Date.now()
-
-  await expect
-    .poll(
-      async () => {
-        try {
-          const currentTimeOrigin = await page.evaluate(() => performance.timeOrigin)
-          if (currentTimeOrigin !== timeOrigin) {
-            timeOrigin = currentTimeOrigin
-            stableSince = Date.now()
-          }
-          return Date.now() - stableSince
-        } catch {
-          stableSince = Date.now()
-          return 0
-        }
-      },
-      { timeout: 5_000, intervals: [250] }
-    )
-    .toBeGreaterThanOrEqual(750)
-}
-
 const openFestivalThemePanel = async (page: Page) => {
-  const tab = page.getByRole('tab', { name: '節日主題管理', exact: true })
+  await expect(page).toHaveURL(/\/admin$/)
+
+  const adminRoot = page.locator('.admin-container')
+  await expect(adminRoot).toBeVisible()
+
+  const announcementTab = adminRoot.locator('.admin-primary-tab-list').getByRole('tab', {
+    name: '公告管理',
+    exact: true,
+  })
+  await expect(announcementTab).toBeVisible()
+  await announcementTab.click()
+  await expect(announcementTab).toHaveAttribute('aria-selected', 'true')
+
+  const announcementManagementTabs = adminRoot.locator('.announcement-management-tabs')
+  await expect(announcementManagementTabs).toBeVisible()
+
+  const festivalTab = announcementManagementTabs.getByRole('tab', {
+    name: '節日主題管理',
+    exact: true,
+  })
   const gallery = page.getByTestId('theme-overview-gallery')
 
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      await waitForStableDocument(page)
-      await expect(tab).toBeVisible({ timeout: 5_000 })
-      await tab.dispatchEvent('click')
-      await expect(gallery).toBeVisible({ timeout: 5_000 })
-      await waitForStableDocument(page)
-      await expect(gallery).toBeVisible({ timeout: 5_000 })
-      return
-    } catch (error) {
-      if (attempt === 3) throw error
-      await page.goto('/admin', { waitUntil: 'networkidle' })
-    }
-  }
+  await expect(festivalTab).toBeVisible()
+  await festivalTab.click()
+  await expect(festivalTab).toHaveAttribute('aria-selected', 'true')
+  await expect(gallery).toBeVisible()
 }
 
 test.describe('Admin › Festival Theme card gallery responsive contract', () => {
@@ -91,7 +76,6 @@ test.describe('Admin › Festival Theme card gallery responsive contract', () =>
     await page.addInitScript((value: string) => {
       window.sessionStorage.setItem('auth-token', value)
       window.localStorage.setItem('auth-token', value)
-      window.localStorage.setItem('admin-current-tab', '2')
     }, token)
 
     await page.route('**/api/auth/heartbeat', (route) => route.fulfill(json({})))
@@ -111,13 +95,15 @@ test.describe('Admin › Festival Theme card gallery responsive contract', () =>
         })
       )
     )
+    await page.route('**/api/wishes/admin/reports**', (route) =>
+      route.fulfill(json({ items: [], total: 0 }))
+    )
     await mockAdminCourseEndpoints(page)
     await mockAdminNotificationEndpoints(page, [])
   })
 
   for (const viewport of viewports) {
     test(`${viewport.label} keeps every theme card and action readable`, async ({ page }) => {
-      test.setTimeout(60_000)
       await page.setViewportSize({ width: viewport.width, height: viewport.height })
       await page.emulateMedia({ reducedMotion: 'reduce' })
       await page.goto('/admin', { waitUntil: 'networkidle' })
