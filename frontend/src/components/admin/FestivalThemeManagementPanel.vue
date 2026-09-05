@@ -74,6 +74,8 @@
             :data-theme-kind="row.kind"
             :aria-label="row.name"
             :aria-current="row.isActive ? 'true' : undefined"
+            :aria-describedby="`theme-card-details-${row.id}`"
+            tabindex="0"
           >
             <div
               class="theme-gallery-card__visual"
@@ -87,28 +89,32 @@
             </div>
 
             <footer class="theme-gallery-card__footer">
-              <div class="theme-gallery-card__summary">
-                <header class="theme-gallery-card__header">
-                  <div class="theme-gallery-card__identity">
-                    <i
-                      :class="row.kind === 'classic' ? 'pi pi-palette' : 'pi pi-sparkles'"
-                      aria-hidden="true"
-                    />
-                    <strong class="theme-gallery-card__title">{{ row.name }}</strong>
-                  </div>
-                  <Tag
-                    :severity="row.isActive ? 'success' : 'secondary'"
-                    :data-testid="
-                      row.isActive
-                        ? row.kind === 'classic'
-                          ? 'classic-theme-active-status'
-                          : 'festival-theme-active-status'
-                        : undefined
-                    "
-                    >{{ row.isActive ? $t('已啟用') : $t('未啟用') }}</Tag
-                  >
-                </header>
+              <header class="theme-gallery-card__header">
+                <div class="theme-gallery-card__identity">
+                  <i
+                    :class="row.kind === 'classic' ? 'pi pi-palette' : 'pi pi-sparkles'"
+                    aria-hidden="true"
+                  />
+                  <strong class="theme-gallery-card__title">{{ row.name }}</strong>
+                </div>
+                <Tag
+                  :severity="row.isActive ? 'success' : 'secondary'"
+                  :data-testid="
+                    row.isActive
+                      ? row.kind === 'classic'
+                        ? 'classic-theme-active-status'
+                        : 'festival-theme-active-status'
+                      : undefined
+                  "
+                  >{{ row.isActive ? $t('已啟用') : $t('未啟用') }}</Tag
+                >
+              </header>
 
+              <div
+                :id="`theme-card-details-${row.id}`"
+                class="theme-gallery-card__details"
+                data-testid="theme-card-details"
+              >
                 <p class="theme-gallery-card__description" :title="row.description">
                   {{ row.description }}
                 </p>
@@ -127,36 +133,36 @@
                     }}</Tag>
                   </span>
                 </div>
-              </div>
 
-              <div class="theme-row-actions">
-                <Button
-                  v-if="!row.isActive"
-                  class="theme-download-action"
-                  :label="$t('啟用')"
-                  icon="pi pi-power-off"
-                  severity="success"
-                  size="small"
-                  :disabled="Boolean(activatingThemeId)"
-                  :loading="activatingThemeId === row.id"
-                  :data-testid="
-                    row.kind === 'classic'
-                      ? 'classic-theme-activation'
-                      : 'festival-theme-activation'
-                  "
-                  @click="activateTheme(row.id)"
-                />
-                <template v-if="row.kind === 'festival'">
+                <div class="theme-row-actions">
                   <Button
+                    v-if="!row.isActive"
                     class="theme-download-action"
-                    :label="$t('編輯')"
-                    icon="pi pi-pencil"
+                    :label="$t('啟用')"
+                    icon="pi pi-power-off"
                     severity="success"
                     size="small"
-                    data-testid="festival-theme-edit"
-                    @click="openEdit(row.theme)"
+                    :disabled="Boolean(activatingThemeId)"
+                    :loading="activatingThemeId === row.id"
+                    :data-testid="
+                      row.kind === 'classic'
+                        ? 'classic-theme-activation'
+                        : 'festival-theme-activation'
+                    "
+                    @click="activateTheme(row.id)"
                   />
-                </template>
+                  <template v-if="row.kind === 'festival'">
+                    <Button
+                      class="theme-download-action"
+                      :label="$t('編輯')"
+                      icon="pi pi-pencil"
+                      severity="success"
+                      size="small"
+                      data-testid="festival-theme-edit"
+                      @click="openEdit(row.theme)"
+                    />
+                  </template>
+                </div>
               </div>
             </footer>
           </article>
@@ -505,6 +511,7 @@ onMounted(loadCapabilities)
   background: var(--theme-card-surface);
   box-shadow: 0 0.2rem 0.6rem rgba(15, 23, 42, 0.07);
   transition:
+    flex-grow 220ms ease,
     transform 160ms ease,
     border-color 160ms ease,
     box-shadow 160ms ease,
@@ -551,6 +558,10 @@ onMounted(loadCapabilities)
     0 0 0 0.18rem color-mix(in srgb, var(--theme-card-accent) 28%, transparent),
     var(--festival-card-shadow);
 }
+.theme-gallery-card:focus-visible {
+  outline: 0.18rem solid color-mix(in srgb, var(--theme-card-accent) 72%, transparent);
+  outline-offset: 0.18rem;
+}
 .theme-gallery-card__visual {
   display: grid;
   min-width: 0;
@@ -566,15 +577,13 @@ onMounted(loadCapabilities)
 }
 .theme-gallery-card__footer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 0.65rem 1rem;
+  gap: 0;
   padding: 0.8rem 0.9rem 0.85rem;
   background: var(--theme-card-layer);
 }
-.theme-gallery-card__summary {
+.theme-gallery-card__details {
   display: grid;
-  gap: 0.32rem;
+  gap: 0.55rem;
   min-width: 0;
 }
 .theme-gallery-card__header,
@@ -587,6 +596,7 @@ onMounted(loadCapabilities)
 }
 .theme-gallery-card__header {
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 0.65rem;
 }
 .theme-gallery-card__header :deep(.p-tag) {
@@ -667,20 +677,68 @@ onMounted(loadCapabilities)
   gap: 0.75rem;
   padding-top: 0.75rem;
 }
-@media (hover: hover) and (pointer: fine) {
-  .theme-gallery-card:hover {
-    transform: translateY(-0.18rem);
+/* Interaction model adapted from Uiverse.io by arshshaikh06: Cards/arshshaikh06_hard-cobra-69.html */
+@media (min-width: 768px) and (hover: hover) and (pointer: fine) {
+  .theme-gallery {
+    display: flex;
+    align-items: stretch;
+    width: min(100%, 58rem);
+    height: clamp(18rem, 32vw, 21rem);
+    padding: 0.5rem;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    border-radius: 1.1rem;
+    background: color-mix(in srgb, var(--bg-secondary) 68%, transparent);
+    box-shadow: 0 0.3rem 0.9rem rgba(15, 23, 42, 0.08);
+  }
+  .theme-gallery-card {
+    flex: 1 1 0;
+    grid-template-rows: minmax(0, 1fr) 4.25rem;
+    aspect-ratio: auto;
+    min-height: 0;
+  }
+  .theme-gallery-card:hover,
+  .theme-gallery-card:focus,
+  .theme-gallery-card:focus-within {
+    flex-grow: 1.85;
     border-color: color-mix(in srgb, var(--theme-card-accent) 44%, var(--theme-card-border));
     box-shadow: var(--festival-card-shadow);
+  }
+  .theme-gallery-card__details {
+    position: absolute;
+    z-index: 1;
+    right: 0.9rem;
+    bottom: 4.8rem;
+    left: 0.9rem;
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(0.35rem);
+    transition:
+      max-height 220ms ease,
+      margin-top 220ms ease,
+      opacity 150ms ease,
+      transform 180ms ease;
+  }
+  .theme-gallery-card:hover .theme-gallery-card__details,
+  .theme-gallery-card:focus .theme-gallery-card__details,
+  .theme-gallery-card:focus-within .theme-gallery-card__details {
+    max-height: 12rem;
+    margin-top: 0.55rem;
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+  .theme-gallery-card__footer {
+    min-height: 4.25rem;
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .theme-gallery-card,
-  .theme-gallery-card::before {
+  .theme-gallery-card::before,
+  .theme-gallery-card__details {
     transition: none;
-  }
-  .theme-gallery-card:hover {
-    transform: none;
   }
 }
 @media (max-width: 767.98px) {
@@ -701,7 +759,6 @@ onMounted(loadCapabilities)
     min-height: 9rem;
   }
   .theme-gallery-card__footer {
-    grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
   }
   .theme-row-actions :deep(.p-button) {

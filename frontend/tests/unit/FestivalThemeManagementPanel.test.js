@@ -155,19 +155,36 @@ describe('FestivalThemeManagementPanel', () => {
     const articleStartTag = source.match(/<article[\s\S]*?>/)?.[0]
 
     expect(source).toContain(':aria-current="row.isActive ? \'true\' : undefined"')
+    expect(source).toContain(':aria-describedby="`theme-card-details-${row.id}`"')
+    expect(source).toContain('tabindex="0"')
     expect(source).toMatch(/<article[\s\S]*?class="theme-gallery-card"[\s\S]*?<\/article>/)
     expect(articleStartTag).not.toContain('@click')
     expect(source).toContain('.theme-gallery-card:focus-within')
-    expect(source).toContain('@media (hover: hover) and (pointer: fine)')
+    expect(source).toContain('@media (min-width: 768px) and (hover: hover) and (pointer: fine)')
     expect(source).toContain('@media (prefers-reduced-motion: reduce)')
     expect(source).not.toContain('.theme-gallery-card__swatch')
     expect(source).not.toContain('.theme-gallery-card__hex')
   })
 
-  it('uses an intrinsic gallery and the governed phone breakpoint', () => {
-    expect(source).toContain(
-      'grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 28rem));'
+  it('groups desktop cards into one expanding suite and keeps the governed phone fallback', () => {
+    expect(source).toContain('width: min(100%, 58rem);')
+    expect(source).toContain('height: clamp(18rem, 32vw, 21rem);')
+    expect(source).toMatch(
+      /@media \(min-width: 768px\) and \(hover: hover\) and \(pointer: fine\)[\s\S]*?\.theme-gallery \{[\s\S]*?display: flex;/
     )
+    expect(source).toMatch(
+      /\.theme-gallery-card:hover,[\s\S]*?\.theme-gallery-card:focus-within \{[\s\S]*?flex-grow: 1\.85;/
+    )
+    expect(source).toMatch(
+      /\.theme-gallery-card:hover \.theme-gallery-card__details,[\s\S]*?max-height: 12rem;[\s\S]*?opacity: 1;/
+    )
+    expect(source).toMatch(
+      /@media \(min-width: 768px\)[\s\S]*?grid-template-rows: minmax\(0, 1fr\) 4\.25rem;/
+    )
+    expect(source).toMatch(
+      /\.theme-gallery-card__details \{[\s\S]*?position: absolute;[\s\S]*?bottom: 4\.8rem;/
+    )
+    expect(source).toMatch(/\.theme-gallery-card__footer \{[\s\S]*?min-height: 4\.25rem;/)
     expect(source).toContain('aspect-ratio: 1.7 / 1;')
     expect(source).toContain('@media (max-width: 767.98px)')
     expect(source).not.toContain('@media (max-width: 640px)')
@@ -184,6 +201,10 @@ describe('FestivalThemeManagementPanel', () => {
 
     expect(classicCard.findAll('[data-testid="theme-mode-visual"]')).toHaveLength(1)
     expect(festivalCard.findAll('[data-testid="theme-mode-visual"]')).toHaveLength(1)
+    expect(classicCard.findAll('[data-testid="theme-card-details"]')).toHaveLength(1)
+    expect(festivalCard.findAll('[data-testid="theme-card-details"]')).toHaveLength(1)
+    expect(classicCard.attributes('aria-describedby')).toBe('theme-card-details-general')
+    expect(festivalCard.attributes('aria-describedby')).toBe('theme-card-details-christmas')
     expect(wrapper.find('[data-testid="theme-palette"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="theme-palette-swatch"]').exists()).toBe(false)
     expect(source).toMatch(

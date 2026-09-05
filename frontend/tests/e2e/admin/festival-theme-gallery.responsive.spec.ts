@@ -91,6 +91,7 @@ test.describe('Admin › Festival Theme card gallery responsive contract', () =>
       await expect(cards.locator('.pi-trash')).toHaveCount(0)
       for (const card of await cards.all()) {
         await expect(card.getByTestId('theme-mode-visual')).toHaveCount(1)
+        await expect(card.getByTestId('theme-card-details')).toHaveCount(1)
         await expect(card.getByTestId('theme-palette-swatch')).toHaveCount(0)
       }
       const modeColors = await cards
@@ -131,23 +132,34 @@ test.describe('Admin › Festival Theme card gallery responsive contract', () =>
           (element) => element.getBoundingClientRect().width
         )
         expect(geometry[0].width).toBeLessThan(galleryWidth)
+        expect(Math.abs(geometry[0].width - geometry[1].width)).toBeLessThan(2)
+
+        const firstDetails = cards.first().getByTestId('theme-card-details')
+        await expect(firstDetails).toHaveCSS('opacity', '0')
+        await cards.first().hover()
+        await expect(firstDetails).toHaveCSS('opacity', '1')
+
+        const expandedWidths = await cards.evaluateAll((elements) =>
+          elements.map((element) => element.getBoundingClientRect().width)
+        )
+        expect(expandedWidths[0] - expandedWidths[1]).toBeGreaterThan(20)
+
+        const dividerHeights = await cards
+          .locator('.theme-gallery-card__footer')
+          .evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().top))
+        expect(Math.abs(dividerHeights[0] - dividerHeights[1])).toBeLessThan(1)
+      } else {
+        for (const details of await cards.getByTestId('theme-card-details').all()) {
+          await expect(details).toHaveCSS('opacity', '1')
+        }
       }
 
-      if (viewport.width === 1440) {
-        const cardRatio = await cards
-          .first()
-          .evaluate(
-            (element) =>
-              element.getBoundingClientRect().width / element.getBoundingClientRect().height
-          )
-        expect(cardRatio).toBeGreaterThanOrEqual(1.6)
-        expect(cardRatio).toBeLessThanOrEqual(1.8)
-      }
-
-      const visibleActions = cards.getByRole('button')
-      expect(await visibleActions.count()).toBeGreaterThan(0)
-      for (const action of await visibleActions.all()) {
-        await expect(action).toBeVisible()
+      for (const card of await cards.all()) {
+        await card.hover()
+        await expect(card.getByTestId('theme-card-details')).toHaveCSS('opacity', '1')
+        for (const action of await card.getByRole('button').all()) {
+          await expect(action).toBeVisible()
+        }
       }
 
       const editAction = cards.first().getByRole('button', { name: '編輯', exact: true })
@@ -160,6 +172,7 @@ test.describe('Admin › Festival Theme card gallery responsive contract', () =>
       await expect
         .poll(() => cards.first().evaluate((element) => element.matches(':focus-within')))
         .toBe(true)
+      await expect(cards.first().getByTestId('theme-card-details')).toHaveCSS('opacity', '1')
 
       await cards.first().hover()
       await expect
