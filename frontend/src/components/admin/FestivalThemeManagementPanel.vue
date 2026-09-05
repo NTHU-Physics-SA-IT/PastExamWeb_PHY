@@ -600,6 +600,9 @@ onMounted(loadCapabilities)
   justify-content: space-between;
   gap: 1rem;
 }
+.theme-gallery-card__header :deep(.p-tag) {
+  flex: 0 0 auto;
+}
 .theme-gallery-card__identity {
   gap: 0.75rem;
   min-width: 0;
@@ -620,6 +623,10 @@ onMounted(loadCapabilities)
   color: var(--text-secondary);
   font-size: var(--app-font-size-xs);
   font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.theme-gallery-card__description {
+  overflow-wrap: anywhere;
 }
 .theme-gallery-card__metadata {
   display: grid;
@@ -661,6 +668,10 @@ onMounted(loadCapabilities)
   align-items: center;
   flex-wrap: wrap;
   gap: 0.5rem;
+  min-width: 0;
+}
+.theme-row-actions :deep(.p-button) {
+  flex: 0 1 auto;
 }
 .theme-delete-guidance {
   flex-basis: 100%;
@@ -711,7 +722,7 @@ onMounted(loadCapabilities)
     transform: none;
   }
 }
-@media (max-width: 640px) {
+@media (max-width: 767.98px) {
   .festival-theme-management__error {
     align-items: stretch;
     flex-direction: column;
@@ -721,6 +732,7 @@ onMounted(loadCapabilities)
   }
   .theme-row-actions :deep(.p-button) {
     flex: 1 1 100%;
+    width: 100%;
   }
   .theme-gallery-card__footer,
   .theme-row-actions {

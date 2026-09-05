@@ -164,6 +164,17 @@ describe('FestivalThemeManagementPanel', () => {
     expect(source).toContain('@media (prefers-reduced-motion: reduce)')
   })
 
+  it('uses an intrinsic gallery and the governed phone breakpoint', () => {
+    expect(source).toContain(
+      'grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));'
+    )
+    expect(source).toContain('@media (max-width: 767.98px)')
+    expect(source).not.toContain('@media (max-width: 640px)')
+    expect(source).toMatch(
+      /\.theme-row-actions :deep\(\.p-button\)[\s\S]*?flex: 1 1 100%;[\s\S]*?width: 100%;/
+    )
+  })
+
   it('maps the edit dialog footer to the preview and download button treatments', () => {
     expect(source).toMatch(
       /class="theme-dialog-cancel-action review-action-preview"[\s\S]{0,220}?severity="secondary"[\s\S]{0,160}?outlined[\s\S]{0,160}?size="small"/
