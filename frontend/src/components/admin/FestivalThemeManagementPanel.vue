@@ -76,21 +76,14 @@
             :aria-current="row.isActive ? 'true' : undefined"
           >
             <div
-              class="theme-gallery-card__palette"
-              data-testid="theme-palette"
-              role="img"
-              :aria-label="`${row.name}: ${themePalette(row).join(', ')}`"
+              class="theme-gallery-card__visual"
+              data-testid="theme-mode-visual"
+              aria-hidden="true"
             >
-              <span
-                v-for="color in themePalette(row)"
-                :key="color"
-                class="theme-gallery-card__swatch"
-                :style="{ '--theme-palette-color': color }"
+              <i
+                :class="row.kind === 'classic' ? 'pi pi-palette' : 'pi pi-sparkles'"
                 aria-hidden="true"
-                data-testid="theme-palette-swatch"
-              >
-                <span class="theme-gallery-card__hex" aria-hidden="true">{{ color }}</span>
-              </span>
+              />
             </div>
 
             <footer class="theme-gallery-card__footer">
@@ -315,8 +308,6 @@ const selectedTheme = ref(null)
 const editPersistenceError = ref('')
 const editErrors = ref({ ends_at: '' })
 const editForm = ref(emptyEditForm())
-const CLASSIC_THEME_PALETTE = ['#F7FBFB', '#EEF6F2', '#176F7B', '#B9821D', '#172522']
-const FESTIVAL_THEME_PALETTE = ['#293F52', '#3E5F72', '#17483F', '#8A3D47', '#DEC78E']
 
 const festivalThemes = computed(() =>
   previewEnabled ? previewThemes.value : (capabilities.value?.festival_theme?.themes ?? [])
@@ -380,8 +371,6 @@ const isActiveFestivalTheme = (themeId) => activeFestivalThemeIds.value.includes
 const themeSupportsColorModes = (theme) =>
   theme.supports_color_modes === true ||
   (Array.isArray(theme.supported_modes) && theme.supported_modes.length > 1)
-const themePalette = (row) =>
-  row.kind === 'classic' ? CLASSIC_THEME_PALETTE : FESTIVAL_THEME_PALETTE
 
 async function loadCapabilities() {
   loading.value = true
@@ -503,9 +492,6 @@ onMounted(loadCapabilities)
 
 <style scoped>
 .festival-theme-management {
-  --festival-card-surface: var(--bg-primary);
-  --festival-card-subtle-surface: color-mix(in srgb, var(--bg-secondary) 74%, transparent);
-  --festival-card-emphasis: var(--primary-color);
   --festival-card-shadow: 0 0.55rem 1.35rem rgba(15, 23, 42, 0.12);
 
   min-width: 0;
@@ -561,7 +547,6 @@ onMounted(loadCapabilities)
   justify-content: start;
   gap: 1rem;
 }
-/* Palette-first anatomy is adapted from Uiverse.io author arshshaikh06; implementation is original. */
 .theme-gallery-card {
   position: relative;
   isolation: isolate;
@@ -571,9 +556,10 @@ onMounted(loadCapabilities)
   min-width: 0;
   min-height: 15.5rem;
   overflow: hidden;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--theme-card-border);
   border-radius: 0.9rem;
-  background: var(--festival-card-surface);
+  color: var(--theme-card-text);
+  background: var(--theme-card-surface);
   box-shadow: 0 0.2rem 0.6rem rgba(15, 23, 42, 0.07);
   transition:
     transform 160ms ease,
@@ -581,68 +567,59 @@ onMounted(loadCapabilities)
     box-shadow 160ms ease,
     background-color 160ms ease;
 }
+.theme-gallery-card[data-theme-kind='classic'] {
+  --theme-card-surface: #eef6f2;
+  --theme-card-layer: #f7fbfb;
+  --theme-card-text: #172522;
+  --theme-card-muted-text: #5d6f6a;
+  --theme-card-accent: #176f7b;
+  --theme-card-border: #cbdad4;
+}
+.theme-gallery-card[data-theme-kind='festival'] {
+  --theme-card-surface: #17483f;
+  --theme-card-layer: #103a34;
+  --theme-card-text: #f8f2e8;
+  --theme-card-muted-text: #f5eedc;
+  --theme-card-accent: #dec78e;
+  --theme-card-border: #294f47;
+}
 .theme-gallery-card::before {
   position: absolute;
   z-index: 2;
   inset: 0 0 auto;
   height: 0.22rem;
-  background: var(--festival-card-emphasis);
+  background: var(--theme-card-accent);
   content: '';
   opacity: 0;
   transition: opacity 160ms ease;
 }
 .theme-gallery-card--active {
-  border-color: color-mix(in srgb, var(--festival-card-emphasis) 58%, var(--border-color));
+  border-color: color-mix(in srgb, var(--theme-card-accent) 58%, var(--theme-card-border));
   box-shadow:
     0 0.3rem 0.9rem rgba(15, 23, 42, 0.1),
-    inset 0 0 0 1px color-mix(in srgb, var(--festival-card-emphasis) 18%, transparent);
+    inset 0 0 0 1px color-mix(in srgb, var(--theme-card-accent) 18%, transparent);
 }
 .theme-gallery-card--active::before {
   opacity: 1;
 }
-.theme-gallery-card--inactive {
-  background: color-mix(
-    in srgb,
-    var(--festival-card-surface) 92%,
-    var(--festival-card-subtle-surface) 8%
-  );
-}
 .theme-gallery-card:focus-within {
-  border-color: var(--festival-card-emphasis);
+  border-color: var(--theme-card-accent);
   box-shadow:
-    0 0 0 0.18rem color-mix(in srgb, var(--festival-card-emphasis) 28%, transparent),
+    0 0 0 0.18rem color-mix(in srgb, var(--theme-card-accent) 28%, transparent),
     var(--festival-card-shadow);
 }
-.theme-gallery-card__palette {
-  display: flex;
+.theme-gallery-card__visual {
+  display: grid;
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
-  border-bottom: 1px solid var(--border-color);
-}
-.theme-gallery-card__swatch {
-  position: relative;
-  display: grid;
-  flex: 1 1 0;
-  min-width: 0;
   place-items: center;
-  background: var(--theme-palette-color);
-  transition: flex-grow 180ms ease;
+  border-bottom: 1px solid var(--theme-card-border);
+  color: var(--theme-card-accent);
+  background: var(--theme-card-surface);
 }
-.theme-gallery-card__hex {
-  padding: 0.2rem 0.34rem;
-  border-radius: 0.3rem;
-  color: #ffffff;
-  background: rgba(16, 23, 21, 0.82);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.67rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  opacity: 0;
-  transform: translateY(0.3rem);
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease;
+.theme-gallery-card__visual > i {
+  font-size: clamp(2.75rem, 5vw, 4.4rem);
+  opacity: 0.86;
 }
 .theme-gallery-card__footer {
   display: grid;
@@ -650,7 +627,7 @@ onMounted(loadCapabilities)
   align-items: end;
   gap: 0.65rem 1rem;
   padding: 0.8rem 0.9rem 0.85rem;
-  background: var(--festival-card-surface);
+  background: var(--theme-card-layer);
 }
 .theme-gallery-card__summary {
   display: grid;
@@ -677,7 +654,7 @@ onMounted(loadCapabilities)
   min-width: 0;
 }
 .theme-gallery-card__identity > i {
-  color: var(--primary-color);
+  color: var(--theme-card-accent);
 }
 .theme-gallery-card__title {
   overflow: hidden;
@@ -689,7 +666,7 @@ onMounted(loadCapabilities)
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  color: var(--text-secondary);
+  color: var(--theme-card-muted-text);
   font-size: var(--app-font-size-xs);
   font-weight: 600;
   overflow-wrap: anywhere;
@@ -698,11 +675,12 @@ onMounted(loadCapabilities)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--theme-card-muted-text);
 }
 .theme-gallery-card__metadata {
   flex-wrap: wrap;
   gap: 0.3rem 0.65rem;
-  color: var(--text-secondary);
+  color: var(--theme-card-muted-text);
   font-size: var(--app-font-size-xs);
   font-weight: 600;
 }
@@ -720,7 +698,7 @@ onMounted(loadCapabilities)
 }
 .theme-delete-guidance {
   grid-column: 1 / -1;
-  color: var(--text-secondary);
+  color: var(--theme-card-muted-text);
   font-size: var(--app-font-size-xs);
   text-align: right;
 }
@@ -755,36 +733,17 @@ onMounted(loadCapabilities)
 @media (hover: hover) and (pointer: fine) {
   .theme-gallery-card:hover {
     transform: translateY(-0.18rem);
-    border-color: color-mix(in srgb, var(--festival-card-emphasis) 44%, var(--border-color));
+    border-color: color-mix(in srgb, var(--theme-card-accent) 44%, var(--theme-card-border));
     box-shadow: var(--festival-card-shadow);
-  }
-  .theme-gallery-card__swatch:hover {
-    flex-grow: 1.8;
-  }
-  .theme-gallery-card__swatch:hover .theme-gallery-card__hex {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-@media (hover: none), (pointer: coarse) {
-  .theme-gallery-card__hex {
-    font-size: 0.62rem;
-    opacity: 0.88;
-    transform: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .theme-gallery-card,
-  .theme-gallery-card::before,
-  .theme-gallery-card__swatch,
-  .theme-gallery-card__hex {
+  .theme-gallery-card::before {
     transition: none;
   }
   .theme-gallery-card:hover {
     transform: none;
-  }
-  .theme-gallery-card__swatch:hover {
-    flex-grow: 1;
   }
 }
 @media (max-width: 767.98px) {
@@ -801,7 +760,7 @@ onMounted(loadCapabilities)
   .theme-gallery-card {
     aspect-ratio: auto;
   }
-  .theme-gallery-card__palette {
+  .theme-gallery-card__visual {
     min-height: 9rem;
   }
   .theme-gallery-card__footer {

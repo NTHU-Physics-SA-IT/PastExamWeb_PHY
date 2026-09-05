@@ -87,8 +87,15 @@ test.describe('Admin › Festival Theme card gallery responsive contract', () =>
       await expect(cards.first()).toContainText('聖誕模式')
       await expect(cards.nth(1)).toContainText('經典模式')
       for (const card of await cards.all()) {
-        await expect(card.getByTestId('theme-palette-swatch')).toHaveCount(5)
+        await expect(card.getByTestId('theme-mode-visual')).toHaveCount(1)
+        await expect(card.getByTestId('theme-palette-swatch')).toHaveCount(0)
       }
+      const modeColors = await cards
+        .getByTestId('theme-mode-visual')
+        .evaluateAll((elements) =>
+          elements.map((element) => getComputedStyle(element).backgroundColor)
+        )
+      expect(modeColors).toEqual(['rgb(23, 72, 63)', 'rgb(238, 246, 242)'])
 
       await expect
         .poll(() =>
@@ -153,46 +160,10 @@ test.describe('Admin › Festival Theme card gallery responsive contract', () =>
         .poll(() => cards.first().evaluate((element) => getComputedStyle(element).transform))
         .toBe('none')
 
-      const reducedMotionWidths = await cards
-        .first()
-        .getByTestId('theme-palette-swatch')
-        .evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().width))
-      expect(Math.max(...reducedMotionWidths) - Math.min(...reducedMotionWidths)).toBeLessThan(1)
-
       if (viewport.width === 390) {
         const leftEdges = geometry.map((card) => Math.round(card.left))
         expect(new Set(leftEdges).size).toBe(1)
       }
     })
   }
-
-  test('fine pointer expands one strip and reveals its hex without changing card semantics', async ({
-    page,
-  }) => {
-    await page.setViewportSize({ width: 1440, height: 900 })
-    await page.emulateMedia({ reducedMotion: 'no-preference' })
-    await page.goto('/admin', { waitUntil: 'networkidle' })
-    await clickWhenVisible(page.getByRole('tab', { name: '節日主題管理', exact: true }))
-
-    const activeCard = page.getByTestId('theme-overview-card').first()
-    const swatches = activeCard.getByTestId('theme-palette-swatch')
-    const hoveredSwatch = swatches.first()
-    const siblingSwatch = swatches.nth(1)
-    await hoveredSwatch.hover()
-
-    await expect
-      .poll(async () => {
-        const hoveredWidth = await hoveredSwatch.evaluate(
-          (element) => element.getBoundingClientRect().width
-        )
-        const siblingWidth = await siblingSwatch.evaluate(
-          (element) => element.getBoundingClientRect().width
-        )
-        return hoveredWidth - siblingWidth
-      })
-      .toBeGreaterThan(10)
-    await expect(hoveredSwatch.locator('.theme-gallery-card__hex')).toHaveCSS('opacity', '1')
-    await expect(activeCard).toHaveAttribute('aria-current', 'true')
-    await expect(activeCard.getByRole('button', { name: '編輯', exact: true })).toBeVisible()
-  })
 })
