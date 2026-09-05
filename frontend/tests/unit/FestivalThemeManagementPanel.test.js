@@ -13,8 +13,6 @@ const mocks = vi.hoisted(() => ({
   getAdmin: vi.fn(),
   activateAdmin: vi.fn(),
   updateAdmin: vi.fn(),
-  removeAdmin: vi.fn(),
-  confirm: vi.fn(),
 }))
 
 vi.mock('@/api', () => ({
@@ -22,10 +20,8 @@ vi.mock('@/api', () => ({
     getAdmin: mocks.getAdmin,
     activateAdmin: mocks.activateAdmin,
     updateAdmin: mocks.updateAdmin,
-    removeAdmin: mocks.removeAdmin,
   },
 }))
-vi.mock('primevue/useconfirm', () => ({ useConfirm: () => ({ require: mocks.confirm }) }))
 
 const phaseOneCapabilities = {
   general_theme: { active: true, user_selectable: true, supported_modes: ['light', 'dark'] },
@@ -144,13 +140,15 @@ describe('FestivalThemeManagementPanel', () => {
     mocks.getAdmin.mockReset().mockResolvedValue({ data: phaseOneCapabilities })
     mocks.activateAdmin.mockReset()
     mocks.updateAdmin.mockReset()
-    mocks.removeAdmin.mockReset()
-    mocks.confirm.mockReset()
   })
 
-  it('maps editable theme actions to the approved Christmas button roles', () => {
+  it('keeps only activation and edit as festival card actions', () => {
     expect(source.match(/theme-download-action/g)).toHaveLength(2)
-    expect(source.match(/theme-admin-delete-action/g)).toHaveLength(1)
+    expect(source).not.toContain('theme-admin-delete-action')
+    expect(source).not.toContain('festival-theme-delete')
+    expect(source).not.toContain('pi pi-trash')
+    expect(source).not.toContain('confirmDelete')
+    expect(source).not.toContain('removeTheme')
   })
 
   it('keeps gallery interactions explicit and motion preferences safe', () => {
@@ -272,7 +270,8 @@ describe('FestivalThemeManagementPanel', () => {
     expect(cards[1].classes()).toContain('theme-gallery-card--inactive')
     expect(cards[1].get('[data-testid="festival-theme-activation"]').text()).toBe('啟用')
     expect(cards[1].get('[data-testid="festival-theme-edit"]').text()).toBe('編輯')
-    expect(cards[1].get('[data-testid="festival-theme-delete"]').text()).toBe('刪除')
+    expect(cards[1].find('[data-testid="festival-theme-delete"]').exists()).toBe(false)
+    expect(cards[1].text()).not.toContain('刪除')
     expect(wrapper.find('[data-testid="festival-theme-empty-note"]').exists()).toBe(false)
   })
 
@@ -369,7 +368,8 @@ describe('FestivalThemeManagementPanel', () => {
     expect(cards[1].get('[data-testid="festival-theme-activation"]').text()).toBe('啟用')
     for (const card of cards) {
       expect(card.get('[data-testid="festival-theme-edit"]').text()).toBe('編輯')
-      expect(card.get('[data-testid="festival-theme-delete"]').text()).toBe('刪除')
+      expect(card.find('[data-testid="festival-theme-delete"]').exists()).toBe(false)
+      expect(card.text()).not.toContain('刪除')
     }
   })
 
@@ -391,29 +391,6 @@ describe('FestivalThemeManagementPanel', () => {
     expect(wrapper.vm.editForm.ends_at.toISOString()).toBe('2026-12-27T00:00:00.000Z')
     expect(wrapper.get('[data-testid="festival-theme-save"]').attributes('disabled')).toBeDefined()
     expect(mocks.updateAdmin).not.toHaveBeenCalled()
-  })
-
-  it('confirms preview deletion, supports cancel, and removes only in memory until reload', async () => {
-    window.history.replaceState({}, '', '/admin?festivalThemePreview=1')
-    const wrapper = createWrapper()
-    await flushPromises()
-
-    await wrapper.findAll('[data-testid="festival-theme-delete"]')[1].trigger('click')
-    const firstConfirmation = mocks.confirm.mock.calls[0][0]
-    expect(firstConfirmation.message).toContain('春節主題')
-    expect(firstConfirmation.rejectLabel).toBe('取消')
-    expect(firstConfirmation.acceptLabel).toBe('確認刪除')
-    expect(themeCards(wrapper, 'festival')).toHaveLength(2)
-
-    await firstConfirmation.accept()
-    await flushPromises()
-    expect(themeCards(wrapper, 'festival')).toHaveLength(1)
-    expect(mocks.removeAdmin).not.toHaveBeenCalled()
-
-    wrapper.unmount()
-    const reloadedWrapper = createWrapper()
-    await flushPromises()
-    expect(themeCards(reloadedWrapper, 'festival')).toHaveLength(2)
   })
 
   it('switches preview activation in memory without calling the real activation endpoint', async () => {
@@ -511,25 +488,6 @@ describe('FestivalThemeManagementPanel', () => {
     )
   })
 
-  it('uses the shared confirmation contract and retains rows when deletion fails', async () => {
-    mocks.getAdmin.mockResolvedValueOnce({ data: futureCapabilities })
-    mocks.removeAdmin.mockRejectedValueOnce(new Error('unavailable'))
-    const wrapper = createWrapper()
-    await flushPromises()
-
-    await wrapper.findAll('[data-testid="festival-theme-delete"]')[1].trigger('click')
-    expect(mocks.confirm).toHaveBeenCalledTimes(1)
-    const request = mocks.confirm.mock.calls[0][0]
-    expect(request.rejectLabel).toBe('取消')
-    expect(request.acceptLabel).toBe('確認刪除')
-    await request.accept()
-    await flushPromises()
-    expect(themeCards(wrapper, 'festival')).toHaveLength(2)
-    expect(wrapper.get('[data-testid="theme-management-action-error"]').text()).toContain(
-      '刪除節日主題失敗'
-    )
-  })
-
   it('persists Christmas edits through the backend without changing deep/light support', async () => {
     mocks.updateAdmin.mockResolvedValueOnce({ data: phaseOneCapabilities })
     const wrapper = createWrapper()
@@ -549,32 +507,6 @@ describe('FestivalThemeManagementPanel', () => {
       })
     )
     expect(mocks.updateAdmin.mock.calls[0][1]).not.toHaveProperty('supports_color_modes')
-  })
-
-  it('deletes inactive Christmas through confirmation and disables deletion while active', async () => {
-    mocks.removeAdmin.mockResolvedValueOnce({ data: emptyCapabilities })
-    const wrapper = createWrapper()
-    await flushPromises()
-
-    await wrapper.get('[data-testid="festival-theme-delete"]').trigger('click')
-    const request = mocks.confirm.mock.calls[0][0]
-    await request.accept()
-    await flushPromises()
-    expect(mocks.removeAdmin).toHaveBeenCalledWith('christmas')
-    expect(themeCards(wrapper, 'festival')).toHaveLength(0)
-
-    mocks.getAdmin.mockResolvedValueOnce({
-      data: {
-        general_theme: { ...phaseOneCapabilities.general_theme, active: false },
-        festival_theme: { ...phaseOneCapabilities.festival_theme, active: 'christmas' },
-      },
-    })
-    const activeWrapper = createWrapper()
-    await flushPromises()
-    expect(
-      activeWrapper.get('[data-testid="festival-theme-delete"]').attributes('disabled')
-    ).toBeDefined()
-    expect(activeWrapper.text()).toContain('請先停用此主題後再刪除')
   })
 
   it('renders a recoverable load error and catalogs new copy in both locales', async () => {

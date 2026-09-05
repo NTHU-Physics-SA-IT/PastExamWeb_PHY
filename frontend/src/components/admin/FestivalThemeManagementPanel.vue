@@ -32,12 +32,12 @@
 
     <div v-else class="festival-theme-management__sections" data-testid="theme-management-sections">
       <Message
-        v-if="activationError || mutationError"
+        v-if="activationError"
         severity="error"
         :closable="false"
         data-testid="theme-management-action-error"
       >
-        {{ activationError || mutationError }}
+        {{ activationError }}
       </Message>
       <Message
         v-if="multipleActiveThemeViolation"
@@ -156,23 +156,8 @@
                     data-testid="festival-theme-edit"
                     @click="openEdit(row.theme)"
                   />
-                  <Button
-                    class="theme-admin-delete-action"
-                    :label="$t('刪除')"
-                    icon="pi pi-trash"
-                    severity="danger"
-                    outlined
-                    size="small"
-                    :disabled="deletingThemeId === row.id || row.isActive"
-                    :title="row.isActive ? $t('請先停用此主題後再刪除') : undefined"
-                    data-testid="festival-theme-delete"
-                    @click="confirmDelete(row.theme)"
-                  />
                 </template>
               </div>
-              <small v-if="row.kind === 'festival' && row.isActive" class="theme-delete-guidance">{{
-                $t('請先停用此主題後再刪除')
-              }}</small>
             </footer>
           </article>
         </div>
@@ -280,7 +265,6 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useConfirm } from 'primevue/useconfirm'
 import { useI18n } from 'vue-i18n'
 import { themeManagementService } from '@/api'
 import { useTheme } from '@/utils/useTheme'
@@ -290,14 +274,11 @@ import {
 } from '@/utils/festivalThemePreview'
 
 const { locale, t } = useI18n()
-const confirm = useConfirm()
 const { applyActiveSiteTheme } = useTheme()
 const loading = ref(true)
 const error = ref('')
 const activationError = ref('')
-const mutationError = ref('')
 const activatingThemeId = ref('')
-const deletingThemeId = ref('')
 const savingThemeId = ref('')
 const capabilities = ref(null)
 const previewEnabled = isFestivalThemePreviewEnabled()
@@ -394,7 +375,6 @@ async function activateTheme(themeId) {
   }
   activatingThemeId.value = themeId
   activationError.value = ''
-  mutationError.value = ''
   try {
     capabilities.value = (await themeManagementService.activateAdmin(themeId)).data
     syncEffectiveTheme(capabilities.value)
@@ -445,43 +425,6 @@ async function saveEdit() {
     editPersistenceError.value = saveFailure?.response?.data?.detail || t('儲存節日主題失敗。')
   } finally {
     savingThemeId.value = ''
-  }
-}
-function confirmDelete(theme) {
-  if (deletingThemeId.value) return
-  if (isActiveFestivalTheme(theme.id)) {
-    mutationError.value = t('請先停用此主題後再刪除')
-    return
-  }
-  confirm.require({
-    header: t('刪除節日主題'),
-    message: t('確定要刪除「{name}」嗎？', { name: localizedThemeName(theme) }),
-    icon: 'pi pi-exclamation-triangle',
-    rejectLabel: t('取消'),
-    acceptLabel: t('確認刪除'),
-    acceptClass: 'p-button-danger',
-    accept: () => removeTheme(theme),
-  })
-}
-async function removeTheme(theme) {
-  if (deletingThemeId.value) return
-  if (isActiveFestivalTheme(theme.id)) {
-    mutationError.value = t('請先停用此主題後再刪除')
-    return
-  }
-  deletingThemeId.value = theme.id
-  mutationError.value = ''
-  try {
-    if (theme.preview_only === true) {
-      previewThemes.value = previewThemes.value.filter((item) => item.id !== theme.id)
-      return
-    }
-    capabilities.value = (await themeManagementService.removeAdmin(theme.id)).data
-    syncEffectiveTheme(capabilities.value)
-  } catch (deleteFailure) {
-    mutationError.value = deleteFailure?.response?.data?.detail || t('刪除節日主題失敗。')
-  } finally {
-    deletingThemeId.value = ''
   }
 }
 function syncEffectiveTheme(nextCapabilities) {
@@ -696,12 +639,6 @@ onMounted(loadCapabilities)
 .theme-row-actions :deep(.p-button) {
   flex: 0 1 auto;
 }
-.theme-delete-guidance {
-  grid-column: 1 / -1;
-  color: var(--theme-card-muted-text);
-  font-size: var(--app-font-size-xs);
-  text-align: right;
-}
 .theme-overview-note {
   margin: 0;
   color: var(--text-secondary);
@@ -776,9 +713,6 @@ onMounted(loadCapabilities)
   }
   .theme-row-actions {
     flex: 1 1 100%;
-  }
-  .theme-delete-guidance {
-    text-align: left;
   }
 }
 </style>

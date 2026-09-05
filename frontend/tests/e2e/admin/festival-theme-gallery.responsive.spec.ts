@@ -86,6 +86,9 @@ test.describe('Admin › Festival Theme card gallery responsive contract', () =>
       await expect(cards.first()).toHaveAttribute('aria-current', 'true')
       await expect(cards.first()).toContainText('聖誕模式')
       await expect(cards.nth(1)).toContainText('經典模式')
+      await expect(cards.getByTestId('festival-theme-delete')).toHaveCount(0)
+      await expect(cards.getByRole('button', { name: '刪除', exact: true })).toHaveCount(0)
+      await expect(cards.locator('.pi-trash')).toHaveCount(0)
       for (const card of await cards.all()) {
         await expect(card.getByTestId('theme-mode-visual')).toHaveCount(1)
         await expect(card.getByTestId('theme-palette-swatch')).toHaveCount(0)
@@ -149,6 +152,9 @@ test.describe('Admin › Festival Theme card gallery responsive contract', () =>
 
       const editAction = cards.first().getByRole('button', { name: '編輯', exact: true })
       await expect(editAction).toHaveAttribute('data-christmas-button-snow', 'true')
+      const activateAction = cards.nth(1).getByRole('button', { name: '啟用', exact: true })
+      await expect(activateAction).toBeVisible()
+      await expect(activateAction).toHaveAttribute('data-christmas-button-snow', 'true')
       await editAction.focus()
       await expect(editAction).toBeFocused()
       await expect
