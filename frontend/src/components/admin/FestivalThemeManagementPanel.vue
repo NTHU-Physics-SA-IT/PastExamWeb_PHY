@@ -73,6 +73,7 @@
             data-testid="theme-overview-card"
             :data-theme-kind="row.kind"
             :aria-label="row.name"
+            :aria-current="row.isActive ? 'true' : undefined"
           >
             <header class="theme-gallery-card__header">
               <div class="theme-gallery-card__identity">
@@ -480,6 +481,11 @@ onMounted(loadCapabilities)
 
 <style scoped>
 .festival-theme-management {
+  --festival-card-surface: var(--bg-primary);
+  --festival-card-subtle-surface: color-mix(in srgb, var(--bg-secondary) 74%, transparent);
+  --festival-card-emphasis: var(--primary-color);
+  --festival-card-shadow: 0 0.55rem 1.35rem rgba(15, 23, 42, 0.12);
+
   min-width: 0;
   color: var(--text-primary);
 }
@@ -532,15 +538,57 @@ onMounted(loadCapabilities)
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
   gap: 1rem;
 }
+/* Card layering is adapted from Uiverse.io author arshshaikh06; implementation is original. */
 .theme-gallery-card {
+  position: relative;
+  isolation: isolate;
   display: grid;
   grid-template-rows: auto minmax(4.8rem, 1fr) auto auto;
   gap: 1rem;
   min-width: 0;
+  overflow: hidden;
   padding: 1rem;
   border: 1px solid var(--border-color);
   border-radius: 0.9rem;
-  background: var(--bg-primary);
+  background: var(--festival-card-surface);
+  box-shadow: 0 0.2rem 0.6rem rgba(15, 23, 42, 0.07);
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+.theme-gallery-card::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0 auto 0 0;
+  width: 0.24rem;
+  background: var(--festival-card-emphasis);
+  content: '';
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+.theme-gallery-card--active {
+  border-color: color-mix(in srgb, var(--festival-card-emphasis) 58%, var(--border-color));
+  box-shadow:
+    0 0.3rem 0.9rem rgba(15, 23, 42, 0.1),
+    inset 0 0 0 1px color-mix(in srgb, var(--festival-card-emphasis) 18%, transparent);
+}
+.theme-gallery-card--active::before {
+  opacity: 1;
+}
+.theme-gallery-card--inactive {
+  background: color-mix(
+    in srgb,
+    var(--festival-card-surface) 92%,
+    var(--festival-card-subtle-surface) 8%
+  );
+}
+.theme-gallery-card:focus-within {
+  border-color: var(--festival-card-emphasis);
+  box-shadow:
+    0 0 0 0.18rem color-mix(in srgb, var(--festival-card-emphasis) 28%, transparent),
+    var(--festival-card-shadow);
 }
 .theme-gallery-card__header,
 .theme-gallery-card__identity,
@@ -577,6 +625,10 @@ onMounted(loadCapabilities)
   display: grid;
   gap: 0.5rem;
   margin: 0;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+  border-radius: 0.65rem;
+  background: var(--festival-card-subtle-surface);
 }
 .theme-gallery-card__metadata > div {
   display: flex;
@@ -611,6 +663,7 @@ onMounted(loadCapabilities)
   gap: 0.5rem;
 }
 .theme-delete-guidance {
+  flex-basis: 100%;
   color: var(--text-secondary);
   font-size: var(--app-font-size-xs);
 }
@@ -641,6 +694,22 @@ onMounted(loadCapabilities)
   justify-content: flex-end;
   gap: 0.75rem;
   padding-top: 0.75rem;
+}
+@media (hover: hover) and (pointer: fine) {
+  .theme-gallery-card:hover {
+    transform: translateY(-0.18rem);
+    border-color: color-mix(in srgb, var(--festival-card-emphasis) 44%, var(--border-color));
+    box-shadow: var(--festival-card-shadow);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .theme-gallery-card,
+  .theme-gallery-card::before {
+    transition: none;
+  }
+  .theme-gallery-card:hover {
+    transform: none;
+  }
 }
 @media (max-width: 640px) {
   .festival-theme-management__error {

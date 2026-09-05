@@ -153,6 +153,17 @@ describe('FestivalThemeManagementPanel', () => {
     expect(source.match(/theme-admin-delete-action/g)).toHaveLength(1)
   })
 
+  it('keeps gallery interactions explicit and motion preferences safe', () => {
+    const articleStartTag = source.match(/<article[\s\S]*?>/)?.[0]
+
+    expect(source).toContain(':aria-current="row.isActive ? \'true\' : undefined"')
+    expect(source).toMatch(/<article[\s\S]*?class="theme-gallery-card"[\s\S]*?<\/article>/)
+    expect(articleStartTag).not.toContain('@click')
+    expect(source).toContain('.theme-gallery-card:focus-within')
+    expect(source).toContain('@media (hover: hover) and (pointer: fine)')
+    expect(source).toContain('@media (prefers-reduced-motion: reduce)')
+  })
+
   it('maps the edit dialog footer to the preview and download button treatments', () => {
     expect(source).toMatch(
       /class="theme-dialog-cancel-action review-action-preview"[\s\S]{0,220}?severity="secondary"[\s\S]{0,160}?outlined[\s\S]{0,160}?size="small"/
@@ -199,6 +210,8 @@ describe('FestivalThemeManagementPanel', () => {
     const classicCard = themeCards(wrapper, 'classic')[0]
     expect(classicCard.element.tagName).toBe('ARTICLE')
     expect(classicCard.attributes('aria-label')).toBe('經典模式')
+    expect(classicCard.attributes('aria-current')).toBe('true')
+    expect(classicCard.classes()).toContain('theme-gallery-card--active')
     expect(classicCard.text()).toContain('經典模式')
     expect(classicCard.text()).not.toContain('一般主題')
     expect(classicCard.text()).toContain('最初設計的模式，有深淺色可供使用者切換。')
@@ -220,6 +233,8 @@ describe('FestivalThemeManagementPanel', () => {
     expect(cards[1].text()).toContain('聖誕模式')
     expect(cards[1].text()).toContain('這是專門為聖誕節準備的主題，只會在聖誕節使用。')
     expect(cards[1].text()).toContain('無')
+    expect(cards[1].attributes('aria-current')).toBeUndefined()
+    expect(cards[1].classes()).toContain('theme-gallery-card--inactive')
     expect(cards[1].get('[data-testid="festival-theme-activation"]').text()).toBe('啟用')
     expect(cards[1].get('[data-testid="festival-theme-edit"]').text()).toBe('編輯')
     expect(cards[1].get('[data-testid="festival-theme-delete"]').text()).toBe('刪除')
