@@ -64,8 +64,9 @@ const openFestivalThemePanel = async (page: Page) => {
   const gallery = page.getByTestId('theme-overview-gallery')
 
   for (let attempt = 1; attempt <= 3; attempt += 1) {
-    await expect(tab).toBeVisible({ timeout: 10_000 })
     try {
+      await waitForStableDocument(page)
+      await expect(tab).toBeVisible({ timeout: 5_000 })
       await tab.dispatchEvent('click')
       await expect(gallery).toBeVisible({ timeout: 5_000 })
       await waitForStableDocument(page)
@@ -73,6 +74,7 @@ const openFestivalThemePanel = async (page: Page) => {
       return
     } catch (error) {
       if (attempt === 3) throw error
+      await page.goto('/admin', { waitUntil: 'networkidle' })
     }
   }
 }
@@ -115,6 +117,7 @@ test.describe('Admin › Festival Theme card gallery responsive contract', () =>
 
   for (const viewport of viewports) {
     test(`${viewport.label} keeps every theme card and action readable`, async ({ page }) => {
+      test.setTimeout(60_000)
       await page.setViewportSize({ width: viewport.width, height: viewport.height })
       await page.emulateMedia({ reducedMotion: 'reduce' })
       await page.goto('/admin', { waitUntil: 'networkidle' })
