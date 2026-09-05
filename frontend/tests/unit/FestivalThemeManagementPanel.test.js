@@ -161,18 +161,51 @@ describe('FestivalThemeManagementPanel', () => {
     expect(articleStartTag).not.toContain('@click')
     expect(source).toContain('.theme-gallery-card:focus-within')
     expect(source).toContain('@media (hover: hover) and (pointer: fine)')
+    expect(source).toContain('.theme-gallery-card__swatch:hover')
+    expect(source).toContain('flex-grow: 1.8;')
+    expect(source).toContain('@media (hover: none), (pointer: coarse)')
     expect(source).toContain('@media (prefers-reduced-motion: reduce)')
+    expect(source).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.theme-gallery-card__swatch:hover \{[\s\S]*?flex-grow: 1;/
+    )
   })
 
   it('uses an intrinsic gallery and the governed phone breakpoint', () => {
     expect(source).toContain(
-      'grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));'
+      'grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 28rem));'
     )
+    expect(source).toContain('aspect-ratio: 1.7 / 1;')
     expect(source).toContain('@media (max-width: 767.98px)')
     expect(source).not.toContain('@media (max-width: 640px)')
     expect(source).toMatch(
       /\.theme-row-actions :deep\(\.p-button\)[\s\S]*?flex: 1 1 100%;[\s\S]*?width: 100%;/
     )
+  })
+
+  it('renders exactly five project-owned palette strips for classic and festival cards', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    const [classicCard, festivalCard] = wrapper.findAll('[data-testid="theme-overview-card"]')
+    const swatchColors = (card) =>
+      card.findAll('[data-testid="theme-palette-swatch"]').map((swatch) => swatch.text())
+
+    expect(swatchColors(classicCard)).toEqual([
+      '#F7FBFB',
+      '#EEF6F2',
+      '#176F7B',
+      '#B9821D',
+      '#172522',
+    ])
+    expect(swatchColors(festivalCard)).toEqual([
+      '#293F52',
+      '#3E5F72',
+      '#17483F',
+      '#8A3D47',
+      '#DEC78E',
+    ])
+    expect(source).toContain('background: var(--theme-palette-color);')
+    expect(source).not.toMatch(/theme-gallery-card__swatch[\s\S]{0,240}linear-gradient/)
   })
 
   it('maps the edit dialog footer to the preview and download button treatments', () => {

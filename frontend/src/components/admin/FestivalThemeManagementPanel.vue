@@ -75,49 +75,67 @@
             :aria-label="row.name"
             :aria-current="row.isActive ? 'true' : undefined"
           >
-            <header class="theme-gallery-card__header">
-              <div class="theme-gallery-card__identity">
-                <i
-                  :class="row.kind === 'classic' ? 'pi pi-palette' : 'pi pi-sparkles'"
-                  aria-hidden="true"
-                />
-                <div>
-                  <strong class="theme-gallery-card__title">{{ row.name }}</strong>
-                  <span class="theme-gallery-card__kind">{{
-                    row.kind === 'classic' ? $t('系統內建') : $t('節日主題')
-                  }}</span>
-                </div>
-              </div>
-              <Tag
-                :severity="row.isActive ? 'success' : 'secondary'"
-                :data-testid="
-                  row.isActive
-                    ? row.kind === 'classic'
-                      ? 'classic-theme-active-status'
-                      : 'festival-theme-active-status'
-                    : undefined
-                "
-                >{{ row.isActive ? $t('已啟用') : $t('未啟用') }}</Tag
+            <div
+              class="theme-gallery-card__palette"
+              data-testid="theme-palette"
+              role="img"
+              :aria-label="`${row.name}: ${themePalette(row).join(', ')}`"
+            >
+              <span
+                v-for="color in themePalette(row)"
+                :key="color"
+                class="theme-gallery-card__swatch"
+                :style="{ '--theme-palette-color': color }"
+                aria-hidden="true"
+                data-testid="theme-palette-swatch"
               >
-            </header>
-
-            <p class="theme-gallery-card__description">{{ row.description }}</p>
-
-            <dl class="theme-gallery-card__metadata">
-              <div>
-                <dt>{{ $t('深淺模式') }}</dt>
-                <dd>
-                  <Tag :severity="row.supportsColorModes ? 'info' : 'secondary'">{{
-                    row.supportsColorModes ? $t('有') : $t('無')
-                  }}</Tag>
-                </dd>
-              </div>
-            </dl>
+                <span class="theme-gallery-card__hex" aria-hidden="true">{{ color }}</span>
+              </span>
+            </div>
 
             <footer class="theme-gallery-card__footer">
-              <span v-if="row.kind === 'classic'" class="theme-system-label"
-                ><i class="pi pi-lock" aria-hidden="true" />{{ $t('系統內建') }}</span
-              >
+              <div class="theme-gallery-card__summary">
+                <header class="theme-gallery-card__header">
+                  <div class="theme-gallery-card__identity">
+                    <i
+                      :class="row.kind === 'classic' ? 'pi pi-palette' : 'pi pi-sparkles'"
+                      aria-hidden="true"
+                    />
+                    <strong class="theme-gallery-card__title">{{ row.name }}</strong>
+                  </div>
+                  <Tag
+                    :severity="row.isActive ? 'success' : 'secondary'"
+                    :data-testid="
+                      row.isActive
+                        ? row.kind === 'classic'
+                          ? 'classic-theme-active-status'
+                          : 'festival-theme-active-status'
+                        : undefined
+                    "
+                    >{{ row.isActive ? $t('已啟用') : $t('未啟用') }}</Tag
+                  >
+                </header>
+
+                <p class="theme-gallery-card__description" :title="row.description">
+                  {{ row.description }}
+                </p>
+
+                <div class="theme-gallery-card__metadata">
+                  <span class="theme-gallery-card__kind"
+                    ><i
+                      :class="row.kind === 'classic' ? 'pi pi-lock' : 'pi pi-sparkles'"
+                      aria-hidden="true"
+                    />{{ row.kind === 'classic' ? $t('系統內建') : $t('節日主題') }}</span
+                  >
+                  <span class="theme-gallery-card__mode">
+                    {{ $t('深淺模式') }}
+                    <Tag :severity="row.supportsColorModes ? 'info' : 'secondary'">{{
+                      row.supportsColorModes ? $t('有') : $t('無')
+                    }}</Tag>
+                  </span>
+                </div>
+              </div>
+
               <div class="theme-row-actions">
                 <Button
                   v-if="!row.isActive"
@@ -297,6 +315,8 @@ const selectedTheme = ref(null)
 const editPersistenceError = ref('')
 const editErrors = ref({ ends_at: '' })
 const editForm = ref(emptyEditForm())
+const CLASSIC_THEME_PALETTE = ['#F7FBFB', '#EEF6F2', '#176F7B', '#B9821D', '#172522']
+const FESTIVAL_THEME_PALETTE = ['#293F52', '#3E5F72', '#17483F', '#8A3D47', '#DEC78E']
 
 const festivalThemes = computed(() =>
   previewEnabled ? previewThemes.value : (capabilities.value?.festival_theme?.themes ?? [])
@@ -360,6 +380,8 @@ const isActiveFestivalTheme = (themeId) => activeFestivalThemeIds.value.includes
 const themeSupportsColorModes = (theme) =>
   theme.supports_color_modes === true ||
   (Array.isArray(theme.supported_modes) && theme.supported_modes.length > 1)
+const themePalette = (row) =>
+  row.kind === 'classic' ? CLASSIC_THEME_PALETTE : FESTIVAL_THEME_PALETTE
 
 async function loadCapabilities() {
   loading.value = true
@@ -535,19 +557,20 @@ onMounted(loadCapabilities)
 }
 .theme-gallery {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 28rem));
+  justify-content: start;
   gap: 1rem;
 }
-/* Card layering is adapted from Uiverse.io author arshshaikh06; implementation is original. */
+/* Palette-first anatomy is adapted from Uiverse.io author arshshaikh06; implementation is original. */
 .theme-gallery-card {
   position: relative;
   isolation: isolate;
   display: grid;
-  grid-template-rows: auto minmax(4.8rem, 1fr) auto auto;
-  gap: 1rem;
+  grid-template-rows: minmax(8.75rem, 1fr) auto;
+  aspect-ratio: 1.7 / 1;
   min-width: 0;
+  min-height: 15.5rem;
   overflow: hidden;
-  padding: 1rem;
   border: 1px solid var(--border-color);
   border-radius: 0.9rem;
   background: var(--festival-card-surface);
@@ -560,9 +583,9 @@ onMounted(loadCapabilities)
 }
 .theme-gallery-card::before {
   position: absolute;
-  z-index: -1;
-  inset: 0 auto 0 0;
-  width: 0.24rem;
+  z-index: 2;
+  inset: 0 0 auto;
+  height: 0.22rem;
   background: var(--festival-card-emphasis);
   content: '';
   opacity: 0;
@@ -590,83 +613,105 @@ onMounted(loadCapabilities)
     0 0 0 0.18rem color-mix(in srgb, var(--festival-card-emphasis) 28%, transparent),
     var(--festival-card-shadow);
 }
+.theme-gallery-card__palette {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border-color);
+}
+.theme-gallery-card__swatch {
+  position: relative;
+  display: grid;
+  flex: 1 1 0;
+  min-width: 0;
+  place-items: center;
+  background: var(--theme-palette-color);
+  transition: flex-grow 180ms ease;
+}
+.theme-gallery-card__hex {
+  padding: 0.2rem 0.34rem;
+  border-radius: 0.3rem;
+  color: #ffffff;
+  background: rgba(16, 23, 21, 0.82);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  opacity: 0;
+  transform: translateY(0.3rem);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+.theme-gallery-card__footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.65rem 1rem;
+  padding: 0.8rem 0.9rem 0.85rem;
+  background: var(--festival-card-surface);
+}
+.theme-gallery-card__summary {
+  display: grid;
+  gap: 0.32rem;
+  min-width: 0;
+}
 .theme-gallery-card__header,
 .theme-gallery-card__identity,
-.theme-gallery-card__footer {
+.theme-gallery-card__metadata,
+.theme-gallery-card__mode,
+.theme-row-actions {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
 }
 .theme-gallery-card__header {
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.65rem;
 }
 .theme-gallery-card__header :deep(.p-tag) {
   flex: 0 0 auto;
 }
 .theme-gallery-card__identity {
-  gap: 0.75rem;
+  gap: 0.5rem;
   min-width: 0;
 }
 .theme-gallery-card__identity > i {
-  margin-top: 0.15rem;
   color: var(--primary-color);
 }
-.theme-gallery-card__identity > div {
-  display: grid;
-  gap: 0.2rem;
-  min-width: 0;
-}
 .theme-gallery-card__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   overflow-wrap: anywhere;
 }
 .theme-gallery-card__kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
   color: var(--text-secondary);
   font-size: var(--app-font-size-xs);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 .theme-gallery-card__description {
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .theme-gallery-card__metadata {
-  display: grid;
-  gap: 0.5rem;
-  margin: 0;
-  padding: 0.7rem 0.75rem;
-  border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
-  border-radius: 0.65rem;
-  background: var(--festival-card-subtle-surface);
-}
-.theme-gallery-card__metadata > div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-.theme-gallery-card__metadata dt {
-  color: var(--text-secondary);
-}
-.theme-gallery-card__metadata dd {
-  margin: 0;
-}
-.theme-gallery-card__footer {
-  justify-content: space-between;
   flex-wrap: wrap;
-  gap: 0.75rem;
-  padding-top: 0.9rem;
-  border-top: 1px solid var(--border-color);
-}
-.theme-system-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
+  gap: 0.3rem 0.65rem;
   color: var(--text-secondary);
+  font-size: var(--app-font-size-xs);
   font-weight: 600;
 }
+.theme-gallery-card__mode {
+  gap: 0.3rem;
+}
 .theme-row-actions {
-  display: flex;
-  align-items: center;
   flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 0.5rem;
   min-width: 0;
 }
@@ -674,9 +719,10 @@ onMounted(loadCapabilities)
   flex: 0 1 auto;
 }
 .theme-delete-guidance {
-  flex-basis: 100%;
+  grid-column: 1 / -1;
   color: var(--text-secondary);
   font-size: var(--app-font-size-xs);
+  text-align: right;
 }
 .theme-overview-note {
   margin: 0;
@@ -712,14 +758,33 @@ onMounted(loadCapabilities)
     border-color: color-mix(in srgb, var(--festival-card-emphasis) 44%, var(--border-color));
     box-shadow: var(--festival-card-shadow);
   }
+  .theme-gallery-card__swatch:hover {
+    flex-grow: 1.8;
+  }
+  .theme-gallery-card__swatch:hover .theme-gallery-card__hex {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (hover: none), (pointer: coarse) {
+  .theme-gallery-card__hex {
+    font-size: 0.62rem;
+    opacity: 0.88;
+    transform: none;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .theme-gallery-card,
-  .theme-gallery-card::before {
+  .theme-gallery-card::before,
+  .theme-gallery-card__swatch,
+  .theme-gallery-card__hex {
     transition: none;
   }
   .theme-gallery-card:hover {
     transform: none;
+  }
+  .theme-gallery-card__swatch:hover {
+    flex-grow: 1;
   }
 }
 @media (max-width: 767.98px) {
@@ -730,16 +795,31 @@ onMounted(loadCapabilities)
   .theme-edit-dates {
     grid-template-columns: minmax(0, 1fr);
   }
+  .theme-gallery {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .theme-gallery-card {
+    aspect-ratio: auto;
+  }
+  .theme-gallery-card__palette {
+    min-height: 9rem;
+  }
+  .theme-gallery-card__footer {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
   .theme-row-actions :deep(.p-button) {
     flex: 1 1 100%;
     width: 100%;
   }
-  .theme-gallery-card__footer,
   .theme-row-actions {
     align-items: stretch;
   }
   .theme-row-actions {
     flex: 1 1 100%;
+  }
+  .theme-delete-guidance {
+    text-align: left;
   }
 }
 </style>
