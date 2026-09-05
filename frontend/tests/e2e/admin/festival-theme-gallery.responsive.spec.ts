@@ -1,8 +1,7 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { mockAdminCourseEndpoints, mockAdminNotificationEndpoints } from '../support/adminFixtures'
 import { JSON_HEADERS } from '../support/constants'
 import { buildJwt } from '../support/jwt'
-import { clickWhenVisible } from '../support/ui'
 
 const json = (value: unknown) => ({
   status: 200,
@@ -35,6 +34,48 @@ const viewports = [
   { label: 'tablet landscape', width: 1024, height: 768 },
   { label: 'desktop', width: 1440, height: 900 },
 ]
+
+const waitForStableDocument = async (page: Page) => {
+  let timeOrigin = await page.evaluate(() => performance.timeOrigin)
+  let stableSince = Date.now()
+
+  await expect
+    .poll(
+      async () => {
+        try {
+          const currentTimeOrigin = await page.evaluate(() => performance.timeOrigin)
+          if (currentTimeOrigin !== timeOrigin) {
+            timeOrigin = currentTimeOrigin
+            stableSince = Date.now()
+          }
+          return Date.now() - stableSince
+        } catch {
+          stableSince = Date.now()
+          return 0
+        }
+      },
+      { timeout: 5_000, intervals: [250] }
+    )
+    .toBeGreaterThanOrEqual(750)
+}
+
+const openFestivalThemePanel = async (page: Page) => {
+  const tab = page.getByRole('tab', { name: '節日主題管理', exact: true })
+  const gallery = page.getByTestId('theme-overview-gallery')
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await expect(tab).toBeVisible({ timeout: 10_000 })
+    try {
+      await tab.dispatchEvent('click')
+      await expect(gallery).toBeVisible({ timeout: 5_000 })
+      await waitForStableDocument(page)
+      await expect(gallery).toBeVisible({ timeout: 5_000 })
+      return
+    } catch (error) {
+      if (attempt === 3) throw error
+    }
+  }
+}
 
 test.describe('Admin › Festival Theme card gallery responsive contract', () => {
   test.beforeEach(async ({ page }) => {
@@ -77,7 +118,7 @@ test.describe('Admin › Festival Theme card gallery responsive contract', () =>
       await page.setViewportSize({ width: viewport.width, height: viewport.height })
       await page.emulateMedia({ reducedMotion: 'reduce' })
       await page.goto('/admin', { waitUntil: 'networkidle' })
-      await clickWhenVisible(page.getByRole('tab', { name: '節日主題管理', exact: true }))
+      await openFestivalThemePanel(page)
 
       const gallery = page.getByTestId('theme-overview-gallery')
       const cards = page.getByTestId('theme-overview-card')
