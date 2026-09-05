@@ -153,11 +153,12 @@
                   />
                   <template v-if="row.kind === 'festival'">
                     <Button
-                      class="theme-download-action"
+                      class="theme-download-action theme-card-edit-action"
                       :label="$t('編輯')"
                       icon="pi pi-pencil"
-                      severity="success"
+                      severity="secondary"
                       size="small"
+                      outlined
                       data-testid="festival-theme-edit"
                       @click="openEdit(row.theme)"
                     />
@@ -526,12 +527,49 @@ onMounted(loadCapabilities)
   --theme-card-border: #cbdad4;
 }
 .theme-gallery-card[data-theme-kind='festival'] {
-  --theme-card-surface: #17483f;
-  --theme-card-layer: #103a34;
+  --theme-card-surface: #426878;
+  --theme-card-layer: #365968;
   --theme-card-text: #f8f2e8;
   --theme-card-muted-text: #f5eedc;
   --theme-card-accent: #dec78e;
-  --theme-card-border: #294f47;
+  --theme-card-border: #293f52;
+}
+:global(
+  html[data-effective-theme='light']
+    .theme-gallery-card[data-theme-kind='festival']
+    .theme-card-edit-action.p-button
+),
+:global(
+  html[data-effective-theme='dark']
+    .theme-gallery-card[data-theme-kind='festival']
+    .theme-card-edit-action.p-button
+) {
+  border-color: rgba(248, 242, 232, 0.78) !important;
+  color: #f8f2e8 !important;
+}
+:global(
+  html[data-effective-theme='light']
+    .theme-gallery-card[data-theme-kind='festival']
+    .theme-card-edit-action.p-button:not(:disabled):hover
+),
+:global(
+  html[data-effective-theme='light']
+    .theme-gallery-card[data-theme-kind='festival']
+    .theme-card-edit-action.p-button:focus-visible
+),
+:global(
+  html[data-effective-theme='dark']
+    .theme-gallery-card[data-theme-kind='festival']
+    .theme-card-edit-action.p-button:not(:disabled):hover
+),
+:global(
+  html[data-effective-theme='dark']
+    .theme-gallery-card[data-theme-kind='festival']
+    .theme-card-edit-action.p-button:focus-visible
+) {
+  border-color: #d7edf5 !important;
+  color: #245368 !important;
+  background: #d7edf5 !important;
 }
 .theme-gallery-card::before {
   position: absolute;

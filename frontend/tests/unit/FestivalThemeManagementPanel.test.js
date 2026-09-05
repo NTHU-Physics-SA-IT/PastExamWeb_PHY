@@ -211,7 +211,7 @@ describe('FestivalThemeManagementPanel', () => {
       /\.theme-gallery-card\[data-theme-kind='classic'\][\s\S]{0,220}?--theme-card-surface: #eef6f2;/
     )
     expect(source).toMatch(
-      /\.theme-gallery-card\[data-theme-kind='festival'\][\s\S]{0,220}?--theme-card-surface: #17483f;/
+      /\.theme-gallery-card\[data-theme-kind='festival'\][\s\S]{0,220}?--theme-card-surface: #426878;/
     )
     expect(source).not.toContain('THEME_PALETTE')
     expect(source).not.toContain('themePalette')

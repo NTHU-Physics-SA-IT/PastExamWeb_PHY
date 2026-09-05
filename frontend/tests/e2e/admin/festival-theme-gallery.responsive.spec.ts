@@ -99,7 +99,7 @@ test.describe('Admin › Festival Theme card gallery responsive contract', () =>
         .evaluateAll((elements) =>
           elements.map((element) => getComputedStyle(element).backgroundColor)
         )
-      expect(modeColors).toEqual(['rgb(23, 72, 63)', 'rgb(238, 246, 242)'])
+      expect(modeColors).toEqual(['rgb(66, 104, 120)', 'rgb(238, 246, 242)'])
 
       await expect
         .poll(() =>
