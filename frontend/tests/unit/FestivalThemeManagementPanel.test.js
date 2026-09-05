@@ -132,10 +132,10 @@ function createWrapper() {
   })
 }
 
-function themeRows(wrapper, kind) {
+function themeCards(wrapper, kind) {
   return wrapper
-    .findAll('[data-testid="theme-overview-row"]')
-    .filter((row) => row.attributes('data-theme-kind') === kind)
+    .findAll('[data-testid="theme-overview-card"]')
+    .filter((card) => card.attributes('data-theme-kind') === kind)
 }
 
 describe('FestivalThemeManagementPanel', () => {
@@ -149,8 +149,8 @@ describe('FestivalThemeManagementPanel', () => {
   })
 
   it('maps editable theme actions to the approved Christmas button roles', () => {
-    expect(source.match(/theme-download-action/g)).toHaveLength(4)
-    expect(source.match(/theme-admin-delete-action/g)).toHaveLength(2)
+    expect(source.match(/theme-download-action/g)).toHaveLength(2)
+    expect(source.match(/theme-admin-delete-action/g)).toHaveLength(1)
   })
 
   it('maps the edit dialog footer to the preview and download button treatments', () => {
@@ -178,7 +178,7 @@ describe('FestivalThemeManagementPanel', () => {
     expect(wrapper.find('[data-testid="theme-management-loading"]').exists()).toBe(false)
   })
 
-  it('renders one unified five-column overview with the built-in classic row', async () => {
+  it('renders one semantic card gallery with the built-in classic theme', async () => {
     const wrapper = createWrapper()
     await flushPromises()
 
@@ -190,39 +190,39 @@ describe('FestivalThemeManagementPanel', () => {
     expect(wrapper.get('[data-testid="theme-overview-panel"] h3').text()).toBe('主題一覽')
     expect(wrapper.find('[data-testid="general-theme-panel"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="festival-theme-panel"]').exists()).toBe(false)
-    expect(wrapper.findAll('.theme-table')).toHaveLength(1)
-    expect(
-      wrapper
-        .get('[data-testid="theme-overview-table"]')
-        .findAll('th')
-        .map((node) => node.text())
-    ).toEqual(['主題名稱', '主題簡介', '深淺模式', '狀態', '操作'])
+    expect(wrapper.find('.theme-table').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="theme-overview-mobile-card"]').exists()).toBe(false)
+    const gallery = wrapper.get('[data-testid="theme-overview-gallery"]')
+    expect(gallery.element.tagName).toBe('DIV')
+    expect(gallery.findAll(':scope > article')).toHaveLength(2)
 
-    const classicRow = themeRows(wrapper, 'classic')[0]
-    expect(classicRow.text()).toContain('經典模式')
-    expect(classicRow.text()).not.toContain('一般主題')
-    expect(classicRow.text()).toContain('最初設計的模式，有深淺色可供使用者切換。')
-    expect(classicRow.text()).toContain('有')
-    expect(classicRow.text()).toContain('已啟用')
-    expect(classicRow.text()).toContain('系統內建')
-    expect(classicRow.find('[data-testid="festival-theme-edit"]').exists()).toBe(false)
-    expect(classicRow.find('[data-testid="festival-theme-delete"]').exists()).toBe(false)
+    const classicCard = themeCards(wrapper, 'classic')[0]
+    expect(classicCard.element.tagName).toBe('ARTICLE')
+    expect(classicCard.attributes('aria-label')).toBe('經典模式')
+    expect(classicCard.text()).toContain('經典模式')
+    expect(classicCard.text()).not.toContain('一般主題')
+    expect(classicCard.text()).toContain('最初設計的模式，有深淺色可供使用者切換。')
+    expect(classicCard.text()).toContain('有')
+    expect(classicCard.text()).toContain('已啟用')
+    expect(classicCard.text()).toContain('系統內建')
+    expect(classicCard.find('[data-testid="festival-theme-edit"]').exists()).toBe(false)
+    expect(classicCard.find('[data-testid="festival-theme-delete"]').exists()).toBe(false)
   })
 
   it('renders the production Christmas row inactive beneath the active classic row', async () => {
     const wrapper = createWrapper()
     await flushPromises()
 
-    const rows = wrapper.findAll('[data-testid="theme-overview-row"]')
-    expect(rows).toHaveLength(2)
-    expect(rows[0].text()).toContain('經典模式')
-    expect(rows[0].text()).toContain('已啟用')
-    expect(rows[1].text()).toContain('聖誕模式')
-    expect(rows[1].text()).toContain('這是專門為聖誕節準備的主題，只會在聖誕節使用。')
-    expect(rows[1].text()).toContain('無')
-    expect(rows[1].get('[data-testid="festival-theme-activation"]').text()).toBe('啟用')
-    expect(rows[1].get('[data-testid="festival-theme-edit"]').text()).toBe('編輯')
-    expect(rows[1].get('[data-testid="festival-theme-delete"]').text()).toBe('刪除')
+    const cards = wrapper.findAll('[data-testid="theme-overview-card"]')
+    expect(cards).toHaveLength(2)
+    expect(cards[0].text()).toContain('經典模式')
+    expect(cards[0].text()).toContain('已啟用')
+    expect(cards[1].text()).toContain('聖誕模式')
+    expect(cards[1].text()).toContain('這是專門為聖誕節準備的主題，只會在聖誕節使用。')
+    expect(cards[1].text()).toContain('無')
+    expect(cards[1].get('[data-testid="festival-theme-activation"]').text()).toBe('啟用')
+    expect(cards[1].get('[data-testid="festival-theme-edit"]').text()).toBe('編輯')
+    expect(cards[1].get('[data-testid="festival-theme-delete"]').text()).toBe('刪除')
     expect(wrapper.find('[data-testid="festival-theme-empty-note"]').exists()).toBe(false)
   })
 
@@ -231,7 +231,7 @@ describe('FestivalThemeManagementPanel', () => {
     const wrapper = createWrapper()
     await flushPromises()
 
-    expect(wrapper.findAll('[data-testid="theme-overview-row"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-testid="theme-overview-card"]')).toHaveLength(1)
     expect(wrapper.get('[data-testid="festival-theme-empty-note"]').text()).toBe(
       '目前尚未建立節日主題'
     )
@@ -243,11 +243,8 @@ describe('FestivalThemeManagementPanel', () => {
     await flushPromises()
 
     expect(
-      wrapper.findAll('[data-testid="theme-overview-row"]').map((row) => row.find('strong').text())
-    ).toEqual(['聖誕節主題', '經典模式', '春節主題', '萬聖節主題'])
-    expect(
       wrapper
-        .findAll('[data-testid="theme-overview-mobile-card"]')
+        .findAll('[data-testid="theme-overview-card"]')
         .map((card) => card.find('strong').text())
     ).toEqual(['聖誕節主題', '經典模式', '春節主題', '萬聖節主題'])
   })
@@ -263,7 +260,9 @@ describe('FestivalThemeManagementPanel', () => {
     await flushPromises()
 
     expect(
-      wrapper.findAll('[data-testid="theme-overview-row"]').map((row) => row.find('strong').text())
+      wrapper
+        .findAll('[data-testid="theme-overview-card"]')
+        .map((card) => card.find('strong').text())
     ).toEqual(['經典模式', '春節主題', '聖誕節主題', '萬聖節主題'])
   })
 
@@ -278,7 +277,9 @@ describe('FestivalThemeManagementPanel', () => {
     await flushPromises()
 
     expect(
-      wrapper.findAll('[data-testid="theme-overview-row"]').map((row) => row.find('strong').text())
+      wrapper
+        .findAll('[data-testid="theme-overview-card"]')
+        .map((card) => card.find('strong').text())
     ).toEqual(['春節主題', '聖誕節主題', '經典模式', '萬聖節主題'])
     expect(wrapper.get('[data-testid="multiple-active-theme-violation"]').text()).toContain(
       '同時標記多個已啟用主題'
@@ -306,19 +307,19 @@ describe('FestivalThemeManagementPanel', () => {
     expect(wrapper.get('[data-testid="festival-theme-preview-indicator"]').text()).toBe(
       'UI 預覽模式'
     )
-    const rows = themeRows(wrapper, 'festival')
-    expect(rows).toHaveLength(2)
-    expect(rows[0].text()).toContain('聖誕節主題')
-    expect(rows[0].text()).toContain('冬季節慶視覺主題')
-    expect(rows[0].text()).toContain('有')
-    expect(rows[0].text()).toContain('已啟用')
-    expect(rows[1].text()).toContain('春節主題')
-    expect(rows[1].text()).toContain('農曆新年節慶視覺主題')
-    expect(rows[1].text()).toContain('無')
-    expect(rows[1].get('[data-testid="festival-theme-activation"]').text()).toBe('啟用')
-    for (const row of rows) {
-      expect(row.get('[data-testid="festival-theme-edit"]').text()).toBe('編輯')
-      expect(row.get('[data-testid="festival-theme-delete"]').text()).toBe('刪除')
+    const cards = themeCards(wrapper, 'festival')
+    expect(cards).toHaveLength(2)
+    expect(cards[0].text()).toContain('聖誕節主題')
+    expect(cards[0].text()).toContain('冬季節慶視覺主題')
+    expect(cards[0].text()).toContain('有')
+    expect(cards[0].text()).toContain('已啟用')
+    expect(cards[1].text()).toContain('春節主題')
+    expect(cards[1].text()).toContain('農曆新年節慶視覺主題')
+    expect(cards[1].text()).toContain('無')
+    expect(cards[1].get('[data-testid="festival-theme-activation"]').text()).toBe('啟用')
+    for (const card of cards) {
+      expect(card.get('[data-testid="festival-theme-edit"]').text()).toBe('編輯')
+      expect(card.get('[data-testid="festival-theme-delete"]').text()).toBe('刪除')
     }
   })
 
@@ -352,17 +353,17 @@ describe('FestivalThemeManagementPanel', () => {
     expect(firstConfirmation.message).toContain('春節主題')
     expect(firstConfirmation.rejectLabel).toBe('取消')
     expect(firstConfirmation.acceptLabel).toBe('確認刪除')
-    expect(themeRows(wrapper, 'festival')).toHaveLength(2)
+    expect(themeCards(wrapper, 'festival')).toHaveLength(2)
 
     await firstConfirmation.accept()
     await flushPromises()
-    expect(themeRows(wrapper, 'festival')).toHaveLength(1)
+    expect(themeCards(wrapper, 'festival')).toHaveLength(1)
     expect(mocks.removeAdmin).not.toHaveBeenCalled()
 
     wrapper.unmount()
     const reloadedWrapper = createWrapper()
     await flushPromises()
-    expect(themeRows(reloadedWrapper, 'festival')).toHaveLength(2)
+    expect(themeCards(reloadedWrapper, 'festival')).toHaveLength(2)
   })
 
   it('switches preview activation in memory without calling the real activation endpoint', async () => {
@@ -370,14 +371,14 @@ describe('FestivalThemeManagementPanel', () => {
     const wrapper = createWrapper()
     await flushPromises()
 
-    const springRow = themeRows(wrapper, 'festival')[1]
-    await springRow.get('[data-testid="festival-theme-activation"]').trigger('click')
+    const springCard = themeCards(wrapper, 'festival')[1]
+    await springCard.get('[data-testid="festival-theme-activation"]').trigger('click')
     await flushPromises()
-    const rows = wrapper.findAll('[data-testid="theme-overview-row"]')
-    expect(rows[0].text()).toContain('春節主題')
-    expect(rows[0].text()).toContain('已啟用')
-    expect(rows[1].text()).toContain('經典模式')
-    expect(rows[2].text()).toContain('聖誕節主題')
+    const cards = wrapper.findAll('[data-testid="theme-overview-card"]')
+    expect(cards[0].text()).toContain('春節主題')
+    expect(cards[0].text()).toContain('已啟用')
+    expect(cards[1].text()).toContain('經典模式')
+    expect(cards[2].text()).toContain('聖誕節主題')
     expect(mocks.activateAdmin).not.toHaveBeenCalled()
   })
 
@@ -391,7 +392,7 @@ describe('FestivalThemeManagementPanel', () => {
     await flushPromises()
     expect(mocks.activateAdmin).toHaveBeenCalledWith('general')
     expect(wrapper.get('[data-testid="classic-theme-active-status"]').text()).toBe('已啟用')
-    expect(themeRows(wrapper, 'classic')[0].text()).toContain('系統內建')
+    expect(themeCards(wrapper, 'classic')[0].text()).toContain('系統內建')
   })
 
   it('activates production Christmas once, applies the shared effective theme, and sorts it first', async () => {
@@ -404,14 +405,14 @@ describe('FestivalThemeManagementPanel', () => {
     const wrapper = createWrapper()
     await flushPromises()
 
-    await themeRows(wrapper, 'festival')[0]
+    await themeCards(wrapper, 'festival')[0]
       .get('[data-testid="festival-theme-activation"]')
       .trigger('click')
     await flushPromises()
 
     expect(mocks.activateAdmin).toHaveBeenCalledOnce()
     expect(mocks.activateAdmin).toHaveBeenCalledWith('christmas')
-    expect(wrapper.findAll('[data-testid="theme-overview-row"]')[0].text()).toContain('聖誕模式')
+    expect(wrapper.findAll('[data-testid="theme-overview-card"]')[0].text()).toContain('聖誕模式')
     expect(wrapper.get('[data-testid="festival-theme-active-status"]').text()).toBe('已啟用')
   })
 
@@ -426,17 +427,17 @@ describe('FestivalThemeManagementPanel', () => {
     const wrapper = createWrapper()
     await flushPromises()
 
-    const rows = themeRows(wrapper, 'festival')
-    expect(rows).toHaveLength(2)
-    expect(rows[0].text()).toContain('春日主題')
-    expect(rows[0].text()).toContain('有')
-    expect(rows[0].text()).toContain('已啟用')
-    expect(rows[1].text()).toContain('無')
-    await rows[1].get('[data-testid="festival-theme-activation"]').trigger('click')
+    const cards = themeCards(wrapper, 'festival')
+    expect(cards).toHaveLength(2)
+    expect(cards[0].text()).toContain('春日主題')
+    expect(cards[0].text()).toContain('有')
+    expect(cards[0].text()).toContain('已啟用')
+    expect(cards[1].text()).toContain('無')
+    await cards[1].get('[data-testid="festival-theme-activation"]').trigger('click')
     await flushPromises()
     expect(mocks.activateAdmin).toHaveBeenCalledWith('mid_autumn')
-    expect(themeRows(wrapper, 'festival')[0].text()).toContain('中秋主題')
-    expect(themeRows(wrapper, 'festival')[0].text()).toContain('已啟用')
+    expect(themeCards(wrapper, 'festival')[0].text()).toContain('中秋主題')
+    expect(themeCards(wrapper, 'festival')[0].text()).toContain('已啟用')
   })
 
   it('opens the edit form, validates its time range, and reports persistence failure', async () => {
@@ -473,7 +474,7 @@ describe('FestivalThemeManagementPanel', () => {
     expect(request.acceptLabel).toBe('確認刪除')
     await request.accept()
     await flushPromises()
-    expect(themeRows(wrapper, 'festival')).toHaveLength(2)
+    expect(themeCards(wrapper, 'festival')).toHaveLength(2)
     expect(wrapper.get('[data-testid="theme-management-action-error"]').text()).toContain(
       '刪除節日主題失敗'
     )
@@ -510,7 +511,7 @@ describe('FestivalThemeManagementPanel', () => {
     await request.accept()
     await flushPromises()
     expect(mocks.removeAdmin).toHaveBeenCalledWith('christmas')
-    expect(themeRows(wrapper, 'festival')).toHaveLength(0)
+    expect(themeCards(wrapper, 'festival')).toHaveLength(0)
 
     mocks.getAdmin.mockResolvedValueOnce({
       data: {

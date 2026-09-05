@@ -61,150 +61,104 @@
           </div>
         </div>
 
-        <div class="theme-table-wrap" data-testid="theme-overview-table">
-          <table class="theme-table admin-data-table">
-            <thead>
-              <tr>
-                <th>{{ $t('主題名稱') }}</th>
-                <th>{{ $t('主題簡介') }}</th>
-                <th>{{ $t('深淺模式') }}</th>
-                <th>{{ $t('狀態') }}</th>
-                <th>{{ $t('操作') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="row in themeOverviewRows"
-                :key="row.id"
-                data-testid="theme-overview-row"
-                :data-theme-kind="row.kind"
-              >
-                <td>
-                  <strong>{{ row.name }}</strong>
-                </td>
-                <td>{{ row.description }}</td>
-                <td>
-                  <Tag :severity="row.supportsColorModes ? 'info' : 'secondary'">{{
-                    row.supportsColorModes ? $t('有') : $t('無')
-                  }}</Tag>
-                </td>
-                <td>
-                  <Tag
-                    v-if="row.isActive"
-                    severity="success"
-                    :data-testid="
-                      row.kind === 'classic'
-                        ? 'classic-theme-active-status'
-                        : 'festival-theme-active-status'
-                    "
-                    >{{ $t('已啟用') }}</Tag
-                  >
-                  <Button
-                    v-else
-                    class="theme-download-action"
-                    :label="$t('啟用')"
-                    icon="pi pi-power-off"
-                    severity="success"
-                    size="small"
-                    :disabled="Boolean(activatingThemeId)"
-                    :loading="activatingThemeId === row.id"
-                    :data-testid="
-                      row.kind === 'classic'
-                        ? 'classic-theme-activation'
-                        : 'festival-theme-activation'
-                    "
-                    @click="activateTheme(row.id)"
-                  />
-                </td>
-                <td>
-                  <span v-if="row.kind === 'classic'" class="theme-system-label"
-                    ><i class="pi pi-lock" aria-hidden="true" />{{ $t('系統內建') }}</span
-                  >
-                  <div v-else class="theme-row-actions">
-                    <Button
-                      class="theme-download-action"
-                      :label="$t('編輯')"
-                      icon="pi pi-pencil"
-                      severity="success"
-                      size="small"
-                      data-testid="festival-theme-edit"
-                      @click="openEdit(row.theme)"
-                    />
-                    <Button
-                      class="theme-admin-delete-action"
-                      :label="$t('刪除')"
-                      icon="pi pi-trash"
-                      severity="danger"
-                      outlined
-                      size="small"
-                      :disabled="deletingThemeId === row.id || row.isActive"
-                      :title="row.isActive ? $t('請先停用此主題後再刪除') : undefined"
-                      data-testid="festival-theme-delete"
-                      @click="confirmDelete(row.theme)"
-                    />
-                    <small v-if="row.isActive" class="theme-delete-guidance">{{
-                      $t('請先停用此主題後再刪除')
-                    }}</small>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="theme-mobile-list">
+        <div class="theme-gallery" data-testid="theme-overview-gallery">
           <article
             v-for="row in themeOverviewRows"
             :key="row.id"
-            class="theme-mobile-card"
-            data-testid="theme-overview-mobile-card"
+            class="theme-gallery-card"
+            :class="{
+              'theme-gallery-card--active': row.isActive,
+              'theme-gallery-card--inactive': !row.isActive,
+            }"
+            data-testid="theme-overview-card"
             :data-theme-kind="row.kind"
+            :aria-label="row.name"
           >
-            <header>
-              <strong>{{ row.name }}</strong>
-              <Tag v-if="row.isActive" severity="success">{{ $t('已啟用') }}</Tag>
-              <Button
-                v-else
-                class="theme-download-action"
-                :label="$t('啟用')"
-                icon="pi pi-power-off"
-                severity="success"
-                size="small"
-                :disabled="Boolean(activatingThemeId)"
-                :loading="activatingThemeId === row.id"
-                @click="activateTheme(row.id)"
-              />
+            <header class="theme-gallery-card__header">
+              <div class="theme-gallery-card__identity">
+                <i
+                  :class="row.kind === 'classic' ? 'pi pi-palette' : 'pi pi-sparkles'"
+                  aria-hidden="true"
+                />
+                <div>
+                  <strong class="theme-gallery-card__title">{{ row.name }}</strong>
+                  <span class="theme-gallery-card__kind">{{
+                    row.kind === 'classic' ? $t('系統內建') : $t('節日主題')
+                  }}</span>
+                </div>
+              </div>
+              <Tag
+                :severity="row.isActive ? 'success' : 'secondary'"
+                :data-testid="
+                  row.isActive
+                    ? row.kind === 'classic'
+                      ? 'classic-theme-active-status'
+                      : 'festival-theme-active-status'
+                    : undefined
+                "
+                >{{ row.isActive ? $t('已啟用') : $t('未啟用') }}</Tag
+              >
             </header>
-            <p>{{ row.description }}</p>
-            <dl>
+
+            <p class="theme-gallery-card__description">{{ row.description }}</p>
+
+            <dl class="theme-gallery-card__metadata">
               <div>
                 <dt>{{ $t('深淺模式') }}</dt>
-                <dd>{{ row.supportsColorModes ? $t('有') : $t('無') }}</dd>
-              </div>
-              <div v-if="row.kind === 'classic'">
-                <dt>{{ $t('操作') }}</dt>
-                <dd>{{ $t('系統內建') }}</dd>
+                <dd>
+                  <Tag :severity="row.supportsColorModes ? 'info' : 'secondary'">{{
+                    row.supportsColorModes ? $t('有') : $t('無')
+                  }}</Tag>
+                </dd>
               </div>
             </dl>
-            <footer v-if="row.kind === 'festival'" class="theme-row-actions">
-              <Button
-                class="theme-download-action"
-                :label="$t('編輯')"
-                icon="pi pi-pencil"
-                severity="success"
-                @click="openEdit(row.theme)"
-              />
-              <Button
-                class="theme-admin-delete-action"
-                :label="$t('刪除')"
-                icon="pi pi-trash"
-                severity="danger"
-                outlined
-                :disabled="deletingThemeId === row.id || row.isActive"
-                :title="row.isActive ? $t('請先停用此主題後再刪除') : undefined"
-                @click="confirmDelete(row.theme)"
-              />
-              <small v-if="row.isActive" class="theme-delete-guidance">{{
+
+            <footer class="theme-gallery-card__footer">
+              <span v-if="row.kind === 'classic'" class="theme-system-label"
+                ><i class="pi pi-lock" aria-hidden="true" />{{ $t('系統內建') }}</span
+              >
+              <div class="theme-row-actions">
+                <Button
+                  v-if="!row.isActive"
+                  class="theme-download-action"
+                  :label="$t('啟用')"
+                  icon="pi pi-power-off"
+                  severity="success"
+                  size="small"
+                  :disabled="Boolean(activatingThemeId)"
+                  :loading="activatingThemeId === row.id"
+                  :data-testid="
+                    row.kind === 'classic'
+                      ? 'classic-theme-activation'
+                      : 'festival-theme-activation'
+                  "
+                  @click="activateTheme(row.id)"
+                />
+                <template v-if="row.kind === 'festival'">
+                  <Button
+                    class="theme-download-action"
+                    :label="$t('編輯')"
+                    icon="pi pi-pencil"
+                    severity="success"
+                    size="small"
+                    data-testid="festival-theme-edit"
+                    @click="openEdit(row.theme)"
+                  />
+                  <Button
+                    class="theme-admin-delete-action"
+                    :label="$t('刪除')"
+                    icon="pi pi-trash"
+                    severity="danger"
+                    outlined
+                    size="small"
+                    :disabled="deletingThemeId === row.id || row.isActive"
+                    :title="row.isActive ? $t('請先停用此主題後再刪除') : undefined"
+                    data-testid="festival-theme-delete"
+                    @click="confirmDelete(row.theme)"
+                  />
+                </template>
+              </div>
+              <small v-if="row.kind === 'festival' && row.isActive" class="theme-delete-guidance">{{
                 $t('請先停用此主題後再刪除')
               }}</small>
             </footer>
@@ -537,7 +491,7 @@ onMounted(loadCapabilities)
   margin: 0;
 }
 .festival-theme-management__intro p,
-.theme-mobile-card p {
+.theme-gallery-card__description {
   margin: 0;
   color: var(--text-secondary);
   line-height: 1.6;
@@ -573,48 +527,75 @@ onMounted(loadCapabilities)
   gap: 1rem;
   min-width: 0;
 }
-.theme-table-wrap {
-  overflow-x: auto;
-  border: 1px solid var(--border-color);
-  border-radius: 0.75rem;
+.theme-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: 1rem;
 }
-.theme-table {
-  width: 100%;
-  min-width: 62rem;
-  border-collapse: collapse;
-  table-layout: fixed;
+.theme-gallery-card {
+  display: grid;
+  grid-template-rows: auto minmax(4.8rem, 1fr) auto auto;
+  gap: 1rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.9rem;
   background: var(--bg-primary);
 }
-.theme-table th,
-.theme-table td {
-  padding: 0.9rem 1rem;
-  border-bottom: 1px solid var(--border-color);
-  text-align: left;
-  vertical-align: middle;
+.theme-gallery-card__header,
+.theme-gallery-card__identity,
+.theme-gallery-card__footer {
+  display: flex;
+  align-items: flex-start;
 }
-.theme-table th {
-  background: var(--bg-secondary);
+.theme-gallery-card__header {
+  justify-content: space-between;
+  gap: 1rem;
+}
+.theme-gallery-card__identity {
+  gap: 0.75rem;
+  min-width: 0;
+}
+.theme-gallery-card__identity > i {
+  margin-top: 0.15rem;
+  color: var(--primary-color);
+}
+.theme-gallery-card__identity > div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.theme-gallery-card__title {
+  overflow-wrap: anywhere;
+}
+.theme-gallery-card__kind {
   color: var(--text-secondary);
-  font-size: var(--app-font-size-sm);
-  font-weight: 700;
+  font-size: var(--app-font-size-xs);
+  font-weight: 600;
 }
-.theme-table tr:last-child td {
-  border-bottom: 0;
+.theme-gallery-card__metadata {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
 }
-.theme-table th:nth-child(1) {
-  width: 16%;
+.theme-gallery-card__metadata > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
 }
-.theme-table th:nth-child(2) {
-  width: 31%;
+.theme-gallery-card__metadata dt {
+  color: var(--text-secondary);
 }
-.theme-table th:nth-child(3) {
-  width: 12%;
+.theme-gallery-card__metadata dd {
+  margin: 0;
 }
-.theme-table th:nth-child(4) {
-  width: 12%;
-}
-.theme-table th:nth-child(5) {
-  width: 29%;
+.theme-gallery-card__footer {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border-color);
 }
 .theme-system-label {
   display: inline-flex;
@@ -632,42 +613,6 @@ onMounted(loadCapabilities)
 .theme-delete-guidance {
   color: var(--text-secondary);
   font-size: var(--app-font-size-xs);
-}
-.theme-mobile-list {
-  display: none;
-  gap: 0.75rem;
-}
-.theme-mobile-card {
-  display: none;
-  gap: 0.8rem;
-  padding: 1rem;
-  border: 1px solid var(--border-color);
-  border-radius: 0.75rem;
-  background: var(--bg-primary);
-}
-.theme-mobile-card header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-.theme-mobile-card dl {
-  display: grid;
-  gap: 0.5rem;
-  margin: 0;
-}
-.theme-mobile-card dl div {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-}
-.theme-mobile-card dt {
-  color: var(--text-secondary);
-}
-.theme-mobile-card dd {
-  margin: 0;
-  font-weight: 600;
-  text-align: right;
 }
 .theme-overview-note {
   margin: 0;
@@ -697,15 +642,6 @@ onMounted(loadCapabilities)
   gap: 0.75rem;
   padding-top: 0.75rem;
 }
-@media (max-width: 1399.98px) {
-  .theme-table-wrap {
-    display: none;
-  }
-  .theme-mobile-card,
-  .theme-mobile-list {
-    display: grid;
-  }
-}
 @media (max-width: 640px) {
   .festival-theme-management__error {
     align-items: stretch;
@@ -715,6 +651,13 @@ onMounted(loadCapabilities)
     grid-template-columns: minmax(0, 1fr);
   }
   .theme-row-actions :deep(.p-button) {
+    flex: 1 1 100%;
+  }
+  .theme-gallery-card__footer,
+  .theme-row-actions {
+    align-items: stretch;
+  }
+  .theme-row-actions {
     flex: 1 1 100%;
   }
 }
