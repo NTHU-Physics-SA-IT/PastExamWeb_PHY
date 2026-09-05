@@ -83,7 +83,10 @@
               aria-hidden="true"
             >
               <i
-                :class="row.kind === 'classic' ? 'pi pi-palette' : 'pi pi-sparkles'"
+                :class="
+                  row.kind === 'festival' ? 'pi pi-bell' : isDarkTheme ? 'pi pi-moon' : 'pi pi-sun'
+                "
+                data-testid="theme-mode-icon"
                 aria-hidden="true"
               />
             </div>
@@ -281,7 +284,7 @@ import {
 } from '@/utils/festivalThemePreview'
 
 const { locale, t } = useI18n()
-const { applyActiveSiteTheme } = useTheme()
+const { isDarkTheme, applyActiveSiteTheme } = useTheme()
 const loading = ref(true)
 const error = ref('')
 const activationError = ref('')
@@ -525,6 +528,18 @@ onMounted(loadCapabilities)
   --theme-card-muted-text: #5d6f6a;
   --theme-card-accent: #176f7b;
   --theme-card-border: #cbdad4;
+}
+:global(
+  html[data-effective-theme='dark']
+    .festival-theme-management
+    .theme-gallery-card[data-theme-kind='classic']
+) {
+  --theme-card-surface: var(--bg-secondary);
+  --theme-card-layer: var(--bg-primary);
+  --theme-card-text: var(--text-primary);
+  --theme-card-muted-text: var(--text-secondary);
+  --theme-card-accent: var(--title-gradient-start);
+  --theme-card-border: var(--border-color);
 }
 .theme-gallery-card[data-theme-kind='festival'] {
   --theme-card-surface: #426878;

@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import FestivalThemeManagementPanel from '@/components/admin/FestivalThemeManagementPanel.vue'
 import source from '@/components/admin/FestivalThemeManagementPanel.vue?raw'
 import { messages } from '@/i18n/messages'
+import { useTheme } from '@/utils/useTheme'
 import {
   FESTIVAL_THEME_PREVIEW_QUERY_KEY,
   createFestivalThemePreviewRows,
@@ -14,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   activateAdmin: vi.fn(),
   updateAdmin: vi.fn(),
 }))
+
+const themeState = useTheme()
 
 vi.mock('@/api', () => ({
   themeManagementService: {
@@ -137,6 +141,8 @@ function themeCards(wrapper, kind) {
 describe('FestivalThemeManagementPanel', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/admin')
+    themeState.isDarkTheme.value = false
+    themeState.applyActiveSiteTheme('general')
     mocks.getAdmin.mockReset().mockResolvedValue({ data: phaseOneCapabilities })
     mocks.activateAdmin.mockReset()
     mocks.updateAdmin.mockReset()
@@ -211,11 +217,41 @@ describe('FestivalThemeManagementPanel', () => {
       /\.theme-gallery-card\[data-theme-kind='classic'\][\s\S]{0,220}?--theme-card-surface: #eef6f2;/
     )
     expect(source).toMatch(
+      /:global\([\s\S]{0,180}?html\[data-effective-theme='dark'\][\s\S]{0,180}?\.festival-theme-management[\s\S]{0,180}?\.theme-gallery-card\[data-theme-kind='classic'\][\s\S]{0,80}?\) \{[\s\S]{0,420}?--theme-card-surface: var\(--bg-secondary\);[\s\S]*?--theme-card-layer: var\(--bg-primary\);[\s\S]*?--theme-card-text: var\(--text-primary\);[\s\S]*?--theme-card-muted-text: var\(--text-secondary\);[\s\S]*?--theme-card-border: var\(--border-color\);/
+    )
+    expect(source).toMatch(
       /\.theme-gallery-card\[data-theme-kind='festival'\][\s\S]{0,220}?--theme-card-surface: #426878;/
     )
     expect(source).not.toContain('THEME_PALETTE')
     expect(source).not.toContain('themePalette')
     expect(source).not.toContain('linear-gradient')
+  })
+
+  it('uses the Navbar PrimeIcons as decorative mode identity without parallel theme state', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+
+    const classicIcon = themeCards(wrapper, 'classic')[0].get('[data-testid="theme-mode-icon"]')
+    const festivalIcon = themeCards(wrapper, 'festival')[0].get('[data-testid="theme-mode-icon"]')
+
+    expect(classicIcon.classes()).toEqual(expect.arrayContaining(['pi', 'pi-sun']))
+    expect(festivalIcon.classes()).toEqual(expect.arrayContaining(['pi', 'pi-bell']))
+    for (const icon of [classicIcon, festivalIcon]) {
+      expect(icon.element.tagName).toBe('I')
+      expect(icon.attributes('aria-hidden')).toBe('true')
+      expect(icon.attributes('tabindex')).toBeUndefined()
+      expect(icon.attributes('role')).toBeUndefined()
+    }
+
+    themeState.isDarkTheme.value = true
+    await nextTick()
+    expect(classicIcon.classes()).toEqual(expect.arrayContaining(['pi', 'pi-moon']))
+    expect(classicIcon.classes()).not.toContain('pi-sun')
+
+    expect(source).toContain('const { isDarkTheme, applyActiveSiteTheme } = useTheme()')
+    expect(source).not.toContain('isDarkForCard')
+    expect(source).not.toContain('@click="handleToggleTheme"')
+    expect(source).not.toContain('notificationStore')
   })
 
   it('maps the edit dialog footer to the preview and download button treatments', () => {
