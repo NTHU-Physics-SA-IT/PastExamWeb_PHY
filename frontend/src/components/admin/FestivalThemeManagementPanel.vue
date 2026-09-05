@@ -32,12 +32,12 @@
 
     <div v-else class="festival-theme-management__sections" data-testid="theme-management-sections">
       <Message
-        v-if="activationError || mutationError"
+        v-if="activationError"
         severity="error"
         :closable="false"
         data-testid="theme-management-action-error"
       >
-        {{ activationError || mutationError }}
+        {{ activationError }}
       </Message>
       <Message
         v-if="multipleActiveThemeViolation"
@@ -61,46 +61,85 @@
           </div>
         </div>
 
-        <div class="theme-table-wrap" data-testid="theme-overview-table">
-          <table class="theme-table admin-data-table">
-            <thead>
-              <tr>
-                <th>{{ $t('主題名稱') }}</th>
-                <th>{{ $t('主題簡介') }}</th>
-                <th>{{ $t('深淺模式') }}</th>
-                <th>{{ $t('狀態') }}</th>
-                <th>{{ $t('操作') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="row in themeOverviewRows"
-                :key="row.id"
-                data-testid="theme-overview-row"
-                :data-theme-kind="row.kind"
-              >
-                <td>
-                  <strong>{{ row.name }}</strong>
-                </td>
-                <td>{{ row.description }}</td>
-                <td>
-                  <Tag :severity="row.supportsColorModes ? 'info' : 'secondary'">{{
-                    row.supportsColorModes ? $t('有') : $t('無')
-                  }}</Tag>
-                </td>
-                <td>
-                  <Tag
-                    v-if="row.isActive"
-                    severity="success"
-                    :data-testid="
-                      row.kind === 'classic'
+        <div class="theme-gallery" data-testid="theme-overview-gallery">
+          <article
+            v-for="row in themeOverviewRows"
+            :key="row.id"
+            class="theme-gallery-card"
+            :class="{
+              'theme-gallery-card--active': row.isActive,
+              'theme-gallery-card--inactive': !row.isActive,
+            }"
+            data-testid="theme-overview-card"
+            :data-theme-kind="row.kind"
+            :aria-label="row.name"
+            :aria-current="row.isActive ? 'true' : undefined"
+            :aria-describedby="`theme-card-details-${row.id}`"
+            tabindex="0"
+          >
+            <div
+              class="theme-gallery-card__visual"
+              data-testid="theme-mode-visual"
+              aria-hidden="true"
+            >
+              <i
+                :class="
+                  row.kind === 'festival' ? 'pi pi-bell' : isDarkTheme ? 'pi pi-moon' : 'pi pi-sun'
+                "
+                data-testid="theme-mode-icon"
+                aria-hidden="true"
+              />
+            </div>
+
+            <footer class="theme-gallery-card__footer">
+              <header class="theme-gallery-card__header">
+                <div class="theme-gallery-card__identity">
+                  <i
+                    :class="row.kind === 'classic' ? 'pi pi-palette' : 'pi pi-sparkles'"
+                    aria-hidden="true"
+                  />
+                  <strong class="theme-gallery-card__title">{{ row.name }}</strong>
+                </div>
+                <Tag
+                  :severity="row.isActive ? 'success' : 'secondary'"
+                  :data-testid="
+                    row.isActive
+                      ? row.kind === 'classic'
                         ? 'classic-theme-active-status'
                         : 'festival-theme-active-status'
-                    "
-                    >{{ $t('已啟用') }}</Tag
+                      : undefined
+                  "
+                  >{{ row.isActive ? $t('已啟用') : $t('未啟用') }}</Tag
+                >
+              </header>
+
+              <div
+                :id="`theme-card-details-${row.id}`"
+                class="theme-gallery-card__details"
+                data-testid="theme-card-details"
+              >
+                <p class="theme-gallery-card__description" :title="row.description">
+                  {{ row.description }}
+                </p>
+
+                <div class="theme-gallery-card__metadata">
+                  <span class="theme-gallery-card__kind"
+                    ><i
+                      :class="row.kind === 'classic' ? 'pi pi-lock' : 'pi pi-sparkles'"
+                      aria-hidden="true"
+                    />{{ row.kind === 'classic' ? $t('系統內建') : $t('節日主題') }}</span
                   >
+                  <span class="theme-gallery-card__mode">
+                    {{ $t('深淺模式') }}
+                    <Tag :severity="row.supportsColorModes ? 'info' : 'secondary'">{{
+                      row.supportsColorModes ? $t('有') : $t('無')
+                    }}</Tag>
+                  </span>
+                </div>
+
+                <div class="theme-row-actions">
                   <Button
-                    v-else
+                    v-if="!row.isActive"
                     class="theme-download-action"
                     :label="$t('啟用')"
                     icon="pi pi-power-off"
@@ -115,98 +154,20 @@
                     "
                     @click="activateTheme(row.id)"
                   />
-                </td>
-                <td>
-                  <span v-if="row.kind === 'classic'" class="theme-system-label"
-                    ><i class="pi pi-lock" aria-hidden="true" />{{ $t('系統內建') }}</span
-                  >
-                  <div v-else class="theme-row-actions">
+                  <template v-if="row.kind === 'festival'">
                     <Button
-                      class="theme-download-action"
+                      class="theme-download-action theme-card-edit-action"
                       :label="$t('編輯')"
                       icon="pi pi-pencil"
-                      severity="success"
+                      severity="secondary"
                       size="small"
+                      outlined
                       data-testid="festival-theme-edit"
                       @click="openEdit(row.theme)"
                     />
-                    <Button
-                      class="theme-admin-delete-action"
-                      :label="$t('刪除')"
-                      icon="pi pi-trash"
-                      severity="danger"
-                      outlined
-                      size="small"
-                      :disabled="deletingThemeId === row.id || row.isActive"
-                      :title="row.isActive ? $t('請先停用此主題後再刪除') : undefined"
-                      data-testid="festival-theme-delete"
-                      @click="confirmDelete(row.theme)"
-                    />
-                    <small v-if="row.isActive" class="theme-delete-guidance">{{
-                      $t('請先停用此主題後再刪除')
-                    }}</small>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="theme-mobile-list">
-          <article
-            v-for="row in themeOverviewRows"
-            :key="row.id"
-            class="theme-mobile-card"
-            data-testid="theme-overview-mobile-card"
-            :data-theme-kind="row.kind"
-          >
-            <header>
-              <strong>{{ row.name }}</strong>
-              <Tag v-if="row.isActive" severity="success">{{ $t('已啟用') }}</Tag>
-              <Button
-                v-else
-                class="theme-download-action"
-                :label="$t('啟用')"
-                icon="pi pi-power-off"
-                severity="success"
-                size="small"
-                :disabled="Boolean(activatingThemeId)"
-                :loading="activatingThemeId === row.id"
-                @click="activateTheme(row.id)"
-              />
-            </header>
-            <p>{{ row.description }}</p>
-            <dl>
-              <div>
-                <dt>{{ $t('深淺模式') }}</dt>
-                <dd>{{ row.supportsColorModes ? $t('有') : $t('無') }}</dd>
+                  </template>
+                </div>
               </div>
-              <div v-if="row.kind === 'classic'">
-                <dt>{{ $t('操作') }}</dt>
-                <dd>{{ $t('系統內建') }}</dd>
-              </div>
-            </dl>
-            <footer v-if="row.kind === 'festival'" class="theme-row-actions">
-              <Button
-                class="theme-download-action"
-                :label="$t('編輯')"
-                icon="pi pi-pencil"
-                severity="success"
-                @click="openEdit(row.theme)"
-              />
-              <Button
-                class="theme-admin-delete-action"
-                :label="$t('刪除')"
-                icon="pi pi-trash"
-                severity="danger"
-                outlined
-                :disabled="deletingThemeId === row.id || row.isActive"
-                :title="row.isActive ? $t('請先停用此主題後再刪除') : undefined"
-                @click="confirmDelete(row.theme)"
-              />
-              <small v-if="row.isActive" class="theme-delete-guidance">{{
-                $t('請先停用此主題後再刪除')
-              }}</small>
             </footer>
           </article>
         </div>
@@ -314,7 +275,6 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useConfirm } from 'primevue/useconfirm'
 import { useI18n } from 'vue-i18n'
 import { themeManagementService } from '@/api'
 import { useTheme } from '@/utils/useTheme'
@@ -324,14 +284,11 @@ import {
 } from '@/utils/festivalThemePreview'
 
 const { locale, t } = useI18n()
-const confirm = useConfirm()
-const { applyActiveSiteTheme } = useTheme()
+const { isDarkTheme, applyActiveSiteTheme } = useTheme()
 const loading = ref(true)
 const error = ref('')
 const activationError = ref('')
-const mutationError = ref('')
 const activatingThemeId = ref('')
-const deletingThemeId = ref('')
 const savingThemeId = ref('')
 const capabilities = ref(null)
 const previewEnabled = isFestivalThemePreviewEnabled()
@@ -428,7 +385,6 @@ async function activateTheme(themeId) {
   }
   activatingThemeId.value = themeId
   activationError.value = ''
-  mutationError.value = ''
   try {
     capabilities.value = (await themeManagementService.activateAdmin(themeId)).data
     syncEffectiveTheme(capabilities.value)
@@ -481,43 +437,6 @@ async function saveEdit() {
     savingThemeId.value = ''
   }
 }
-function confirmDelete(theme) {
-  if (deletingThemeId.value) return
-  if (isActiveFestivalTheme(theme.id)) {
-    mutationError.value = t('請先停用此主題後再刪除')
-    return
-  }
-  confirm.require({
-    header: t('刪除節日主題'),
-    message: t('確定要刪除「{name}」嗎？', { name: localizedThemeName(theme) }),
-    icon: 'pi pi-exclamation-triangle',
-    rejectLabel: t('取消'),
-    acceptLabel: t('確認刪除'),
-    acceptClass: 'p-button-danger',
-    accept: () => removeTheme(theme),
-  })
-}
-async function removeTheme(theme) {
-  if (deletingThemeId.value) return
-  if (isActiveFestivalTheme(theme.id)) {
-    mutationError.value = t('請先停用此主題後再刪除')
-    return
-  }
-  deletingThemeId.value = theme.id
-  mutationError.value = ''
-  try {
-    if (theme.preview_only === true) {
-      previewThemes.value = previewThemes.value.filter((item) => item.id !== theme.id)
-      return
-    }
-    capabilities.value = (await themeManagementService.removeAdmin(theme.id)).data
-    syncEffectiveTheme(capabilities.value)
-  } catch (deleteFailure) {
-    mutationError.value = deleteFailure?.response?.data?.detail || t('刪除節日主題失敗。')
-  } finally {
-    deletingThemeId.value = ''
-  }
-}
 function syncEffectiveTheme(nextCapabilities) {
   applyActiveSiteTheme(nextCapabilities?.festival_theme?.active || 'general')
 }
@@ -526,6 +445,8 @@ onMounted(loadCapabilities)
 
 <style scoped>
 .festival-theme-management {
+  --festival-card-shadow: 0 0.55rem 1.35rem rgba(15, 23, 42, 0.12);
+
   min-width: 0;
   color: var(--text-primary);
 }
@@ -537,7 +458,7 @@ onMounted(loadCapabilities)
   margin: 0;
 }
 .festival-theme-management__intro p,
-.theme-mobile-card p {
+.theme-gallery-card__description {
   margin: 0;
   color: var(--text-secondary);
   line-height: 1.6;
@@ -573,101 +494,213 @@ onMounted(loadCapabilities)
   gap: 1rem;
   min-width: 0;
 }
-.theme-table-wrap {
-  overflow-x: auto;
-  border: 1px solid var(--border-color);
-  border-radius: 0.75rem;
+.theme-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 23rem), 28rem));
+  justify-content: start;
+  gap: 1rem;
 }
-.theme-table {
-  width: 100%;
-  min-width: 62rem;
-  border-collapse: collapse;
-  table-layout: fixed;
-  background: var(--bg-primary);
+.theme-gallery-card {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-rows: minmax(8.75rem, 1fr) auto;
+  aspect-ratio: 1.7 / 1;
+  min-width: 0;
+  min-height: 15.5rem;
+  overflow: hidden;
+  border: 1px solid var(--theme-card-border);
+  border-radius: 0.9rem;
+  color: var(--theme-card-text);
+  background: var(--theme-card-surface);
+  box-shadow: 0 0.2rem 0.6rem rgba(15, 23, 42, 0.07);
+  transition:
+    flex-grow 220ms ease,
+    transform 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
 }
-.theme-table th,
-.theme-table td {
-  padding: 0.9rem 1rem;
-  border-bottom: 1px solid var(--border-color);
-  text-align: left;
-  vertical-align: middle;
+.theme-gallery-card[data-theme-kind='classic'] {
+  --theme-card-surface: #eef6f2;
+  --theme-card-layer: #f7fbfb;
+  --theme-card-text: #172522;
+  --theme-card-muted-text: #5d6f6a;
+  --theme-card-accent: #176f7b;
+  --theme-card-border: #cbdad4;
 }
-.theme-table th {
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-  font-size: var(--app-font-size-sm);
-  font-weight: 700;
+:global(
+  html[data-effective-theme='dark']
+    .festival-theme-management
+    .theme-gallery-card[data-theme-kind='classic']
+) {
+  --theme-card-surface: var(--bg-secondary);
+  --theme-card-layer: var(--bg-primary);
+  --theme-card-text: var(--text-primary);
+  --theme-card-muted-text: var(--text-secondary);
+  --theme-card-accent: var(--title-gradient-start);
+  --theme-card-border: var(--border-color);
 }
-.theme-table tr:last-child td {
-  border-bottom: 0;
+.theme-gallery-card[data-theme-kind='festival'] {
+  --theme-card-surface: #426878;
+  --theme-card-layer: #365968;
+  --theme-card-text: #f8f2e8;
+  --theme-card-muted-text: #f5eedc;
+  --theme-card-accent: #dec78e;
+  --theme-card-border: #293f52;
 }
-.theme-table th:nth-child(1) {
-  width: 16%;
+:global(
+  html[data-effective-theme='light']
+    .theme-gallery-card[data-theme-kind='festival']
+    .theme-card-edit-action.p-button
+),
+:global(
+  html[data-effective-theme='dark']
+    .theme-gallery-card[data-theme-kind='festival']
+    .theme-card-edit-action.p-button
+) {
+  border-color: rgba(248, 242, 232, 0.78) !important;
+  color: #f8f2e8 !important;
 }
-.theme-table th:nth-child(2) {
-  width: 31%;
+:global(
+  html[data-effective-theme='light']
+    .theme-gallery-card[data-theme-kind='festival']
+    .theme-card-edit-action.p-button:not(:disabled):hover
+),
+:global(
+  html[data-effective-theme='light']
+    .theme-gallery-card[data-theme-kind='festival']
+    .theme-card-edit-action.p-button:focus-visible
+),
+:global(
+  html[data-effective-theme='dark']
+    .theme-gallery-card[data-theme-kind='festival']
+    .theme-card-edit-action.p-button:not(:disabled):hover
+),
+:global(
+  html[data-effective-theme='dark']
+    .theme-gallery-card[data-theme-kind='festival']
+    .theme-card-edit-action.p-button:focus-visible
+) {
+  border-color: #d7edf5 !important;
+  color: #245368 !important;
+  background: #d7edf5 !important;
 }
-.theme-table th:nth-child(3) {
-  width: 12%;
+.theme-gallery-card::before {
+  position: absolute;
+  z-index: 2;
+  inset: 0 0 auto;
+  height: 0.22rem;
+  background: var(--theme-card-accent);
+  content: '';
+  opacity: 0;
+  transition: opacity 160ms ease;
 }
-.theme-table th:nth-child(4) {
-  width: 12%;
+.theme-gallery-card--active {
+  border-color: color-mix(in srgb, var(--theme-card-accent) 58%, var(--theme-card-border));
+  box-shadow:
+    0 0.3rem 0.9rem rgba(15, 23, 42, 0.1),
+    inset 0 0 0 1px color-mix(in srgb, var(--theme-card-accent) 18%, transparent);
 }
-.theme-table th:nth-child(5) {
-  width: 29%;
+.theme-gallery-card--active::before {
+  opacity: 1;
 }
-.theme-system-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  color: var(--text-secondary);
-  font-weight: 600;
+.theme-gallery-card:focus-within {
+  border-color: var(--theme-card-accent);
+  box-shadow:
+    0 0 0 0.18rem color-mix(in srgb, var(--theme-card-accent) 28%, transparent),
+    var(--festival-card-shadow);
 }
+.theme-gallery-card:focus-visible {
+  outline: 0.18rem solid color-mix(in srgb, var(--theme-card-accent) 72%, transparent);
+  outline-offset: 0.18rem;
+}
+.theme-gallery-card__visual {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  place-items: center;
+  border-bottom: 1px solid var(--theme-card-border);
+  color: var(--theme-card-accent);
+  background: var(--theme-card-surface);
+}
+.theme-gallery-card__visual > i {
+  font-size: clamp(2.75rem, 5vw, 4.4rem);
+  opacity: 0.86;
+}
+.theme-gallery-card__footer {
+  display: grid;
+  gap: 0;
+  padding: 0.8rem 0.9rem 0.85rem;
+  background: var(--theme-card-layer);
+}
+.theme-gallery-card__details {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.theme-gallery-card__header,
+.theme-gallery-card__identity,
+.theme-gallery-card__metadata,
+.theme-gallery-card__mode,
 .theme-row-actions {
   display: flex;
   align-items: center;
+}
+.theme-gallery-card__header {
+  justify-content: space-between;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.65rem;
 }
-.theme-delete-guidance {
-  color: var(--text-secondary);
+.theme-gallery-card__header :deep(.p-tag) {
+  flex: 0 0 auto;
+}
+.theme-gallery-card__identity {
+  gap: 0.5rem;
+  min-width: 0;
+}
+.theme-gallery-card__identity > i {
+  color: var(--theme-card-accent);
+}
+.theme-gallery-card__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+.theme-gallery-card__kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--theme-card-muted-text);
   font-size: var(--app-font-size-xs);
-}
-.theme-mobile-list {
-  display: none;
-  gap: 0.75rem;
-}
-.theme-mobile-card {
-  display: none;
-  gap: 0.8rem;
-  padding: 1rem;
-  border: 1px solid var(--border-color);
-  border-radius: 0.75rem;
-  background: var(--bg-primary);
-}
-.theme-mobile-card header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-.theme-mobile-card dl {
-  display: grid;
-  gap: 0.5rem;
-  margin: 0;
-}
-.theme-mobile-card dl div {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-}
-.theme-mobile-card dt {
-  color: var(--text-secondary);
-}
-.theme-mobile-card dd {
-  margin: 0;
   font-weight: 600;
-  text-align: right;
+  overflow-wrap: anywhere;
+}
+.theme-gallery-card__description {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--theme-card-muted-text);
+}
+.theme-gallery-card__metadata {
+  flex-wrap: wrap;
+  gap: 0.3rem 0.65rem;
+  color: var(--theme-card-muted-text);
+  font-size: var(--app-font-size-xs);
+  font-weight: 600;
+}
+.theme-gallery-card__mode {
+  gap: 0.3rem;
+}
+.theme-row-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.theme-row-actions :deep(.p-button) {
+  flex: 0 1 auto;
 }
 .theme-overview-note {
   margin: 0;
@@ -697,16 +730,71 @@ onMounted(loadCapabilities)
   gap: 0.75rem;
   padding-top: 0.75rem;
 }
-@media (max-width: 1399.98px) {
-  .theme-table-wrap {
-    display: none;
+/* Interaction model adapted from Uiverse.io by arshshaikh06: Cards/arshshaikh06_hard-cobra-69.html */
+@media (min-width: 768px) and (hover: hover) and (pointer: fine) {
+  .theme-gallery {
+    display: flex;
+    align-items: stretch;
+    width: min(100%, 58rem);
+    height: clamp(18rem, 32vw, 21rem);
+    padding: 0.5rem;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    border-radius: 1.1rem;
+    background: color-mix(in srgb, var(--bg-secondary) 68%, transparent);
+    box-shadow: 0 0.3rem 0.9rem rgba(15, 23, 42, 0.08);
   }
-  .theme-mobile-card,
-  .theme-mobile-list {
-    display: grid;
+  .theme-gallery-card {
+    flex: 1 1 0;
+    grid-template-rows: minmax(0, 1fr) 4.25rem;
+    aspect-ratio: auto;
+    min-height: 0;
+  }
+  .theme-gallery-card:hover,
+  .theme-gallery-card:focus,
+  .theme-gallery-card:focus-within {
+    flex-grow: 1.85;
+    border-color: color-mix(in srgb, var(--theme-card-accent) 44%, var(--theme-card-border));
+    box-shadow: var(--festival-card-shadow);
+  }
+  .theme-gallery-card__details {
+    position: absolute;
+    z-index: 1;
+    right: 0.9rem;
+    bottom: 4.8rem;
+    left: 0.9rem;
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(0.35rem);
+    transition:
+      max-height 220ms ease,
+      margin-top 220ms ease,
+      opacity 150ms ease,
+      transform 180ms ease;
+  }
+  .theme-gallery-card:hover .theme-gallery-card__details,
+  .theme-gallery-card:focus .theme-gallery-card__details,
+  .theme-gallery-card:focus-within .theme-gallery-card__details {
+    max-height: 12rem;
+    margin-top: 0.55rem;
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+  .theme-gallery-card__footer {
+    min-height: 4.25rem;
   }
 }
-@media (max-width: 640px) {
+@media (prefers-reduced-motion: reduce) {
+  .theme-gallery-card,
+  .theme-gallery-card::before,
+  .theme-gallery-card__details {
+    transition: none;
+  }
+}
+@media (max-width: 767.98px) {
   .festival-theme-management__error {
     align-items: stretch;
     flex-direction: column;
@@ -714,7 +802,26 @@ onMounted(loadCapabilities)
   .theme-edit-dates {
     grid-template-columns: minmax(0, 1fr);
   }
+  .theme-gallery {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .theme-gallery-card {
+    aspect-ratio: auto;
+  }
+  .theme-gallery-card__visual {
+    min-height: 9rem;
+  }
+  .theme-gallery-card__footer {
+    align-items: stretch;
+  }
   .theme-row-actions :deep(.p-button) {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+  .theme-row-actions {
+    align-items: stretch;
+  }
+  .theme-row-actions {
     flex: 1 1 100%;
   }
 }

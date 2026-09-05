@@ -512,6 +512,16 @@ async def test_reconciler_dispatches_storage_only_cleanup(
     session_maker,
     make_user,
 ) -> None:
+    def clock():
+        return NOW
+
+    async def processor(db, **kwargs):
+        return await process_one_permanent_deletion(
+            db,
+            lease_clock=clock,
+            **kwargs,
+        )
+
     requester = await make_user()
     submission = await _create_live_submission(
         session_maker, requester_id=int(requester.id)
@@ -540,7 +550,9 @@ async def test_reconciler_dispatches_storage_only_cleanup(
         summary = await reconcile_due_once(
             session_maker=session_maker,
             storage_factory=lambda: storage,
-            now=NOW,
+            now=clock(),
+            event_clock=clock,
+            processor=processor,
         )
         assert summary.completed == 1
         async with session_maker() as session:
