@@ -67,7 +67,8 @@
         <Button
           :label="$t('稍後再看')"
           severity="secondary"
-          outlined
+          :outlined="effectiveTheme === 'christmas'"
+          :text="effectiveTheme !== 'christmas'"
           class="notification-summary-secondary-action review-action-preview"
           @click="$emit('update:visible', false)"
         />
@@ -81,7 +82,7 @@
         <Button
           :label="$t('全部標記為已讀')"
           icon="pi pi-check-circle"
-          severity="success"
+          :severity="effectiveTheme === 'christmas' ? 'success' : undefined"
           class="notification-summary-mark-all-action review-action-republish"
           @click="$emit('mark-all-read')"
         />

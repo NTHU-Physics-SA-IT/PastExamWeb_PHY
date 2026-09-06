@@ -3117,6 +3117,7 @@
                         :label="$t('還原')"
                         size="small"
                         severity="success"
+                        outlined
                         @click="confirmRestoreTrashItem(data)"
                       />
                       <Button
@@ -3128,7 +3129,7 @@
                         :title="$t('永久刪除')"
                         size="small"
                         severity="danger"
-                        :outlined="isChristmas"
+                        outlined
                         @click="confirmPermanentDeleteTrashItem(data)"
                       />
                       <span
@@ -3279,6 +3280,7 @@
                         :title="$t('還原')"
                         size="small"
                         severity="success"
+                        outlined
                         @click="confirmRestoreTrashItem(data)"
                       />
                       <Button
@@ -3290,7 +3292,7 @@
                         :title="$t('永久刪除')"
                         size="small"
                         severity="danger"
-                        :outlined="isChristmas"
+                        outlined
                         @click="confirmPermanentDeleteTrashItem(data)"
                       />
                       <span
@@ -17547,15 +17549,19 @@ html[data-effective-theme='christmas'].admin-page-active
   text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
 }
 
-html[data-effective-theme='christmas'].admin-page-active .review-action-republish.p-button {
+html[data-effective-theme='christmas'].admin-page-active
+  .review-action-republish.p-button:not(:where(.trash-restore-action.p-button-outlined)) {
   border-color: rgba(127, 188, 145, 0.82) !important;
   color: #f5fff7 !important;
   background: linear-gradient(135deg, #3d8a64, #2d6c52) !important;
 }
 
-html[data-effective-theme='christmas'].admin-page-active .review-action-republish.p-button:hover,
 html[data-effective-theme='christmas'].admin-page-active
-  .review-action-republish.p-button:focus-visible {
+  .review-action-republish.p-button:not(:where(.trash-restore-action.p-button-outlined)):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .review-action-republish.p-button:not(
+    :where(.trash-restore-action.p-button-outlined)
+  ):focus-visible {
   border-color: rgba(255, 226, 143, 0.9) !important;
   color: #ffffff !important;
   background: linear-gradient(135deg, #479b70, #347b5c) !important;

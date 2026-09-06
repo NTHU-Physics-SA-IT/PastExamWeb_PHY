@@ -411,7 +411,13 @@ describe('AdminView', () => {
         wrapper.vm.courses = sampleCourses
         wrapper.vm.notifications = sampleNotifications
         wrapper.vm.trashItems = [
-          { id: 91, item_type: 'course', name: 'Deleted course', canPermanentDelete: true },
+          {
+            id: 91,
+            item_type: 'course',
+            name: 'Deleted course',
+            canRestore: true,
+            canPermanentDelete: true,
+          },
           { id: 92, item_type: 'course', name: 'Blocked course', canPermanentDelete: false },
         ]
         wrapper.vm.courseCategories = [
@@ -422,7 +428,7 @@ describe('AdminView', () => {
           ['刪除課程', sampleCourses.length * 2, theme === 'christmas'],
           ['刪除公告', sampleNotifications.length * 2, theme === 'christmas'],
           ['刪除分類', 2, true],
-          ['永久刪除', 2, theme === 'christmas'],
+          ['永久刪除', 2, true],
         ]) {
           const actions = wrapper
             .findAllComponents({ name: 'ResetContractButton' })
@@ -433,6 +439,16 @@ describe('AdminView', () => {
             expect(button.props('outlined'), label).toBe(outlined)
           }
         }
+        const restoreActions = wrapper
+          .findAllComponents({ name: 'ResetContractButton' })
+          .filter((button) => button.classes().includes('trash-restore-action'))
+        expect(restoreActions).toHaveLength(2)
+        for (const button of restoreActions) {
+          expect(button.props('severity')).toBe('success')
+          expect(button.props('outlined')).toBe(true)
+          expect(button.props('size')).toBe('small')
+          expect(button.attributes('icon')).toBe('pi pi-undo')
+        }
       } finally {
         wrapper.unmount()
         state.applyActiveSiteTheme('general')
@@ -440,6 +456,24 @@ describe('AdminView', () => {
       }
     }
   )
+
+  it('excludes only outlined Trash restore from Christmas republish gradient authority', () => {
+    const selector =
+      '.review-action-republish.p-button:not(:where(.trash-restore-action.p-button-outlined))'
+    expect(adminChristmasStyles).toContain(`${selector} {`)
+    expect(adminChristmasStyles).toContain(`${selector}:hover,`)
+    expect(adminChristmasStyles.replace(/\s+/g, '')).toContain(`${selector}:focus-visible{`)
+    const button = document.createElement('button')
+    for (const [classes, matches] of [
+      ['review-action-republish p-button trash-restore-action p-button-outlined', false],
+      ['review-action-republish p-button trash-restore-action', true],
+      ['review-action-republish p-button', true],
+      ['review-action-republish p-button p-button-outlined', true],
+    ]) {
+      button.className = classes
+      expect(button.matches(selector), classes).toBe(matches)
+    }
+  })
 
   it('keeps 公告管理 top-level and adds the three requested nested management sections', () => {
     expect(adminTemplateSource).toContain('<Tab value="2">')

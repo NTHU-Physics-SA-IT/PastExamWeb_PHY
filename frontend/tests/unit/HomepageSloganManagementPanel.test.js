@@ -1,3 +1,6 @@
+import Button from 'primevue/button'
+import PrimeVue from 'primevue/config'
+import { useTheme } from '@/utils/useTheme'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import HomepageSloganManagementPanel from '@/components/admin/HomepageSloganManagementPanel.vue'
@@ -34,6 +37,41 @@ const item = {
 }
 
 describe('HomepageSloganManagementPanel', () => {
+  // Assert the rendered PrimeVue contract, not literal hex absence in source.
+  it.each(['light', 'dark', 'christmas'])(
+    'restores Classic presentation and preserves Christmas (%s)',
+    async (theme) => {
+      const themeState = useTheme()
+      const previous = themeState.effectiveTheme.value
+      themeState.isDarkTheme.value = theme === 'dark'
+      themeState.applyActiveSiteTheme(theme === 'christmas' ? 'christmas' : 'general')
+      let wrapper
+      try {
+        wrapper = shallowMount(HomepageSloganManagementPanel, {
+          global: {
+            plugins: [PrimeVue],
+            stubs: { Button: false, Dialog: { template: '<div><slot /></div>' } },
+          },
+        })
+        await flushPromises()
+        wrapper.vm.openReview(item)
+        await wrapper.vm.$nextTick()
+        const save = wrapper.findAllComponents(Button).find((b) => b.props('label') === '儲存')
+        expect(save.props('severity') ?? undefined).toBe(
+          theme === 'christmas' ? 'success' : undefined
+        )
+        expect(save.props('size') ?? undefined).toBe(theme === 'christmas' ? 'small' : undefined)
+        expect(save.props('icon')).toBe('pi pi-save')
+        expect(save.classes()).toContain('slogan-dialog-save-action')
+        expect(mocks.update).not.toHaveBeenCalled()
+      } finally {
+        wrapper?.unmount()
+        themeState.isDarkTheme.value = previous === 'dark'
+        themeState.applyActiveSiteTheme(previous === 'christmas' ? 'christmas' : 'general')
+      }
+    }
+  )
+
   beforeEach(() => {
     mocks.list.mockReset().mockResolvedValue({
       data: {
@@ -99,11 +137,8 @@ describe('HomepageSloganManagementPanel', () => {
     expect(source.match(/slogan-admin-delete-action/g)).toHaveLength(2)
   })
 
-  it('maps the review dialog save action to the archive download treatment', () => {
-    expect(source).toMatch(
-      /class="slogan-dialog-save-action review-action-republish"[\s\S]{0,220}?severity="success"[\s\S]{0,160}?size="small"/
-    )
-  })
+  // The rendered three-theme test above protects the Christmas save treatment
+  // while allowing Classic to keep its original default severity and geometry.
 
   it('keeps the desktop table fluid while retaining the existing responsive card surface', async () => {
     const wrapper = shallowMount(HomepageSloganManagementPanel)

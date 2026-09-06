@@ -14,7 +14,7 @@
             v-if="isAdmin"
             :label="$t('新增關於我們內容')"
             icon="pi pi-plus"
-            severity="success"
+            :severity="effectiveTheme === 'christmas' ? 'success' : undefined"
             class="about-us-add-action review-action-republish"
             @click="openCreate"
           />
@@ -94,7 +94,8 @@
                   :label="$t('編輯')"
                   icon="pi pi-pencil"
                   size="small"
-                  outlined
+                  :outlined="effectiveTheme === 'christmas'"
+                  :text="effectiveTheme !== 'christmas'"
                   class="about-us-edit-action review-action-preview"
                   @click="openEdit(currentEntry)"
                 />
@@ -103,7 +104,8 @@
                   icon="pi pi-trash"
                   severity="danger"
                   size="small"
-                  outlined
+                  :outlined="effectiveTheme === 'christmas'"
+                  :text="effectiveTheme !== 'christmas'"
                   class="about-us-delete-action review-action-delete"
                   @click="requestDelete(currentEntry)"
                 />
@@ -184,7 +186,7 @@
             type="button"
             :label="$t('取消')"
             severity="secondary"
-            outlined
+            :outlined="effectiveTheme === 'christmas'"
             class="about-us-dialog-cancel-action review-action-preview"
             @click="dialogVisible = false"
           />
@@ -192,7 +194,7 @@
             type="submit"
             :label="$t('儲存')"
             icon="pi pi-check"
-            severity="success"
+            :severity="effectiveTheme === 'christmas' ? 'success' : undefined"
             class="about-us-dialog-save-action review-action-republish"
             :loading="saving"
           />

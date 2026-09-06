@@ -122,7 +122,7 @@
                                 icon="pi pi-download"
                                 :label="$t('下載')"
                                 size="small"
-                                severity="success"
+                                :severity="effectiveTheme === 'christmas' ? 'success' : undefined"
                               />
                               <Button
                                 class="personal-settings-delete-action review-action-delete"
@@ -205,7 +205,7 @@
                       :label="$t('儲存基本資料')"
                       icon="pi pi-save"
                       type="submit"
-                      severity="success"
+                      :severity="effectiveTheme === 'christmas' ? 'success' : undefined"
                       :loading="profileSaving"
                       :disabled="profileLoading || !canSaveProfile"
                     />
@@ -270,7 +270,7 @@
                       :label="$t('儲存密碼')"
                       icon="pi pi-key"
                       type="submit"
-                      severity="success"
+                      :severity="effectiveTheme === 'christmas' ? 'success' : undefined"
                       :disabled="!canSubmitPassword"
                     />
                   </div>

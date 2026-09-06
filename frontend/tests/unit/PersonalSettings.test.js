@@ -1,3 +1,6 @@
+import Button from 'primevue/button'
+import PrimeVue from 'primevue/config'
+import { useTheme } from '@/utils/useTheme'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -33,12 +36,13 @@ const formControlStub = {
   template: '<input v-bind="$attrs" :value="modelValue" />',
 }
 
-function mountSettings() {
+function mountSettings(realButtons = false) {
   return mount(PersonalSettings, {
     attachTo: document.body,
     global: {
+      plugins: realButtons ? [PrimeVue] : [],
       stubs: {
-        Button: { template: '<button><slot />{{ $attrs.label }}</button>' },
+        Button: realButtons ? false : { template: '<button><slot />{{ $attrs.label }}</button>' },
         Card: CardStub,
         InputText: formControlStub,
         Password: formControlStub,
@@ -71,6 +75,42 @@ class IntersectionObserverMock {
 }
 
 describe('PersonalSettings account visibility', () => {
+  // Assert the rendered PrimeVue contract, not literal hex absence in source.
+  it.each(['light', 'dark', 'christmas'])(
+    'restores Classic presentation and preserves Christmas (%s)',
+    async (theme) => {
+      const themeState = useTheme()
+      const previous = themeState.effectiveTheme.value
+      themeState.isDarkTheme.value = theme === 'dark'
+      themeState.applyActiveSiteTheme(theme === 'christmas' ? 'christmas' : 'general')
+      let wrapper
+      try {
+        userServiceMock.getMe.mockResolvedValue({
+          data: { id: 1, name: 'QA', email: 'qa@example.com', is_local: true },
+        })
+        wrapper = mountSettings(true)
+        await flushPromises()
+        const buttons = wrapper
+          .findAllComponents(Button)
+          .filter((b) => b.classes().includes('personal-settings-download-action'))
+        expect(buttons).toHaveLength(3)
+        for (const b of buttons) {
+          expect(b.props('severity') ?? undefined).toBe(
+            theme === 'christmas' ? 'success' : undefined
+          )
+          expect(b.props('text')).toBe(false)
+          expect(b.props('outlined')).toBe(false)
+        }
+        expect(wrapper.get('.profile-save-button').attributes()).toHaveProperty('disabled')
+        expect(userServiceMock.updateMyNickname).not.toHaveBeenCalled()
+      } finally {
+        wrapper?.unmount()
+        themeState.isDarkTheme.value = previous === 'dark'
+        themeState.applyActiveSiteTheme(previous === 'christmas' ? 'christmas' : 'general')
+      }
+    }
+  )
+
   beforeEach(() => {
     userServiceMock.getMe.mockReset()
     userServiceMock.updateMyNickname.mockReset()
