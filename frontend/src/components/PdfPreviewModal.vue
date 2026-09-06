@@ -3,7 +3,10 @@
     :visible="localVisible"
     @update:visible="localVisible = $event"
     class="pdf-preview-dialog"
-    :class="{ 'pdf-preview-dialog-christmas': christmas }"
+    :class="{
+      'pdf-preview-dialog-christmas': christmas,
+      'pdf-preview-dialog--downloadable': showDownload,
+    }"
     :style="{ width: 'min(1200px, 95vw)', height: 'min(90vh, 90dvh)' }"
     :contentStyle="{ flex: '1 1 auto', overflow: 'clip' }"
     :modal="true"
@@ -595,6 +598,15 @@ function handleDownload() {
 
 /* Mobile responsive adjustments */
 @media (width < 768px) {
+  :global(
+    body
+      .p-dialog.pdf-preview-dialog--downloadable:not(.pdf-preview-dialog-christmas)
+      .p-dialog-content
+  ) {
+    min-height: 0;
+    max-height: none;
+  }
+
   :deep(.p-dialog .p-dialog-header) {
     font-size: 1rem;
   }

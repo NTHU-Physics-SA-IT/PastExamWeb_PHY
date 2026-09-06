@@ -144,15 +144,112 @@ test('renders both comparison PDFs beyond page one and reopens at narrow width',
   await page.setViewportSize({ width: 600, height: 900 })
   await compare.filter({ visible: true }).click()
   await expect(grid.locator('[data-pdf-page="1"][data-page-loaded="true"]')).toHaveCount(2)
-  const panes = await grid
-    .locator('.pdf-document-viewer')
-    .evaluateAll((nodes) =>
-      nodes.map((node) => ({
-        height: node.clientHeight,
-        overflow: getComputedStyle(node).overflowY,
-      }))
-    )
+  const panes = await grid.locator('.pdf-document-viewer').evaluateAll((nodes) =>
+    nodes.map((node) => ({
+      height: node.clientHeight,
+      overflow: getComputedStyle(node).overflowY,
+    }))
+  )
   expect(panes.every((pane) => pane.height > 100 && pane.overflow === 'auto')).toBe(true)
+})
+
+test('wraps comparison metadata only when the card content is genuinely narrow', async ({
+  page,
+}) => {
+  await page.addInitScript(() => window.localStorage.setItem('theme-preference', 'dark'))
+  await page.route('**/api/theme-management/active-theme', (route) =>
+    route.fulfill(json({ active_theme: 'general' }))
+  )
+  await mockReviewCenter(page)
+  await page.route('**/api/archives/admin/submissions/*/comparisons', (route) =>
+    route.fulfill(
+      json([
+        {
+          ...reviewItems[1],
+          id: 990,
+          status: 'pending',
+          has_answers: false,
+          submitter_name: 'long.requester.address.for.responsive.validation@example.com',
+        },
+      ])
+    )
+  )
+
+  const openDetail = async (family: string) => {
+    const tab = page.getByRole('tab', { name: family, exact: true })
+    await tab.click()
+    await expect(tab).toHaveAttribute('aria-selected', 'true')
+    await page
+      .locator('.review-section:visible')
+      .getByRole('button', { name: 'View / Edit', exact: true })
+      .click()
+    const dialog = page.locator('.submission-typography-dialog:visible')
+    await expect(dialog).toBeVisible()
+    await expect(dialog.locator('.comparison-mobile-card')).toHaveCount(1)
+    return dialog
+  }
+
+  const readMetadataGeometry = (dialog: Locator) =>
+    dialog.locator('.comparison-mobile-card').evaluate((card) => {
+      const meta = card.querySelector('.comparison-mobile-meta') as HTMLElement
+      const items = Array.from(meta.querySelectorAll('.comparison-mobile-meta-item'))
+      return {
+        card: { clientWidth: card.clientWidth, scrollWidth: card.scrollWidth },
+        meta: { clientWidth: meta.clientWidth, scrollWidth: meta.scrollWidth },
+        itemRects: items.map((item) => item.getBoundingClientRect().toJSON()),
+      }
+    })
+
+  await page.setViewportSize({ width: 475, height: 900 })
+  await page.goto('/admin', { waitUntil: 'networkidle' })
+
+  let dialog = await openDetail('New Course / Category Exam Requests')
+  let geometry = await readMetadataGeometry(dialog)
+  console.info('comparison-mobile-meta-geometry 475 new', JSON.stringify(geometry))
+  expect(Math.abs(geometry.itemRects[0].top - geometry.itemRects[1].top)).toBeLessThanOrEqual(1)
+  expect(
+    await dialog.locator('.comparison-mobile-status').evaluate((element) => {
+      const style = getComputedStyle(element)
+      return {
+        background: style.getPropertyValue('--soft-badge-bg').trim(),
+        border: style.getPropertyValue('--soft-badge-border').trim(),
+        color: style.getPropertyValue('--soft-badge-color').trim(),
+      }
+    })
+  ).toEqual({
+    background: 'rgba(245, 158, 11, 0.13)',
+    border: 'rgba(251, 191, 36, 0.34)',
+    color: '#f6c65b',
+  })
+
+  await page.setViewportSize({ width: 552, height: 900 })
+  geometry = await readMetadataGeometry(dialog)
+  console.info('comparison-mobile-meta-geometry 552 new', JSON.stringify(geometry))
+  expect(Math.abs(geometry.itemRects[0].top - geometry.itemRects[1].top)).toBeLessThanOrEqual(1)
+
+  await page.setViewportSize({ width: 360, height: 900 })
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = '150%'
+  })
+  geometry = await readMetadataGeometry(dialog)
+  console.info('comparison-mobile-meta-geometry 360 new', JSON.stringify(geometry))
+  expect(geometry.itemRects[1].top).toBeGreaterThan(geometry.itemRects[0].bottom)
+  expect(geometry.meta.scrollWidth).toBeLessThanOrEqual(geometry.meta.clientWidth + 1)
+  expect(geometry.card.scrollWidth).toBeLessThanOrEqual(geometry.card.clientWidth + 1)
+
+  await dialog.locator('.review-close-action').click()
+  await expect(dialog).toBeHidden()
+
+  await page.setViewportSize({ width: 475, height: 900 })
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = ''
+  })
+  dialog = await openDetail('Existing Course Exam Requests')
+  geometry = await readMetadataGeometry(dialog)
+  console.info('comparison-mobile-meta-geometry 475 existing', JSON.stringify(geometry))
+  expect(Math.abs(geometry.itemRects[0].top - geometry.itemRects[1].top)).toBeLessThanOrEqual(1)
+  expect(geometry.meta.scrollWidth).toBeLessThanOrEqual(geometry.meta.clientWidth + 1)
+  expect(geometry.card.scrollWidth).toBeLessThanOrEqual(geometry.card.clientWidth + 1)
 })
 
 const readStatusGeometry = async (tag: Locator) =>

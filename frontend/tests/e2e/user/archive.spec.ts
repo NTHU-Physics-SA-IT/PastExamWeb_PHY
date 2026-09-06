@@ -541,6 +541,20 @@ test.describe('User › Archive browsing', () => {
         download_count: archiveDownloadCount,
         uploader_id: 9,
       },
+      {
+        item_kind: 'pending_submission',
+        submission_id: 301,
+        course_id: 101,
+        academic_year: 2024,
+        name: '待審核小考',
+        archive_type: 'quiz',
+        professor: '陳教授',
+        has_answers: false,
+        status: 'pending',
+        can_preview: true,
+        can_edit: true,
+        can_withdraw: true,
+      },
     ]
 
     await page.route('**/api/notifications/active', async (route) => {
@@ -565,6 +579,14 @@ test.describe('User › Archive browsing', () => {
     await page.route('**/api/auth/heartbeat', (route) =>
       route.fulfill({ status: 200, headers: JSON_HEADERS, body: JSON.stringify({}) })
     )
+    await page.route('**/api/theme-management/active-theme', (route) =>
+      route.fulfill({
+        status: 200,
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ active_theme: 'general' }),
+      })
+    )
+    await page.addInitScript(() => window.localStorage.setItem('theme-preference', 'light'))
 
     await page.route('**/api/courses', async (route) => {
       await route.fulfill({
@@ -746,6 +768,51 @@ test.describe('User › Archive browsing', () => {
     await expect(archiveCard.getByRole('button', { name: '編輯' })).toHaveCount(0)
     await expect(archiveCard.getByRole('button', { name: '刪除' })).toHaveCount(0)
 
+    const pendingBadge = page.locator('.archive-pending-badge')
+    const archiveScreen = page.locator('.archive-screen')
+    const readPendingBadgeVariables = () =>
+      pendingBadge.evaluate((element) => {
+        const style = getComputedStyle(element)
+        return {
+          background: style.getPropertyValue('--soft-badge-bg').trim(),
+          border: style.getPropertyValue('--soft-badge-border').trim(),
+          color: style.getPropertyValue('--soft-badge-color').trim(),
+        }
+      })
+    await expect(pendingBadge).toBeVisible()
+    const lightPendingVariables = await readPendingBadgeVariables()
+    expect(lightPendingVariables).toEqual({
+      background: 'rgba(217, 119, 6, 0.1)',
+      border: 'rgba(217, 119, 6, 0.32)',
+      color: '#92400e',
+    })
+
+    await page.evaluate(() => {
+      document.documentElement.classList.add('dark')
+      document.documentElement.dataset.effectiveTheme = 'dark'
+    })
+    await archiveScreen.evaluate((element) => element.classList.add('archive-dark'))
+    expect(await readPendingBadgeVariables()).toEqual({
+      background: 'rgba(245, 158, 11, 0.13)',
+      border: 'rgba(251, 191, 36, 0.34)',
+      color: '#f6c65b',
+    })
+
+    await page.evaluate(() => {
+      document.documentElement.classList.remove('dark')
+      document.documentElement.dataset.effectiveTheme = 'christmas'
+    })
+    await archiveScreen.evaluate((element) => {
+      element.classList.remove('archive-dark')
+      element.classList.add('archive-christmas')
+    })
+    expect(await readPendingBadgeVariables()).toEqual(lightPendingVariables)
+
+    await page.evaluate(() => {
+      document.documentElement.dataset.effectiveTheme = 'light'
+    })
+    await archiveScreen.evaluate((element) => element.classList.remove('archive-christmas'))
+
     const previewRequestPromise = page.waitForRequest(
       (request) =>
         request.method() === 'GET' &&
@@ -793,12 +860,37 @@ test.describe('User › Archive browsing', () => {
 
     await clickWhenVisible(previewDialog.getByRole('button', { name: '關閉', exact: true }))
     await expect(previewDialog).toBeHidden()
+    await page.setViewportSize({ width: 390, height: 844 })
     await clickWhenVisible(archiveCard.getByRole('button', { name: '預覽' }))
     await expect(previewDialog).toBeVisible()
     await expect(previewDialog.locator('[data-pdf-page="1"]')).toHaveAttribute(
       'data-page-loaded',
       'true'
     )
+
+    const previewGeometry = await previewDialog.evaluate((dialog) => {
+      const content = dialog.querySelector('.p-dialog-content')
+      const footer = dialog.querySelector('.p-dialog-footer')
+      const button = dialog.querySelector('.pdf-preview-download-button')
+      const rect = (element: Element | null) => element?.getBoundingClientRect().toJSON()
+      return {
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        dialog: rect(dialog),
+        content: rect(content),
+        footer: rect(footer),
+        button: rect(button),
+      }
+    })
+    console.info('archive-mobile-preview-geometry', JSON.stringify(previewGeometry))
+    expect(previewGeometry.viewport).toEqual({ width: 390, height: 844 })
+    expect(previewGeometry.dialog).toBeTruthy()
+    expect(previewGeometry.content).toBeTruthy()
+    expect(previewGeometry.footer).toBeTruthy()
+    expect(previewGeometry.button).toBeTruthy()
+    expect(previewGeometry.footer!.bottom).toBeLessThanOrEqual(previewGeometry.dialog!.bottom + 1)
+    expect(previewGeometry.button!.right).toBeLessThanOrEqual(previewGeometry.dialog!.right + 1)
+    expect(previewGeometry.button!.bottom).toBeLessThanOrEqual(previewGeometry.dialog!.bottom + 1)
+    expect(previewGeometry.content!.bottom).toBeLessThanOrEqual(previewGeometry.footer!.top + 1)
 
     const downloadPromise = page.waitForEvent('download')
     await clickWhenVisible(previewDialog.getByRole('button', { name: '下載' }))

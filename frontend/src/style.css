@@ -1622,7 +1622,7 @@ html.dark {
 .dark .soft-badge.submission-status-pending,
 .dark .review-status-pending,
 .dark .submission-status-pending,
-.archive-dark .soft-badge--pending,
+.archive-dark .soft-badge.soft-badge--pending,
 .archive-dark .soft-badge.submission-status-pending,
 .archive-dark .submission-status-pending {
   --soft-badge-bg: rgba(245, 158, 11, 0.13);
