@@ -99,14 +99,12 @@
           </div>
 
           <div v-else-if="currentPdf && renderPdf" class="flex-1 pdf-container">
-            <iframe
+            <PdfDocumentViewer
               :key="currentPdf"
-              :src="currentPdf"
-              class="pdf-frame"
-              :title="$t('PDF 預覽')"
+              :source="currentPdf"
               @load="handlePdfLoaded"
               @error="handlePdfError"
-            ></iframe>
+            />
             <div
               v-if="loading || pdfLoading"
               class="pdf-loading-overlay flex align-items-center justify-content-center"
@@ -241,6 +239,7 @@ import { useI18n } from 'vue-i18n'
 import { useUnauthorizedEvent } from '../utils/useUnauthorizedEvent'
 import ArchiveDiscussionPanel from './ArchiveDiscussionPanel.vue'
 import ArchiveReportPanel from './ArchiveReportPanel.vue'
+import PdfDocumentViewer from './PdfDocumentViewer.vue'
 import { getBooleanPreference } from '../utils/usePreferences'
 import { STORAGE_KEYS } from '../utils/storage'
 import { formatAcademicTerm } from '../utils/academicTerm'
@@ -395,7 +394,7 @@ watch(
     if (!visible) return
 
     // PrimeVue Dialog teleports + transitions; defer mounting until the
-    // content is attached to the DOM so native PDF viewers get stable sizing.
+    // content is attached to the DOM so the canvas viewer gets stable sizing.
     await nextTick()
     requestAnimationFrame(() => {
       if (props.visible) renderPdf.value = true
@@ -535,16 +534,6 @@ function handleDownload() {
   display: flex;
   flex-direction: column;
   background-color: #525659;
-  border-radius: 6px;
-}
-
-.pdf-frame {
-  width: 100%;
-  height: 100%;
-  min-height: 65vh;
-  flex: 1 1 auto;
-  border: 0;
-  background: white;
   border-radius: 6px;
 }
 
