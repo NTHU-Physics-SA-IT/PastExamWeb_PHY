@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { buildJwt } from '../support/jwt'
 import { JSON_HEADERS } from '../support/constants'
 import {
@@ -33,7 +33,7 @@ const buildDurationPoints = () => {
   }))
 }
 
-const expectNoHorizontalOverflow = async (page: import('@playwright/test').Page) => {
+const expectNoHorizontalOverflow = async (page: Page) => {
   await expect
     .poll(() =>
       page.evaluate(
@@ -48,14 +48,14 @@ const mobileSummaryWidths = [
   390, 430, 495, 544, 545, 550, 560, 567, 568, 600, 640, 641, 645, 650, 651,
 ]
 
-const expectSameRow = async (locator: import('@playwright/test').Locator) => {
+const expectSameRow = async (locator: Locator) => {
   const tops = await locator.evaluateAll((elements) =>
     elements.map((element) => Math.round(element.getBoundingClientRect().top))
   )
   expect(new Set(tops).size).toBe(1)
 }
 
-const expectStatisticsActionsRightAligned = async (card: import('@playwright/test').Locator) => {
+const expectStatisticsActionsRightAligned = async (card: Locator) => {
   const boxes = await card.evaluate((element) => {
     const heading = element.querySelector('.user-insights__heading')
     const actions = element.querySelector('.user-insights__actions')
@@ -89,9 +89,7 @@ test.use({
   hasTouch: true,
 })
 
-test('keeps mobile statistics tabs and duration summaries aligned', async ({ page }) => {
-  test.setTimeout(45_000)
-
+const setupAdminStatistics = async (page: Page) => {
   const token = buildJwt({
     uid: 1,
     email: 'admin@example.com',
@@ -237,6 +235,36 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
   })
 
   await page.goto('/admin', { waitUntil: 'networkidle' })
+}
+
+const openUserInsights = async (page: Page) => {
+  await expect(page.getByRole('heading', { name: '使用者統計圖表' })).toBeVisible()
+  await page.getByRole('button', { name: '展開使用者統計圖表' }).click()
+  return page.locator('.admin-insights-card').filter({ hasText: '使用者統計圖表' })
+}
+
+const openReviewInsights = async (page: Page) => {
+  await page.getByRole('tab', { name: '審核中心' }).click()
+  await expect(page.getByRole('heading', { name: '投稿統計圖表' })).toBeVisible()
+  await page.getByRole('button', { name: '展開投稿統計圖表' }).click()
+  return page.locator('.admin-insights-card').filter({ hasText: '投稿統計圖表' })
+}
+
+const setDarkMode = async (page: Page, enabled: boolean) => {
+  await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), enabled)
+}
+
+const setLargeFontScale = async (page: Page) => {
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = '150%'
+    document.documentElement.style.setProperty('--app-effective-font-scale', '1.5')
+  })
+}
+
+test('keeps mobile user statistics summaries and ranges aligned', async ({ page }) => {
+  test.setTimeout(45_000)
+  await setupAdminStatistics(page)
+
   const viewportMetrics = await page.evaluate(() => ({
     innerWidth: window.innerWidth,
     clientWidth: document.documentElement.clientWidth,
@@ -248,12 +276,7 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
   expect(viewportMetrics.visualViewportWidth).toBe(393)
   expect(viewportMetrics.devicePixelRatio).toBe(3)
 
-  await expect(page.getByRole('heading', { name: '使用者統計圖表' })).toBeVisible()
-  await page.getByRole('button', { name: '展開使用者統計圖表' }).click()
-
-  const userInsightsCard = page
-    .locator('.admin-insights-card')
-    .filter({ hasText: '使用者統計圖表' })
+  const userInsightsCard = await openUserInsights(page)
   const userSummaryCards = userInsightsCard.locator('.chart-summary-item')
   const userRangeButtons = userInsightsCard.locator('.user-insights__range button')
   await expect(userSummaryCards).toHaveCount(3)
@@ -270,14 +293,17 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
     await expectSameRow(userRangeButtons)
     await expectNoHorizontalOverflow(page)
   }
+})
+
+test('keeps user statistics actions right-aligned across locales and themes', async ({ page }) => {
+  test.setTimeout(45_000)
+  await setupAdminStatistics(page)
+  const userInsightsCard = await openUserInsights(page)
 
   for (const width of [797, 908, 964]) {
     await page.setViewportSize({ width, height: 900 })
     for (const dark of [false, true]) {
-      await page.evaluate(
-        (enabled) => document.documentElement.classList.toggle('dark', enabled),
-        dark
-      )
+      await setDarkMode(page, dark)
       await expectStatisticsActionsRightAligned(userInsightsCard)
     }
   }
@@ -290,15 +316,19 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
   for (const width of [797, 908, 964]) {
     await page.setViewportSize({ width, height: 900 })
     for (const dark of [false, true]) {
-      await page.evaluate(
-        (enabled) => document.documentElement.classList.toggle('dark', enabled),
-        dark
-      )
+      await setDarkMode(page, dark)
       await expectStatisticsActionsRightAligned(englishUserInsightsCard)
     }
   }
   await page.getByRole('button', { name: 'Switch to Chinese' }).click()
   await expect(page.locator('html')).toHaveAttribute('lang', 'zh-TW')
+})
+
+test('keeps user statistics mode controls aligned across mobile and desktop', async ({ page }) => {
+  test.setTimeout(45_000)
+  await setupAdminStatistics(page)
+  await openUserInsights(page)
+  await setDarkMode(page, true)
 
   await page.setViewportSize({ width: 393, height: 852 })
 
@@ -344,6 +374,29 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
   await modeButtons.nth(0).click()
   await expectNoHorizontalOverflow(page)
 
+  await setLargeFontScale(page)
+  for (const desktopWidth of [1280, 1440]) {
+    await page.setViewportSize({ width: desktopWidth, height: 900 })
+    await expect
+      .poll(() => modeSwitch.evaluate((element) => getComputedStyle(element).display))
+      .toBe('flex')
+    const desktopBoxes = await modeButtons.evaluateAll((elements) =>
+      elements.map((element) => Math.round(element.getBoundingClientRect().y))
+    )
+    expect(new Set(desktopBoxes).size).toBe(1)
+    await expectNoHorizontalOverflow(page)
+  }
+})
+
+test('keeps user duration summaries aligned across responsive widths and themes', async ({
+  page,
+}) => {
+  test.setTimeout(45_000)
+  await setupAdminStatistics(page)
+  await openUserInsights(page)
+  await setDarkMode(page, true)
+  await page.setViewportSize({ width: 393, height: 852 })
+
   await page.getByRole('button', { name: '查看使用者資料統計' }).first().click()
   const dialog = page.getByRole('dialog', { name: '使用者資料統計' })
   await expect(dialog).toBeVisible()
@@ -376,10 +429,7 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
   }
 
   for (const dark of [false, true]) {
-    await page.evaluate(
-      (enabled) => document.documentElement.classList.toggle('dark', enabled),
-      dark
-    )
+    await setDarkMode(page, dark)
     const boxes = await summaryCards.evaluateAll((elements) =>
       elements.map((element) => {
         const rect = element.getBoundingClientRect()
@@ -391,10 +441,7 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
     await expectNoHorizontalOverflow(page)
   }
 
-  await page.evaluate(() => {
-    document.documentElement.style.fontSize = '150%'
-    document.documentElement.style.setProperty('--app-effective-font-scale', '1.5')
-  })
+  await setLargeFontScale(page)
   const scaledTops = await summaryCards.evaluateAll((elements) =>
     elements.map((element) => Math.round(element.getBoundingClientRect().top))
   )
@@ -412,22 +459,16 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
     expect(new Set(desktopSummaryTops).size).toBe(1)
     await expectNoHorizontalOverflow(page)
   }
+})
 
-  await dialog.getByRole('button', { name: '關閉' }).click()
-  for (const desktopWidth of [1280, 1440]) {
-    await page.setViewportSize({ width: desktopWidth, height: 900 })
-    await expect
-      .poll(() => modeSwitch.evaluate((element) => getComputedStyle(element).display))
-      .toBe('flex')
-    const desktopBoxes = await modeButtons.evaluateAll((elements) =>
-      elements.map((element) => Math.round(element.getBoundingClientRect().y))
-    )
-    expect(new Set(desktopBoxes).size).toBe(1)
-    await expectNoHorizontalOverflow(page)
-  }
+test('keeps review statistics controls aligned across mobile widths', async ({ page }) => {
+  test.setTimeout(45_000)
+  await setupAdminStatistics(page)
+  await setDarkMode(page, true)
+  await setLargeFontScale(page)
 
   await page.setViewportSize({ width: 393, height: 852 })
-  await page.getByRole('tab', { name: '審核中心' }).click()
+  const reviewInsightsCard = await openReviewInsights(page)
   const reviewModeSwitch = page.locator('.user-insights__switch--two')
   const reviewModeButtons = reviewModeSwitch.locator(':scope > .user-insights__switch-option')
   await expect(reviewModeButtons).toHaveCount(2)
@@ -436,9 +477,6 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
   )
   expect(Math.abs(reviewBoxes[0].top - reviewBoxes[1].top)).toBeLessThanOrEqual(1)
   expect(Math.abs(reviewBoxes[0].width - reviewBoxes[1].width)).toBeLessThanOrEqual(1)
-  const reviewInsightsCard = page
-    .locator('.admin-insights-card')
-    .filter({ hasText: '投稿統計圖表' })
   const reviewSummaryCards = reviewInsightsCard.locator('.chart-summary-item')
   const reviewRangeButtons = reviewInsightsCard.locator('.user-insights__range button')
   await expect(reviewSummaryCards).toHaveCount(3)
@@ -449,13 +487,22 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
     await expectSameRow(reviewRangeButtons)
     await expectNoHorizontalOverflow(page)
   }
+})
+
+test('keeps review statistics actions right-aligned across locales and themes', async ({
+  page,
+}) => {
+  test.setTimeout(45_000)
+  await setupAdminStatistics(page)
+  await setDarkMode(page, true)
+  await setLargeFontScale(page)
+  await page.setViewportSize({ width: 393, height: 852 })
+  const reviewInsightsCard = await openReviewInsights(page)
+
   for (const width of [797, 908, 964]) {
     await page.setViewportSize({ width, height: 900 })
     for (const dark of [false, true]) {
-      await page.evaluate(
-        (enabled) => document.documentElement.classList.toggle('dark', enabled),
-        dark
-      )
+      await setDarkMode(page, dark)
       await expectStatisticsActionsRightAligned(reviewInsightsCard)
     }
   }
@@ -467,10 +514,7 @@ test('keeps mobile statistics tabs and duration summaries aligned', async ({ pag
   for (const width of [797, 908, 964]) {
     await page.setViewportSize({ width, height: 900 })
     for (const dark of [false, true]) {
-      await page.evaluate(
-        (enabled) => document.documentElement.classList.toggle('dark', enabled),
-        dark
-      )
+      await setDarkMode(page, dark)
       await expectStatisticsActionsRightAligned(englishReviewInsightsCard)
     }
   }
