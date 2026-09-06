@@ -230,6 +230,34 @@ describe('PdfPreviewModal', () => {
     expect(pdfPreviewSource).not.toContain('pdf-frame')
   })
 
+  it('scopes the mobile footer sizing fix to downloadable previews', async () => {
+    const wrapper = mount(PdfPreviewModal, {
+      props: {
+        visible: true,
+        previewUrl: '',
+        showDownload: false,
+      },
+      global: {
+        stubs: {
+          Dialog: DialogSlotsStub,
+          ProgressSpinner: stubComponent,
+          Button: stubComponent,
+          PdfDocumentViewer: PdfDocumentViewerStub,
+        },
+      },
+    })
+
+    expect(wrapper.find('.pdf-preview-dialog--downloadable').exists()).toBe(false)
+    expect(wrapper.find('.pdf-preview-download-button').exists()).toBe(false)
+
+    await wrapper.setProps({ showDownload: true })
+
+    expect(wrapper.find('.pdf-preview-dialog--downloadable').exists()).toBe(true)
+    expect(wrapper.find('.pdf-preview-download-button').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
   it('opts into the Christmas preview shell and keeps the download action identifiable', () => {
     const wrapper = mount(PdfPreviewModal, {
       props: {

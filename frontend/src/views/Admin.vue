@@ -11869,7 +11869,7 @@ onBeforeUnmount(() => {
 
 .comparison-mobile-meta {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
   gap: 0.5rem 0.75rem;
 }
 
@@ -13778,10 +13778,6 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 480px) {
-  .comparison-mobile-meta {
-    grid-template-columns: 1fr;
-  }
-
   .comparison-mobile-card-header {
     flex-wrap: wrap;
   }
