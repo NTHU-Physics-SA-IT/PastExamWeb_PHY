@@ -50,6 +50,12 @@ const DialogStyleStub = {
   },
   template: '<div><slot /></div>',
 }
+const PdfDocumentViewerStub = {
+  name: 'PdfDocumentViewer',
+  props: ['source'],
+  emits: ['load', 'error'],
+  template: '<div class="pdf-document-viewer-stub" />',
+}
 
 describe('PdfPreviewModal', () => {
   beforeAll(async () => {
@@ -77,6 +83,7 @@ describe('PdfPreviewModal', () => {
           Dialog: stubComponent,
           ProgressSpinner: stubComponent,
           Button: stubComponent,
+          PdfDocumentViewer: PdfDocumentViewerStub,
         },
       },
     })
@@ -120,6 +127,7 @@ describe('PdfPreviewModal', () => {
           Dialog: stubComponent,
           ProgressSpinner: stubComponent,
           Button: stubComponent,
+          PdfDocumentViewer: PdfDocumentViewerStub,
         },
       },
     })
@@ -143,21 +151,28 @@ describe('PdfPreviewModal', () => {
           Dialog: stubComponent,
           ProgressSpinner: stubComponent,
           Button: stubComponent,
+          PdfDocumentViewer: PdfDocumentViewerStub,
         },
       },
     })
 
     // trigger load with url and expect loading
     await wrapper.setProps({ previewUrl: 'https://example.com/file.pdf' })
+    await nextTick()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    await nextTick()
 
-    // simulate the native iframe load event
+    const viewer = wrapper.findComponent({ name: 'PdfDocumentViewer' })
+    expect(viewer.props('source')).toBe('https://example.com/file.pdf')
+
+    // simulate the application viewer load event
     expect(wrapper.vm.pdfLoading).toBe(true)
-    wrapper.vm.handlePdfLoaded()
+    viewer.vm.$emit('load')
     expect(wrapper.vm.pdfLoading).toBe(false)
     expect(wrapper.vm.pdfError).toBe(false)
 
-    // simulate the native iframe error event
-    wrapper.vm.handlePdfError(new Error('load failed'))
+    // simulate the application viewer error event
+    viewer.vm.$emit('error', new Error('load failed'))
     expect(wrapper.vm.pdfError).toBe(true)
     expect(wrapper.emitted('error')).toBeTruthy()
 
@@ -184,6 +199,7 @@ describe('PdfPreviewModal', () => {
           Dialog: stubComponent,
           ProgressSpinner: stubComponent,
           Button: stubComponent,
+          PdfDocumentViewer: PdfDocumentViewerStub,
           ArchiveDiscussionPanel: { template: '<div class="discussion-panel-stub"></div>' },
           ArchiveReportPanel: { template: '<div class="archive-report-panel-stub"></div>' },
         },
@@ -200,6 +216,12 @@ describe('PdfPreviewModal', () => {
     expect(pdfPreviewSource).not.toContain('(max-width: 768px)')
   })
 
+  it('uses the application PDF viewer instead of a native iframe', () => {
+    expect(pdfPreviewSource).toContain('<PdfDocumentViewer')
+    expect(pdfPreviewSource).not.toContain('<iframe')
+    expect(pdfPreviewSource).not.toContain('pdf-frame')
+  })
+
   it('顯示明確的考古題檔案缺失訊息', async () => {
     const wrapper = mount(PdfPreviewModal, {
       props: {
@@ -213,6 +235,7 @@ describe('PdfPreviewModal', () => {
           Dialog: stubComponent,
           ProgressSpinner: stubComponent,
           Button: stubComponent,
+          PdfDocumentViewer: PdfDocumentViewerStub,
         },
       },
     })
@@ -236,6 +259,7 @@ describe('PdfPreviewModal', () => {
           Dialog: stubComponent,
           ProgressSpinner: stubComponent,
           Button: stubComponent,
+          PdfDocumentViewer: PdfDocumentViewerStub,
           ArchiveDiscussionPanel: { template: '<div class="discussion-panel-stub"></div>' },
           ArchiveReportPanel: { template: '<div class="archive-report-panel-stub"></div>' },
         },
@@ -260,6 +284,7 @@ describe('PdfPreviewModal', () => {
           Dialog: DialogStyleStub,
           ProgressSpinner: stubComponent,
           Button: stubComponent,
+          PdfDocumentViewer: PdfDocumentViewerStub,
           ArchiveDiscussionPanel: { template: '<div class="discussion-panel-stub"></div>' },
           ArchiveReportPanel: { template: '<div class="archive-report-panel-stub"></div>' },
         },
@@ -293,6 +318,7 @@ describe('PdfPreviewModal', () => {
             props: ['label'],
             template: '<button v-bind="$attrs">{{ label }}</button>',
           },
+          PdfDocumentViewer: PdfDocumentViewerStub,
           ArchiveDiscussionPanel: {
             template: '<div class="discussion-panel-stub"><textarea value="draft" /></div>',
           },

@@ -1,6 +1,6 @@
 import { userTest as test, expect } from '../support/userTest'
+import { PDFDocument, StandardFonts } from 'pdf-lib'
 import { JSON_HEADERS } from '../support/constants'
-import { fromBase64ToBinaryString } from '../support/jwt'
 import { clickWhenVisible } from '../support/ui'
 import { createConsoleErrorCollector } from '../support/consoleDiagnostics'
 
@@ -27,9 +27,13 @@ test.describe('User › Archive browsing', () => {
     const pageErrors: string[] = []
     page.on('pageerror', (error) => pageErrors.push(error.message))
 
-    const pdfBody = fromBase64ToBinaryString(
-      'JVBERi0xLjUKJcTl8uXrPgoxIDAgb2JqPDwvVHlwZS9DYXRhbG9nL1BhZ2VzIDIgMCBSPj4KZW5kb2JqCjIgMCBvYmo8PC9UeXBlL1BhZ2VzL0tpZHMgWzMgMCBSXS9Db3VudCAxPj4KZW5kb2JqCjMgMCBvYmo8PC9UeXBlL1BhZ2UvUGFyZW50IDIgMCBSL01lZGlhQm94WzAgMCA1OTUgODQyXS9Db250ZW50cyA0IDAgUi9SZXNvdXJjZXMgPDwvUHJvY1Nl0dDU2V0Wy9QREZdPj4+Pj4KZW5kb2JqCjQgMCBvYmo8PC9MZW5ndGggNTI+PnN0cmVhbQpIL0YgMTIgVGYgMTIgVG0gMCBUZgoKZW5kc3RyZWFtCmVuZG9iagogNSAwIG9iag8+PnN0YXJ0eHJlZgoxNjYKJSVFT0YK'
-    )
+    const pdfDocument = await PDFDocument.create()
+    const pdfFont = await pdfDocument.embedFont(StandardFonts.Helvetica)
+    for (const label of ['Page 1', 'Page 2']) {
+      const pdfPage = pdfDocument.addPage([595, 842])
+      pdfPage.drawText(label, { x: 72, y: 770, size: 24, font: pdfFont })
+    }
+    const pdfBody = Buffer.from(await pdfDocument.save({ useObjectStreams: false }))
     const archivesResponse = () => [
       {
         id: 201,
@@ -122,19 +126,16 @@ test.describe('User › Archive browsing', () => {
       })
     })
 
-    await page.route(
-      '**/api/courses/101/archives/201/discussion/ws-ticket',
-      async (route) => {
-        wsTicketRequestCount += 1
-        expect(route.request().method()).toBe('POST')
-        expect(route.request().headers().authorization).toMatch(/^Bearer /)
-        await route.fulfill({
-          status: 200,
-          headers: JSON_HEADERS,
-          body: JSON.stringify({ ticket: 'w'.repeat(43), expires_in: 30 }),
-        })
-      }
-    )
+    await page.route('**/api/courses/101/archives/201/discussion/ws-ticket', async (route) => {
+      wsTicketRequestCount += 1
+      expect(route.request().method()).toBe('POST')
+      expect(route.request().headers().authorization).toMatch(/^Bearer /)
+      await route.fulfill({
+        status: 200,
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ ticket: 'w'.repeat(43), expires_in: 30 }),
+      })
+    })
 
     let downloadEndpointCalled = false
     await page.route('**/api/courses/101/archives/201/download', async (route) => {
@@ -146,14 +147,6 @@ test.describe('User › Archive browsing', () => {
         body: JSON.stringify({
           url: `${new URL(route.request().url()).origin}/minio/archives/201.pdf?X-Amz-Signature=download`,
         }),
-      })
-    })
-
-    await page.route('**/pdf.worker*.js', async (route) => {
-      await route.fulfill({
-        status: 200,
-        headers: { 'content-type': 'application/javascript' },
-        body: '',
       })
     })
 
@@ -283,6 +276,12 @@ test.describe('User › Archive browsing', () => {
     await expect(previewDialog).toBeVisible()
     await expect(previewDialog).toContainText('期末考')
 
+    const firstPage = previewDialog.locator('[data-pdf-page="1"]')
+    const secondPage = previewDialog.locator('[data-pdf-page="2"]')
+    await expect(firstPage).toHaveAttribute('data-page-loaded', 'true')
+    await secondPage.scrollIntoViewIfNeeded()
+    await expect(secondPage).toHaveAttribute('data-page-loaded', 'true')
+
     await expect.poll(() => wsTicketRequestCount).toBeGreaterThan(0)
     const discussionWsUrl = await page.evaluate(() => {
       const testWindow = window as Window & { __discussionWsUrls: string[] }
@@ -295,6 +294,16 @@ test.describe('User › Archive browsing', () => {
 
     expect(await consoleErrors.errors()).toEqual([])
     expect(pageErrors).toEqual([])
+
+    await clickWhenVisible(previewDialog.getByRole('button', { name: 'Close' }))
+    await expect(previewDialog).toBeHidden()
+    await clickWhenVisible(archiveCard.getByRole('button', { name: '預覽' }))
+    await expect(previewDialog).toBeVisible()
+    await expect(previewDialog.locator('[data-pdf-page="1"]')).toHaveAttribute(
+      'data-page-loaded',
+      'true'
+    )
+
     const downloadPromise = page.waitForEvent('download')
     await clickWhenVisible(previewDialog.getByRole('button', { name: '下載' }))
     const download = await downloadPromise

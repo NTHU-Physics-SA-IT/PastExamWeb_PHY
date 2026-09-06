@@ -47,6 +47,7 @@ declare module 'vue' {
     Paginator: typeof import('primevue/paginator')['default']
     PanelMenu: typeof import('primevue/panelmenu')['default']
     Password: typeof import('primevue/password')['default']
+    PdfDocumentViewer: typeof import('./src/components/PdfDocumentViewer.vue')['default']
     PdfPreviewModal: typeof import('./src/components/PdfPreviewModal.vue')['default']
     ProgressSpinner: typeof import('primevue/progressspinner')['default']
     RadioButton: typeof import('primevue/radiobutton')['default']
