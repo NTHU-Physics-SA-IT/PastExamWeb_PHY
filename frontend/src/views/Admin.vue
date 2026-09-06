@@ -424,7 +424,7 @@
                         icon="pi pi-trash"
                         severity="danger"
                         size="small"
-                        outlined
+                        :outlined="isChristmas"
                         @click="confirmDeleteCourse(data)"
                         :label="$t('刪除')"
                         :aria-label="$t('刪除課程')"
@@ -508,7 +508,7 @@
                       icon="pi pi-trash"
                       severity="danger"
                       size="small"
-                      outlined
+                      :outlined="isChristmas"
                       @click="confirmDeleteCourse(course)"
                       :label="$t('刪除')"
                       :aria-label="$t('刪除課程')"
@@ -1268,9 +1268,11 @@
                         :title="$t('編輯使用者')"
                       />
                       <Button
-                        class="user-reset-action review-takedown-action"
+                        :class="
+                          isChristmas ? 'user-reset-action review-takedown-action' : undefined
+                        "
                         icon="pi pi-key"
-                        severity="secondary"
+                        :severity="isChristmas ? 'secondary' : 'info'"
                         size="small"
                         @click="openResetPasswordDialog(data)"
                         :label="$t('重設密碼')"
@@ -1368,9 +1370,9 @@
                       :title="$t('編輯使用者')"
                     />
                     <Button
-                      class="user-reset-action review-takedown-action"
+                      :class="isChristmas ? 'user-reset-action review-takedown-action' : undefined"
                       icon="pi pi-key"
-                      severity="secondary"
+                      :severity="isChristmas ? 'secondary' : 'info'"
                       size="small"
                       @click="openResetPasswordDialog(user)"
                       :label="$t('重設密碼')"
@@ -1613,7 +1615,7 @@
                               class="announcement-delete-action"
                               icon="pi pi-trash"
                               severity="danger"
-                              outlined
+                              :outlined="isChristmas"
                               size="small"
                               @click="confirmDeleteNotification(data)"
                               :label="$t('刪除')"
@@ -1698,7 +1700,7 @@
                             class="announcement-delete-action"
                             icon="pi pi-trash"
                             severity="danger"
-                            outlined
+                            :outlined="isChristmas"
                             size="small"
                             @click="confirmDeleteNotification(notification)"
                             :label="$t('刪除')"
@@ -3126,7 +3128,7 @@
                         :title="$t('永久刪除')"
                         size="small"
                         severity="danger"
-                        outlined
+                        :outlined="isChristmas"
                         @click="confirmPermanentDeleteTrashItem(data)"
                       />
                       <span
@@ -3288,7 +3290,7 @@
                         :title="$t('永久刪除')"
                         size="small"
                         severity="danger"
-                        outlined
+                        :outlined="isChristmas"
                         @click="confirmPermanentDeleteTrashItem(data)"
                       />
                       <span
@@ -5104,6 +5106,7 @@ import { getMessageTemplate } from '../i18n'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { getCurrentUser } from '../utils/auth'
+import { useTheme } from '../utils/useTheme'
 import { isUnauthorizedError } from '../utils/http'
 import { formatRelativeOrAbsoluteDateTime } from '../utils/time'
 import {
@@ -5172,6 +5175,8 @@ import {
 } from '../utils/submissionLevel'
 
 const confirm = useConfirm()
+const { effectiveTheme } = useTheme()
+const isChristmas = computed(() => effectiveTheme.value === 'christmas')
 const toast = useToast()
 const announcementManagementTab = ref('announcements')
 const { t, locale } = useI18n()

@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { shallowMount, flushPromises } from '@vue/test-utils'
+import { computed, inject, provide } from 'vue'
 import AdminView from '@/views/Admin.vue'
+import { useTheme } from '@/utils/useTheme'
 import { setLocale } from '@/i18n'
 import { applyFontSizePreference } from '@/utils/fontSizePreference'
 
@@ -343,6 +345,102 @@ function createBackupWrapper() {
 let consoleErrorSpy
 
 describe('AdminView', () => {
+  it.each(['light', 'dark', 'christmas'])(
+    'keeps desktop and mobile Classic action variants and OAuth reset restrictions (%s)',
+    async (theme) => {
+      const state = useTheme()
+      state.isDarkTheme.value = theme === 'dark'
+      state.applyActiveSiteTheme(theme === 'christmas' ? 'christmas' : 'general')
+      const wrapper = shallowMount(AdminView, {
+        global: {
+          renderStubDefaultSlot: true,
+          stubs: {
+            DataTable: {
+              props: ['value', 'scrollHeight'],
+              setup(props) {
+                provide(
+                  'resetButtonRows',
+                  computed(() => props.value || [])
+                )
+              },
+              template: '<div><slot /></div>',
+            },
+            Column: {
+              setup() {
+                return { rows: inject('resetButtonRows', []) }
+              },
+              template: '<div><slot v-for="data in rows" name="body" :data="data" /></div>',
+            },
+            Button: {
+              name: 'ResetContractButton',
+              props: { severity: String, disabled: Boolean, size: String, outlined: Boolean },
+              template: '<button :disabled="disabled"><slot /></button>',
+            },
+          },
+        },
+      })
+      try {
+        await wrapper.vm.loadUsers()
+        await flushPromises()
+        const buttons = wrapper
+          .findAllComponents({ name: 'ResetContractButton' })
+          .filter((button) => button.attributes('aria-label') === '重設使用者密碼')
+        expect(buttons).toHaveLength(2)
+        for (const button of buttons) {
+          expect(button.props('severity')).toBe(theme === 'christmas' ? 'secondary' : 'info')
+          expect(button.props('disabled')).toBe(false)
+          expect(button.props('size')).toBe('small')
+          expect(button.classes().includes('review-takedown-action')).toBe(theme === 'christmas')
+          expect(button.classes().includes('user-reset-action')).toBe(theme === 'christmas')
+        }
+        await buttons[0].trigger('click')
+        expect(wrapper.vm.showResetPasswordDialog).toBe(true)
+
+        wrapper.vm.activeUserSource = 'nthu'
+        await wrapper.vm.$nextTick()
+        const oauthButtons = wrapper
+          .findAllComponents({ name: 'ResetContractButton' })
+          .filter((button) => button.attributes('aria-label') === '重設使用者密碼')
+        expect(oauthButtons).toHaveLength(2)
+        for (const button of oauthButtons) {
+          expect(button.props('severity')).toBe(theme === 'christmas' ? 'secondary' : 'info')
+          expect(button.props('disabled')).toBe(true)
+          expect(button.attributes('title')).toBe('此帳號不是本地帳號，無法由系統重設密碼。')
+        }
+
+        wrapper.vm.courses = sampleCourses
+        wrapper.vm.notifications = sampleNotifications
+        wrapper.vm.trashItems = [
+          { id: 91, item_type: 'course', name: 'Deleted course', canPermanentDelete: true },
+          { id: 92, item_type: 'course', name: 'Blocked course', canPermanentDelete: false },
+        ]
+        wrapper.vm.courseCategories = [
+          { id: 1, key: 'freshman', name: '基礎必修', label: '基礎', is_active: true },
+        ]
+        await wrapper.vm.$nextTick()
+        for (const [label, count, outlined] of [
+          ['刪除課程', sampleCourses.length * 2, theme === 'christmas'],
+          ['刪除公告', sampleNotifications.length * 2, theme === 'christmas'],
+          ['刪除分類', 2, true],
+          ['永久刪除', 2, theme === 'christmas'],
+        ]) {
+          const actions = wrapper
+            .findAllComponents({ name: 'ResetContractButton' })
+            .filter((button) => button.attributes('aria-label') === label)
+          expect(actions, label).toHaveLength(count)
+          for (const button of actions) {
+            expect(button.props('severity'), label).toBe('danger')
+            expect(button.props('outlined'), label).toBe(outlined)
+          }
+        }
+      } finally {
+        wrapper.unmount()
+        state.applyActiveSiteTheme('general')
+        getUsersMock.mockClear()
+      }
+    }
+  )
+
   it('keeps 公告管理 top-level and adds the three requested nested management sections', () => {
     expect(adminTemplateSource).toContain('<Tab value="2">')
     expect(adminTemplateSource).toContain('<Tab value="announcements">{{ $t(\'公告管理\') }}</Tab>')
@@ -758,9 +856,6 @@ describe('AdminView', () => {
     ).toHaveLength(2)
     expect(
       adminTemplateSource.match(/class="user-download-action review-action-republish"/g)
-    ).toHaveLength(2)
-    expect(
-      adminTemplateSource.match(/class="user-reset-action review-takedown-action"/g)
     ).toHaveLength(2)
     expect(
       adminTemplateSource.match(

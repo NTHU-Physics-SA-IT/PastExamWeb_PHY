@@ -233,6 +233,7 @@
             :label="$t('登入')"
             type="submit"
             class="p-button-primary w-full"
+            :class="{ 'login-submit--classic': effectiveTheme !== 'christmas' }"
             @click="handleLocalLogin"
             :loading="loading"
           />
@@ -1161,6 +1162,45 @@ export default {
 </script>
 
 <style scoped>
+/* The teleported login submit owns its Classic sweep independently of Home. */
+.login-submit--classic {
+  isolation: isolate;
+  overflow: hidden;
+  position: relative;
+}
+
+.login-submit--classic::before {
+  position: absolute;
+  z-index: 2;
+  top: -35%;
+  left: -42%;
+  width: 30%;
+  height: 170%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.12) 28%,
+    rgba(255, 255, 255, 0.42) 50%,
+    rgba(255, 255, 255, 0.12) 72%,
+    transparent 100%
+  );
+  content: '';
+  pointer-events: none;
+  transform: translateX(0) skewX(-18deg);
+  transition: none;
+}
+
+.login-submit--classic:not(:disabled):not(.p-button-loading):hover::before {
+  transform: translateX(510%) skewX(-18deg);
+  transition: transform 1s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-submit--classic::before {
+    display: none;
+  }
+}
+
 .p-dialog .p-dialog-content {
   padding: 1.5rem;
 }

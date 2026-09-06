@@ -273,7 +273,28 @@ describe('HomeView', () => {
     reducedMotionWrapper.unmount()
   })
 
-  it('removes login CTA sweeps while preserving the catalog content effect and reduced motion', () => {
+  it.each(['light', 'dark', 'christmas'])(
+    'enables the login CTA sweep owner only for Classic mode (%s)',
+    async (theme) => {
+      const state = useTheme()
+      state.isDarkTheme.value = theme === 'dark'
+      state.applyActiveSiteTheme(theme === 'christmas' ? 'christmas' : 'general')
+      const wrapper = mount(HomeView)
+      try {
+        await flushPromises()
+        expect(wrapper.get('.hero-actions').classes().includes('hero-actions--classic')).toBe(
+          theme !== 'christmas'
+        )
+        expect(wrapper.get('.hero-actions').text()).toContain('清華校務系統登入')
+        expect(wrapper.get('.hero-actions').text()).toContain('本地帳號登入')
+      } finally {
+        wrapper.unmount()
+        state.applyActiveSiteTheme('general')
+      }
+    }
+  )
+
+  it('preserves Christmas CTA effects, catalog content effects and reduced motion', () => {
     expect(homeSource).not.toMatch(/\.hero-actions\s+:deep\(\.p-button\)::before/)
     expect(homeSource).not.toMatch(
       /\.hero-actions\s+:deep\(\.p-button:not\(:disabled\):hover\)::before/

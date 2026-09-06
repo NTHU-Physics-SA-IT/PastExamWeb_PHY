@@ -65,7 +65,10 @@
             <p class="title-campus"><span></span>NTHU PHYSICS<span></span></p>
           </div>
           <p class="subtitle">{{ homepageSlogan }}</p>
-          <div class="hero-actions">
+          <div
+            class="hero-actions"
+            :class="{ 'hero-actions--classic': effectiveTheme !== 'christmas' }"
+          >
             <Button
               :class="{
                 'nthu-login-button': effectiveTheme === 'christmas',
@@ -833,6 +836,46 @@ h1 {
   border-color: transparent;
   background: transparent;
   box-shadow: none;
+}
+
+/* Classic login CTA light sweep; retain the independent Christmas treatment. */
+.hero-actions--classic :deep(.p-button:not(.catalog-action)) {
+  isolation: isolate;
+  overflow: hidden;
+  position: relative;
+}
+
+.hero-actions--classic :deep(.p-button:not(.catalog-action))::before {
+  position: absolute;
+  z-index: 2;
+  top: -35%;
+  left: -42%;
+  width: 30%;
+  height: 170%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.12) 28%,
+    rgba(255, 255, 255, 0.42) 50%,
+    rgba(255, 255, 255, 0.12) 72%,
+    transparent 100%
+  );
+  content: '';
+  pointer-events: none;
+  transform: translateX(0) skewX(-18deg);
+  transition: none;
+  will-change: transform;
+}
+
+.hero-actions--classic :deep(.p-button:not(.catalog-action):not(:disabled):hover)::before {
+  transform: translateX(510%) skewX(-18deg);
+  transition: transform 1s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.hero-actions--classic :deep(.p-button:not(.catalog-action) .p-button-icon),
+.hero-actions--classic :deep(.p-button:not(.catalog-action) .p-button-label) {
+  position: relative;
+  z-index: 1;
 }
 
 .hero-actions {
@@ -2122,6 +2165,10 @@ h1 {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .hero-actions--classic :deep(.p-button:not(.catalog-action))::before {
+    display: none;
+  }
+
   .mass-core-entry,
   .mass-core-entry.mass-core-entry-ready {
     opacity: 1;
