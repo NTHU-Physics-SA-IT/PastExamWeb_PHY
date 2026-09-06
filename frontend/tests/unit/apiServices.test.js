@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { courseService } from '@/api/services/courses.js'
 import { archiveService } from '@/api/services/archives.js'
 import { notificationService } from '@/api/services/notifications.js'
@@ -40,6 +40,32 @@ vi.mock('@/api/services/client', () => ({
 }))
 
 describe('API service wrappers', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('keeps signed archive paths intact while using the dev page origin only for loopback storage', async () => {
+    const path = '/minio/bucket/exam%2Fone.pdf?X-Amz-Signature=abc&name=a%20b+z&x=%2f'
+    vi.stubEnv('DEV', true)
+    for (const method of ['getArchivePreviewUrl', 'getArchiveDownloadUrl']) {
+      getMock.mockResolvedValueOnce({ data: { url: `http://localhost:8080${path}` } })
+      const response = await archiveService[method](1, 2)
+      expect(response.data.url).toBe(`${window.location.origin}${path}`)
+    }
+    for (const url of [
+      `https://storage.example${path}`,
+      `http://localhost.evil.example${path}`,
+      'http://localhost:8080/other/file.pdf?X-Amz-Signature=abc',
+      'http://localhost:8080/minio/bucket/unsigned.pdf',
+      'blob:http://localhost:8080/document',
+      path,
+    ]) {
+      getMock.mockResolvedValueOnce({ data: { url } })
+      expect((await archiveService.getArchivePreviewUrl(1, 2)).data.url).toBe(url)
+    }
+    vi.stubEnv('DEV', false)
+    const productionUrl = `http://localhost:8080${path}`
+    getMock.mockResolvedValueOnce({ data: { url: productionUrl } })
+    expect((await archiveService.getArchivePreviewUrl(1, 2)).data.url).toBe(productionUrl)
+  })
   beforeEach(() => {
     getMock.mockReset()
     postMock.mockReset()
@@ -87,7 +113,8 @@ describe('API service wrappers', () => {
     expect(deleteMock).toHaveBeenCalledWith('/courses/admin/courses/course-1')
   })
 
-  it('archiveService proxies to API client', () => {
+  it('archiveService proxies to API client', async () => {
+    getMock.mockResolvedValue({ data: { url: '/unchanged' } })
     const formData = new FormData()
     archiveService.uploadArchive(formData)
     expect(postMock).toHaveBeenCalledWith(
@@ -99,10 +126,10 @@ describe('API service wrappers', () => {
       })
     )
 
-    archiveService.getArchivePreviewUrl('course-1', 'arch-1')
+    await archiveService.getArchivePreviewUrl('course-1', 'arch-1')
     expect(getMock).toHaveBeenCalledWith('/courses/course-1/archives/arch-1/preview')
 
-    archiveService.getArchiveDownloadUrl('course-1', 'arch-1')
+    await archiveService.getArchiveDownloadUrl('course-1', 'arch-1')
     expect(getMock).toHaveBeenCalledWith('/courses/course-1/archives/arch-1/download')
 
     archiveService.downloadArchiveBackup()

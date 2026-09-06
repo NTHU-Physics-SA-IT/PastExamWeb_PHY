@@ -1,5 +1,20 @@
 import { api } from './client'
 
+function useDevStorageOrigin(response) {
+  if (!import.meta.env.DEV) return response
+
+  const url = response.data.url
+  // Both dev entrypoints proxy /minio/ with the signing Host minio:9000.
+  // Preserve the raw signed path/query; never normalize production or external URLs.
+  const match =
+    typeof url === 'string' &&
+    url.match(/^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(\/minio\/[^?#]+\?[^#]+)$/)
+  if (match && /[?&]X-Amz-Signature=[^&]+/.test(match[1])) {
+    response.data.url = `${window.location.origin}${match[1]}`
+  }
+  return response
+}
+
 const archiveSubmissionStatuses = new Set([
   'pending',
   'approved',
@@ -32,8 +47,8 @@ export const archiveService = {
     })
   },
 
-  getArchivePreviewUrl(courseId, archiveId) {
-    return api.get(`/courses/${courseId}/archives/${archiveId}/preview`)
+  async getArchivePreviewUrl(courseId, archiveId) {
+    return useDevStorageOrigin(await api.get(`/courses/${courseId}/archives/${archiveId}/preview`))
   },
 
   getArchivePreviewFileUrl(courseId, archiveId) {
@@ -46,8 +61,8 @@ export const archiveService = {
     })
   },
 
-  getArchiveDownloadUrl(courseId, archiveId) {
-    return api.get(`/courses/${courseId}/archives/${archiveId}/download`)
+  async getArchiveDownloadUrl(courseId, archiveId) {
+    return useDevStorageOrigin(await api.get(`/courses/${courseId}/archives/${archiveId}/download`))
   },
 
   downloadArchiveBackup() {

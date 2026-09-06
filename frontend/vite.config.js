@@ -7,11 +7,20 @@ import Components from 'unplugin-vue-components/vite'
 import { PrimeVueResolver } from '@primevue/auto-import-resolver'
 import eslintPlugin from 'vite-plugin-eslint'
 import viteCompression from 'vite-plugin-compression'
+import { pdfJsLegacyAliases } from './pdfjs-compat.config.js'
 
 export default defineConfig(({ mode }) => {
   return {
     resolve: {
-      alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+      alias: [
+        { find: '@', replacement: fileURLToPath(new URL('./src', import.meta.url)) },
+        ...pdfJsLegacyAliases,
+      ],
+    },
+    optimizeDeps: {
+      // Keep the aliased worker as a Vite URL asset. Prebundling it drops the
+      // URL wrapper's default export and exposes only WorkerMessageHandler.
+      exclude: ['pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'],
     },
     server: {
       host: true,

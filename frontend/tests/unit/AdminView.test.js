@@ -1428,6 +1428,101 @@ describe('AdminView', () => {
     wrapper.unmount()
   })
 
+  it('renders independent comparison viewers and cleans up parent-owned URLs', async () => {
+    const wrapper = shallowMount(AdminView, {
+      global: {
+        stubs: {
+          Dialog: {
+            props: ['visible'],
+            template: '<div v-if="visible"><slot /></div>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+    let serial = 0
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => `blob:compare-${++serial}`),
+    })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+    try {
+      wrapper.vm.selectedArchiveRequest = { id: 1, review_revision: 'left' }
+      await wrapper.vm.openComparePreview({ id: 2, review_revision: 'right' })
+      await flushPromises()
+      const viewers = wrapper.findAllComponents({ name: 'PdfDocumentViewer' })
+      expect(viewers).toHaveLength(2)
+      expect(wrapper.find('.compare-preview-grid iframe').exists()).toBe(false)
+      expect(viewers.map((v) => v.props('source'))).toEqual(['blob:compare-1', 'blob:compare-2'])
+      expect(wrapper.findAll('.compare-preview-status')).toHaveLength(2)
+      viewers[0].vm.$emit('load')
+      viewers[1].vm.$emit('error', new Error('private worker detail'))
+      await flushPromises()
+      expect(wrapper.findAllComponents({ name: 'PdfDocumentViewer' })).toHaveLength(1)
+      expect(wrapper.find('[data-compare-side="archive"]').text()).toContain('無法載入比對 PDF')
+      expect(wrapper.text()).not.toContain('private worker detail')
+      const stalePane = wrapper.vm.comparePreviewPanes[0]
+      await wrapper.vm.openComparePreview({ id: 3, review_revision: 'replacement' })
+      await flushPromises()
+      wrapper.vm.setCompareRenderState(stalePane, 'error')
+      expect(wrapper.vm.comparePreviewPanes[0].state).toBe('loading')
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:compare-1')
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:compare-2')
+      wrapper.vm.closeComparePreview()
+      await flushPromises()
+      expect(wrapper.findAllComponents({ name: 'PdfDocumentViewer' })).toHaveLength(0)
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:compare-3')
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:compare-4')
+    } finally {
+      wrapper.unmount()
+      delete URL.createObjectURL
+      delete URL.revokeObjectURL
+    }
+  })
+
+  it('ignores comparison fetches that finish after close or replacement', async () => {
+    const wrapper = createWrapper()
+    await flushPromises()
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:current'),
+    })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+    try {
+      wrapper.vm.selectedArchiveRequest = { id: 1, review_revision: 'left' }
+      let finish
+      getSubmissionPreviewFileMock.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve
+          })
+      )
+      const pending = wrapper.vm.openComparePreview({ id: 2, review_revision: 'old' })
+      wrapper.vm.closeComparePreview()
+      finish({ data: new Blob(['old']) })
+      await pending
+      expect(URL.createObjectURL).not.toHaveBeenCalled()
+      let replace
+      getSubmissionPreviewFileMock.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            replace = resolve
+          })
+      )
+      const old = wrapper.vm.openComparePreview({ id: 2, review_revision: 'old' })
+      await wrapper.vm.openComparePreview({ id: 3, review_revision: 'new' })
+      expect(URL.createObjectURL).toHaveBeenCalledTimes(2)
+      replace({ data: new Blob(['old']) })
+      await old
+      expect(URL.createObjectURL).toHaveBeenCalledTimes(2)
+      expect(wrapper.vm.comparePreviewArchive.id).toBe(3)
+    } finally {
+      wrapper.unmount()
+      delete URL.createObjectURL
+      delete URL.revokeObjectURL
+    }
+  })
+
   it('preserves distinct comparison submission identities returned by the API', async () => {
     const currentSubmissionId = 7001
     const candidateIds = [7002, 7003]
