@@ -1,3 +1,5 @@
+import PrimeVue from 'primevue/config'
+import { useTheme } from '@/utils/useTheme'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import aboutUsSource from '@/views/AboutUs.vue?raw'
@@ -34,6 +36,51 @@ const stubs = {
 }
 
 describe('About Us view', () => {
+  // Assert the rendered PrimeVue contract, not literal hex absence in source.
+  it.each(['light', 'dark', 'christmas'])(
+    'restores Classic presentation and preserves Christmas (%s)',
+    async (theme) => {
+      const themeState = useTheme()
+      const previous = themeState.effectiveTheme.value
+      themeState.isDarkTheme.value = theme === 'dark'
+      themeState.applyActiveSiteTheme(theme === 'christmas' ? 'christmas' : 'general')
+      let wrapper
+      try {
+        const AboutUs = (await import('@/views/AboutUs.vue')).default
+        wrapper = mount(AboutUs, {
+          global: { plugins: [PrimeVue], stubs: { ...stubs, Button: false } },
+        })
+        await flushPromises()
+        wrapper.vm.openCreate()
+        await wrapper.vm.$nextTick()
+        for (const key of ['add', 'dialog-save']) {
+          const b = wrapper.findComponent('.about-us-' + key + '-action')
+          expect(b.props('severity') ?? undefined).toBe(
+            theme === 'christmas' ? 'success' : undefined
+          )
+        }
+        for (const key of ['edit', 'delete']) {
+          const b = wrapper.findComponent('.about-us-' + key + '-action')
+          expect(b.props('text')).toBe(theme !== 'christmas')
+          expect(b.props('outlined')).toBe(theme === 'christmas')
+          expect(b.props('size') ?? undefined).toBe('small')
+        }
+        expect(
+          wrapper.findComponent('.about-us-delete-action').props('severity') ?? undefined
+        ).toBe('danger')
+        expect(wrapper.findComponent('.about-us-dialog-cancel-action').props('outlined')).toBe(
+          theme === 'christmas'
+        )
+        expect(createMock).not.toHaveBeenCalled()
+        expect(deleteMock).not.toHaveBeenCalled()
+      } finally {
+        wrapper?.unmount()
+        themeState.isDarkTheme.value = previous === 'dark'
+        themeState.applyActiveSiteTheme(previous === 'christmas' ? 'christmas' : 'general')
+      }
+    }
+  )
+
   beforeEach(() => {
     vi.clearAllMocks()
     getCurrentUserMock.mockReturnValue({ id: 1, is_admin: true })

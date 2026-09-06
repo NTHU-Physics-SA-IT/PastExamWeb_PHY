@@ -424,7 +424,7 @@
                         icon="pi pi-trash"
                         severity="danger"
                         size="small"
-                        outlined
+                        :outlined="isChristmas"
                         @click="confirmDeleteCourse(data)"
                         :label="$t('刪除')"
                         :aria-label="$t('刪除課程')"
@@ -508,7 +508,7 @@
                       icon="pi pi-trash"
                       severity="danger"
                       size="small"
-                      outlined
+                      :outlined="isChristmas"
                       @click="confirmDeleteCourse(course)"
                       :label="$t('刪除')"
                       :aria-label="$t('刪除課程')"
@@ -1268,9 +1268,11 @@
                         :title="$t('編輯使用者')"
                       />
                       <Button
-                        class="user-reset-action review-takedown-action"
+                        :class="
+                          isChristmas ? 'user-reset-action review-takedown-action' : undefined
+                        "
                         icon="pi pi-key"
-                        severity="secondary"
+                        :severity="isChristmas ? 'secondary' : 'info'"
                         size="small"
                         @click="openResetPasswordDialog(data)"
                         :label="$t('重設密碼')"
@@ -1368,9 +1370,9 @@
                       :title="$t('編輯使用者')"
                     />
                     <Button
-                      class="user-reset-action review-takedown-action"
+                      :class="isChristmas ? 'user-reset-action review-takedown-action' : undefined"
                       icon="pi pi-key"
-                      severity="secondary"
+                      :severity="isChristmas ? 'secondary' : 'info'"
                       size="small"
                       @click="openResetPasswordDialog(user)"
                       :label="$t('重設密碼')"
@@ -1613,7 +1615,7 @@
                               class="announcement-delete-action"
                               icon="pi pi-trash"
                               severity="danger"
-                              outlined
+                              :outlined="isChristmas"
                               size="small"
                               @click="confirmDeleteNotification(data)"
                               :label="$t('刪除')"
@@ -1698,7 +1700,7 @@
                             class="announcement-delete-action"
                             icon="pi pi-trash"
                             severity="danger"
-                            outlined
+                            :outlined="isChristmas"
                             size="small"
                             @click="confirmDeleteNotification(notification)"
                             :label="$t('刪除')"
@@ -3115,6 +3117,7 @@
                         :label="$t('還原')"
                         size="small"
                         severity="success"
+                        outlined
                         @click="confirmRestoreTrashItem(data)"
                       />
                       <Button
@@ -3277,6 +3280,7 @@
                         :title="$t('還原')"
                         size="small"
                         severity="success"
+                        outlined
                         @click="confirmRestoreTrashItem(data)"
                       />
                       <Button
@@ -5112,6 +5116,7 @@ import { getMessageTemplate } from '../i18n'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { getCurrentUser } from '../utils/auth'
+import { useTheme } from '../utils/useTheme'
 import { isUnauthorizedError } from '../utils/http'
 import { formatRelativeOrAbsoluteDateTime } from '../utils/time'
 import {
@@ -5181,6 +5186,8 @@ import {
 } from '../utils/submissionLevel'
 
 const confirm = useConfirm()
+const { effectiveTheme } = useTheme()
+const isChristmas = computed(() => effectiveTheme.value === 'christmas')
 const toast = useToast()
 const announcementManagementTab = ref('announcements')
 const { t, locale } = useI18n()
@@ -17597,15 +17604,19 @@ html[data-effective-theme='christmas'].admin-page-active
   text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
 }
 
-html[data-effective-theme='christmas'].admin-page-active .review-action-republish.p-button {
+html[data-effective-theme='christmas'].admin-page-active
+  .review-action-republish.p-button:not(:where(.trash-restore-action.p-button-outlined)) {
   border-color: rgba(127, 188, 145, 0.82) !important;
   color: #f5fff7 !important;
   background: linear-gradient(135deg, #3d8a64, #2d6c52) !important;
 }
 
-html[data-effective-theme='christmas'].admin-page-active .review-action-republish.p-button:hover,
 html[data-effective-theme='christmas'].admin-page-active
-  .review-action-republish.p-button:focus-visible {
+  .review-action-republish.p-button:not(:where(.trash-restore-action.p-button-outlined)):hover,
+html[data-effective-theme='christmas'].admin-page-active
+  .review-action-republish.p-button:not(
+    :where(.trash-restore-action.p-button-outlined)
+  ):focus-visible {
   border-color: rgba(255, 226, 143, 0.9) !important;
   color: #ffffff !important;
   background: linear-gradient(135deg, #479b70, #347b5c) !important;

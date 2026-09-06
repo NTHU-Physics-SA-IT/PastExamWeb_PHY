@@ -342,8 +342,8 @@
             class="slogan-dialog-save-action review-action-republish"
             :label="$t('儲存')"
             icon="pi pi-save"
-            severity="success"
-            size="small"
+            :severity="effectiveTheme === 'christmas' ? 'success' : undefined"
+            :size="effectiveTheme === 'christmas' ? 'small' : undefined"
             :loading="saving"
             @click="saveReview"
           />
@@ -362,9 +362,11 @@ import { homepageSloganService } from '@/api'
 import { ADMIN_PAGE_SIZE_OPTIONS } from '@/constants/pagination'
 import { getMessageTemplate } from '@/i18n'
 import { formatExactDateTime24h } from '@/utils/time'
+import { useTheme } from '@/utils/useTheme'
 
 const emit = defineEmits(['attention-change'])
 const { t } = useI18n()
+const { effectiveTheme } = useTheme()
 const confirm = useConfirm()
 const toast = useToast()
 const paginationReportTemplate = computed(() =>

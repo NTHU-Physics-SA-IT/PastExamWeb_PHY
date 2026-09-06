@@ -1,3 +1,6 @@
+import Button from 'primevue/button'
+import PrimeVue from 'primevue/config'
+import { useTheme } from '@/utils/useTheme'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import process from 'node:process'
@@ -98,6 +101,7 @@ const rowDataTableStub = {
 }
 
 function mountPanel({
+  realButtons = false,
   renderRows = false,
   cardLayout = false,
   mediaQuery = null,
@@ -116,6 +120,7 @@ function mountPanel({
   return mount(ReportManagementPanel, {
     props,
     global: {
+      plugins: realButtons ? [PrimeVue] : [],
       stubs: {
         Tabs: slotStub,
         TabList: slotStub,
@@ -133,7 +138,9 @@ function mountPanel({
             '<div class="column-header" :data-sortable="String(Boolean(sortable))" :data-sort-field="sortField || \'\'">{{ header }}</div>',
         },
         Dialog: slotStub,
-        Button: { props: ['label'], template: '<button>{{ label }}</button>' },
+        Button: realButtons
+          ? false
+          : { props: ['label'], template: '<button>{{ label }}</button>' },
         InputText: true,
         Select: true,
         Tag: { props: ['value'], template: '<span class="tag-stub">{{ value }}</span>' },
@@ -150,6 +157,74 @@ function mountPanel({
 }
 
 describe('ReportManagementPanel', () => {
+  // Assert the rendered PrimeVue contract, not literal hex absence in source.
+  it.each(['light', 'dark', 'christmas'])(
+    'restores Classic presentation and preserves Christmas (%s)',
+    async (theme) => {
+      const themeState = useTheme()
+      const previous = themeState.effectiveTheme.value
+      themeState.isDarkTheme.value = theme === 'dark'
+      themeState.applyActiveSiteTheme(theme === 'christmas' ? 'christmas' : 'general')
+      let wrapper
+      try {
+        mocks.confirm.mockImplementation(() => {})
+        wrapper = mountPanel({ realButtons: true })
+        await flushPromises()
+        wrapper.vm.selectedSystemReport = { id: 1, is_read: false }
+        wrapper.vm.selectedReport = { id: 2, status: 'pending', source_exists: true }
+        wrapper.vm.selectedArchiveReport = { id: 3, status: 'pending', source_exists: true }
+        wrapper.vm.selectedWishReport = { id: 4, status: 'pending' }
+        await wrapper.vm.$nextTick()
+        const buttons = wrapper.findAllComponents(Button)
+        const saves = buttons.filter((b) => b.classes().includes('report-download-action'))
+        expect(saves).toHaveLength(4)
+        for (const b of saves) {
+          expect(b.props('severity') ?? undefined).toBe(
+            theme === 'christmas' ? 'success' : undefined
+          )
+          expect(b.props('size') ?? undefined).toBe(theme === 'christmas' ? 'small' : undefined)
+          expect(b.props('icon')).toMatch(/^pi pi-(save|check)$/)
+        }
+        const dialogPreviews = buttons.filter(
+          (b) =>
+            b.classes().includes('report-preview-action') &&
+            ['關閉', '前往來源'].includes(b.props('label'))
+        )
+        expect(dialogPreviews).toHaveLength(6)
+        for (const b of dialogPreviews)
+          expect(b.props('size') ?? undefined).toBe(theme === 'christmas' ? 'small' : undefined)
+        expect(dialogPreviews.filter((b) => b.props('text'))).toHaveLength(
+          theme === 'christmas' ? 0 : 3
+        )
+        for (const method of [
+          'confirmDeleteSystemIssue',
+          'confirmDeleteCommentReport',
+          'confirmDeleteArchiveReport',
+          'confirmDeleteWishReport',
+        ]) {
+          wrapper.vm[method]({ id: 9 })
+          const options = mocks.confirm.mock.lastCall[0]
+          expect(options.acceptClass).toBe(
+            theme === 'christmas'
+              ? 'admin-danger-outline-button review-action-delete p-button-danger p-button-outlined p-button-sm'
+              : 'p-button-danger'
+          )
+          expect(options.rejectClass).toBe(
+            theme === 'christmas'
+              ? 'review-action-preview p-button-secondary p-button-outlined p-button-sm'
+              : undefined
+          )
+        }
+        expect(mocks.deleteSystem).not.toHaveBeenCalled()
+        expect(mocks.deleteComment).not.toHaveBeenCalled()
+      } finally {
+        wrapper?.unmount()
+        themeState.isDarkTheme.value = previous === 'dark'
+        themeState.applyActiveSiteTheme(previous === 'christmas' ? 'christmas' : 'general')
+      }
+    }
+  )
+
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.listSystem.mockResolvedValue({ data: { items: [], total: 0 } })
@@ -1104,7 +1179,7 @@ describe('ReportManagementPanel', () => {
 
     const options = mocks.confirm.mock.calls[0][0]
     expect(options.message).toContain('被回報留言將永久刪除，無法復原，也不會進入垃圾桶。')
-    expect(options.acceptClass).toContain('review-action-delete')
+    expect(options.acceptClass).toBe('p-button-danger')
     expect(options.acceptClass).toContain('p-button-danger')
     expect(mocks.reviewComment).not.toHaveBeenCalled()
   })
@@ -1273,17 +1348,23 @@ describe('ReportManagementPanel', () => {
     expect(reportManagementSource).toMatch(
       /const REPORT_CONFIRM_DELETE_CLASS\s*=\s*\n?\s*'admin-danger-outline-button review-action-delete p-button-danger p-button-outlined p-button-sm'/
     )
-    expect(reportManagementSource.match(/rejectClass: REPORT_CONFIRM_PREVIEW_CLASS/g)).toHaveLength(
-      7
-    )
-    expect(reportManagementSource.match(/acceptClass: REPORT_CONFIRM_DELETE_CLASS/g)).toHaveLength(
-      4
-    )
     expect(
-      reportManagementSource.match(/acceptClass: REPORT_CONFIRM_DOWNLOAD_CLASS/g)
+      reportManagementSource.match(
+        /rejectClass: effectiveTheme\.value === 'christmas' \? REPORT_CONFIRM_PREVIEW_CLASS : undefined/g
+      )
+    ).toHaveLength(7)
+    expect(
+      reportManagementSource.match(
+        /acceptClass:\s*effectiveTheme\.value === 'christmas' \? REPORT_CONFIRM_DELETE_CLASS : 'p-button-danger'/g
+      )
+    ).toHaveLength(4)
+    expect(
+      reportManagementSource.match(
+        /acceptClass: effectiveTheme\.value === 'christmas' \? REPORT_CONFIRM_DOWNLOAD_CLASS : undefined/g
+      )
     ).toHaveLength(2)
     expect(reportManagementSource).toMatch(
-      /acceptClass:\s*deletesComment\s*\?\s*REPORT_CONFIRM_DELETE_CLASS\s*:\s*REPORT_CONFIRM_DOWNLOAD_CLASS/
+      /acceptClass:\s*effectiveTheme\.value === 'christmas'\s*\? deletesComment\s*\?\s*REPORT_CONFIRM_DELETE_CLASS\s*:\s*REPORT_CONFIRM_DOWNLOAD_CLASS\s*:\s*deletesComment\s*\?\s*'p-button-danger'\s*:\s*'p-button-primary'/
     )
   })
 

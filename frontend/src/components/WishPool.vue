@@ -248,6 +248,7 @@
             type="button"
             :label="$t('取消')"
             severity="secondary"
+            :text="!props.christmas"
             class="wish-slogan-cancel-button"
             @click="sloganDialogVisible = false"
           />

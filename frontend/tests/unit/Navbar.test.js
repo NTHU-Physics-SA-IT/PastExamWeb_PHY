@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { nextTick } from 'vue'
+import { nextTick, ref } from 'vue'
 import { shallowMount } from '@vue/test-utils'
 import Navbar from '@/components/Navbar.vue'
 import navbarSource from '@/components/Navbar.vue?raw'
@@ -201,6 +201,37 @@ describe('Navbar methods', () => {
     expect(trackEventMock).toHaveBeenCalledWith('toggle-theme', expect.any(Object))
     expect(ctx.toggleTheme).toHaveBeenCalled()
   })
+
+  it.each(['light', 'dark', 'christmas'])(
+    'scopes the login dialog submit sweep to Classic mode (%s)',
+    async (theme) => {
+      const previousTheme = themeStateMock.effectiveTheme
+      themeStateMock.effectiveTheme = ref(theme)
+      const wrapper = shallowMount(Navbar, {
+        data: () => ({ loginVisible: true }),
+        global: {
+          mocks: { $route: { path: '/' }, $router: { push: vi.fn() } },
+          stubs: {
+            RouterLink: { template: '<a><slot /></a>' },
+            Dialog: {
+              props: ['visible'],
+              template: '<section v-if="visible"><slot /></section>',
+            },
+          },
+        },
+      })
+      try {
+        await nextTick()
+        const submit = wrapper.get('.login-dialog button-stub[type="submit"]')
+        expect(submit.classes().includes('login-submit--classic')).toBe(theme !== 'christmas')
+        expect(submit.classes()).toContain('p-button-primary')
+        expect(submit.attributes('label')).toBe('登入')
+      } finally {
+        wrapper.unmount()
+        themeStateMock.effectiveTheme = previousTheme
+      }
+    }
+  )
 
   it('handles local login success and failure', async () => {
     const routerPush = vi.fn()

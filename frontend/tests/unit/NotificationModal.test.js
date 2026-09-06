@@ -1,3 +1,6 @@
+import Button from 'primevue/button'
+import PrimeVue from 'primevue/config'
+import { useTheme } from '@/utils/useTheme'
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import NotificationModal from '@/components/NotificationModal.vue'
@@ -23,6 +26,38 @@ const summary = {
 const slotStub = { template: '<div><slot /><slot name="footer" /></div>' }
 
 describe('NotificationModal', () => {
+  // Assert the rendered PrimeVue contract, not literal hex absence in source.
+  it.each(['light', 'dark', 'christmas'])(
+    'restores Classic presentation and preserves Christmas (%s)',
+    async (theme) => {
+      const themeState = useTheme()
+      const previous = themeState.effectiveTheme.value
+      themeState.isDarkTheme.value = theme === 'dark'
+      themeState.applyActiveSiteTheme(theme === 'christmas' ? 'christmas' : 'general')
+      let wrapper
+      try {
+        wrapper = mount(NotificationModal, {
+          props: { visible: true, summary },
+          global: { plugins: [PrimeVue], stubs: { Dialog: slotStub, Button: false, Badge: true } },
+        })
+        const buttons = wrapper.findAllComponents(Button)
+        const later = buttons.find((b) => b.props('label') === '稍後再看')
+        expect(later.props('severity') ?? undefined).toBe('secondary')
+        expect(later.props('text')).toBe(theme !== 'christmas')
+        expect(later.props('outlined')).toBe(theme === 'christmas')
+        expect(
+          buttons.find((b) => b.props('label') === '全部標記為已讀').props('severity') ?? undefined
+        ).toBe(theme === 'christmas' ? 'success' : undefined)
+        expect(buttons.find((b) => b.props('label') === '查看全部').props('outlined')).toBe(true)
+        expect(wrapper.emitted('mark-all-read')).toBeUndefined()
+      } finally {
+        wrapper?.unmount()
+        themeState.isDarkTheme.value = previous === 'dark'
+        themeState.applyActiveSiteTheme(previous === 'christmas' ? 'christmas' : 'general')
+      }
+    }
+  )
+
   it('uses a Christmas dialog surface and the shared action hierarchy', () => {
     expect(notificationModalSource).toContain(
       "'notification-summary-dialog--christmas': effectiveTheme === 'christmas'"

@@ -405,7 +405,7 @@ test.describe('Home page', () => {
     expect(await circle.evaluate((element) => getComputedStyle(element).fill)).not.toBe(initialFill)
   })
 
-  test('keeps login actions stable while revealing the catalog action without shifting layout', async ({
+  test('runs the Classic login sweep while revealing the catalog action without shifting layout', async ({
     page,
   }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' })
@@ -454,19 +454,37 @@ test.describe('Home page', () => {
         }
       })
 
-    const beforeHover = await readButtonState(heroActions.nth(0))
-    await heroActions.nth(0).hover()
-    await page.waitForTimeout(1050)
-    const afterHover = await readButtonState(heroActions.nth(0))
+    const classicLoginAction = heroActions.nth(0)
+    await expect(classicLoginAction.locator('.p-button-icon')).toBeVisible()
+    await expect(classicLoginAction.locator('.p-button-label')).toBeVisible()
+    await expect(heroActions.nth(1).locator('.p-button-icon')).toBeVisible()
+    await expect(heroActions.nth(1).locator('.p-button-label')).toBeVisible()
+
+    const beforeHover = await readButtonState(classicLoginAction)
+    expect(beforeHover.sheenTransitionDuration).toBe('0s')
+    await classicLoginAction.hover()
+    await expect
+      .poll(
+        async () => {
+          const state = await readButtonState(classicLoginAction)
+          return Math.abs(state.sheenTranslateX - beforeHover.sheenTranslateX)
+        },
+        { timeout: 1500 }
+      )
+      .toBeGreaterThan(1)
+    const afterHover = await readButtonState(classicLoginAction)
 
     expect(afterHover.sheenDisplay).toBe(beforeHover.sheenDisplay)
     expect(afterHover.sheenPointerEvents).toBe(beforeHover.sheenPointerEvents)
-    expect(afterHover.sheenTransitionDuration).toBe(beforeHover.sheenTransitionDuration)
-    expect(afterHover.sheenTranslateX).toBeCloseTo(beforeHover.sheenTranslateX, 3)
+    expect(afterHover.sheenTransitionDuration).toBe('1s')
+    expect(Math.abs(afterHover.sheenTranslateX - beforeHover.sheenTranslateX)).toBeGreaterThan(1)
     expect(afterHover.left).toBeCloseTo(beforeHover.left, 3)
     expect(afterHover.top).toBeCloseTo(beforeHover.top, 3)
     expect(afterHover.width).toBeCloseTo(beforeHover.width, 3)
     expect(afterHover.height).toBeCloseTo(beforeHover.height, 3)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      1440
+    )
 
     const catalogBeforeHover = await readButtonState(catalogAction)
     expect(catalogBeforeHover.labelRevealWidth).toBeCloseTo(0, 3)
@@ -520,6 +538,9 @@ test.describe('Home page', () => {
     expect(mobileLayout.every(({ width, height }) => width > 0 && height > 0)).toBe(true)
 
     await page.emulateMedia({ reducedMotion: 'reduce' })
+    const reducedMotionLoginState = await readButtonState(heroActions.nth(0))
+    expect(reducedMotionLoginState.sheenDisplay).toBe('none')
+    expect(reducedMotionLoginState.sheenTransitionDuration).toBe('0s')
     expect((await readButtonState(catalogAction)).labelRevealTransitionDuration).toBe('0s')
   })
 

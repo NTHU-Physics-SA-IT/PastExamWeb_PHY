@@ -1,3 +1,5 @@
+import PrimeVue from 'primevue/config'
+import { useTheme } from '@/utils/useTheme'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -87,6 +89,36 @@ function dispatchPointer(element, type, options) {
 }
 
 describe('Wish Pool focused interactions', () => {
+  // Assert the rendered PrimeVue contract, not literal hex absence in source.
+  it.each(['light', 'dark', 'christmas'])(
+    'restores Classic presentation and preserves Christmas (%s)',
+    async (theme) => {
+      const themeState = useTheme()
+      const previous = themeState.effectiveTheme.value
+      themeState.isDarkTheme.value = theme === 'dark'
+      themeState.applyActiveSiteTheme(theme === 'christmas' ? 'christmas' : 'general')
+      let wrapper
+      try {
+        const WishPool = (await import('@/components/WishPool.vue')).default
+        wrapper = mount(WishPool, {
+          props: { christmas: theme === 'christmas' },
+          global: { plugins: [PrimeVue], stubs: { ...stubs, Button: false } },
+        })
+        await flushPromises()
+        const cancel = wrapper.findComponent('.wish-slogan-cancel-button')
+        expect(cancel.props('severity')).toBe('secondary')
+        expect(cancel.props('text')).toBe(theme !== 'christmas')
+        expect(cancel.props('outlined')).toBe(false)
+        expect(cancel.attributes('type')).toBe('button')
+        expect(homepageSloganServiceMock.submit).not.toHaveBeenCalled()
+      } finally {
+        wrapper?.unmount()
+        themeState.isDarkTheme.value = previous === 'dark'
+        themeState.applyActiveSiteTheme(previous === 'christmas' ? 'christmas' : 'general')
+      }
+    }
+  )
+
   beforeEach(() => {
     resizeObserverCallback = null
     resizeObserverTarget = null

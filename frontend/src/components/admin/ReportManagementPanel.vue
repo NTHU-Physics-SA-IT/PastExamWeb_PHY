@@ -378,7 +378,7 @@
               class="report-preview-action review-action-preview"
               :label="$t('關閉')"
               severity="secondary"
-              size="small"
+              :size="effectiveTheme === 'christmas' ? 'small' : undefined"
               outlined
               @click="systemDetailVisible = false"
             />
@@ -386,8 +386,8 @@
               class="report-download-action review-action-republish"
               :label="$t('儲存')"
               icon="pi pi-save"
-              severity="success"
-              size="small"
+              :severity="effectiveTheme === 'christmas' ? 'success' : undefined"
+              :size="effectiveTheme === 'christmas' ? 'small' : undefined"
               :loading="systemReadSaving"
               :disabled="systemReadSaving"
               @click="saveSystemReadState"
@@ -1307,16 +1307,17 @@
             class="report-preview-action review-action-preview"
             :label="$t('關閉')"
             severity="secondary"
-            size="small"
-            outlined
+            :size="effectiveTheme === 'christmas' ? 'small' : undefined"
+            :outlined="effectiveTheme === 'christmas'"
+            :text="effectiveTheme !== 'christmas'"
             @click="wishReviewVisible = false"
           /><Button
             v-if="!isFinal(selectedWishReport.status)"
             class="report-download-action review-action-republish"
             :label="$t('確認送出')"
             icon="pi pi-check"
-            severity="success"
-            size="small"
+            :severity="effectiveTheme === 'christmas' ? 'success' : undefined"
+            :size="effectiveTheme === 'christmas' ? 'small' : undefined"
             :loading="wishReviewSaving"
             :disabled="!['upheld', 'dismissed'].includes(wishReviewForm.status)"
             @click="confirmSaveWishReview"
@@ -1454,8 +1455,9 @@
             :label="$t('前往來源')"
             icon="pi pi-external-link"
             severity="secondary"
-            size="small"
-            outlined
+            :size="effectiveTheme === 'christmas' ? 'small' : undefined"
+            :outlined="effectiveTheme === 'christmas'"
+            :text="effectiveTheme !== 'christmas'"
             :disabled="!selectedReport.source_exists"
             @click="openReportSource"
           />
@@ -1464,7 +1466,7 @@
             class="report-preview-action review-action-preview"
             :label="$t('關閉')"
             severity="secondary"
-            size="small"
+            :size="effectiveTheme === 'christmas' ? 'small' : undefined"
             outlined
             @click="reviewVisible = false"
           />
@@ -1473,8 +1475,8 @@
             class="report-download-action review-action-republish"
             :label="$t('儲存審核')"
             icon="pi pi-check"
-            severity="success"
-            size="small"
+            :severity="effectiveTheme === 'christmas' ? 'success' : undefined"
+            :size="effectiveTheme === 'christmas' ? 'small' : undefined"
             :loading="reviewSaving"
             :disabled="!canSaveReview"
             @click="confirmSaveReview"
@@ -1601,8 +1603,9 @@
             :label="$t('前往來源')"
             icon="pi pi-external-link"
             severity="secondary"
-            size="small"
-            outlined
+            :size="effectiveTheme === 'christmas' ? 'small' : undefined"
+            :outlined="effectiveTheme === 'christmas'"
+            :text="effectiveTheme !== 'christmas'"
             :disabled="!selectedArchiveReport.source_exists"
             @click="openArchiveReportSource"
           />
@@ -1611,7 +1614,7 @@
             class="report-preview-action review-action-preview"
             :label="$t('關閉')"
             severity="secondary"
-            size="small"
+            :size="effectiveTheme === 'christmas' ? 'small' : undefined"
             outlined
             @click="archiveReviewVisible = false"
           />
@@ -1620,8 +1623,8 @@
             class="report-download-action review-action-republish"
             :label="$t('儲存審核')"
             icon="pi pi-check"
-            severity="success"
-            size="small"
+            :severity="effectiveTheme === 'christmas' ? 'success' : undefined"
+            :size="effectiveTheme === 'christmas' ? 'small' : undefined"
             :loading="archiveReviewSaving"
             :disabled="!canSaveArchiveReview"
             @click="confirmSaveArchiveReview"
@@ -2010,9 +2013,9 @@ function confirmSaveWishReview() {
     message: t('審核結果與管理員答覆送出後將無法修改。'),
     icon: 'pi pi-question-circle',
     rejectLabel: t('取消'),
-    rejectClass: REPORT_CONFIRM_PREVIEW_CLASS,
+    rejectClass: effectiveTheme.value === 'christmas' ? REPORT_CONFIRM_PREVIEW_CLASS : undefined,
     acceptLabel: t('確認送出'),
-    acceptClass: REPORT_CONFIRM_DOWNLOAD_CLASS,
+    acceptClass: effectiveTheme.value === 'christmas' ? REPORT_CONFIRM_DOWNLOAD_CLASS : undefined,
     defaultFocus: 'reject',
     accept: saveWishReview,
   })
@@ -2051,9 +2054,10 @@ function confirmDeleteWishReport(report) {
     message: t('回報會移至垃圾桶，可由管理員在垃圾桶中還原或永久刪除。'),
     icon: 'pi pi-exclamation-triangle',
     rejectLabel: t('取消'),
-    rejectClass: REPORT_CONFIRM_PREVIEW_CLASS,
+    rejectClass: effectiveTheme.value === 'christmas' ? REPORT_CONFIRM_PREVIEW_CLASS : undefined,
     acceptLabel: t('刪除'),
-    acceptClass: REPORT_CONFIRM_DELETE_CLASS,
+    acceptClass:
+      effectiveTheme.value === 'christmas' ? REPORT_CONFIRM_DELETE_CLASS : 'p-button-danger',
     defaultFocus: 'reject',
     accept: () => removeWishReport(report),
   })
@@ -2099,9 +2103,10 @@ function confirmDeleteSystemIssue(item) {
     message: t('回報會移至垃圾桶，可由管理員在垃圾桶中還原或永久刪除。'),
     icon: 'pi pi-exclamation-triangle',
     rejectLabel: t('取消'),
-    rejectClass: REPORT_CONFIRM_PREVIEW_CLASS,
+    rejectClass: effectiveTheme.value === 'christmas' ? REPORT_CONFIRM_PREVIEW_CLASS : undefined,
     acceptLabel: t('刪除'),
-    acceptClass: REPORT_CONFIRM_DELETE_CLASS,
+    acceptClass:
+      effectiveTheme.value === 'christmas' ? REPORT_CONFIRM_DELETE_CLASS : 'p-button-danger',
     accept: () => deleteSystemIssue(item),
   })
 }
@@ -2190,9 +2195,10 @@ function confirmDeleteCommentReport(item) {
     message: t('回報會移至垃圾桶，可由管理員在垃圾桶中還原或永久刪除。'),
     icon: 'pi pi-exclamation-triangle',
     rejectLabel: t('取消'),
-    rejectClass: REPORT_CONFIRM_PREVIEW_CLASS,
+    rejectClass: effectiveTheme.value === 'christmas' ? REPORT_CONFIRM_PREVIEW_CLASS : undefined,
     acceptLabel: t('刪除'),
-    acceptClass: REPORT_CONFIRM_DELETE_CLASS,
+    acceptClass:
+      effectiveTheme.value === 'christmas' ? REPORT_CONFIRM_DELETE_CLASS : 'p-button-danger',
     accept: () => deleteCommentReport(item),
   })
 }
@@ -2262,9 +2268,16 @@ function confirmSaveReview() {
     message: message.join('\n'),
     icon: deletesComment ? 'pi pi-exclamation-triangle' : 'pi pi-question-circle',
     rejectLabel: t('取消'),
-    rejectClass: REPORT_CONFIRM_PREVIEW_CLASS,
+    rejectClass: effectiveTheme.value === 'christmas' ? REPORT_CONFIRM_PREVIEW_CLASS : undefined,
     acceptLabel: t('確認送出'),
-    acceptClass: deletesComment ? REPORT_CONFIRM_DELETE_CLASS : REPORT_CONFIRM_DOWNLOAD_CLASS,
+    acceptClass:
+      effectiveTheme.value === 'christmas'
+        ? deletesComment
+          ? REPORT_CONFIRM_DELETE_CLASS
+          : REPORT_CONFIRM_DOWNLOAD_CLASS
+        : deletesComment
+          ? 'p-button-danger'
+          : 'p-button-primary',
     defaultFocus: 'reject',
     accept: saveReview,
   })
@@ -2326,9 +2339,10 @@ function confirmDeleteArchiveReport(item) {
     message: t('回報會移至垃圾桶；考古題、投稿與 PDF 不會受到影響。'),
     icon: 'pi pi-exclamation-triangle',
     rejectLabel: t('取消'),
-    rejectClass: REPORT_CONFIRM_PREVIEW_CLASS,
+    rejectClass: effectiveTheme.value === 'christmas' ? REPORT_CONFIRM_PREVIEW_CLASS : undefined,
     acceptLabel: t('刪除'),
-    acceptClass: REPORT_CONFIRM_DELETE_CLASS,
+    acceptClass:
+      effectiveTheme.value === 'christmas' ? REPORT_CONFIRM_DELETE_CLASS : 'p-button-danger',
     accept: () => deleteArchiveReport(item),
   })
 }
@@ -2396,9 +2410,9 @@ function confirmSaveArchiveReview() {
       : t('送出後將通知回報者，審核結果無法修改。'),
     icon: takesDown ? 'pi pi-exclamation-triangle' : 'pi pi-question-circle',
     rejectLabel: t('取消'),
-    rejectClass: REPORT_CONFIRM_PREVIEW_CLASS,
+    rejectClass: effectiveTheme.value === 'christmas' ? REPORT_CONFIRM_PREVIEW_CLASS : undefined,
     acceptLabel: t('確認送出'),
-    acceptClass: REPORT_CONFIRM_DOWNLOAD_CLASS,
+    acceptClass: effectiveTheme.value === 'christmas' ? REPORT_CONFIRM_DOWNLOAD_CLASS : undefined,
     defaultFocus: 'reject',
     accept: saveArchiveReview,
   })
