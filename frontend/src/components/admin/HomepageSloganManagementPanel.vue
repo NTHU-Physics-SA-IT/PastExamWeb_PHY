@@ -86,14 +86,14 @@
         @change="applyFilters"
       />
       <Button
-        class="report-filter-submit"
+        class="report-filter-submit slogan-refresh-action"
         :label="$t('搜尋')"
         icon="pi pi-search"
         outlined
         @click="applyFilters"
       />
       <Button
-        class="report-filter-refresh"
+        class="report-filter-refresh slogan-refresh-action"
         :label="$t('重新整理')"
         icon="pi pi-refresh"
         outlined
@@ -164,6 +164,7 @@
         <template #body="{ data }">
           <div class="report-row-actions">
             <Button
+              class="slogan-preview-action"
               :label="$t('查看/審核')"
               icon="pi pi-search"
               :aria-label="$t('查看/審核')"
@@ -173,6 +174,7 @@
               @click="openReview(data)"
             />
             <Button
+              class="slogan-admin-delete-action"
               :label="$t('首頁 slogan 永久刪除按鈕')"
               icon="pi pi-trash"
               severity="danger"
@@ -239,6 +241,7 @@
         <footer class="report-mobile-card__footer">
           <div class="report-row-actions">
             <Button
+              class="slogan-preview-action"
               :label="$t('查看/審核')"
               icon="pi pi-search"
               :aria-label="$t('查看/審核')"
@@ -248,6 +251,7 @@
               @click="openReview(item)"
             />
             <Button
+              class="slogan-admin-delete-action"
               :label="$t('首頁 slogan 永久刪除按鈕')"
               icon="pi pi-trash"
               severity="danger"
@@ -334,7 +338,15 @@
         </div>
         <div class="report-review__actions">
           <Button :label="$t('取消')" severity="secondary" text @click="reviewVisible = false" />
-          <Button :label="$t('儲存')" icon="pi pi-save" :loading="saving" @click="saveReview" />
+          <Button
+            class="slogan-dialog-save-action review-action-republish"
+            :label="$t('儲存')"
+            icon="pi pi-save"
+            severity="success"
+            size="small"
+            :loading="saving"
+            @click="saveReview"
+          />
         </div>
       </div>
     </Dialog>

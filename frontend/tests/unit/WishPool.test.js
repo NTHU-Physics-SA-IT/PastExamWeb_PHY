@@ -1,6 +1,14 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import wishPoolSource from '@/components/WishPool.vue?raw'
+
+const archiveViewSource = readFileSync(
+  resolve(globalThis.process.cwd(), 'src/views/Archive.vue'),
+  'utf8'
+)
+const globalStyleSource = readFileSync(resolve(globalThis.process.cwd(), 'src/style.css'), 'utf8')
 
 const wishServiceMock = vi.hoisted(() => ({
   list: vi.fn(),
@@ -130,6 +138,121 @@ describe('Wish Pool focused interactions', () => {
     expect(wishPoolSource).toMatch(
       /\.wish-header :deep\(\.p-button\)\s*\{[^}]*flex:\s*0 0 auto;[^}]*white-space:\s*nowrap[;}]/
     )
+  })
+
+  it('uses Christmas archive action colors without changing Wish Pool action geometry', () => {
+    expect(wishPoolSource).toContain('class="wish-add-button"')
+
+    const addButtonRule = wishPoolSource.match(
+      /:global\(\s*html\[data-effective-theme='christmas'\]\s+\.wish-header__actions\s+\.wish-add-button\.p-button\s*\)\s*\{([\s\S]*?)\n\}/
+    )
+    const addButtonHoverRule = wishPoolSource.match(
+      /:global\(\s*html\[data-effective-theme='christmas'\]\s+\.wish-header__actions\s+\.wish-add-button\.p-button:not\(:disabled\):hover\s*\),[\s\S]*?\{([\s\S]*?)\n\}/
+    )
+    const sloganHoverRule = wishPoolSource.match(
+      /:global\(\s*html\[data-effective-theme='christmas'\]\s+\.wish-header__actions\s+\.wish-slogan-submit-button\.p-button:not\(:disabled\):hover\s*\),[\s\S]*?\{([\s\S]*?)\n\}/
+    )
+
+    expect(wishPoolSource).not.toContain(
+      ":global(html[data-effective-theme='christmas'])\n  .wish-header__actions"
+    )
+    expect(addButtonRule?.[1]).toContain('background: linear-gradient(135deg, #3d8a64, #2d6c52);')
+    expect(addButtonRule?.[1]).not.toMatch(/(?:width|min-height|height|padding):/)
+    expect(addButtonHoverRule?.[1]).toContain(
+      'background: linear-gradient(135deg, #479b70, #347b5c);'
+    )
+    expect(addButtonHoverRule?.[1]).toContain('0 0 0.72rem rgba(255, 201, 59, 0.34)')
+    expect(sloganHoverRule?.[1]).toContain('0 0 0.72rem rgba(255, 201, 59, 0.34)')
+    expect(sloganHoverRule?.[1]).not.toContain('background:')
+  })
+
+  it('keeps wish content controls free of Christmas snow', () => {
+    expect(wishPoolSource).toMatch(
+      /class="wish-word"[\s\S]*?data-christmas-snow="off"[\s\S]*?@click="openWishDetail/
+    )
+    expect(wishPoolSource).toMatch(
+      /class="wish-inline-heart discussion-action-button discussion-action-like-button"[\s\S]*?data-christmas-snow="off"[\s\S]*?@click\.stop="toggleHeart/
+    )
+  })
+
+  it('uses the Christmas cream surface and archive action treatments in Wish details', () => {
+    const dialogRootRule = globalStyleSource.match(
+      /body \.p-dialog\.wish-detail-dialog-christmas \{([\s\S]*?)\n\}/
+    )
+    const dialogSurfaceRule = globalStyleSource.match(
+      /body \.p-dialog\.wish-detail-dialog-christmas \.p-dialog-header,[\s\S]*?\.p-dialog-content \{([\s\S]*?)\n\}/
+    )
+    const helpButtonRule = globalStyleSource.match(
+      /body \.p-dialog\.wish-detail-dialog-christmas \.p-button\.wish-detail-help-button \{([\s\S]*?)\n\}/
+    )
+    const deleteButtonRule = globalStyleSource.match(
+      /body \.p-dialog\.wish-detail-dialog-christmas \.p-button\.wish-detail-delete-button \{([\s\S]*?)\n\}/
+    )
+    const helpButtonHoverRule = globalStyleSource.match(
+      /body \.p-dialog\.wish-detail-dialog-christmas \.p-button\.wish-detail-help-button:not\(:disabled\):hover,[\s\S]*?\{([\s\S]*?)\n\}/
+    )
+    const deleteButtonHoverRule = globalStyleSource.match(
+      /body\s+\.p-dialog\.wish-detail-dialog-christmas\s+\.p-button\.wish-detail-delete-button:not\(:disabled\):hover,[\s\S]*?\{([\s\S]*?)\n\}/
+    )
+
+    expect(wishPoolSource).toContain("'wish-detail-dialog-christmas': props.christmas")
+    expect(wishPoolSource).toMatch(
+      /'wish-detail-dialog-christmas': props\.christmas[\s\S]*?class="discussion-action-button discussion-action-like-button"[\s\S]*?data-christmas-snow="off"/
+    )
+    expect(wishPoolSource).toContain('class="wish-detail-help-button"')
+    expect(wishPoolSource).toContain('class="wish-detail-delete-button"')
+    expect(dialogRootRule?.[1]).toContain('overflow: hidden;')
+    expect(dialogRootRule?.[1]).toContain('border-radius: 0.9rem;')
+    expect(dialogSurfaceRule?.[1]).toContain('background: #f5eedc !important;')
+    expect(helpButtonRule?.[1]).toContain('background: linear-gradient(135deg, #3d8a64, #2d6c52);')
+    expect(deleteButtonRule?.[1]).toContain(
+      'background: linear-gradient(135deg, #8a3d47, #70313a);'
+    )
+    expect(helpButtonHoverRule?.[1]).toContain(
+      'background: linear-gradient(135deg, #479b70, #347b5c);'
+    )
+    expect(helpButtonHoverRule?.[1]).toContain('0 0 0.72rem rgba(255, 201, 59, 0.34)')
+    expect(deleteButtonHoverRule?.[1]).toContain(
+      'background: linear-gradient(135deg, #9b4752, #7f3741);'
+    )
+    expect(deleteButtonHoverRule?.[1]).toContain('0 0 0.72rem rgba(255, 201, 59, 0.34)')
+  })
+
+  it('reuses the Christmas login dialog and NTHU login colors for slogan submission', () => {
+    const cancelRule = globalStyleSource.match(
+      /body \.p-dialog\.wish-slogan-dialog-christmas \.p-button\.wish-slogan-cancel-button \{([\s\S]*?)\n\}/
+    )
+    const cancelHoverRule = globalStyleSource.match(
+      /body\s+\.p-dialog\.wish-slogan-dialog-christmas\s+\.p-button\.wish-slogan-cancel-button:not\(:disabled\):hover,[\s\S]*?\{([\s\S]*?)\n\}/
+    )
+    const confirmRule = globalStyleSource.match(
+      /body \.p-dialog\.wish-slogan-dialog-christmas \.p-button\.wish-slogan-confirm-button \{([\s\S]*?)\n\}/
+    )
+    const confirmHoverRule = globalStyleSource.match(
+      /body\s+\.p-dialog\.wish-slogan-dialog-christmas\s+\.p-button\.wish-slogan-confirm-button:not\(:disabled\):hover,[\s\S]*?\{([\s\S]*?)\n\}/
+    )
+
+    expect(archiveViewSource).toMatch(
+      /<WishPool[\s\S]*?:christmas="effectiveTheme === 'christmas'"[\s\S]*?\/>/
+    )
+    expect(wishPoolSource).toContain("'login-dialog-christmas': props.christmas")
+    expect(wishPoolSource).toContain("'wish-slogan-dialog-christmas': props.christmas")
+    expect(wishPoolSource).toContain('class="wish-slogan-cancel-button"')
+    expect(wishPoolSource).toContain('class="wish-slogan-confirm-button"')
+    expect(cancelRule?.[1]).toContain('color: #245368;')
+    expect(cancelRule?.[1]).toContain('border-color: rgba(225, 246, 252, 0.96);')
+    expect(cancelRule?.[1]).toContain('background: #d7edf5;')
+    expect(cancelHoverRule?.[1]).toContain('color: #173846;')
+    expect(cancelHoverRule?.[1]).toContain('background: #e5f4f9;')
+    expect(cancelHoverRule?.[1]).toContain('0 0 0.72rem rgba(255, 201, 59, 0.34)')
+    expect(confirmRule?.[1]).toContain('border-color: rgba(127, 188, 145, 0.82);')
+    expect(confirmRule?.[1]).toContain('color: #f5fff7;')
+    expect(confirmRule?.[1]).toContain('background: linear-gradient(135deg, #3d8a64, #2d6c52);')
+    expect(confirmHoverRule?.[1]).toContain('color: #ffffff;')
+    expect(confirmHoverRule?.[1]).toContain(
+      'background: linear-gradient(135deg, #479b70, #347b5c);'
+    )
+    expect(confirmHoverRule?.[1]).toContain('0 0 0.72rem rgba(255, 201, 59, 0.34)')
   })
 
   it('measures the exact pool viewport and remains free of continuous layout work', () => {

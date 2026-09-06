@@ -21,6 +21,7 @@
       "tests/api/test_permanent_deletion_saga.py",
       "tests/api/test_public_catalog.py",
       "tests/api/test_statistics.py",
+      "tests/api/test_theme_management.py",
       "tests/api/test_users.py",
       "tests/api/test_users_me.py",
       "tests/db/test_init_db.py",

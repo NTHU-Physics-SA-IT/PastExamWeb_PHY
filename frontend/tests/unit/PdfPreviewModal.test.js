@@ -1,7 +1,12 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import pdfPreviewSource from '@/components/PdfPreviewModal.vue?raw'
+import discussionPanelSource from '@/components/ArchiveDiscussionPanel.vue?raw'
+
+const styleSource = readFileSync(resolve(globalThis.process.cwd(), 'src/style.css'), 'utf8')
 
 const unauthorizedCallbacks = vi.hoisted(() => [])
 let consoleErrorSpy
@@ -55,6 +60,9 @@ const PdfDocumentViewerStub = {
   props: ['source'],
   emits: ['load', 'error'],
   template: '<div class="pdf-document-viewer-stub" />',
+}
+const DialogSlotsStub = {
+  template: '<div><slot name="header" /><slot /><slot name="footer" /></div>',
 }
 
 describe('PdfPreviewModal', () => {
@@ -220,6 +228,44 @@ describe('PdfPreviewModal', () => {
     expect(pdfPreviewSource).toContain('<PdfDocumentViewer')
     expect(pdfPreviewSource).not.toContain('<iframe')
     expect(pdfPreviewSource).not.toContain('pdf-frame')
+  })
+
+  it('opts into the Christmas preview shell and keeps the download action identifiable', () => {
+    const wrapper = mount(PdfPreviewModal, {
+      props: {
+        visible: true,
+        previewUrl: '',
+        christmas: true,
+      },
+      global: {
+        stubs: {
+          Dialog: DialogSlotsStub,
+          ProgressSpinner: stubComponent,
+          Button: stubComponent,
+        },
+      },
+    })
+
+    expect(wrapper.find('.pdf-preview-dialog-christmas').exists()).toBe(true)
+    expect(wrapper.find('.pdf-preview-download-button').exists()).toBe(true)
+    expect(wrapper.find('.pdf-preview-download-button').attributes('data-christmas-snow')).toBe(
+      undefined
+    )
+
+    const discussionSubmitRule = styleSource.match(
+      /body \.p-dialog\.pdf-preview-dialog-christmas \.p-button\.discussion-submit-button,\nbody \.p-dialog\.pdf-preview-discussion-dialog-christmas \.p-button\.discussion-submit-button \{([\s\S]*?)\n\}/
+    )
+    const discussionSubmitHoverRule = styleSource.match(
+      /body \.p-dialog\.pdf-preview-dialog-christmas \.p-button\.discussion-submit-button:hover,[\s\S]*?\{([\s\S]*?)\n\}/
+    )
+
+    expect(discussionPanelSource).toContain('class="discussion-submit-button"')
+    expect(discussionSubmitRule?.[1]).toContain('color: #245368;')
+    expect(discussionSubmitRule?.[1]).toContain('background: #d7edf5;')
+    expect(discussionSubmitHoverRule?.[1]).toContain('background: #e5f4f9;')
+    expect(discussionSubmitHoverRule?.[1]).toContain('0 0 0.34rem rgba(255, 218, 94, 0.58)')
+
+    wrapper.unmount()
   })
 
   it('顯示明確的考古題檔案缺失訊息', async () => {

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import aboutUsSource from '@/views/AboutUs.vue?raw'
 
 const listMock = vi.hoisted(() => vi.fn())
 const createMock = vi.hoisted(() => vi.fn())
@@ -49,6 +50,21 @@ describe('About Us view', () => {
     updateMock.mockResolvedValue({ data: {} })
     reorderMock.mockResolvedValue({ data: {} })
     deleteMock.mockResolvedValue({ data: {} })
+  })
+
+  it('uses explicit Christmas surfaces and the shared action hierarchy', () => {
+    expect(aboutUsSource).toContain("'about-us-page--christmas': effectiveTheme === 'christmas'")
+    expect(aboutUsSource).toContain(
+      "'about-us-editor-dialog--christmas': effectiveTheme === 'christmas'"
+    )
+    expect(aboutUsSource).toContain('about-us-add-action review-action-republish')
+    expect(aboutUsSource).toContain('about-us-dialog-cancel-action review-action-preview')
+    expect(aboutUsSource).toContain('about-us-dialog-save-action review-action-republish')
+    expect(aboutUsSource).toContain('.about-us-page--christmas .about-us-empty')
+    expect(aboutUsSource).toContain('background: rgba(41, 63, 82, 0.32);')
+    expect(aboutUsSource).toMatch(
+      /\.about-us-editor-dialog--christmas\s+\.about-us-preview\s+\.markdown-content[\s\S]*?color: #f8f2e8;/
+    )
   })
 
   it('renders stored Markdown and allows an administrator to create another entry', async () => {

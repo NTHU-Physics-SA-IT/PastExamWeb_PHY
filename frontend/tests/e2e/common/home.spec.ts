@@ -405,7 +405,7 @@ test.describe('Home page', () => {
     expect(await circle.evaluate((element) => getComputedStyle(element).fill)).not.toBe(initialFill)
   })
 
-  test('sweeps a scoped sheen across the homepage actions without shifting layout', async ({
+  test('keeps login actions stable while revealing the catalog action without shifting layout', async ({
     page,
   }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' })
@@ -455,23 +455,20 @@ test.describe('Home page', () => {
       })
 
     const beforeHover = await readButtonState(heroActions.nth(0))
-    expect(beforeHover.sheenDisplay).toBe('block')
-    expect(beforeHover.sheenPointerEvents).toBe('none')
-    expect(beforeHover.sheenTranslateX).toBeCloseTo(0, 3)
-
     await heroActions.nth(0).hover()
     await page.waitForTimeout(1050)
     const afterHover = await readButtonState(heroActions.nth(0))
 
-    expect(afterHover.sheenTransitionDuration).toBe('1s')
-    expect(afterHover.sheenTranslateX).toBeGreaterThan(0)
+    expect(afterHover.sheenDisplay).toBe(beforeHover.sheenDisplay)
+    expect(afterHover.sheenPointerEvents).toBe(beforeHover.sheenPointerEvents)
+    expect(afterHover.sheenTransitionDuration).toBe(beforeHover.sheenTransitionDuration)
+    expect(afterHover.sheenTranslateX).toBeCloseTo(beforeHover.sheenTranslateX, 3)
     expect(afterHover.left).toBeCloseTo(beforeHover.left, 3)
     expect(afterHover.top).toBeCloseTo(beforeHover.top, 3)
     expect(afterHover.width).toBeCloseTo(beforeHover.width, 3)
     expect(afterHover.height).toBeCloseTo(beforeHover.height, 3)
 
     const catalogBeforeHover = await readButtonState(catalogAction)
-    expect(catalogBeforeHover.sheenDisplay).toBe('none')
     expect(catalogBeforeHover.labelRevealWidth).toBeCloseTo(0, 3)
     expect(catalogBeforeHover.labelUnderlineWidth).toBeCloseTo(0, 3)
     await catalogAction.hover()
@@ -488,7 +485,12 @@ test.describe('Home page', () => {
       )
       .toBeCloseTo(0, 1)
     const catalogAfterHover = await readButtonState(catalogAction)
-    expect(catalogAfterHover.sheenDisplay).toBe('none')
+    expect(catalogAfterHover.sheenDisplay).toBe(catalogBeforeHover.sheenDisplay)
+    expect(catalogAfterHover.sheenPointerEvents).toBe(catalogBeforeHover.sheenPointerEvents)
+    expect(catalogAfterHover.sheenTransitionDuration).toBe(
+      catalogBeforeHover.sheenTransitionDuration
+    )
+    expect(catalogAfterHover.sheenTranslateX).toBeCloseTo(catalogBeforeHover.sheenTranslateX, 3)
     expect(catalogAfterHover.backgroundColor).toBe(catalogBeforeHover.backgroundColor)
     expect(catalogAfterHover.border).toBe(catalogBeforeHover.border)
     expect(catalogAfterHover.color).toBe(catalogBeforeHover.color)
@@ -500,13 +502,6 @@ test.describe('Home page', () => {
     expect(catalogAfterHover.left).toBeCloseTo(catalogBeforeHover.left, 3)
     expect(catalogAfterHover.top).toBeCloseTo(catalogBeforeHover.top, 3)
 
-    const initialThemeIsDark = await page
-      .locator('.physics-home')
-      .evaluate((home) => home.classList.contains('physics-home-dark'))
-    await page.locator('.theme-toggle-button').click()
-    await expect(page.locator('.physics-home')).toHaveClass(
-      initialThemeIsDark ? /physics-home(?!-dark)/ : /physics-home-dark/
-    )
     await expect(heroActions).toHaveCount(2)
     await expect(
       catalogTarget.getByRole('button', { name: '瀏覽公開課程目錄', exact: true })
@@ -525,10 +520,7 @@ test.describe('Home page', () => {
     expect(mobileLayout.every(({ width, height }) => width > 0 && height > 0)).toBe(true)
 
     await page.emulateMedia({ reducedMotion: 'reduce' })
-    const reducedMotionDisplays = await heroActions.evaluateAll((buttons) =>
-      buttons.map((button) => getComputedStyle(button, '::before').display)
-    )
-    expect(reducedMotionDisplays).toEqual(['none', 'none', 'none'])
+    expect((await readButtonState(catalogAction)).labelRevealTransitionDuration).toBe('0s')
   })
 
   test('public catalog renders canonical courses and a zero-archive detail', async ({ page }) => {

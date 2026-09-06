@@ -3,6 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import HomeView from '@/views/Home.vue'
 import homeSource from '@/views/Home.vue?raw'
 import { setLocale } from '@/i18n'
+import { useTheme } from '@/utils/useTheme'
+import { createChristmasButtonSnowEngine } from '@/utils/christmasButtonSnow'
 
 const statisticsPayload = vi.hoisted(() => ({
   totalUsers: 120,
@@ -79,6 +81,7 @@ const originalGetScreenCTM = SVGElement.prototype.getScreenCTM
 
 describe('HomeView', () => {
   beforeEach(() => {
+    useTheme().applyActiveSiteTheme('general')
     prefersReducedMotion = false
     desktopHeroLayout = false
     nextAnimationFrameId = 1
@@ -270,14 +273,17 @@ describe('HomeView', () => {
     reducedMotionWrapper.unmount()
   })
 
-  it('scopes each CTA sweep to its intended visual content and disables motion when requested', () => {
-    expect(homeSource).toMatch(
-      /\.hero-actions\s+:deep\(\.p-button\)::before\s*\{[\s\S]*?z-index:\s*2;[\s\S]*?pointer-events:\s*none;[\s\S]*?transform:\s*translateX\(0\)\s+skewX\(-18deg\);[\s\S]*?transition:\s*none;/
+  it('removes login CTA sweeps while preserving the catalog content effect and reduced motion', () => {
+    expect(homeSource).not.toMatch(/\.hero-actions\s+:deep\(\.p-button\)::before/)
+    expect(homeSource).not.toMatch(
+      /\.hero-actions\s+:deep\(\.p-button:not\(:disabled\):hover\)::before/
     )
     expect(homeSource).toMatch(
-      /\.hero-actions\s+:deep\(\.p-button:not\(:disabled\):hover\)::before\s*\{[\s\S]*?transform:\s*translateX\(510%\)\s+skewX\(-18deg\);[\s\S]*?transition:\s*transform\s+1s/
+      /:deep\(\.p-button\.christmas-login-button:hover\),[\s\S]*?:deep\(\.p-button\.christmas-login-button:focus-visible\)\s*\{[\s\S]*?box-shadow:\s*[\s\S]*?0 0 0\.34rem rgba\(255, 218, 94, 0\.58\),[\s\S]*?0 0 0\.72rem rgba\(255, 201, 59, 0\.34\);/
     )
-    expect(homeSource).toMatch(/:deep\(\.catalog-action\)::before\s*\{[^}]*display:\s*none;/)
+    expect(homeSource).toMatch(
+      /\.metrics-hover-ready \.stat-card:hover::before\s*\{[^}]*transform:\s*translateX\(510%\)\s+skewX\(-18deg\);/
+    )
     expect(homeSource).toMatch(
       /:deep\(\.catalog-action\.p-button\.p-button-secondary\.p-button-outlined:not\(:disabled\):hover\)\s*\{[^}]*border-color:\s*transparent;[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/
     )
@@ -293,9 +299,6 @@ describe('HomeView', () => {
     )
     expect(homeSource).not.toMatch(
       /:deep\(\.catalog-action:hover \.p-button-(?:icon|label)\)\s*\{[^}]*transform:/
-    )
-    expect(homeSource).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)\s*\{[\s\S]*?\.hero-actions\s+:deep\(\.p-button\)::before\s*\{[^}]*display:\s*none;/
     )
     expect(homeSource).toMatch(
       /@media \(prefers-reduced-motion: reduce\)\s*\{[\s\S]*?:deep\(\.catalog-action \.p-button-label\)::before,[\s\S]*?:deep\(\.catalog-action \.p-button-label\)::after\s*\{[^}]*transition:\s*none;/
@@ -325,6 +328,14 @@ describe('HomeView', () => {
     const statCards = wrapper.findAll('.stat-card')
     expect(statCards).toHaveLength(6)
     expect(statCards[0].text()).toContain('考古題')
+    expect(
+      statCards.every(
+        (card) =>
+          !card.classes().includes('stat-card--stocking-green') &&
+          !card.classes().includes('stat-card--stocking-burgundy') &&
+          !card.classes().some((className) => className.startsWith('stat-card--cuff-wave-'))
+      )
+    ).toBe(true)
 
     expect(wrapper.vm.animatedValues.totalArchives).toBe('0')
     expect(wrapper.vm.animatedValues.totalUsers).toBe('0')
@@ -338,6 +349,96 @@ describe('HomeView', () => {
     expect(statCards[3].text()).toContain('使用者')
     expect(statCards[3].text()).toContain(String(statisticsPayload.totalUsers))
 
+    wrapper.unmount()
+  })
+
+  it('keeps Home Christmas presentation and snow-button treatments theme-scoped', async () => {
+    const { applyActiveSiteTheme, toggleTheme, effectiveTheme } = useTheme()
+    applyActiveSiteTheme('christmas')
+    const wrapper = mount(HomeView)
+    await flushPromises()
+    let snowSeed = 100
+    const snowEngine = createChristmasButtonSnowEngine({
+      root: wrapper.element,
+      seedFactory: () => snowSeed++,
+      matchMedia: matchMediaMock,
+    })
+    snowEngine.start()
+
+    expect(wrapper.get('.physics-home').classes()).toContain('physics-home-christmas')
+    expect(wrapper.find('.christmas-snowfall').exists()).toBe(false)
+
+    const statCards = wrapper.findAll('.stat-card')
+    expect(statCards.map((card) => card.text().split(/\d/)[0].trim())).toEqual([
+      '考古題',
+      '課程',
+      '下載',
+      '使用者',
+      '今日活躍',
+      '在線',
+    ])
+    expect(statCards.map((card) => card.classes())).toEqual(
+      expect.arrayContaining([
+        expect.arrayContaining(['stat-card--stocking-green']),
+        expect.arrayContaining(['stat-card--stocking-burgundy']),
+      ])
+    )
+    expect(
+      statCards.map((card) =>
+        card.classes().includes('stat-card--stocking-green') ? 'green' : 'burgundy'
+      )
+    ).toEqual(['green', 'green', 'burgundy', 'green', 'burgundy', 'green'])
+    expect(
+      statCards.map((card) =>
+        card.classes().find((className) => className.startsWith('stat-card--cuff-wave-'))
+      )
+    ).toEqual([
+      'stat-card--cuff-wave-a',
+      'stat-card--cuff-wave-b',
+      'stat-card--cuff-wave-c',
+      'stat-card--cuff-wave-b',
+      'stat-card--cuff-wave-a',
+      'stat-card--cuff-wave-c',
+    ])
+    expect(statCards.map((card) => card.get('.stat-icon i').classes())).toEqual([
+      ['pi', 'pi-file-pdf'],
+      ['pi', 'pi-book'],
+      ['pi', 'pi-download'],
+      ['pi', 'pi-users'],
+      ['pi', 'pi-chart-line'],
+      ['pi', 'pi-circle-fill'],
+    ])
+
+    const loginButtons = wrapper.findAll('.hero-actions button').slice(0, 2)
+    expect(loginButtons).toHaveLength(2)
+    expect(
+      loginButtons.every((button) => button.classes().includes('christmas-login-button'))
+    ).toBe(true)
+    expect(loginButtons[0].classes()).toContain('nthu-login-button')
+    expect(
+      loginButtons.every((button) => button.attributes('data-christmas-button-snow') === 'true')
+    ).toBe(true)
+    expect(loginButtons[0].attributes('data-christmas-snow-pattern')).not.toBe(
+      loginButtons[1].attributes('data-christmas-snow-pattern')
+    )
+    expect(wrapper.find('.christmas-button-hover-snow').exists()).toBe(false)
+    expect(wrapper.find('.christmas-button-snowflake').exists()).toBe(false)
+    expect(effectiveTheme.value).toBe('christmas')
+
+    toggleTheme()
+    await wrapper.vm.$nextTick()
+    expect(effectiveTheme.value).toBe('christmas')
+    expect(
+      loginButtons.every((button) => button.classes().includes('christmas-login-button'))
+    ).toBe(true)
+
+    applyActiveSiteTheme('general')
+    await wrapper.vm.$nextTick()
+    snowEngine.stop()
+    expect(wrapper.get('.physics-home').classes()).not.toContain('physics-home-christmas')
+    expect(wrapper.find('.christmas-snowfall').exists()).toBe(false)
+    expect(wrapper.find('.christmas-button-hover-snow').exists()).toBe(false)
+    expect(wrapper.find('.christmas-login-button').exists()).toBe(false)
     wrapper.unmount()
   })
 

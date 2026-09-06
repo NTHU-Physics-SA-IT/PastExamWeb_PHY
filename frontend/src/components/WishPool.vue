@@ -11,6 +11,7 @@
           icon="pi pi-plus"
           severity="success"
           size="small"
+          class="wish-add-button"
           @click="emit('add-wish')"
         />
         <Button
@@ -75,6 +76,7 @@
               <button
                 type="button"
                 class="wish-word"
+                data-christmas-snow="off"
                 :style="wishTextStyle(wish)"
                 @click="openWishDetail(wish, $event)"
               >
@@ -94,6 +96,7 @@
                 :title="$t('愛心 {count}', { count: wish.heart_count })"
                 :aria-pressed="wish.hearted_by_me"
                 class="wish-inline-heart discussion-action-button discussion-action-like-button"
+                data-christmas-snow="off"
                 :class="{ 'is-active': wish.hearted_by_me }"
                 @pointerdown.stop
                 @click.stop="toggleHeart(wish)"
@@ -133,6 +136,7 @@
     <Dialog
       :visible="Boolean(selected)"
       @update:visible="!$event && closeWishDetail()"
+      :class="{ 'wish-detail-dialog-christmas': props.christmas }"
       modal
       :draggable="false"
       :style="{ width: '520px', maxWidth: '94vw' }"
@@ -154,6 +158,7 @@
               :title="$t('愛心 {count}', { count: selected.heart_count })"
               :aria-pressed="selected.hearted_by_me"
               class="discussion-action-button discussion-action-like-button"
+              data-christmas-snow="off"
               :class="{ 'is-active': selected.hearted_by_me }"
               @click="toggleHeart()"
             />
@@ -185,6 +190,7 @@
             :label="$t('協助上傳')"
             icon="pi pi-cloud-upload"
             severity="success"
+            class="wish-detail-help-button"
             @click="$emit('help-upload', selected)"
           />
           <Button
@@ -193,6 +199,7 @@
             icon="pi pi-trash"
             severity="danger"
             outlined
+            class="wish-detail-delete-button"
             :loading="deleting"
             :disabled="deleting"
             @click="requestRemoveWish"
@@ -218,6 +225,10 @@
       modal
       :draggable="false"
       :header="$t('投稿首頁 slogan')"
+      :class="{
+        'login-dialog-christmas': props.christmas,
+        'wish-slogan-dialog-christmas': props.christmas,
+      }"
       :style="{ width: '440px', maxWidth: '94vw' }"
       @hide="resetSloganDialog"
     >
@@ -237,13 +248,14 @@
             type="button"
             :label="$t('取消')"
             severity="secondary"
-            text
+            class="wish-slogan-cancel-button"
             @click="sloganDialogVisible = false"
           />
           <Button
             type="submit"
             :label="$t('投稿')"
             icon="pi pi-send"
+            class="wish-slogan-confirm-button"
             :loading="sloganSubmitting"
             :disabled="!sloganContent.trim() || sloganSubmitting"
           />
@@ -276,6 +288,12 @@ import {
 } from '@/utils/wishHoneycombLayout'
 import InlineCommentReport from '@/components/InlineCommentReport.vue'
 
+const props = defineProps({
+  christmas: {
+    type: Boolean,
+    default: false,
+  },
+})
 const emit = defineEmits(['add-wish', 'help-upload'])
 const { t } = useI18n()
 const confirm = useConfirm()
@@ -869,6 +887,62 @@ onBeforeUnmount(() => {
   border-color: var(--border-color);
   background: var(--p-surface-100);
   color: var(--p-surface-800);
+}
+
+:global(html[data-effective-theme='christmas'] .wish-header__actions .wish-add-button.p-button) {
+  border-color: rgba(127, 188, 145, 0.82);
+  background: linear-gradient(135deg, #3d8a64, #2d6c52);
+  color: #f5fff7;
+}
+
+:global(
+  html[data-effective-theme='christmas']
+    .wish-header__actions
+    .wish-add-button.p-button:not(:disabled):hover
+),
+:global(
+  html[data-effective-theme='christmas']
+    .wish-header__actions
+    .wish-add-button.p-button:focus-visible
+) {
+  border-color: rgba(255, 226, 143, 0.9);
+  background: linear-gradient(135deg, #479b70, #347b5c);
+  color: #ffffff;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+:global(
+  html[data-effective-theme='christmas']
+    .wish-header__actions
+    .wish-slogan-submit-button.p-button:not(:disabled):hover
+),
+:global(
+  html[data-effective-theme='christmas']
+    .wish-header__actions
+    .wish-slogan-submit-button.p-button:focus-visible
+) {
+  border-color: rgba(255, 226, 143, 0.9);
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+:global(
+  html[data-effective-theme='christmas']
+    .wish-header__actions
+    .wish-add-button.p-button:focus-visible
+),
+:global(
+  html[data-effective-theme='christmas']
+    .wish-header__actions
+    .wish-slogan-submit-button.p-button:focus-visible
+) {
+  outline: 2px solid rgba(238, 211, 142, 0.72);
+  outline-offset: 2px;
 }
 .wish-header h2,
 .wish-header p {

@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import publicCourseSource from '@/views/PublicCourse.vue?raw'
 
 import PublicCourse from '@/views/PublicCourse.vue'
+import { useTheme } from '@/utils/useTheme'
 
 const routeMock = vi.hoisted(() => ({
   params: { courseId: '42' },
@@ -16,6 +18,7 @@ const courseServiceMock = vi.hoisted(() => ({
 }))
 
 const setSeoMock = vi.hoisted(() => vi.fn())
+const { applyActiveSiteTheme } = useTheme()
 
 vi.mock('vue-router', () => ({ useRoute: () => routeMock }))
 vi.mock('@/api', () => ({ courseService: courseServiceMock }))
@@ -37,12 +40,28 @@ function mountView() {
 
 describe('PublicCourse', () => {
   beforeEach(() => {
+    applyActiveSiteTheme('general')
     routeMock.params.courseId = '42'
     routeMock.path = '/courses/42'
     courseServiceMock.listPublicCategories.mockReset()
     courseServiceMock.listPublicCourses.mockReset()
     courseServiceMock.getPublicCourseArchives.mockReset()
     setSeoMock.mockReset()
+  })
+
+  it('applies the Christmas presentation hook only while Christmas is active', async () => {
+    routeMock.params.courseId = 'invalid'
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.get('.public-course').classes()).not.toContain('public-course-christmas')
+
+    applyActiveSiteTheme('christmas')
+    await nextTick()
+
+    expect(wrapper.get('.public-course').classes()).toContain('public-course-christmas')
+    wrapper.unmount()
   })
 
   it('uses the shared course header selector for every bold dynamic course title', () => {

@@ -61,9 +61,7 @@
     "vitest": "^4.1.11"
   },
   "lint-staged": {
-    "*.{js,jsx,vue}": [
-      "pnpm exec eslint --ext .js,.ts,.vue src tests",
-      "pnpm exec prettier --write ."
-    ]
+    "*.{js,jsx,mjs,ts,tsx,vue}": "pnpm exec eslint",
+    "*": "pnpm exec prettier --check --ignore-unknown"
   }
 }

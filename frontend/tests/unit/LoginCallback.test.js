@@ -24,6 +24,22 @@ vi.mock('@/api', () => ({
 
 const originalURLSearchParams = window.URLSearchParams
 
+const contrastRatio = (foreground, background) => {
+  const luminance = (hex) => {
+    const channels = hex
+      .slice(1)
+      .match(/.{2}/g)
+      .map((channel) => Number.parseInt(channel, 16) / 255)
+      .map((channel) => (channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4))
+
+    return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722
+  }
+
+  const lighter = Math.max(luminance(foreground), luminance(background))
+  const darker = Math.min(luminance(foreground), luminance(background))
+  return (lighter + 0.05) / (darker + 0.05)
+}
+
 function mockURLSearchParams(values = {}) {
   window.URLSearchParams = class {
     constructor() {}
@@ -180,5 +196,24 @@ describe('LoginCallback view', () => {
     expect(loginCallbackSource).not.toContain('physics-background')
     expect(loginCallbackSource).not.toContain('getFieldBgSvg')
     expect(loginCallbackSource).toContain('authService.exchangeNthuCode(code)')
+  })
+
+  it('keeps Classic surfaces and covers every callback view state with owner-scoped Christmas styles', () => {
+    expect(loginCallbackSource).toContain('.login-callback-card')
+    expect(loginCallbackSource).toContain("html[data-effective-theme='christmas'] .login-callback")
+    expect(loginCallbackSource).toContain('background: transparent')
+    expect(loginCallbackSource).toContain('background: #293f52')
+    expect(loginCallbackSource).toContain('background: #3e5f72')
+    expect(loginCallbackSource).toContain('border-left: 0.25rem solid #793941')
+    expect(loginCallbackSource).toContain('.loading-container')
+    expect(loginCallbackSource).toContain('.p-progressspinner-circle')
+    expect(loginCallbackSource).toContain('stroke: #dec78e')
+    expect(loginCallbackSource).not.toContain('@keyframes')
+    expect(loginCallbackSource).not.toContain('@media')
+  })
+
+  it('uses readable existing Christmas palette pairings for error and body text', () => {
+    expect(contrastRatio('#F8F2E8', '#293F52')).toBeGreaterThanOrEqual(4.5)
+    expect(contrastRatio('#F5EEDC', '#3E5F72')).toBeGreaterThanOrEqual(4.5)
   })
 })

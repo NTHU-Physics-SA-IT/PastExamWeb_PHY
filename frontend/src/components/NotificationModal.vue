@@ -6,6 +6,7 @@
     :style="{ width: '620px', maxWidth: '92vw' }"
     :draggable="false"
     :blockScroll="true"
+    :class="{ 'notification-summary-dialog--christmas': effectiveTheme === 'christmas' }"
     :pt="{ root: { 'aria-label': $t('系統公告與通知'), 'aria-labelledby': null } }"
   >
     <template #header>
@@ -33,6 +34,7 @@
             :label="$t('檢視')"
             size="small"
             outlined
+            class="notification-summary-view-action review-action-preview"
             @click="$emit('view-announcement', item.id)"
           />
         </article>
@@ -54,6 +56,7 @@
             :label="$t('檢視')"
             size="small"
             outlined
+            class="notification-summary-view-action review-action-preview"
             @click="$emit('view-personal', item.id)"
           />
         </article>
@@ -64,18 +67,22 @@
         <Button
           :label="$t('稍後再看')"
           severity="secondary"
-          text
+          outlined
+          class="notification-summary-secondary-action review-action-preview"
           @click="$emit('update:visible', false)"
         />
         <Button
           :label="$t('查看全部')"
           severity="secondary"
           outlined
+          class="notification-summary-secondary-action review-action-preview"
           @click="$emit('open-center')"
         />
         <Button
           :label="$t('全部標記為已讀')"
           icon="pi pi-check-circle"
+          severity="success"
+          class="notification-summary-mark-all-action review-action-republish"
           @click="$emit('mark-all-read')"
         />
       </div>
@@ -92,8 +99,10 @@ import {
 } from '@/utils/announcementNotificationPresentation'
 import { localizedPersonalNotification } from '@/utils/personalNotificationPresentation'
 import { formatExactDateTime24h } from '@/utils/time'
+import { useTheme } from '@/utils/useTheme'
 
 const { locale } = useI18n()
+const { effectiveTheme } = useTheme()
 const props = defineProps({ visible: Boolean, summary: { type: Object, required: true } })
 defineEmits([
   'update:visible',
@@ -178,5 +187,97 @@ const formatTimestamp = (value) => formatExactDateTime24h(value)
   .summary-item .p-button {
     justify-self: end;
   }
+}
+</style>
+
+<style>
+html[data-effective-theme='christmas'] body .p-dialog.notification-summary-dialog--christmas {
+  border: 1px solid rgba(222, 199, 142, 0.46);
+  background: #3e5f72;
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-summary-dialog--christmas
+  .p-dialog-header {
+  border-bottom: 1px solid rgba(222, 199, 142, 0.38);
+  background: #293f52;
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-summary-dialog--christmas
+  .p-dialog-content,
+html[data-effective-theme='christmas']
+  body
+  .notification-summary-dialog--christmas
+  .p-dialog-footer {
+  background: #3e5f72;
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-summary-dialog--christmas
+  .p-dialog-close-button,
+html[data-effective-theme='christmas'] body .notification-summary-dialog--christmas h3,
+html[data-effective-theme='christmas'] body .notification-summary-dialog--christmas strong,
+html[data-effective-theme='christmas'] body .notification-summary-dialog--christmas p {
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas'] body .notification-summary-dialog--christmas .summary-item {
+  border: 1px solid rgba(222, 199, 142, 0.34);
+  border-inline-start: 3px solid #7cc9ed;
+  background: rgba(41, 63, 82, 0.64);
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-summary-dialog--christmas
+  .summary-item--divided {
+  border-top-color: rgba(222, 199, 142, 0.38);
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-summary-dialog--christmas
+  .summary-item
+  small {
+  color: #c5d5d2;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-summary-dialog--christmas
+  .review-action-preview.p-button {
+  border-color: rgba(225, 246, 252, 0.96);
+  background: #d7edf5;
+  color: #245368;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-summary-dialog--christmas
+  .review-action-republish.p-button {
+  border-color: rgba(127, 188, 145, 0.82);
+  background: linear-gradient(180deg, #3d8a64 0%, #2d6c52 100%);
+  color: #f5fff7;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .notification-summary-dialog--christmas
+  .review-action-preview.p-button:hover,
+html[data-effective-theme='christmas']
+  body
+  .notification-summary-dialog--christmas
+  .review-action-republish.p-button:hover {
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
 }
 </style>

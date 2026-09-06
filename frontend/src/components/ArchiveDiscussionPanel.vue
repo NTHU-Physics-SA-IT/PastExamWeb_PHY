@@ -170,6 +170,7 @@
             type="submit"
             icon="pi pi-send"
             :label="$t('送出')"
+            class="discussion-submit-button"
             severity="secondary"
             :disabled="!canSend || !draft.trim()"
           />

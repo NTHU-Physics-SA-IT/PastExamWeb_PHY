@@ -93,6 +93,18 @@ describe('HomepageSloganManagementPanel', () => {
     expect(messages['zh-TW']['出現等級']).toBe('出現等級')
   })
 
+  it('maps both filter actions and row actions to the approved Christmas button roles', () => {
+    expect(source.match(/slogan-refresh-action/g)).toHaveLength(2)
+    expect(source.match(/slogan-preview-action/g)).toHaveLength(2)
+    expect(source.match(/slogan-admin-delete-action/g)).toHaveLength(2)
+  })
+
+  it('maps the review dialog save action to the archive download treatment', () => {
+    expect(source).toMatch(
+      /class="slogan-dialog-save-action review-action-republish"[\s\S]{0,220}?severity="success"[\s\S]{0,160}?size="small"/
+    )
+  })
+
   it('keeps the desktop table fluid while retaining the existing responsive card surface', async () => {
     const wrapper = shallowMount(HomepageSloganManagementPanel)
     await flushPromises()

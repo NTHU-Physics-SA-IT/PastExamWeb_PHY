@@ -1,5 +1,8 @@
 <template>
-  <main class="personal-settings-page">
+  <main
+    class="personal-settings-page"
+    :class="{ 'personal-settings-page--christmas': effectiveTheme === 'christmas' }"
+  >
     <section class="personal-settings-shell">
       <header class="settings-header">
         <h1>{{ $t('個人化設定') }}</h1>
@@ -60,7 +63,8 @@
                           :options="languageOptions"
                           optionLabel="label"
                           optionValue="value"
-                          class="w-full"
+                          class="w-full personal-settings-language-select"
+                          overlayClass="personal-settings-language-overlay"
                         />
                         <small>{{ $t('選擇網站顯示語言，變更會立即套用。') }}</small>
                       </div>
@@ -106,9 +110,22 @@
                               </div>
                             </div>
                             <div class="preview-actions">
-                              <Button icon="pi pi-eye" :label="$t('預覽')" size="small" outlined />
-                              <Button icon="pi pi-download" :label="$t('下載')" size="small" />
                               <Button
+                                class="personal-settings-preview-action review-action-preview"
+                                icon="pi pi-eye"
+                                :label="$t('預覽')"
+                                size="small"
+                                outlined
+                              />
+                              <Button
+                                class="personal-settings-download-action review-action-republish"
+                                icon="pi pi-download"
+                                :label="$t('下載')"
+                                size="small"
+                                severity="success"
+                              />
+                              <Button
+                                class="personal-settings-delete-action review-action-delete"
                                 icon="pi pi-trash"
                                 :label="$t('刪除')"
                                 size="small"
@@ -184,10 +201,11 @@
 
                   <div v-if="canEditProfile" class="form-actions">
                     <Button
-                      class="profile-save-button"
+                      class="profile-save-button personal-settings-download-action review-action-republish"
                       :label="$t('儲存基本資料')"
                       icon="pi pi-save"
                       type="submit"
+                      severity="success"
                       :loading="profileSaving"
                       :disabled="profileLoading || !canSaveProfile"
                     />
@@ -248,9 +266,11 @@
 
                   <div class="form-actions">
                     <Button
+                      class="password-save-button personal-settings-download-action review-action-republish"
                       :label="$t('儲存密碼')"
                       icon="pi pi-key"
                       type="submit"
+                      severity="success"
                       :disabled="!canSubmitPassword"
                     />
                   </div>
@@ -277,16 +297,19 @@ import {
 } from '../utils/fontSizePreference'
 import { useToast } from 'primevue/usetoast'
 import { useLocale } from '../i18n'
+import { useTheme } from '../utils/useTheme'
 
 export default {
   name: 'PersonalSettings',
   setup() {
     const toast = useToast()
     const { locale } = useLocale()
+    const { effectiveTheme } = useTheme()
 
     return {
       toast,
       locale,
+      effectiveTheme,
     }
   },
   data() {
@@ -987,6 +1010,214 @@ small {
   line-height: 1.5;
 }
 
+.personal-settings-page--christmas {
+  --personal-settings-christmas-text: #f8f2e8;
+  --personal-settings-christmas-muted: #c5d5d2;
+  --personal-settings-christmas-border: rgba(222, 199, 142, 0.38);
+  --personal-settings-christmas-field: #293f52;
+  min-height: 100%;
+  color: var(--personal-settings-christmas-text);
+  background: transparent !important;
+  background-image: none !important;
+}
+
+.personal-settings-page--christmas .settings-header h1,
+.personal-settings-page--christmas .settings-group-header h2,
+.personal-settings-page--christmas label,
+.personal-settings-page--christmas .font-size-current,
+.personal-settings-page--christmas .font-size-preview h3,
+.personal-settings-page--christmas .font-size-preview h4,
+.personal-settings-page--christmas .settings-section :deep(.p-card-title) {
+  color: var(--personal-settings-christmas-text);
+}
+
+.personal-settings-page--christmas .settings-group-header p,
+.personal-settings-page--christmas .preview-sample-label,
+.personal-settings-page--christmas .font-size-preview p,
+.personal-settings-page--christmas .preview-meta-row,
+.personal-settings-page--christmas .autosave-hint,
+.personal-settings-page--christmas small {
+  color: var(--personal-settings-christmas-muted);
+}
+
+.personal-settings-page--christmas .settings-nav,
+.personal-settings-page--christmas .settings-section,
+.personal-settings-page--christmas .settings-section :deep(.p-card-body),
+.personal-settings-page--christmas .settings-section :deep(.p-card-content) {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+.personal-settings-page--christmas .settings-nav,
+.personal-settings-page--christmas .settings-section {
+  border-color: var(--personal-settings-christmas-border);
+  box-shadow: none;
+}
+
+.personal-settings-page--christmas .settings-group + .settings-group {
+  border-top-color: rgba(222, 199, 142, 0.34);
+}
+
+.personal-settings-page--christmas .settings-nav-item {
+  color: var(--personal-settings-christmas-muted);
+}
+
+.personal-settings-page--christmas .settings-nav-item:hover {
+  color: #ffffff;
+  background: rgba(52, 121, 165, 0.48);
+}
+
+.personal-settings-page--christmas .settings-nav-item.active {
+  color: #ffffff;
+  background: #245c80;
+  box-shadow: inset 3px 0 0 #8fd4f4;
+}
+
+.personal-settings-page--christmas .settings-section :deep(.p-inputtext),
+.personal-settings-page--christmas .settings-section :deep(.p-password-input),
+.personal-settings-page--christmas .settings-section :deep(.p-select) {
+  border-color: var(--personal-settings-christmas-border);
+  color: var(--personal-settings-christmas-text);
+  background: var(--personal-settings-christmas-field) !important;
+  background-image: none !important;
+}
+
+.personal-settings-page--christmas .settings-section :deep(.p-select-label),
+.personal-settings-page--christmas .settings-section :deep(.p-select-dropdown),
+.personal-settings-page--christmas .settings-section :deep(.p-password-toggle-mask-icon) {
+  color: var(--personal-settings-christmas-muted);
+}
+
+.personal-settings-page--christmas .settings-section :deep(.p-inputtext::placeholder),
+.personal-settings-page--christmas .settings-section :deep(.p-select-label.p-placeholder) {
+  color: rgba(197, 213, 210, 0.74);
+}
+
+.personal-settings-page--christmas .settings-section :deep(.p-inputtext:focus),
+.personal-settings-page--christmas .settings-section :deep(.p-select:focus-within) {
+  border-color: #dec78e;
+  box-shadow: 0 0 0 2px rgba(222, 199, 142, 0.18);
+}
+
+.personal-settings-page--christmas .font-size-slider.p-slider {
+  background: rgba(197, 213, 210, 0.34);
+}
+
+.personal-settings-page--christmas .font-size-slider :deep(.p-slider-range) {
+  background: #35b77b;
+}
+
+.personal-settings-page--christmas .font-size-slider :deep(.p-slider-handle) {
+  border-color: #73d2aa;
+  background: #eef9fc;
+  box-shadow: 0 0 0 2px rgba(41, 63, 82, 0.65);
+}
+
+.personal-settings-page--christmas .font-size-preview {
+  border-color: var(--personal-settings-christmas-border);
+  color: var(--personal-settings-christmas-text);
+  background: rgba(41, 63, 82, 0.76);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.personal-settings-page--christmas .preview-filter-chip {
+  border-color: rgba(215, 237, 245, 0.5);
+  color: #e5f4f9;
+  background: rgba(41, 78, 100, 0.9);
+}
+
+.personal-settings-page--christmas .preview-archive-card {
+  border-color: rgba(222, 199, 142, 0.34);
+  background: rgba(30, 64, 83, 0.82);
+}
+
+.personal-settings-page--christmas .font-size-preview .review-status-pending {
+  --soft-badge-bg: rgba(104, 78, 24, 0.9);
+  --soft-badge-border: rgba(251, 215, 120, 0.78);
+  --soft-badge-color: #fff2c3;
+}
+
+.personal-settings-page--christmas .font-size-preview .submission-status-deleted {
+  --soft-badge-bg: rgba(111, 41, 55, 0.92);
+  --soft-badge-border: rgba(255, 154, 174, 0.8);
+  --soft-badge-color: #ffe1e7;
+}
+
+.personal-settings-page--christmas .font-size-preview .preview-tag.p-tag-success {
+  color: #ddfbe7;
+  border: 1px solid rgba(142, 230, 173, 0.72);
+  background: rgba(30, 112, 68, 0.88);
+}
+
+.personal-settings-page--christmas :deep(.review-action-preview.p-button),
+.personal-settings-page--christmas :deep(.review-action-republish.p-button),
+.personal-settings-page--christmas :deep(.review-action-delete.p-button) {
+  transition:
+    border-color 0.18s ease,
+    color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    text-shadow 0.18s ease;
+}
+
+.personal-settings-page--christmas :deep(.review-action-preview.p-button) {
+  border-color: rgba(225, 246, 252, 0.96) !important;
+  color: #245368 !important;
+  background: #d7edf5 !important;
+  background-image: none !important;
+  box-shadow: 0 0.38rem 0.9rem rgba(6, 35, 49, 0.18);
+}
+
+.personal-settings-page--christmas :deep(.review-action-republish.p-button) {
+  border-color: rgba(127, 188, 145, 0.82) !important;
+  color: #f5fff7 !important;
+  background: linear-gradient(135deg, #3d8a64, #2d6c52) !important;
+}
+
+.personal-settings-page--christmas :deep(.review-action-delete.p-button) {
+  border-color: rgba(240, 119, 132, 0.86) !important;
+  color: #ffe8eb !important;
+  background: rgba(116, 38, 50, 0.82) !important;
+  background-image: none !important;
+}
+
+.personal-settings-page--christmas :deep(.review-action-preview.p-button:not(:disabled):hover),
+.personal-settings-page--christmas :deep(.review-action-preview.p-button:focus-visible) {
+  border-color: rgba(255, 226, 143, 0.9) !important;
+  color: #173846 !important;
+  background: #e5f4f9 !important;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+}
+
+.personal-settings-page--christmas :deep(.review-action-republish.p-button:not(:disabled):hover),
+.personal-settings-page--christmas :deep(.review-action-republish.p-button:focus-visible) {
+  border-color: rgba(255, 226, 143, 0.9) !important;
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #479b70, #347b5c) !important;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+}
+
+.personal-settings-page--christmas :deep(.review-action-delete.p-button:not(:disabled):hover),
+.personal-settings-page--christmas :deep(.review-action-delete.p-button:focus-visible) {
+  border-color: rgba(255, 226, 143, 0.9) !important;
+  color: #ffffff !important;
+  background: rgba(137, 45, 59, 0.92) !important;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+}
+
+.personal-settings-page--christmas :deep(.review-action-preview.p-button:focus-visible),
+.personal-settings-page--christmas :deep(.review-action-republish.p-button:focus-visible),
+.personal-settings-page--christmas :deep(.review-action-delete.p-button:focus-visible) {
+  outline: 2px solid rgba(238, 211, 142, 0.72);
+  outline-offset: 2px;
+}
+
 @media (max-width: 980px) {
   .settings-layout {
     display: grid;
@@ -1011,6 +1242,10 @@ small {
 
   .settings-nav-item.active {
     box-shadow: inset 0 -3px 0 color-mix(in srgb, var(--title-gradient-start) 72%, transparent);
+  }
+
+  .personal-settings-page--christmas .settings-nav-item.active {
+    box-shadow: inset 0 -3px 0 #8fd4f4;
   }
 
   .settings-nav-item--item {
@@ -1053,5 +1288,35 @@ small {
   .form-actions :deep(.p-button) {
     width: 100%;
   }
+}
+</style>
+
+<style>
+html[data-effective-theme='christmas'] body .personal-settings-language-overlay.p-select-overlay {
+  border-color: rgba(222, 199, 142, 0.38);
+  color: #f8f2e8;
+  background: #3e5f72;
+  background-image: none;
+}
+
+html[data-effective-theme='christmas'] body .personal-settings-language-overlay .p-select-list {
+  background: transparent;
+}
+
+html[data-effective-theme='christmas'] body .personal-settings-language-overlay .p-select-option {
+  color: #f8f2e8;
+  background: transparent;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .personal-settings-language-overlay
+  .p-select-option:hover,
+html[data-effective-theme='christmas']
+  body
+  .personal-settings-language-overlay
+  .p-select-option.p-select-option-selected {
+  color: #ffffff;
+  background: #245c80;
 }
 </style>

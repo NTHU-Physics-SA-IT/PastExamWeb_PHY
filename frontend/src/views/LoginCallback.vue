@@ -1,13 +1,15 @@
 <template>
   <div class="login-callback h-full flex align-items-center justify-content-center">
-    <div class="text-center px-4 w-full max-w-md" :style="{ color: 'var(--text-secondary)' }">
+    <div class="login-callback-panel text-center px-4 w-full max-w-md">
       <div v-if="errorMessage">
-        <Card class="border-round shadow-2" :style="{ backgroundColor: 'var(--bg-secondary)' }">
+        <Card class="login-callback-card border-round shadow-2">
           <template #title>
-            <div class="text-red-400 text-xl mb-1">{{ $t('登入失敗') }}</div>
+            <div class="login-callback-error-title text-xl mb-1">
+              {{ $t('登入失敗') }}
+            </div>
           </template>
           <template #content>
-            <p :style="{ color: 'var(--text-secondary)' }" class="mb-4">
+            <p class="login-callback-message mb-4">
               {{ errorMessage }}
             </p>
             <Button
@@ -95,17 +97,70 @@ export default {
   background: var(--bg-primary);
 }
 
-:deep(.p-card) {
+.login-callback-panel,
+.login-callback-message {
+  color: var(--text-secondary);
+}
+
+.login-callback-error-title {
+  color: #f87171;
+}
+
+:deep(.login-callback-card) {
   background-color: var(--bg-secondary);
   color: var(--text-primary);
 }
 
-:deep(.p-card .p-card-title) {
+:deep(.login-callback-card .p-card-title) {
   text-align: center;
 }
 
-:deep(.p-card .p-card-content) {
+:deep(.login-callback-card .p-card-content) {
   padding-bottom: 0;
   text-align: center;
+}
+</style>
+
+<style>
+html[data-effective-theme='christmas'] .login-callback {
+  background: transparent;
+}
+
+html[data-effective-theme='christmas'] .login-callback .login-callback-panel {
+  color: #f5eedc;
+}
+
+html[data-effective-theme='christmas'] .login-callback .login-callback-card {
+  border: 1px solid rgba(222, 199, 142, 0.46);
+  border-left: 0.25rem solid #793941;
+  background: #3e5f72;
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas'] .login-callback .login-callback-card .p-card-title {
+  padding: 0.9rem;
+  border-bottom: 1px solid rgba(222, 199, 142, 0.38);
+  border-radius: 0.45rem;
+  background: #293f52;
+}
+
+html[data-effective-theme='christmas'] .login-callback .login-callback-error-title {
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas'] .login-callback .login-callback-message {
+  color: #f5eedc;
+}
+
+html[data-effective-theme='christmas'] .login-callback .loading-container {
+  padding: 1.5rem;
+  border: 1px solid rgba(222, 199, 142, 0.46);
+  border-radius: 0.75rem;
+  background: #293f52;
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas'] .login-callback .p-progressspinner-circle {
+  stroke: #dec78e;
 }
 </style>

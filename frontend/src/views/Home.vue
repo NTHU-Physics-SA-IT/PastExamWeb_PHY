@@ -1,5 +1,11 @@
 <template>
-  <main class="physics-home" :class="{ 'physics-home-dark': isDarkTheme }">
+  <main
+    class="physics-home"
+    :class="{
+      'physics-home-dark': effectiveTheme === 'dark',
+      'physics-home-christmas': effectiveTheme === 'christmas',
+    }"
+  >
     <div class="physics-board" aria-hidden="true">
       <svg class="spacetime-mesh" viewBox="0 0 1200 760" preserveAspectRatio="xMidYMid slice">
         <defs>
@@ -61,12 +67,17 @@
           <p class="subtitle">{{ homepageSlogan }}</p>
           <div class="hero-actions">
             <Button
+              :class="{
+                'nthu-login-button': effectiveTheme === 'christmas',
+                'christmas-login-button': effectiveTheme === 'christmas',
+              }"
               icon="pi pi-building-columns"
               :label="$t('清華校務系統登入')"
               size="large"
               @click="startNthuLogin"
             />
             <Button
+              :class="{ 'christmas-login-button': effectiveTheme === 'christmas' }"
               icon="pi pi-sign-in"
               :label="$t('本地帳號登入')"
               size="large"
@@ -98,7 +109,7 @@
           v-for="(stat, index) in statistics"
           :key="stat.key"
           class="stat-card"
-          :class="{ 'animate-fade-in': statsLoaded }"
+          :class="[{ 'animate-fade-in': statsLoaded }, christmasMetricCardClasses(stat.key)]"
           :style="{ animationDelay: `${index * 0.08}s` }"
           @pointerenter="enableMetricsHover"
         >
@@ -141,7 +152,7 @@ import { useFormulaPhysics } from '../composables/useFormulaPhysics'
 import { DEFAULT_DESCRIPTION, SITE_URL, setSeo } from '../utils/seo'
 import 'katex/dist/katex.min.css'
 
-const { isDarkTheme } = useTheme()
+const { effectiveTheme } = useTheme()
 const { t, locale } = useI18n()
 const router = useRouter()
 const FALLBACK_HOMEPAGE_SLOGAN = '書卷沒有，考古這有'
@@ -238,6 +249,20 @@ const statistics = computed(() => [
     icon: 'pi pi-circle-fill',
   },
 ])
+
+const CHRISTMAS_METRIC_CARD_CLASSES = Object.freeze({
+  totalArchives: Object.freeze(['stat-card--stocking-green', 'stat-card--cuff-wave-a']),
+  totalCourses: Object.freeze(['stat-card--stocking-green', 'stat-card--cuff-wave-b']),
+  totalDownloads: Object.freeze(['stat-card--stocking-burgundy', 'stat-card--cuff-wave-c']),
+  totalUsers: Object.freeze(['stat-card--stocking-green', 'stat-card--cuff-wave-b']),
+  activeToday: Object.freeze(['stat-card--stocking-burgundy', 'stat-card--cuff-wave-a']),
+  onlineUsers: Object.freeze(['stat-card--stocking-green', 'stat-card--cuff-wave-c']),
+})
+
+function christmasMetricCardClasses(statisticKey) {
+  if (effectiveTheme.value !== 'christmas') return []
+  return CHRISTMAS_METRIC_CARD_CLASSES[statisticKey] || []
+}
 
 const formulaCards = [
   {
@@ -821,52 +846,8 @@ h1 {
   display: none;
 }
 
-/* Light sweep inspired by Uiverse.io by satyamchaudharydev. */
-.hero-actions :deep(.p-button) {
-  isolation: isolate;
-  overflow: hidden;
-  position: relative;
-}
-
-.hero-actions :deep(.p-button)::before {
-  position: absolute;
-  z-index: 2;
-  top: -35%;
-  left: -42%;
-  width: 30%;
-  height: 170%;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.12) 28%,
-    rgba(255, 255, 255, 0.42) 50%,
-    rgba(255, 255, 255, 0.12) 72%,
-    transparent 100%
-  );
-  content: '';
-  pointer-events: none;
-  transform: translateX(0) skewX(-18deg);
-  transition: none;
-  will-change: transform;
-}
-
-.hero-actions :deep(.p-button:not(:disabled):hover)::before {
-  transform: translateX(510%) skewX(-18deg);
-  transition: transform 1s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-:deep(.catalog-action)::before {
-  display: none;
-}
-
 :deep(.catalog-action) {
   transition: none;
-}
-
-.hero-actions :deep(.p-button .p-button-icon),
-.hero-actions :deep(.p-button .p-button-label) {
-  position: relative;
-  z-index: 1;
 }
 
 :deep(.catalog-action .p-button-label) {
@@ -1903,6 +1884,83 @@ h1 {
   color: #183a31;
 }
 
+/* Christmas metric cards retain the existing geometry and add a restrained stocking palette. */
+.physics-home.physics-home-christmas .stat-card {
+  --christmas-card-gradient-angle: 145deg;
+  border-color: rgba(243, 235, 221, 0.18);
+  border-left-color: rgba(202, 171, 100, 0.7);
+  box-shadow:
+    0 0.7rem 1.6rem rgba(4, 18, 17, 0.14),
+    inset 0 1px rgba(255, 253, 248, 0.035);
+}
+
+.physics-home.physics-home-christmas .stat-card--stocking-green {
+  background: linear-gradient(var(--christmas-card-gradient-angle), #17483f 0%, #103a34 100%);
+}
+
+.physics-home.physics-home-christmas .stat-card--stocking-burgundy {
+  background: linear-gradient(var(--christmas-card-gradient-angle), #793941 0%, #60353a 100%);
+}
+
+.physics-home.physics-home-christmas .stat-card::before {
+  display: none;
+}
+
+.physics-home.physics-home-christmas .stat-card::after {
+  position: absolute;
+  z-index: 0;
+  inset: 0 0 auto;
+  height: 0.76rem;
+  background: linear-gradient(180deg, #f5eedc 0%, #eee4d2 100%);
+  filter: drop-shadow(0 0.09rem 0.08rem rgba(36, 25, 18, 0.13));
+  content: '';
+  pointer-events: none;
+}
+
+.physics-home.physics-home-christmas .stat-card--cuff-wave-a {
+  --christmas-card-gradient-angle: 142deg;
+}
+
+.physics-home.physics-home-christmas .stat-card--cuff-wave-a::after {
+  clip-path: polygon(0 0, 100% 0, 100% 80%, 82% 84%, 63% 78%, 44% 85%, 23% 79%, 0 83%);
+}
+
+.physics-home.physics-home-christmas .stat-card--cuff-wave-b {
+  --christmas-card-gradient-angle: 147deg;
+}
+
+.physics-home.physics-home-christmas .stat-card--cuff-wave-b::after {
+  clip-path: polygon(0 0, 100% 0, 100% 83%, 79% 78%, 59% 85%, 38% 79%, 18% 84%, 0 80%);
+}
+
+.physics-home.physics-home-christmas .stat-card--cuff-wave-c {
+  --christmas-card-gradient-angle: 144deg;
+}
+
+.physics-home.physics-home-christmas .stat-card--cuff-wave-c::after {
+  clip-path: polygon(0 0, 100% 0, 100% 79%, 85% 84%, 67% 80%, 48% 85%, 28% 78%, 12% 83%, 0 81%);
+}
+
+.physics-home.physics-home-christmas .stat-card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.physics-home.physics-home-christmas .stat-icon {
+  border: 1px solid rgba(222, 199, 142, 0.12);
+  border-radius: 50%;
+  color: #dec78e;
+  background: rgba(222, 199, 142, 0.08);
+}
+
+.physics-home.physics-home-christmas .stat-card p {
+  color: #eee7da;
+}
+
+.physics-home.physics-home-christmas .stat-card strong {
+  color: #f8f2e8;
+}
+
 .animate-fade-in {
   animation: fadeInUp 0.45s ease forwards;
 }
@@ -2072,10 +2130,6 @@ h1 {
 
   .mass-core-entry.mass-core-entry-animate {
     animation: none;
-  }
-
-  .hero-actions :deep(.p-button)::before {
-    display: none;
   }
 
   .stat-card::before {
@@ -2459,5 +2513,64 @@ h1 {
     bottom: 7%;
     left: 8%;
   }
+}
+
+.physics-home.physics-home-christmas {
+  background: transparent;
+}
+
+.physics-home.physics-home-christmas .physics-board {
+  background: transparent;
+}
+
+.physics-home.physics-home-christmas .physics-board::before {
+  background: transparent;
+}
+
+.physics-home.physics-home-christmas .physics-board::after {
+  background: transparent;
+}
+
+.physics-home.physics-home-christmas h1 {
+  color: #f5fbff;
+  text-shadow: 0 1.2rem 3rem rgba(3, 15, 24, 0.42);
+}
+
+.physics-home.physics-home-christmas .eyebrow,
+.physics-home.physics-home-christmas .subtitle {
+  color: rgba(232, 247, 252, 0.86);
+}
+
+.physics-home.physics-home-christmas :deep(.catalog-action) {
+  --catalog-action-color: rgba(235, 248, 252, 0.88);
+  --catalog-action-highlight-color: #ffffff;
+}
+
+.physics-home.physics-home-christmas
+  .hero-actions
+  :deep(.p-button.nthu-login-button.christmas-login-button) {
+  color: #245368;
+  border-color: rgba(225, 246, 252, 0.96);
+  background: #d7edf5;
+  box-shadow: 0 0.38rem 0.9rem rgba(6, 35, 49, 0.18);
+}
+
+.physics-home.physics-home-christmas .hero-actions :deep(.p-button:nth-child(2)) {
+  color: rgba(240, 250, 253, 0.94);
+  border-color: rgba(220, 239, 246, 0.72);
+  background: rgba(10, 37, 51, 0.18);
+}
+
+.physics-home.physics-home-christmas .hero-actions :deep(.p-button.christmas-login-button:hover),
+.physics-home.physics-home-christmas
+  .hero-actions
+  :deep(.p-button.christmas-login-button:focus-visible) {
+  color: #173846;
+  border-color: rgba(255, 226, 143, 0.9);
+  background: #e5f4f9;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
 }
 </style>

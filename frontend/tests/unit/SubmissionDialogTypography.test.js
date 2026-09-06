@@ -63,7 +63,7 @@ describe('submission dialog typography', () => {
     const contentEnd = normalizedAdminSource.indexOf('</div>\n        <template #footer>')
     const footerStart = normalizedAdminSource.indexOf('<template #footer>', contentEnd)
     const closeButton = normalizedAdminSource.indexOf(
-      'class="user-data-stats-dialog__close"',
+      'class="user-data-stats-dialog__close review-action-preview"',
       footerStart
     )
 

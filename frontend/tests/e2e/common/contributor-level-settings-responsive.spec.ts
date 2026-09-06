@@ -47,6 +47,9 @@ const installAdminMocks = async (page: Page) => {
     window.localStorage.setItem('admin-current-tab', '1')
   }, token)
 
+  await page.route('**/api/theme-management/active-theme', (route) =>
+    route.fulfill(json({ active_theme: 'christmas' }))
+  )
   await page.route('**/api/auth/heartbeat', (route) => route.fulfill(json({})))
   await page.route('**/api/notifications/active', (route) => route.fulfill(json([])))
   await page.route('**/api/notifications/unread-summary**', (route) =>
@@ -94,7 +97,27 @@ test('keeps contributor level settings bounded and overlap-free across target vi
   test.setTimeout(60_000)
   await installAdminMocks(page)
   await page.goto('/admin', { waitUntil: 'networkidle' })
-  await page.getByRole('button', { name: '等級設定' }).click()
+  const settingsButton = page.getByRole('button', { name: '等級設定' })
+  await expect(settingsButton).toBeVisible()
+  const pagePaintState = await settingsButton.evaluate((element) => {
+    const rect = element.getBoundingClientRect()
+    const content = document.querySelector<HTMLElement>('.content-container')
+    const hitTarget = document.elementFromPoint(
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2
+    )
+    return {
+      documentHeight: document.documentElement.getBoundingClientRect().height,
+      viewportHeight: window.innerHeight,
+      contentHeight: content?.getBoundingClientRect().height ?? 0,
+      buttonReceivesPointer:
+        hitTarget === element || (hitTarget instanceof Node && element.contains(hitTarget)),
+    }
+  })
+  expect(pagePaintState.documentHeight).toBeGreaterThanOrEqual(pagePaintState.viewportHeight)
+  expect(pagePaintState.contentHeight).toBeGreaterThan(0)
+  expect(pagePaintState.buttonReceivesPointer).toBe(true)
+  await settingsButton.click()
 
   const dialog = page.getByRole('dialog', { name: '投稿等級設定' })
   const list = dialog.locator('.contributor-level-settings-list')

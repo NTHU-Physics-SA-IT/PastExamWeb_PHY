@@ -1,5 +1,11 @@
 <template>
-  <div class="card" :class="{ 'navbar-dark': isDarkTheme }">
+  <div
+    class="card"
+    :class="{
+      'navbar-dark': effectiveTheme === 'dark',
+      'navbar-christmas': effectiveTheme === 'christmas',
+    }"
+  >
     <Menubar :model="menuItems">
       <template #start>
         <div class="nav-brand-cluster">
@@ -115,7 +121,15 @@
             class="locale-toggle-button"
             @click="toggleLocale"
           />
+          <span
+            v-if="effectiveTheme === 'christmas'"
+            class="theme-bell-indicator"
+            aria-hidden="true"
+          >
+            <i class="pi pi-bell"></i>
+          </span>
           <Button
+            v-else
             :icon="isDarkTheme ? 'pi pi-moon' : 'pi pi-sun'"
             :aria-label="isDarkTheme ? $t('切換至淺色模式') : $t('切換至深色模式')"
             severity="secondary"
@@ -125,7 +139,14 @@
             @click="handleToggleTheme"
           />
         </div>
-        <Menu ref="moreActionsMenu" :model="moreActions" :popup="true">
+        <Menu
+          ref="moreActionsMenu"
+          :model="moreActions"
+          :popup="true"
+          :class="{
+            'navbar-more-actions-menu--christmas': effectiveTheme === 'christmas',
+          }"
+        >
           <template #item="{ item, props }">
             <a v-bind="props.action" class="flex align-items-center gap-2">
               <span :class="item.icon" />
@@ -171,6 +192,8 @@
       :visible="loginVisible"
       @update:visible="loginVisible = $event"
       :header="$t('登入')"
+      class="login-dialog"
+      :class="{ 'login-dialog-christmas': effectiveTheme === 'christmas' }"
       :modal="true"
       :draggable="false"
       :closeOnEscape="false"
@@ -225,6 +248,7 @@
       :closeOnEscape="true"
       :style="{ width: '700px', maxWidth: '90vw' }"
       class="issue-report-dialog"
+      :class="{ 'issue-report-dialog--christmas': effectiveTheme === 'christmas' }"
       :pt="{ root: { 'aria-label': $t('系統問題回報'), 'aria-labelledby': null } }"
     >
       <template #header>
@@ -245,6 +269,9 @@
             optionValue="value"
             :placeholder="$t('選擇問題類型')"
             class="w-full mt-2"
+            :overlayClass="
+              effectiveTheme === 'christmas' ? 'issue-report-select-overlay--christmas' : undefined
+            "
           />
         </div>
 
@@ -258,7 +285,7 @@
             class="w-full mt-2"
             :maxlength="100"
           />
-          <small class="text-gray-500">{{ issueForm.title.length }}/100</small>
+          <small class="issue-report-counter">{{ issueForm.title.length }}/100</small>
         </div>
 
         <div class="field mt-3">
@@ -272,7 +299,7 @@
             rows="8"
             :maxlength="2000"
           />
-          <small class="text-gray-500">{{ issueForm.description.length }}/2000</small>
+          <small class="issue-report-counter">{{ issueForm.description.length }}/2000</small>
         </div>
 
         <div class="field mt-3">
@@ -293,7 +320,7 @@
             severity="secondary"
             outlined
             @click="closeIssueReportDialog"
-            class="flex-1"
+            class="flex-1 issue-report-cancel-action review-action-preview"
           />
           <Button
             :label="$t('建立回報並前往 GitHub')"
@@ -301,13 +328,14 @@
             @click="submitIssueReport"
             :disabled="!canSubmitIssue"
             :loading="issueSubmitting"
-            class="flex-1"
+            severity="success"
+            class="flex-1 issue-report-submit-action review-action-republish"
           />
         </div>
 
-        <div class="mt-3 p-3 bg-blue-50 border-round text-sm flex align-items-start">
-          <i class="pi pi-info-circle text-blue-600 mr-2 mt-1"></i>
-          <span class="text-blue-800 line-height-3" style="overflow-wrap: anywhere">
+        <div class="issue-report-guidance mt-3 p-3 border-round text-sm flex align-items-start">
+          <i class="pi pi-info-circle issue-report-guidance__icon mr-2 mt-1"></i>
+          <span class="issue-report-guidance__text line-height-3">
             {{ $t('系統會先保存本地回報摘要，再開啟 GitHub 預填 Issue 頁面。') }}<br />
             {{ $t('請先在目前瀏覽器登入 GitHub，否則登入後可能無法正確返回預填頁面。') }}<br />
             {{ $t('GitHub Issue 仍需由您在 GitHub 頁面確認送出後才會正式建立。') }}
@@ -373,7 +401,7 @@ export default {
     }
   },
   setup() {
-    const { isDarkTheme, toggleTheme } = useTheme()
+    const { isDarkTheme, effectiveTheme, toggleTheme } = useTheme()
     const router = useRouter()
     const toast = useToast()
     const confirm = useConfirm()
@@ -382,6 +410,7 @@ export default {
 
     return {
       isDarkTheme,
+      effectiveTheme,
       toggleTheme,
       router,
       toast,
@@ -1165,6 +1194,59 @@ export default {
   border-bottom-color: #24342f;
 }
 
+.card.navbar-christmas {
+  background: #426878 !important;
+  background-image: none !important;
+  border-bottom-color: rgba(205, 231, 239, 0.18);
+  box-shadow: none;
+  filter: none;
+  mix-blend-mode: normal;
+  opacity: 1;
+}
+
+.card.navbar-christmas :deep(.p-menubar) {
+  background: #426878 !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+  mix-blend-mode: normal;
+  opacity: 1;
+}
+
+:global(.p-menu.navbar-more-actions-menu--christmas) {
+  border: 1px solid rgba(184, 224, 242, 0.72) !important;
+  color: #f3f9fc !important;
+  background: #245c80 !important;
+  background-image: none !important;
+  box-shadow: 0 0.65rem 1.4rem rgba(10, 38, 58, 0.3) !important;
+}
+
+:global(.p-menu.navbar-more-actions-menu--christmas .p-menu-list),
+:global(.p-menu.navbar-more-actions-menu--christmas .p-menu-item-content) {
+  background: transparent !important;
+}
+
+:global(.p-menu.navbar-more-actions-menu--christmas .p-menu-item-link),
+:global(.p-menu.navbar-more-actions-menu--christmas .p-menu-item-icon),
+:global(.p-menu.navbar-more-actions-menu--christmas .p-menu-item-label) {
+  color: #f3f9fc !important;
+}
+
+:global(.p-menu.navbar-more-actions-menu--christmas .p-menu-item-content:hover),
+:global(.p-menu.navbar-more-actions-menu--christmas .p-menu-item-content.p-focus) {
+  background: #3479a5 !important;
+}
+
+:global(.p-menu.navbar-more-actions-menu--christmas .p-menu-item-link:focus-visible) {
+  outline: 2px solid #c5ebfb;
+  outline-offset: -2px;
+}
+
+:global(.p-menu.navbar-more-actions-menu--christmas .p-menu-separator) {
+  border-color: rgba(205, 235, 248, 0.3) !important;
+}
+
 .nav-brand-cluster,
 .nav-control-cluster {
   display: flex;
@@ -1225,7 +1307,8 @@ export default {
   white-space: nowrap;
 }
 
-.navbar-dark .brand-title-main {
+.navbar-dark .brand-title-main,
+.navbar-christmas .brand-title-main {
   color: #eef6ed;
 }
 
@@ -1251,7 +1334,8 @@ export default {
   border-right: 1px solid rgba(23, 37, 34, 0.22);
 }
 
-.navbar-dark .nav-action-group {
+.navbar-dark .nav-action-group,
+.navbar-christmas .nav-action-group {
   border-right-color: rgba(229, 235, 226, 0.22);
 }
 
@@ -1263,6 +1347,19 @@ export default {
   border-radius: 999px;
 }
 
+.theme-bell-indicator {
+  display: inline-grid;
+  place-items: center;
+  width: 2.35rem;
+  min-width: 2.35rem;
+  height: 2.35rem;
+  color: rgba(238, 249, 252, 0.88);
+  font-size: var(--app-icon-size);
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
+}
+
 .user-name {
   display: flex;
   align-items: center;
@@ -1272,7 +1369,8 @@ export default {
   font-size: var(--app-font-size-base);
 }
 
-.navbar-dark .user-name {
+.navbar-dark .user-name,
+.navbar-christmas .user-name {
   color: rgba(229, 235, 226, 0.84);
 }
 
@@ -1305,9 +1403,18 @@ export default {
   color: rgba(229, 235, 226, 0.78);
 }
 
+.navbar-christmas :deep(.p-button.p-button-text) {
+  color: rgba(238, 249, 252, 0.82);
+}
+
 .navbar-dark :deep(.p-button.p-button-text:hover) {
   color: #eef6ed;
   background: rgba(255, 255, 255, 0.08);
+}
+
+.navbar-christmas :deep(.p-button.p-button-text:hover) {
+  color: #ffffff;
+  background: rgba(218, 241, 248, 0.1);
 }
 
 :deep(.p-password) {
@@ -1463,5 +1570,151 @@ export default {
   .brand-title-sub {
     max-width: 7.5rem;
   }
+}
+</style>
+
+<style>
+html[data-effective-theme='christmas'] body .p-dialog.issue-report-dialog--christmas {
+  border: 1px solid rgba(222, 199, 142, 0.46);
+  background: #3e5f72;
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas'] body .issue-report-dialog--christmas .p-dialog-header {
+  border-bottom: 1px solid rgba(222, 199, 142, 0.38);
+  background: #293f52;
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas'] body .issue-report-dialog--christmas .p-dialog-content,
+html[data-effective-theme='christmas'] body .issue-report-dialog--christmas .p-dialog-footer {
+  background: #3e5f72;
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas'] body .issue-report-dialog--christmas .p-dialog-close-button,
+html[data-effective-theme='christmas'] body .issue-report-dialog--christmas label {
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas'] body .issue-report-dialog--christmas .p-inputtext,
+html[data-effective-theme='christmas'] body .issue-report-dialog--christmas .p-textarea,
+html[data-effective-theme='christmas'] body .issue-report-dialog--christmas .p-select {
+  border-color: rgba(222, 199, 142, 0.42);
+  background: #293f52;
+  color: #f8f2e8;
+  caret-color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas'] body .issue-report-dialog--christmas .p-select-label,
+html[data-effective-theme='christmas'] body .issue-report-dialog--christmas .p-select-dropdown,
+html[data-effective-theme='christmas'] body .issue-report-dialog--christmas .issue-report-counter {
+  color: #c5d5d2;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .issue-report-dialog--christmas
+  .p-inputtext::placeholder,
+html[data-effective-theme='christmas']
+  body
+  .issue-report-dialog--christmas
+  .p-textarea::placeholder,
+html[data-effective-theme='christmas']
+  body
+  .issue-report-dialog--christmas
+  .p-select-label.p-placeholder {
+  color: #aebfbe;
+  opacity: 1;
+}
+
+html[data-effective-theme='christmas'] body .issue-report-dialog--christmas .p-inputtext:focus,
+html[data-effective-theme='christmas'] body .issue-report-dialog--christmas .p-textarea:focus,
+html[data-effective-theme='christmas'] body .issue-report-dialog--christmas .p-select.p-focus {
+  border-color: #f0c96f;
+  box-shadow: 0 0 0 0.16rem rgba(240, 201, 111, 0.22);
+}
+
+html[data-effective-theme='christmas'] body .issue-report-dialog--christmas .issue-report-guidance {
+  border: 1px solid rgba(121, 184, 220, 0.55);
+  background: rgba(35, 83, 111, 0.72);
+}
+
+html[data-effective-theme='christmas']
+  body
+  .issue-report-dialog--christmas
+  .issue-report-guidance__icon {
+  color: #9edbfa;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .issue-report-dialog--christmas
+  .issue-report-guidance__text {
+  color: #e7f6ff;
+  overflow-wrap: anywhere;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .issue-report-dialog--christmas
+  .review-action-preview.p-button {
+  border-color: rgba(225, 246, 252, 0.96);
+  background: #d7edf5;
+  color: #245368;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .issue-report-dialog--christmas
+  .review-action-republish.p-button {
+  border-color: rgba(127, 188, 145, 0.82);
+  background: linear-gradient(180deg, #3d8a64 0%, #2d6c52 100%);
+  color: #f5fff7;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .issue-report-dialog--christmas
+  .review-action-preview.p-button:hover,
+html[data-effective-theme='christmas']
+  body
+  .issue-report-dialog--christmas
+  .review-action-republish.p-button:hover {
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+html[data-effective-theme='christmas']
+  body
+  .p-select-overlay.issue-report-select-overlay--christmas {
+  border-color: rgba(222, 199, 142, 0.46);
+  background: #293f52;
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .issue-report-select-overlay--christmas
+  .p-select-option {
+  color: #f8f2e8;
+}
+
+html[data-effective-theme='christmas']
+  body
+  .issue-report-select-overlay--christmas
+  .p-select-option:hover,
+html[data-effective-theme='christmas']
+  body
+  .issue-report-select-overlay--christmas
+  .p-select-option.p-focus,
+html[data-effective-theme='christmas']
+  body
+  .issue-report-select-overlay--christmas
+  .p-select-option.p-select-option-selected {
+  background: #245c80;
+  color: #f3f9fc;
 }
 </style>

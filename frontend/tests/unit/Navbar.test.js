@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { nextTick } from 'vue'
 import { shallowMount } from '@vue/test-utils'
 import Navbar from '@/components/Navbar.vue'
@@ -31,6 +33,10 @@ const notificationStoreMock = vi.hoisted(() => ({
   markNotificationAsSeen: vi.fn(),
   latestUnseenNotification: null,
 }))
+const themeStateMock = vi.hoisted(() => ({
+  isDarkTheme: { value: false },
+  effectiveTheme: { value: 'light' },
+}))
 
 let consoleErrorSpy
 const translate = (key) => key
@@ -54,10 +60,10 @@ vi.mock('@/utils/auth.js', () => ({
 }))
 
 vi.mock('@/utils/useTheme', () => {
-  const themeState = { value: false }
   return {
     useTheme: () => ({
-      isDarkTheme: themeState,
+      isDarkTheme: themeStateMock.isDarkTheme,
+      effectiveTheme: themeStateMock.effectiveTheme,
       toggleTheme: vi.fn(),
     }),
   }
@@ -146,6 +152,8 @@ describe('Navbar methods', () => {
   })
 
   beforeEach(() => {
+    themeStateMock.isDarkTheme.value = false
+    themeStateMock.effectiveTheme.value = 'light'
     consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     trackEventMock.mockReset()
     localLoginMock.mockReset()
@@ -573,6 +581,13 @@ describe('Navbar methods', () => {
 
   it('renders locale and theme indicators as the current state', () => {
     expect(navbarSource).toContain(":label=\"isEnglish ? 'EN' : '中'\"")
+    expect(navbarSource).toContain("'navbar-christmas': effectiveTheme === 'christmas'")
+    expect(navbarSource).toContain(
+      ":class=\"{ 'login-dialog-christmas': effectiveTheme === 'christmas' }\""
+    )
+    expect(navbarSource).toContain('v-if="effectiveTheme === \'christmas\'"')
+    expect(navbarSource).toContain('class="pi pi-bell"')
+    expect(navbarSource).toContain('class="theme-bell-indicator"')
     expect(navbarSource).toContain(":icon=\"isDarkTheme ? 'pi pi-moon' : 'pi pi-sun'\"")
     expect(navbarSource).toContain(
       ":aria-label=\"isEnglish ? $t('切換為中文') : $t('切換為英文')\""
@@ -580,6 +595,64 @@ describe('Navbar methods', () => {
     expect(navbarSource).toContain(
       ":aria-label=\"isDarkTheme ? $t('切換至淺色模式') : $t('切換至深色模式')\""
     )
+  })
+
+  it('uses the current right-side blue as a solid Christmas navbar color', () => {
+    const christmasNavbarRule = navbarSource.match(/\.card\.navbar-christmas \{([\s\S]*?)\n\}/)
+
+    expect(christmasNavbarRule).not.toBeNull()
+    expect(christmasNavbarRule[1]).toContain('background: #426878 !important;')
+    expect(christmasNavbarRule[1]).toContain('background-image: none !important;')
+    expect(christmasNavbarRule[1]).toContain('box-shadow: none;')
+    expect(christmasNavbarRule[1]).toContain('mix-blend-mode: normal;')
+    expect(christmasNavbarRule[1]).toContain('opacity: 1;')
+    expect(christmasNavbarRule[1]).not.toContain('gradient')
+
+    const christmasMenubarRule = navbarSource.match(
+      /\.card\.navbar-christmas :deep\(\.p-menubar\) \{([\s\S]*?)\n\}/
+    )
+    expect(christmasMenubarRule?.[1]).toContain('background: #426878 !important;')
+    expect(christmasMenubarRule?.[1]).toContain('background-image: none !important;')
+    expect(christmasMenubarRule?.[1]).toContain('backdrop-filter: none !important;')
+  })
+
+  it('uses a blue popup surface for the Christmas more-actions menu', () => {
+    expect(navbarSource).toContain(
+      "'navbar-more-actions-menu--christmas': effectiveTheme === 'christmas'"
+    )
+
+    const christmasMenuRule = navbarSource.match(
+      /:global\(\.p-menu\.navbar-more-actions-menu--christmas\) \{([\s\S]*?)\n\}/
+    )
+    expect(christmasMenuRule?.[1]).toContain('background: #245c80 !important;')
+    expect(christmasMenuRule?.[1]).toContain('color: #f3f9fc !important;')
+
+    const christmasMenuHoverRule = navbarSource.match(
+      /:global\(\.p-menu\.navbar-more-actions-menu--christmas \.p-menu-item-content:hover\),[\s\S]*?\{([\s\S]*?)\n\}/
+    )
+    expect(christmasMenuHoverRule?.[1]).toContain('background: #3479a5 !important;')
+  })
+
+  it('uses the Christmas issue-report surface and shared action hierarchy', () => {
+    expect(navbarSource).toContain(
+      "'issue-report-dialog--christmas': effectiveTheme === 'christmas'"
+    )
+    expect(navbarSource).toContain('issue-report-cancel-action review-action-preview')
+    expect(navbarSource).toContain('issue-report-submit-action review-action-republish')
+    expect(navbarSource).toContain('issue-report-select-overlay--christmas')
+    expect(navbarSource).toContain('.p-dialog.issue-report-dialog--christmas')
+    expect(navbarSource).toContain('background: #3e5f72;')
+  })
+
+  it('uses the standard Christmas action glow on the login action', () => {
+    const styleSource = readFileSync(resolve(globalThis.process.cwd(), 'src/style.css'), 'utf8')
+    const loginHoverRule = styleSource.match(
+      /body \.p-dialog\.login-dialog-christmas \.p-button-primary:hover,[\s\S]*?\{([\s\S]*?)\n\}/
+    )
+
+    expect(loginHoverRule?.[1]).toContain('0 0 0.34rem rgba(255, 218, 94, 0.58)')
+    expect(loginHoverRule?.[1]).toContain('0 0 0.72rem rgba(255, 201, 59, 0.34)')
+    expect(loginHoverRule?.[1]).toContain('text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);')
   })
 
   it('formats issue body with system information', () => {

@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import publicCoursesSource from '@/views/PublicCourses.vue?raw'
 
 import PublicCourses from '@/views/PublicCourses.vue'
+import { useTheme } from '@/utils/useTheme'
 
 const courseServiceMock = vi.hoisted(() => ({
   listPublicCategories: vi.fn(),
@@ -10,6 +12,7 @@ const courseServiceMock = vi.hoisted(() => ({
 }))
 
 const setSeoMock = vi.hoisted(() => vi.fn())
+const { applyActiveSiteTheme } = useTheme()
 
 vi.mock('@/api', () => ({ courseService: courseServiceMock }))
 vi.mock('@/utils/seo', () => ({
@@ -30,9 +33,26 @@ function mountView() {
 
 describe('PublicCourses', () => {
   beforeEach(() => {
+    applyActiveSiteTheme('general')
     courseServiceMock.listPublicCategories.mockReset()
     courseServiceMock.listPublicCourses.mockReset()
     setSeoMock.mockReset()
+  })
+
+  it('applies the Christmas presentation hook only while Christmas is active', async () => {
+    courseServiceMock.listPublicCategories.mockResolvedValue({ data: [] })
+    courseServiceMock.listPublicCourses.mockResolvedValue({ data: {} })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.get('.public-catalog').classes()).not.toContain('public-catalog-christmas')
+
+    applyActiveSiteTheme('christmas')
+    await nextTick()
+
+    expect(wrapper.get('.public-catalog').classes()).toContain('public-catalog-christmas')
+    wrapper.unmount()
   })
 
   it('uses the catalog header selector for the bold page title', () => {

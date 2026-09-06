@@ -2327,6 +2327,79 @@ class HomepageSloganAdminListRead(BaseModel):
     status_counts: HomepageSloganStatusCounts
 
 
+class GeneralThemeMode(str, PyEnum):
+    LIGHT = "light"
+    DARK = "dark"
+
+
+class GeneralThemeCapabilityRead(BaseModel):
+    active: bool
+    user_selectable: bool
+    supported_modes: list[GeneralThemeMode]
+
+
+class FestivalThemeRead(BaseModel):
+    id: str
+    name: str
+    name_en: str
+    description: str
+    description_en: str
+    supports_color_modes: bool = False
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_schedule_metadata(self):
+        if self.starts_at and self.ends_at and self.ends_at <= self.starts_at:
+            raise ValueError("Theme end time must be later than start time")
+        return self
+
+
+class FestivalThemeCapabilityRead(BaseModel):
+    active: str | None = None
+    themes: list[FestivalThemeRead] = Field(default_factory=list)
+
+
+class ThemeActivationRequest(BaseModel):
+    theme_id: str
+
+    @field_validator("theme_id")
+    @classmethod
+    def validate_theme_id(cls, value: str) -> str:
+        allowed = set("abcdefghijklmnopqrstuvwxyz0123456789_")
+        if not 1 <= len(value) <= 64 or any(char not in allowed for char in value):
+            raise ValueError("Invalid theme ID")
+        return value
+
+
+class FestivalThemeUpdateRequest(BaseModel):
+    name: str | None = None
+    name_en: str | None = None
+    description: str | None = None
+    description_en: str | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+
+    @field_validator("name", "name_en", "description", "description_en")
+    @classmethod
+    def validate_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Theme text must not be empty")
+        return normalized
+
+
+class ActiveThemeRead(BaseModel):
+    active_theme: str
+
+
+class ThemeManagementRead(BaseModel):
+    general_theme: GeneralThemeCapabilityRead
+    festival_theme: FestivalThemeCapabilityRead
+
+
 class ArchiveWishRead(BaseModel):
     id: int
     title: str

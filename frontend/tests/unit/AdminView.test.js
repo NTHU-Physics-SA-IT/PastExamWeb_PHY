@@ -10,7 +10,34 @@ const adminViewSource = readFileSync(
   resolve(globalThis.process.cwd(), 'src/views/Admin.vue'),
   'utf8'
 )
+const sharedStylesSource = readFileSync(resolve(globalThis.process.cwd(), 'src/style.css'), 'utf8')
+const appSource = readFileSync(resolve(globalThis.process.cwd(), 'src/App.vue'), 'utf8')
+const nonAdminDialogOwnerSources = [
+  'src/App.vue',
+  'src/components/Navbar.vue',
+  'src/components/NotificationCenterModal.vue',
+  'src/components/NotificationModal.vue',
+  'src/components/admin/ReportManagementPanel.vue',
+  'src/views/AboutUs.vue',
+  'src/views/Archive.vue',
+]
+  .map((path) => readFileSync(resolve(globalThis.process.cwd(), path), 'utf8'))
+  .join('\n')
+const unaffectedRoutePaletteSources = [
+  'src/views/Home.vue',
+  'src/views/PublicCourse.vue',
+  'src/views/PublicCourses.vue',
+  'src/views/NthuDevLogin.vue',
+  'src/components/Navbar.vue',
+  'src/utils/christmasButtonSnow.js',
+]
+  .map((path) => readFileSync(resolve(globalThis.process.cwd(), path), 'utf8'))
+  .join('\n')
 const adminTemplateSource = adminViewSource.split('<script setup>')[0]
+const adminChristmasStyles = adminViewSource.slice(
+  adminViewSource.indexOf("html[data-effective-theme='christmas'].admin-page-active {"),
+  adminViewSource.indexOf('html.dark .review-action-reject')
+)
 const sampleCourses = [
   { id: 1, name: '普通物理', category: 'junior' },
   { id: 2, name: '電磁學', category: 'freshman' },
@@ -316,12 +343,18 @@ function createBackupWrapper() {
 let consoleErrorSpy
 
 describe('AdminView', () => {
-  it('keeps 公告管理 top-level and adds the two requested nested management sections', () => {
+  it('keeps 公告管理 top-level and adds the three requested nested management sections', () => {
     expect(adminTemplateSource).toContain('<Tab value="2">')
     expect(adminTemplateSource).toContain('<Tab value="announcements">{{ $t(\'公告管理\') }}</Tab>')
     expect(adminTemplateSource).toContain('<Tab value="homepage-slogans">')
     expect(adminTemplateSource).toContain(
       'v-if="announcementManagementTab === \'homepage-slogans\'"'
+    )
+    expect(adminTemplateSource).toContain(
+      '<Tab value="festival-themes">{{ $t(\'節日主題管理\') }}</Tab>'
+    )
+    expect(adminTemplateSource).toContain(
+      'v-if="announcementManagementTab === \'festival-themes\'"'
     )
   })
   beforeEach(() => {
@@ -423,10 +456,411 @@ describe('AdminView', () => {
   })
 
   afterEach(() => {
+    document.documentElement.classList.remove('admin-page-active')
     setLocale('zh-TW')
     consoleErrorSpy?.mockRestore()
     vi.useRealTimers()
     vi.resetModules()
+  })
+
+  it('uses Admin-owned Christmas surfaces across Admin pages and teleported overlays', () => {
+    expect(adminViewSource).toContain("document.documentElement.classList.add('admin-page-active')")
+    expect(adminViewSource).toContain(
+      "document.documentElement.classList.remove('admin-page-active')"
+    )
+    expect(adminChristmasStyles).toContain('background: transparent !important;')
+    expect(adminChristmasStyles).toContain('--admin-christmas-structural-surface: #293f52;')
+    expect(adminChristmasStyles).toContain('--admin-christmas-content-surface: #3e5f72;')
+    expect(adminChristmasStyles).toContain('--admin-christmas-tab-hover-surface: #365968;')
+    expect(adminChristmasStyles).toContain('--admin-christmas-tab-active-surface: #426878;')
+    expect(adminChristmasStyles).toContain('--bg-primary: var(--admin-christmas-content-surface);')
+    expect(adminChristmasStyles).toContain(
+      'background: var(--admin-christmas-structural-surface) !important;'
+    )
+    expect(adminChristmasStyles).toContain(
+      'background: var(--admin-christmas-content-surface) !important;'
+    )
+    expect(adminChristmasStyles).toContain('background: var(--admin-christmas-tab-hover-surface);')
+    expect(adminChristmasStyles).toContain('background: var(--admin-christmas-tab-active-surface);')
+    expect(adminChristmasStyles).toContain(
+      "html[data-effective-theme='christmas'].admin-page-active"
+    )
+    expect(adminChristmasStyles).toMatch(
+      /body\s+\.p-dialog\.admin-owned-dialog\s+\.p-dialog-content/
+    )
+    expect(adminChristmasStyles).not.toMatch(/body\s+\.p-confirmdialog/)
+    expect(adminChristmasStyles).toContain('body .p-select-overlay')
+    const adminSurfaceStyles = adminChristmasStyles.slice(
+      0,
+      adminChristmasStyles.indexOf('.course-download-action.p-button')
+    )
+    expect(adminSurfaceStyles).not.toContain('linear-gradient(')
+    expect(adminSurfaceStyles).not.toContain('radial-gradient(')
+  })
+
+  it('limits teleported Admin Dialog styling to explicit Admin-owned roots', () => {
+    const adminDialogOpeningTags = adminTemplateSource.match(/<Dialog\b[\s\S]*?>/g) ?? []
+    const adminDialogSelectorSuffixes = [
+      ...adminChristmasStyles.matchAll(/body\s+\.p-dialog([^\s,{]*)/g),
+    ].map((match) => match[1])
+
+    expect(adminDialogOpeningTags).toHaveLength(10)
+    adminDialogOpeningTags.forEach((openingTag) => {
+      expect(openingTag).toMatch(/class="[^"]*\badmin-owned-dialog\b[^"]*"/)
+    })
+    expect(adminDialogSelectorSuffixes.length).toBeGreaterThan(0)
+    expect(
+      adminDialogSelectorSuffixes.every((suffix) => /^\.admin-owned-dialog(?:\.|$)/.test(suffix))
+    ).toBe(true)
+    expect(adminChristmasStyles).not.toContain('.p-dialog:not(.p-confirmdialog)')
+    expect(nonAdminDialogOwnerSources).not.toContain('admin-owned-dialog')
+    expect(appSource).toContain('<ConfirmDialog class="app-global-confirm-dialog" />')
+  })
+
+  it('renders the Admin owner identifier on every direct Dialog root', () => {
+    const wrapper = createWrapper()
+    const dialogs = wrapper.findAllComponents({ name: 'Dialog' })
+
+    expect(dialogs).toHaveLength(10)
+    dialogs.forEach((dialog) => {
+      expect(dialog.classes()).toContain('admin-owned-dialog')
+    })
+
+    wrapper.unmount()
+  })
+
+  it('keeps the Admin blue-gray selectors Christmas-scoped and owner-isolated', () => {
+    const paletteAuthorityRule = adminChristmasStyles.match(
+      /html\[data-effective-theme='christmas'\]\.admin-page-active\s*\{([^}]*)\}/
+    )?.[1]
+
+    expect(paletteAuthorityRule).toContain('--admin-christmas-structural-surface: #293f52;')
+    expect(paletteAuthorityRule).toContain('--admin-christmas-content-surface: #3e5f72;')
+    expect(paletteAuthorityRule).toContain('--admin-christmas-tab-hover-surface: #365968;')
+    expect(paletteAuthorityRule).toContain('--admin-christmas-tab-active-surface: #426878;')
+    expect(paletteAuthorityRule).not.toMatch(
+      /\b(?:padding|margin|width|height|gap|border-radius|background)\s*:/
+    )
+    expect(adminChristmasStyles).not.toContain('--admin-review-christmas-')
+    expect(adminChristmasStyles).toContain('.admin-container .p-tablist-tab-list')
+    expect(adminChristmasStyles).toContain('.admin-container .admin-toolbar')
+    expect(adminChristmasStyles).toContain('.admin-container .p-datatable-thead > tr > th')
+    expect(adminChristmasStyles).toContain('.admin-container .admin-insights-card')
+    expect(adminChristmasStyles).toContain('.admin-container .p-datatable-tbody > tr > td')
+    expect(adminChristmasStyles).toContain('.admin-container .p-paginator')
+    expect(sharedStylesSource).toContain('--christmas-semester-surface: #173f3a;')
+    expect(sharedStylesSource).toContain('--christmas-archive-card-surface: #2c594d;')
+    expect(appSource).toContain('.p-dialog.app-global-confirm-dialog')
+    expect(appSource).not.toMatch(/\.admin-page-active[\s\S]*?\.app-global-confirm-dialog/)
+    expect(adminChristmasStyles).not.toMatch(/body\s+\.p-confirmdialog/)
+    expect(unaffectedRoutePaletteSources).not.toContain('app-global-confirm-dialog')
+  })
+
+  it('maps Review Center Christmas actions to the requested archive button treatments', () => {
+    expect(
+      adminTemplateSource.match(/class="review-action-button review-action-preview"/g)
+    ).toHaveLength(2)
+    expect(
+      adminTemplateSource.match(/'review-action-republish': action\.key === 'republish'/g)
+    ).toHaveLength(3)
+
+    expect(adminChristmasStyles).toContain('.review-action-preview.p-button')
+    expect(adminChristmasStyles).toContain('border-color: rgba(225, 246, 252, 0.96) !important;')
+    expect(adminChristmasStyles).toContain('color: #245368 !important;')
+    expect(adminChristmasStyles).toContain('background: #d7edf5 !important;')
+    expect(adminChristmasStyles).toContain('color: #173846 !important;')
+    expect(adminChristmasStyles).toContain('background: #e5f4f9 !important;')
+
+    expect(adminChristmasStyles).toContain('.review-action-republish.p-button')
+    expect(adminChristmasStyles).toContain('border-color: rgba(127, 188, 145, 0.82) !important;')
+    expect(adminChristmasStyles).toContain('color: #f5fff7 !important;')
+    expect(adminChristmasStyles).toContain(
+      'background: linear-gradient(135deg, #3d8a64, #2d6c52) !important;'
+    )
+    expect(adminChristmasStyles).toContain('color: #ffffff !important;')
+    expect(adminChristmasStyles).toContain(
+      'background: linear-gradient(135deg, #479b70, #347b5c) !important;'
+    )
+
+    expect(adminChristmasStyles).toContain('.review-takedown-action.p-button')
+    expect(adminChristmasStyles).toContain('background: #365968 !important;')
+    expect(adminChristmasStyles).toContain('background: #426878 !important;')
+    expect(adminChristmasStyles).toContain(
+      '.review-action-reject.p-button.p-button-danger:not(:disabled):hover'
+    )
+    expect(adminChristmasStyles).toContain(
+      '.review-action-delete.p-button.p-button-danger:not(:disabled):hover'
+    )
+    expect(adminChristmasStyles).toContain('border-color: rgba(255, 226, 143, 0.9) !important;')
+    expect(adminChristmasStyles).toContain(
+      '0 0 0.34rem rgba(255, 218, 94, 0.58),\n    0 0 0.72rem rgba(255, 201, 59, 0.34)'
+    )
+    expect(adminChristmasStyles).toContain('text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);')
+    expect(adminChristmasStyles).not.toMatch(/\.review-action-delete\.p-button\s*\{/)
+  })
+
+  it('keeps Review Center Christmas status and supporting text readable', () => {
+    expect(adminChristmasStyles).toMatch(
+      /\.review-center\s+\.soft-badge\.review-status-approved\s*\{[\s\S]*?--soft-badge-bg:\s*rgba\(30, 112, 68, 0\.88\);[\s\S]*?--soft-badge-color:\s*#ddfbe7;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.review-center\s+\.soft-badge\.review-status-takedown\s*\{[\s\S]*?--soft-badge-bg:\s*#293f52;[\s\S]*?--soft-badge-color:\s*#f8f2e8;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.review-center\s+\.review-admin-upload-chip\.soft-badge\s*\{[\s\S]*?--soft-badge-bg:\s*#294e64;[\s\S]*?--soft-badge-color:\s*#e5f4f9;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.review-center\s+\.soft-badge\.soft-badge--new-course-category\s*\{[\s\S]*?--soft-badge-bg:\s*#275b65;[\s\S]*?--soft-badge-color:\s*#e3faf6;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.review-card-action-note--info\.review-card-action-note[\s\S]*?color:\s*#e5f4f9 !important;[\s\S]*?background:\s*rgba\(41, 63, 82, 0\.9\) !important;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.p-paginator\s+\.p-paginator-current,[\s\S]*?color:\s*#f8f2e8 !important;[\s\S]*?opacity:\s*1;/
+    )
+  })
+
+  it('lets the Review Center toolbar and group tabs blend into the Christmas background', () => {
+    expect(adminTemplateSource).toContain(
+      '<Tabs v-model:value="activeReviewGroup" class="review-group-tabs mb-4">'
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.review-search-toolbar\.admin-toolbar--review\s*\{[\s\S]*?background:\s*transparent !important;[\s\S]*?background-image:\s*none !important;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.review-group-tabs\s+\.p-tablist-tab-list\s*\{[\s\S]*?background:\s*transparent !important;[\s\S]*?background-image:\s*none !important;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.review-refresh-button\.p-button:not\(:disabled\):hover[\s\S]*?border-color:\s*rgba\(255, 226, 143, 0\.9\) !important;[\s\S]*?0 0 0\.34rem rgba\(255, 218, 94, 0\.58\)[\s\S]*?text-shadow:\s*0 0 0\.2rem rgba\(255, 209, 72, 0\.62\);/
+    )
+  })
+
+  it('lets both Review Center request table headers blend into the Christmas background', () => {
+    expect(adminTemplateSource.match(/class="review-section-header"/g)).toHaveLength(2)
+    expect(
+      adminTemplateSource.match(
+        /class="admin-data-table admin-responsive-card-table review-request-table/g
+      )
+    ).toHaveLength(2)
+    expect(adminChristmasStyles).toMatch(
+      /\.review-center\s+\.review-section-header,[\s\S]*?\.review-center\s+\.review-request-table\s+\.p-datatable-thead\s*>\s*tr\s*>\s*th\s*\{[\s\S]*?background:\s*transparent !important;[\s\S]*?background-image:\s*none !important;/
+    )
+  })
+
+  it('lets the primary Admin tab row blend into the Christmas background', () => {
+    expect(adminTemplateSource).toContain('<TabList class="admin-primary-tab-list">')
+    expect(adminChristmasStyles).toMatch(
+      /\.admin-primary-tab-list\s+\.p-tablist-tab-list\s*\{[\s\S]*?background:\s*transparent !important;[\s\S]*?background-image:\s*none !important;/
+    )
+  })
+
+  it('applies the approved Trash Christmas surfaces and action mappings', () => {
+    expect(adminTemplateSource.match(/class="[^"]*trash-refresh-action[^"]*"/g)).toHaveLength(3)
+    expect(adminTemplateSource.match(/class="[^"]*trash-preview-action[^"]*"/g)).toHaveLength(4)
+    expect(adminTemplateSource.match(/class="[^"]*trash-restore-action[^"]*"/g)).toHaveLength(2)
+    expect(adminTemplateSource.match(/class="[^"]*trash-admin-delete-action[^"]*"/g)).toHaveLength(
+      5
+    )
+
+    expect(adminViewSource).toContain(
+      "const TRASH_CONFIRM_PREVIEW_CLASS =\n  'review-action-preview p-button-secondary p-button-outlined p-button-sm'"
+    )
+    expect(adminViewSource).toContain(
+      "const TRASH_CONFIRM_RESTORE_CLASS = 'review-action-republish p-button-success p-button-sm'"
+    )
+    expect(adminViewSource).toContain(
+      "'admin-danger-outline-button review-action-delete p-button-danger p-button-outlined p-button-sm'"
+    )
+    expect(adminViewSource.match(/rejectClass: TRASH_CONFIRM_PREVIEW_CLASS/g)).toHaveLength(3)
+    expect(adminViewSource.match(/acceptClass: TRASH_CONFIRM_RESTORE_CLASS/g)).toHaveLength(1)
+    expect(adminViewSource.match(/acceptClass: TRASH_CONFIRM_DELETE_CLASS/g)).toHaveLength(2)
+
+    expect(adminChristmasStyles).toMatch(
+      /\.admin-toolbar--trash-shell\.admin-toolbar,[\s\S]*?\.admin-toolbar--trash\.admin-toolbar\s*\{[\s\S]*?background:\s*transparent !important;[\s\S]*?background-image:\s*none !important;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.trash-table\s+\.p-datatable-thead\s*>\s*tr\s*>\s*th\s*\{[\s\S]*?background:\s*transparent !important;[\s\S]*?background-image:\s*none !important;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.trash-center\s+\.trash-refresh-action\.p-button:not\(:disabled\):hover,[\s\S]*?border-color:\s*rgba\(255, 226, 143, 0\.9\) !important;[\s\S]*?0 0 0\.34rem rgba\(255, 218, 94, 0\.58\)/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /body\s+\.p-dialog\.admin-owned-dialog\s+\.trash-dependency-help-section,[\s\S]*?\.trash-dependency-help-flow\s*\{[\s\S]*?background:\s*transparent !important;[\s\S]*?background-image:\s*none !important;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.trash-type-chip\.soft-badge,[\s\S]*?\.trash-dependency-chip--relation\.soft-badge\s*\{[\s\S]*?--soft-badge-bg:\s*rgba\(41, 78, 100, 0\.9\);[\s\S]*?--soft-badge-color:\s*#e5f4f9;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.trash-center\s+\.soft-badge\.review-status-deleted\s*\{[\s\S]*?--soft-badge-bg:\s*rgba\(111, 41, 55, 0\.92\);[\s\S]*?--soft-badge-border:\s*rgba\(255, 154, 174, 0\.8\);[\s\S]*?--soft-badge-color:\s*#ffe1e7;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.trash-dependency-chip--restore-blocked\.soft-badge\s*\{[\s\S]*?--soft-badge-color:\s*#fff2c3;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.trash-dependency-chip--delete-blocked\.soft-badge\s*\{[\s\S]*?--soft-badge-color:\s*#ffe4d6;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.trash-dependency-chip--cascade\.soft-badge\s*\{[\s\S]*?--soft-badge-color:\s*#f0f0ff;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.trash-dependency-chip--clear\.soft-badge\s*\{[\s\S]*?--soft-badge-color:\s*#e1fae8;/
+    )
+  })
+
+  it('applies the approved Announcement Management Christmas surfaces and button mappings', () => {
+    expect(adminTemplateSource).toContain(
+      'class="admin-toolbar admin-toolbar--announcement announcement-search-toolbar mb-4"'
+    )
+    expect(adminTemplateSource).toContain(
+      'class="admin-toolbar__button announcement-download-action w-full md:w-auto"'
+    )
+    expect(adminTemplateSource.match(/class="announcement-download-action"/g)).toHaveLength(2)
+    expect(adminTemplateSource.match(/class="announcement-delete-action"/g)).toHaveLength(2)
+
+    expect(adminChristmasStyles).toMatch(
+      /\.announcement-management-tabs\s+\.p-tablist-tab-list[\s\S]*?background:\s*transparent !important;[\s\S]*?background-image:\s*none !important;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.announcement-search-toolbar\.admin-toolbar[\s\S]*?background:\s*transparent !important;[\s\S]*?background-image:\s*none !important;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.notification-management-table\s+\.p-datatable-thead\s*>\s*tr\s*>\s*th[\s\S]*?background:\s*transparent !important;[\s\S]*?background-image:\s*none !important;/
+    )
+    expect(adminChristmasStyles).toContain('.announcement-download-action.p-button')
+    expect(adminChristmasStyles).toContain('.announcement-delete-action.p-button')
+  })
+
+  it('maps the announcement dialog footer to the preview and download button treatments', () => {
+    expect(adminTemplateSource).toMatch(
+      /class="announcement-dialog-cancel-action review-action-preview"[\s\S]{0,260}?severity="secondary"[\s\S]{0,180}?outlined[\s\S]{0,180}?size="small"/
+    )
+    expect(adminTemplateSource).toMatch(
+      /class="announcement-dialog-save-action review-action-republish"[\s\S]{0,300}?severity="success"[\s\S]{0,180}?size="small"/
+    )
+  })
+
+  it('maps User Management Christmas actions to the approved button treatments', () => {
+    expect(adminTemplateSource).toContain(
+      'class="user-download-action nthu-access-policy-save-action review-action-republish"'
+    )
+    expect(adminTemplateSource).toContain(
+      'class="user-search-toolbar admin-toolbar admin-toolbar--users mb-4"'
+    )
+    expect(adminTemplateSource).toContain(
+      'class="user-download-action admin-toolbar__button w-full md:w-auto review-action-republish"'
+    )
+    expect(adminTemplateSource).toMatch(
+      /class="contributor-level-settings-button review-action-preview"[\s\S]{0,300}?severity="secondary"[\s\S]{0,180}?size="small"[\s\S]{0,180}?outlined/
+    )
+    expect(adminTemplateSource).not.toContain('user-settings-outline-action')
+    expect(
+      adminTemplateSource.match(/class="user-preview-action review-action-preview"/g)
+    ).toHaveLength(2)
+    expect(
+      adminTemplateSource.match(/class="user-download-action review-action-republish"/g)
+    ).toHaveLength(2)
+    expect(
+      adminTemplateSource.match(/class="user-reset-action review-takedown-action"/g)
+    ).toHaveLength(2)
+    expect(
+      adminTemplateSource.match(
+        /class="user-admin-delete-action admin-danger-outline-button review-action-delete"/g
+      )
+    ).toHaveLength(2)
+    expect(adminTemplateSource).toMatch(
+      /class="user-dialog-cancel-action review-action-preview"[\s\S]{0,260}?severity="secondary"[\s\S]{0,180}?outlined[\s\S]{0,180}?size="small"/
+    )
+    expect(adminTemplateSource).toMatch(
+      /class="user-dialog-save-action review-action-republish"[\s\S]{0,300}?severity="success"[\s\S]{0,180}?size="small"/
+    )
+    expect(adminTemplateSource).toMatch(
+      /class="reset-password-dialog-cancel-action review-action-preview"[\s\S]{0,260}?severity="secondary"[\s\S]{0,180}?outlined[\s\S]{0,180}?size="small"/
+    )
+    expect(adminTemplateSource).toMatch(
+      /class="reset-password-dialog-confirm-action review-action-republish"[\s\S]{0,300}?severity="success"[\s\S]{0,180}?size="small"/
+    )
+    expect(adminTemplateSource).toMatch(
+      /class="user-data-stats-dialog__close review-action-preview"[\s\S]{0,260}?severity="secondary"[\s\S]{0,180}?size="small"[\s\S]{0,180}?outlined/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.user-search-toolbar\.admin-toolbar,[\s\S]*?\.user-source-tabs\s+\.p-tablist-tab-list\s*\{[\s\S]*?background:\s*transparent !important;[\s\S]*?background-image:\s*none !important;/
+    )
+  })
+
+  it('uses the Review Center readable pagination text across every Admin paginator', () => {
+    expect(adminChristmasStyles).toMatch(
+      /\.admin-container\s+\.p-paginator\s+\.p-paginator-current,[\s\S]*?\.admin-container\s+\.p-paginator\s+\.p-paginator-rpp-dropdown\s+\.p-select-label[\s\S]*?color:\s*#f8f2e8 !important;[\s\S]*?opacity:\s*1;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.admin-container\s+\.p-paginator\s+\.p-paginator-page:not\(\.p-paginator-page-selected\)[\s\S]*?color:\s*#f8f2e8 !important;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.admin-container\s+\.p-paginator\s+\.p-paginator-first:disabled[\s\S]*?color:\s*#c5d5d2 !important;[\s\S]*?opacity:\s*0\.72;/
+    )
+  })
+
+  it('gives the Admin user statistics dialog the My Submissions Christmas palette', () => {
+    expect(adminChristmasStyles).toMatch(
+      /body\s+\.p-dialog\.admin-owned-dialog\.user-data-stats-dialog\s*\{[\s\S]*?border:\s*1px solid rgba\(222, 199, 142, 0\.46\);[\s\S]*?background:\s*#f5eedc !important;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /body\s+\.p-dialog\.admin-owned-dialog\.user-data-stats-dialog\s+\.p-dialog-header,[\s\S]*?\.p-dialog-content,[\s\S]*?\.p-dialog-footer\s*\{[\s\S]*?color:\s*#173d37;[\s\S]*?background:\s*#f5eedc !important;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.user-data-stats-dialog\s+\.user-duration-card,[\s\S]*?\.user-submission-overview,[\s\S]*?\.user-submission-record\s*\{[\s\S]*?background:\s*#eadfd9 !important;/
+    )
+  })
+
+  it('maps the course dialog footer to the preview and download button treatments', () => {
+    expect(adminTemplateSource).toMatch(
+      /class="course-dialog-cancel-action review-action-preview"[\s\S]{0,260}?severity="secondary"[\s\S]{0,180}?outlined[\s\S]{0,180}?size="small"/
+    )
+    expect(adminTemplateSource).toMatch(
+      /class="course-dialog-save-action review-action-republish"[\s\S]{0,300}?severity="success"[\s\S]{0,180}?size="small"/
+    )
+  })
+
+  it('applies the requested Course Management Christmas toolbar and action treatments', () => {
+    expect(adminTemplateSource).toContain(
+      'class="admin-toolbar admin-toolbar--course admin-toolbar--section course-category-toolbar mb-3"'
+    )
+    expect(adminTemplateSource).toContain(
+      'class="admin-toolbar admin-toolbar--course course-search-toolbar mb-4"'
+    )
+    expect(adminTemplateSource).toContain(
+      'class="review-refresh-button course-category-add-button admin-toolbar__button"'
+    )
+    expect(adminTemplateSource.match(/course-category-outline-action/g)).toHaveLength(6)
+    expect(adminTemplateSource.match(/course-download-action/g)).toHaveLength(3)
+    expect(adminTemplateSource.match(/course-delete-action/g)).toHaveLength(2)
+
+    expect(adminChristmasStyles).toMatch(
+      /\.course-category-toolbar\.admin-toolbar,[\s\S]*?\.course-search-toolbar\.admin-toolbar\s*\{[\s\S]*?background:\s*transparent !important;[\s\S]*?background-image:\s*none !important;/
+    )
+    expect(adminChristmasStyles).toContain(
+      '.course-category-add-button.p-button:not(:disabled):hover'
+    )
+    expect(adminChristmasStyles).toContain(
+      '.course-category-outline-action.p-button:not(:disabled):hover'
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.course-download-action\.p-button\s*\{[\s\S]*?border-color:\s*rgba\(127, 188, 145, 0\.82\) !important;[\s\S]*?color:\s*#f5fff7 !important;[\s\S]*?background:\s*linear-gradient\(135deg, #3d8a64, #2d6c52\) !important;/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.course-delete-action\.p-button\s*\{[\s\S]*?border-color:\s*rgba\(207, 119, 128, 0\.78\) !important;[\s\S]*?color:\s*#fff0ee !important;[\s\S]*?background:\s*linear-gradient\(135deg, #8a3d47, #70313a\) !important;/
+    )
+    expect(adminChristmasStyles).toContain('border-color: rgba(255, 226, 143, 0.9) !important;')
+    expect(adminChristmasStyles).toContain(
+      '0 0 0.34rem rgba(255, 218, 94, 0.58),\n    0 0 0.72rem rgba(255, 201, 59, 0.34)'
+    )
+  })
+
+  it('marks the document only while the Admin view is mounted', () => {
+    const wrapper = createWrapper()
+    expect(document.documentElement.classList.contains('admin-page-active')).toBe(true)
+
+    wrapper.unmount()
+    expect(document.documentElement.classList.contains('admin-page-active')).toBe(false)
   })
 
   it('loads data and handles admin actions', async () => {
@@ -579,6 +1013,12 @@ describe('AdminView', () => {
       true
     )
     expect(contentGrid.find('.backup-scope-note > .pi-info-circle').exists()).toBe(true)
+    expect(adminTemplateSource).toMatch(
+      /class="backup-card__action backup-download-action review-action-republish"[\s\S]{0,220}?severity="success"[\s\S]{0,120}?size="small"/
+    )
+    expect(adminChristmasStyles).toMatch(
+      /\.backup-card,[\s\S]*?\.backup-card__header,[\s\S]*?\.backup-card__icon,[\s\S]*?\.backup-information-block,[\s\S]*?\.backup-file-guidance\s*\{[\s\S]*?background:\s*transparent !important;[\s\S]*?background-image:\s*none !important;/
+    )
 
     wrapper.unmount()
   })

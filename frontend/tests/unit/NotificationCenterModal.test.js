@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import NotificationCenterModal from '@/components/NotificationCenterModal.vue'
+import notificationCenterSource from '@/components/NotificationCenterModal.vue?raw'
 import { setLocale } from '@/i18n'
 
 const slotStub = { template: '<div><slot /><slot name="header" /></div>' }
@@ -34,6 +35,19 @@ const personal = [
 ]
 
 describe('NotificationCenterModal', () => {
+  it('themes both notification dialogs and maps their actions by intent', () => {
+    expect(notificationCenterSource).toContain(
+      "'notification-center-dialog--christmas': effectiveTheme === 'christmas'"
+    )
+    expect(notificationCenterSource).toContain(
+      "'notification-detail-dialog--christmas': effectiveTheme === 'christmas'"
+    )
+    expect(notificationCenterSource).toContain('notification-view-button review-action-preview')
+    expect(notificationCenterSource).toContain('personal-mark-all-button review-action-republish')
+    expect(notificationCenterSource).toContain('personal-delete-all-button review-action-delete')
+    expect(notificationCenterSource).toContain('.notification-card--unread')
+  })
+
   it('uses canonical Chinese announcement content in zh-TW', async () => {
     const wrapper = mount(NotificationCenterModal, {
       props: { visible: true, announcements },

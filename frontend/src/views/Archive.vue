@@ -1,7 +1,10 @@
 <template>
   <div
     class="h-full archive-screen"
-    :class="{ 'archive-dark': isDarkTheme }"
+    :class="{
+      'archive-dark': effectiveTheme === 'dark',
+      'archive-christmas': effectiveTheme === 'christmas',
+    }"
     ref="archiveView"
     @toggle-sidebar="toggleSidebar"
   >
@@ -75,7 +78,7 @@
                 severity="secondary"
                 outlined
                 @click="wishPoolActive = true"
-                class="w-full"
+                class="w-full archive-sidebar-download-action"
                 size="small"
               />
               <Button
@@ -84,7 +87,7 @@
                 severity="secondary"
                 outlined
                 @click="openSubmissionStatus"
-                class="w-full"
+                class="w-full archive-sidebar-download-action"
                 size="small"
               />
             </div>
@@ -97,15 +100,24 @@
         v-if="isMobile"
         :visible="sidebarVisible"
         @update:visible="sidebarVisible = $event"
-        :class="['mobile-drawer', { 'mobile-drawer-dark': isDarkTheme }]"
+        :class="[
+          'mobile-drawer',
+          {
+            'mobile-drawer-dark': effectiveTheme === 'dark',
+            'mobile-drawer-christmas': effectiveTheme === 'christmas',
+          },
+        ]"
         position="left"
         :style="{ width: 'min(100vw, 26rem)' }"
         :autoFocus="false"
         :pt="{
           mask: {
-            class: isDarkTheme
-              ? 'mobile-drawer-mask mobile-drawer-mask-dark'
-              : 'mobile-drawer-mask',
+            class:
+              effectiveTheme === 'christmas'
+                ? 'mobile-drawer-mask mobile-drawer-mask-christmas'
+                : isDarkTheme
+                  ? 'mobile-drawer-mask mobile-drawer-mask-dark'
+                  : 'mobile-drawer-mask',
           },
         }"
       >
@@ -179,7 +191,7 @@
                 severity="secondary"
                 outlined
                 @click="openWishPoolFromMobileMenu"
-                class="w-full"
+                class="w-full archive-sidebar-download-action"
                 size="small"
               />
               <Button
@@ -188,7 +200,7 @@
                 severity="secondary"
                 outlined
                 @click="openSubmissionStatusFromMobileMenu"
-                class="w-full"
+                class="w-full archive-sidebar-download-action"
                 size="small"
               />
             </div>
@@ -200,6 +212,7 @@
         <div class="card h-full flex flex-col">
           <WishPool
             v-if="wishPoolActive"
+            :christmas="effectiveTheme === 'christmas'"
             :coursesList="coursesList"
             :courseCategories="courseCategories"
             @add-wish="showWishDialog = true"
@@ -249,6 +262,9 @@
                       optionValue="code"
                       :placeholder="$t('學期')"
                       class="filter-select"
+                      :panelClass="{
+                        'archive-filter-overlay-christmas': effectiveTheme === 'christmas',
+                      }"
                       showClear
                       filter
                     />
@@ -261,6 +277,9 @@
                       optionValue="code"
                       :placeholder="$t('教授')"
                       class="filter-select"
+                      :panelClass="{
+                        'archive-filter-overlay-christmas': effectiveTheme === 'christmas',
+                      }"
                       showClear
                       filter
                     />
@@ -273,6 +292,9 @@
                       optionValue="code"
                       :placeholder="$t('類型')"
                       class="filter-select"
+                      :panelClass="{
+                        'archive-filter-overlay-christmas': effectiveTheme === 'christmas',
+                      }"
                       showClear
                     />
                     <div class="answer-filter">
@@ -320,14 +342,14 @@
                         <article
                           v-for="data in group.list"
                           :key="archiveRowKey(data)"
-                          class="archive-record-card"
+                          class="archive-record-card archive-record-card--information"
                         >
                           <div class="archive-record-content">
                             <div class="archive-record-line archive-record-primary-line">
                               <div class="archive-record-title-group">
                                 <Tag
                                   :severity="archiveTypeConfig[data.type]?.severity || 'secondary'"
-                                  class="exam-type-tag"
+                                  :class="['exam-type-tag', `exam-type-tag--${data.type}`]"
                                 >
                                   {{ archiveTypeConfig[data.type]?.name || data.type }}
                                 </Tag>
@@ -353,7 +375,7 @@
                                   outlined
                                   :aria-label="$t('預覽')"
                                   :title="$t('預覽')"
-                                  class="archive-action-preview"
+                                  class="archive-action-preview archive-action-neutral"
                                 />
                                 <Button
                                   v-if="!isPendingSubmission(data)"
@@ -365,7 +387,7 @@
                                   :loading="downloadingId === data.archiveId"
                                   :aria-label="$t('下載')"
                                   :title="$t('下載')"
-                                  class="archive-action-download"
+                                  class="archive-action-download archive-action-neutral"
                                 />
                                 <Button
                                   v-if="canEditArchive(data)"
@@ -377,7 +399,7 @@
                                   outlined
                                   :aria-label="$t('編輯')"
                                   :title="$t('編輯')"
-                                  class="archive-action-edit"
+                                  class="archive-action-edit archive-action-neutral"
                                 />
                                 <Button
                                   v-if="canDeleteArchive(data)"
@@ -419,14 +441,14 @@
               </div>
               <div
                 v-else
-                class="flex flex-column align-items-center justify-content-center h-full"
+                class="archive-empty-state flex flex-column align-items-center justify-content-center h-full"
                 style="min-height: calc(100vh - 200px)"
               >
-                <i class="pi pi-book text-6xl" style="color: var(--text-secondary)"></i>
-                <div class="text-xl font-medium mt-4" style="color: var(--text-secondary)">
+                <i class="archive-empty-icon pi pi-book text-6xl"></i>
+                <div class="archive-empty-title text-xl font-medium mt-4">
                   {{ $t('請從左側選單選擇課程') }}
                 </div>
-                <div class="text-sm mt-2" style="color: var(--text-secondary)">
+                <div class="archive-empty-copy text-sm mt-2">
                   {{ $t('選擇課程後即可瀏覽相關考古題') }}
                 </div>
               </div>
@@ -436,6 +458,7 @@
           <PdfPreviewModal
             :visible="showPreview"
             @update:visible="showPreview = $event"
+            :christmas="effectiveTheme === 'christmas'"
             :courseId="selectedCourse"
             :archiveId="selectedArchive?.archiveId"
             :previewUrl="selectedArchive?.previewUrl"
@@ -455,6 +478,7 @@
 
           <UploadArchiveDialog
             v-model="showUploadDialog"
+            :christmas="effectiveTheme === 'christmas'"
             :coursesList="coursesList"
             :courseCategories="courseCategories"
             :prefill="wishUploadPrefill"
@@ -465,6 +489,7 @@
           <UploadArchiveDialog
             v-model="showWishDialog"
             mode="wish"
+            :christmas="effectiveTheme === 'christmas'"
             :coursesList="coursesList"
             :courseCategories="courseCategories"
             @upload-success="handleWishCreated"
@@ -473,6 +498,7 @@
           <UploadArchiveDialog
             v-model="showPendingEditDialog"
             mode="edit"
+            :christmas="effectiveTheme === 'christmas'"
             :submissionId="pendingEditSubmission?.submissionId || null"
             :coursesList="coursesList"
             :courseCategories="courseCategories"
@@ -485,6 +511,7 @@
             v-model:visible="showSubmissionStatusDialog"
             :header="$t('我的考古投稿')"
             class="submission-typography-dialog"
+            :class="{ 'my-submissions-dialog-christmas': effectiveTheme === 'christmas' }"
             modal
             :draggable="false"
             :style="{ width: '760px', maxWidth: '94vw' }"
@@ -677,6 +704,8 @@
           <Dialog
             :visible="showEditDialog"
             @update:visible="showEditDialog = $event"
+            class="archive-edit-dialog"
+            :class="{ 'archive-edit-dialog-christmas': effectiveTheme === 'christmas' }"
             :modal="true"
             :draggable="false"
             :closeOnEscape="false"
@@ -711,6 +740,9 @@
                   optionLabel="name"
                   :placeholder="$t('選擇授課教授')"
                   class="w-full"
+                  :panelClass="{
+                    'archive-edit-overlay-christmas': effectiveTheme === 'christmas',
+                  }"
                   dropdown
                   completeOnFocus
                   :minLength="0"
@@ -734,6 +766,9 @@
                   :showIcon="true"
                   :placeholder="$t('選擇考試年份')"
                   class="w-full"
+                  :panelClass="{
+                    'archive-edit-overlay-christmas': effectiveTheme === 'christmas',
+                  }"
                   :maxDate="new Date()"
                   :minDate="new Date(2000, 0, 1)"
                 />
@@ -755,6 +790,15 @@
                   optionValue="value"
                   :placeholder="$t('選擇考試類型')"
                   class="w-full"
+                  :panelClass="{
+                    'archive-edit-overlay-christmas': effectiveTheme === 'christmas',
+                  }"
+                  :pt="{
+                    dropdown: {
+                      'data-christmas-snow-control':
+                        effectiveTheme === 'christmas' ? 'true' : undefined,
+                    },
+                  }"
                 />
               </div>
 
@@ -794,6 +838,9 @@
                     optionValue="value"
                     :placeholder="$t('選擇課程類別')"
                     class="w-full"
+                    :panelClass="{
+                      'archive-edit-overlay-christmas': effectiveTheme === 'christmas',
+                    }"
                   />
                 </div>
 
@@ -811,6 +858,9 @@
                     optionLabel="label"
                     :placeholder="$t('搜尋或輸入目標課程名稱')"
                     class="w-full"
+                    :panelClass="{
+                      'archive-edit-overlay-christmas': effectiveTheme === 'christmas',
+                    }"
                     :disabled="!editForm.targetCategory"
                     dropdown
                     completeOnFocus
@@ -829,12 +879,14 @@
                 :label="$t('取消')"
                 icon="pi pi-times"
                 severity="secondary"
+                class="archive-edit-cancel-button"
                 @click="closeEditDialog"
               />
               <Button
                 :label="editForm.shouldTransfer ? $t('儲存並轉移') : $t('儲存')"
                 :icon="editForm.shouldTransfer ? 'pi pi-arrow-right-arrow-left' : 'pi pi-check'"
                 severity="success"
+                class="archive-edit-save-button"
                 @click="handleEdit"
                 :loading="editLoading"
               />
@@ -891,7 +943,7 @@ const toast = inject('toast')
 const confirm = inject('confirm')
 const route = inject(routeLocationKey, { fullPath: '/archive', query: {} })
 
-const { isDarkTheme } = useTheme()
+const { isDarkTheme, effectiveTheme } = useTheme()
 const { t, locale } = useI18n()
 loadContributorLevelSettings()
 const sidebarVisible = inject('sidebarVisible')
@@ -3129,6 +3181,543 @@ const mobileMenuItems = computed(() => {
   background: #0f1a17;
 }
 
+.archive-empty-icon,
+.archive-empty-title,
+.archive-empty-copy {
+  color: var(--text-secondary);
+}
+
+/* Christmas presentation: keep Archive behavior/layout intact while aligning it with the
+   midnight, pine, burgundy, cream, and antique-gold language used by the festival shell. */
+.archive-christmas {
+  --bg-primary: #071b25;
+  --bg-secondary: #0d2931;
+  --border-color: rgba(222, 199, 142, 0.24);
+  --text-color: #f5eedc;
+  --text-primary: #f8f2e8;
+  --text-secondary: #c5d5d2;
+  color: var(--text-primary);
+  color-scheme: dark;
+  background: transparent;
+}
+
+.archive-christmas .main-content,
+.archive-christmas .card {
+  background: transparent;
+}
+
+.archive-christmas .card {
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.archive-christmas .card > * {
+  position: relative;
+  z-index: 1;
+}
+
+.archive-christmas .sidebar {
+  background: transparent;
+  background-image: none;
+  border-right-color: transparent;
+  box-shadow: none;
+}
+
+.archive-christmas .sidebar .search-section {
+  border-bottom: 1px solid rgba(222, 199, 142, 0.14);
+}
+
+.archive-christmas .sidebar .search-section i,
+.archive-christmas .search-results .text-500 {
+  color: rgba(245, 238, 220, 0.68) !important;
+}
+
+.archive-christmas .sidebar :deep(.p-inputtext) {
+  background: rgba(7, 30, 42, 0.7);
+  border-color: rgba(222, 199, 142, 0.3);
+  color: #f8f2e8;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+.archive-christmas .sidebar :deep(.p-inputtext::placeholder) {
+  color: rgba(197, 213, 210, 0.7);
+}
+
+.archive-christmas .sidebar :deep(.p-inputtext:focus) {
+  border-color: #dec78e;
+  box-shadow: 0 0 0 2px rgba(222, 199, 142, 0.14);
+}
+
+.archive-christmas :deep(.p-panelmenu-panel) {
+  border-color: rgba(222, 199, 142, 0.12);
+  background: rgba(7, 34, 44, 0.5);
+  box-shadow: inset 0 1px 0 rgba(245, 238, 220, 0.025);
+}
+
+.archive-christmas :deep(.p-panelmenu-header-link),
+.archive-christmas :deep(.p-panelmenu-item-link) {
+  color: rgba(248, 242, 232, 0.92);
+}
+
+.archive-christmas :deep(.p-panelmenu-header-content:hover),
+.archive-christmas :deep(.p-panelmenu-item-content:hover) {
+  background: rgba(20, 68, 67, 0.96) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 226, 143, 0.34),
+    0 0 0.28rem rgba(255, 218, 94, 0.38),
+    0 0 0.58rem rgba(255, 201, 59, 0.2);
+}
+
+.archive-christmas :deep(.p-panelmenu-header-content:hover .p-panelmenu-header-link),
+.archive-christmas :deep(.p-panelmenu-item-content:hover .p-panelmenu-item-link),
+.archive-christmas :deep(.p-panelmenu-item-content:hover .p-panelmenu-item-label) {
+  color: #f8f2e8 !important;
+  background: transparent !important;
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.5);
+}
+
+.archive-christmas :deep(.p-panelmenu-header-icon),
+.archive-christmas :deep(.p-panelmenu-submenu-icon),
+.archive-christmas :deep(.p-panelmenu-item-icon) {
+  color: #dec78e;
+}
+
+.archive-christmas :deep(.active-course-menu-item) {
+  overflow: hidden;
+  border: 1px solid rgba(222, 199, 142, 0.14);
+  border-radius: 7px;
+  background-color: var(--christmas-page-background-color) !important;
+  background-image: var(--christmas-page-background-gradient) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+  mix-blend-mode: normal;
+  opacity: 1;
+}
+
+.archive-christmas :deep(.active-course-menu-item)::before,
+.archive-christmas :deep(.active-course-menu-item)::after {
+  content: none !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.archive-christmas :deep(.active-course-menu-item .p-panelmenu-item-content),
+.archive-christmas :deep(.active-course-menu-item .p-panelmenu-item-link),
+.archive-christmas :deep(.active-course-menu-item > .p-panelmenu-item-link) {
+  color: #f8f2e8 !important;
+  border: 0;
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+  mix-blend-mode: normal;
+  opacity: 1;
+}
+
+.archive-christmas .active-course-search-result {
+  color: #f8f2e8 !important;
+  border: 1px solid rgba(222, 199, 142, 0.14);
+  background-color: var(--christmas-page-background-color) !important;
+  background-image: var(--christmas-page-background-gradient) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+  mix-blend-mode: normal;
+  opacity: 1;
+}
+
+.archive-christmas :deep(.active-course-menu-item .p-panelmenu-item-content)::before,
+.archive-christmas :deep(.active-course-menu-item .p-panelmenu-item-content)::after,
+.archive-christmas :deep(.active-course-menu-item .p-panelmenu-item-link)::before,
+.archive-christmas :deep(.active-course-menu-item .p-panelmenu-item-link)::after,
+.archive-christmas .active-course-search-result::before,
+.archive-christmas .active-course-search-result::after {
+  content: none !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.archive-christmas :deep(.active-course-menu-item .christmas-button-snow-particle),
+.archive-christmas .active-course-search-result > .christmas-button-snow-particle {
+  display: none !important;
+}
+
+.archive-christmas .upload-section {
+  border-top-color: transparent;
+  background: transparent;
+}
+
+.archive-christmas .upload-section :deep(.p-button.p-button-success) {
+  border-color: rgba(222, 199, 142, 0.48);
+  color: #f8f2e8;
+  background: linear-gradient(135deg, #793941, #60353a);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    text-shadow 0.18s ease;
+}
+
+.archive-christmas .upload-section :deep(.p-button.p-button-success:hover),
+.archive-christmas .upload-section :deep(.p-button.p-button-success:focus-visible) {
+  border-color: rgba(255, 226, 143, 0.9);
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+.archive-christmas .upload-section :deep(.p-button.p-button-success:focus-visible) {
+  outline: 2px solid rgba(238, 211, 142, 0.72);
+  outline-offset: 2px;
+}
+
+.archive-christmas
+  .upload-section
+  :deep(.p-button.p-button-secondary.p-button-outlined.archive-sidebar-download-action) {
+  border-color: rgba(127, 188, 145, 0.82);
+  color: #f5fff7;
+  background: linear-gradient(135deg, #3d8a64, #2d6c52);
+  transition:
+    border-color 0.18s ease,
+    color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    text-shadow 0.18s ease;
+}
+
+.archive-christmas
+  .upload-section
+  :deep(.p-button.p-button-secondary.p-button-outlined.archive-sidebar-download-action:hover),
+.archive-christmas
+  .upload-section
+  :deep(
+    .p-button.p-button-secondary.p-button-outlined.archive-sidebar-download-action:focus-visible
+  ) {
+  border-color: rgba(255, 226, 143, 0.9);
+  color: #ffffff;
+  background: linear-gradient(135deg, #479b70, #347b5c);
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+.archive-christmas
+  .upload-section
+  :deep(
+    .p-button.p-button-secondary.p-button-outlined.archive-sidebar-download-action:focus-visible
+  ) {
+  outline: 2px solid rgba(238, 211, 142, 0.72);
+  outline-offset: 2px;
+}
+
+.archive-christmas .subject-header {
+  border-bottom-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.archive-christmas .subject-header::after {
+  content: none;
+  background: none;
+}
+
+.archive-christmas .subject-tag {
+  border-color: rgba(222, 199, 142, 0.32) !important;
+  color: #f3dfaa !important;
+  background: rgba(222, 199, 142, 0.1) !important;
+}
+
+.archive-christmas .exam-type-tag {
+  border-color: rgba(222, 199, 142, 0.3) !important;
+  color: #ead9ad !important;
+  background: rgba(182, 146, 79, 0.16) !important;
+}
+
+.archive-christmas .exam-type-tag--midterm {
+  border-color: rgba(159, 184, 161, 0.28) !important;
+  color: #dce7d7 !important;
+  background: rgba(23, 72, 63, 0.52) !important;
+}
+
+.archive-christmas .exam-type-tag--quiz {
+  border-color: rgba(192, 128, 133, 0.34) !important;
+  color: #f0d3cf !important;
+  background: rgba(103, 50, 57, 0.42) !important;
+}
+
+.archive-christmas .subject-title,
+.archive-christmas .term-title,
+.archive-christmas .archive-record-card h3 {
+  color: #f8f2e8;
+}
+
+.archive-christmas .subject-english-name,
+.archive-christmas .subject-summary,
+.archive-christmas .filter-summary,
+.archive-christmas .answer-filter,
+.archive-christmas .archive-record-meta-line {
+  color: #c5d5d2;
+}
+
+.archive-christmas .archive-filter-bar {
+  border-color: rgba(222, 199, 142, 0.2) !important;
+  background: rgba(8, 37, 48, 0.82) !important;
+  box-shadow:
+    0 0.55rem 1.35rem rgba(1, 12, 16, 0.12),
+    inset 0 1px 0 rgba(245, 238, 220, 0.035);
+  backdrop-filter: blur(12px);
+}
+
+.archive-christmas .archive-filter-controls :deep(.p-select) {
+  border-color: rgba(188, 151, 76, 0.72) !important;
+  color: #294f47;
+  background: #e7dcc4;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.archive-christmas .archive-filter-controls :deep(.p-select-label),
+.archive-christmas .archive-filter-controls :deep(.p-select-dropdown) {
+  color: #294f47;
+}
+
+.archive-christmas .archive-filter-controls :deep(.p-select-label.p-placeholder) {
+  color: #60736f;
+}
+
+.archive-christmas .archive-filter-controls :deep(.p-select:hover) {
+  border-color: rgba(192, 148, 62, 0.94) !important;
+  background: #efe6d5;
+}
+
+.archive-christmas .archive-filter-controls :deep(.p-select:focus-within),
+.archive-christmas .archive-filter-controls :deep(.p-select.p-focus) {
+  border-color: #c0953e !important;
+  background: #efe6d5;
+  box-shadow:
+    0 0 0 2px rgba(255, 226, 143, 0.28),
+    0 0 0.65rem rgba(222, 178, 75, 0.2);
+}
+
+.archive-christmas .answer-filter :deep(.p-checkbox-box) {
+  border-color: rgba(222, 199, 142, 0.38);
+  background: rgba(7, 30, 42, 0.76);
+}
+
+.archive-christmas :deep(.p-accordionpanel),
+.archive-christmas :deep(.p-accordioncontent),
+.archive-christmas :deep(.p-accordioncontent-content) {
+  border-color: rgba(222, 199, 142, 0.12);
+  background: #102f35 !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+  mix-blend-mode: normal;
+  opacity: 1;
+}
+
+.archive-christmas :deep(.p-accordionpanel)::before,
+.archive-christmas :deep(.p-accordionpanel)::after,
+.archive-christmas :deep(.p-accordioncontent)::before,
+.archive-christmas :deep(.p-accordioncontent)::after,
+.archive-christmas :deep(.p-accordioncontent-content)::before,
+.archive-christmas :deep(.p-accordioncontent-content)::after {
+  content: none !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.archive-christmas :deep(.p-accordionpanel) {
+  border-left-width: 2px;
+  border-left-color: rgba(182, 146, 79, 0.48);
+}
+
+.archive-christmas :deep(.p-accordionheader) {
+  color: #f8f2e8 !important;
+  border-bottom: 1px solid rgba(222, 199, 142, 0.32);
+  background: #293f52 !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  filter: none !important;
+  mix-blend-mode: normal;
+  opacity: 1;
+}
+
+.archive-christmas :deep(.p-accordionheader)::before,
+.archive-christmas :deep(.p-accordionheader)::after {
+  content: none !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.archive-christmas :deep(.p-accordionheader > .christmas-button-snow-particle) {
+  display: none !important;
+}
+
+.archive-christmas :deep(.p-accordionheader-toggle-icon) {
+  color: #dec78e;
+}
+
+.archive-christmas .term-count {
+  color: #ead9ad;
+}
+
+.archive-christmas .archive-record-card {
+  position: relative;
+  border-color: rgba(238, 228, 210, 0.14);
+  border-left-color: rgba(182, 146, 79, 0.58);
+  color: #f5eedc;
+  background: #3e5f72 !important;
+  background-image: none !important;
+  box-shadow: none;
+  backdrop-filter: none;
+  filter: none;
+  mix-blend-mode: normal;
+  opacity: 1;
+  transition: border-color 0.18s ease;
+}
+
+.archive-christmas .archive-record-card::before,
+.archive-christmas .archive-record-card::after {
+  content: none !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+.archive-christmas .archive-record-card:hover {
+  border-color: rgba(222, 199, 142, 0.24);
+  border-left-color: rgba(222, 199, 142, 0.72);
+  box-shadow: none;
+  filter: none;
+}
+
+.archive-christmas .archive-record-meta-line span + span::before {
+  background: #c5aa6c;
+}
+
+.archive-christmas .archive-record-actions :deep(.archive-action-neutral.p-button) {
+  border-color: rgba(222, 199, 142, 0.3);
+  color: #eee4d2;
+  background: rgba(4, 24, 27, 0.34);
+  transition:
+    border-color 0.18s ease,
+    color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    text-shadow 0.18s ease;
+}
+
+.archive-christmas .archive-record-actions :deep(.archive-action-preview.p-button) {
+  border-color: rgba(225, 246, 252, 0.96);
+  color: #245368;
+  background: #d7edf5;
+  box-shadow: 0 0.38rem 0.9rem rgba(6, 35, 49, 0.18);
+}
+
+.archive-christmas .archive-record-actions :deep(.archive-action-preview.p-button:hover),
+.archive-christmas .archive-record-actions :deep(.archive-action-preview.p-button:focus-visible) {
+  color: #173846;
+  background: #e5f4f9;
+}
+
+.archive-christmas .archive-record-actions :deep(.archive-action-download.p-button) {
+  border-color: rgba(127, 188, 145, 0.82);
+  color: #f5fff7;
+  background: linear-gradient(135deg, #3d8a64, #2d6c52);
+}
+
+.archive-christmas .archive-record-actions :deep(.archive-action-download.p-button:hover),
+.archive-christmas .archive-record-actions :deep(.archive-action-download.p-button:focus-visible) {
+  color: #ffffff;
+  background: linear-gradient(135deg, #479b70, #347b5c);
+}
+
+.archive-christmas .archive-record-actions :deep(.archive-action-edit.p-button) {
+  border-color: rgba(208, 173, 102, 0.78);
+  color: #fff0c9;
+  background: rgba(122, 99, 52, 0.68);
+}
+
+.archive-christmas .archive-record-actions :deep(.archive-action-edit.p-button:hover),
+.archive-christmas .archive-record-actions :deep(.archive-action-edit.p-button:focus-visible) {
+  color: #fff9e9;
+  background: rgba(145, 117, 59, 0.84);
+}
+
+.archive-christmas .archive-record-actions :deep(.archive-action-delete.p-button) {
+  border-color: rgba(207, 119, 128, 0.78);
+  color: #fff0ee;
+  background: linear-gradient(135deg, #8a3d47, #70313a);
+}
+
+.archive-christmas .archive-record-actions :deep(.archive-action-delete.p-button:hover),
+.archive-christmas .archive-record-actions :deep(.archive-action-delete.p-button:focus-visible) {
+  color: #ffffff;
+  background: linear-gradient(135deg, #9b4752, #7f3741);
+}
+
+.archive-christmas .archive-record-actions :deep(.archive-action-preview.p-button:hover),
+.archive-christmas .archive-record-actions :deep(.archive-action-download.p-button:hover),
+.archive-christmas .archive-record-actions :deep(.archive-action-edit.p-button:hover),
+.archive-christmas .archive-record-actions :deep(.archive-action-delete.p-button:hover),
+.archive-christmas .archive-record-actions :deep(.archive-action-preview.p-button:focus-visible),
+.archive-christmas .archive-record-actions :deep(.archive-action-download.p-button:focus-visible),
+.archive-christmas .archive-record-actions :deep(.archive-action-edit.p-button:focus-visible),
+.archive-christmas .archive-record-actions :deep(.archive-action-delete.p-button:focus-visible) {
+  border-color: rgba(255, 226, 143, 0.9);
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34);
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62);
+}
+
+.archive-christmas .archive-record-actions :deep(.p-button:focus-visible) {
+  outline: 2px solid rgba(238, 211, 142, 0.72);
+  outline-offset: 2px;
+}
+
+.archive-christmas .archive-empty-state {
+  position: relative;
+  z-index: 1;
+  padding: 2rem;
+  text-align: center;
+}
+
+.archive-christmas .archive-empty-icon {
+  display: grid;
+  width: 5.5rem;
+  height: 5.5rem;
+  place-items: center;
+  border: 1px solid rgba(222, 199, 142, 0.32);
+  border-radius: 50%;
+  color: #dec78e;
+  background:
+    radial-gradient(circle at 32% 28%, rgba(245, 238, 220, 0.09), transparent 42%),
+    rgba(23, 72, 63, 0.44);
+  box-shadow: 0 1rem 2.5rem rgba(1, 10, 14, 0.2);
+}
+
+.archive-christmas .archive-empty-title {
+  color: #f8f2e8;
+}
+
+.archive-christmas .archive-empty-copy {
+  color: #b9cbc7;
+}
+
 @media (max-width: 1199px) {
   .subject-header {
     padding: 0.75rem 1rem;
@@ -3453,6 +4042,11 @@ const mobileMenuItems = computed(() => {
   background: rgba(2, 8, 7, 0.54) !important;
 }
 
+:global(.mobile-drawer-mask-christmas) {
+  background: rgba(1, 10, 14, 0.68) !important;
+  backdrop-filter: blur(3px);
+}
+
 :deep(.mobile-drawer .p-sidebar-content),
 :deep(.mobile-drawer .p-drawer-content) {
   padding: 0.9rem;
@@ -3481,6 +4075,23 @@ const mobileMenuItems = computed(() => {
     linear-gradient(180deg, #101916 0%, #0b1512 100%) !important;
 }
 
+:global(.mobile-drawer.mobile-drawer-christmas.p-drawer),
+:global(.mobile-drawer.mobile-drawer-christmas .p-drawer),
+:global(.mobile-drawer.mobile-drawer-christmas .p-sidebar) {
+  border-right-color: transparent !important;
+  color: #f5eedc !important;
+  background-color: var(--christmas-page-background-color) !important;
+  background-image: var(--christmas-page-background-gradient) !important;
+  box-shadow: none;
+}
+
+:global(.mobile-drawer.mobile-drawer-christmas .p-drawer-content),
+:global(.mobile-drawer.mobile-drawer-christmas .p-sidebar-content) {
+  color: #f5eedc !important;
+  background-color: var(--christmas-page-background-color) !important;
+  background-image: var(--christmas-page-background-gradient) !important;
+}
+
 :deep(.mobile-drawer .p-sidebar-header),
 :deep(.mobile-drawer .p-drawer-header) {
   padding: 1rem;
@@ -3501,6 +4112,13 @@ const mobileMenuItems = computed(() => {
   background: #101916 !important;
   border-bottom-color: rgba(214, 230, 223, 0.16);
   color: rgba(239, 247, 238, 0.94) !important;
+}
+
+:global(.mobile-drawer.mobile-drawer-christmas .p-drawer-header),
+:global(.mobile-drawer.mobile-drawer-christmas .p-sidebar-header) {
+  border-bottom-color: rgba(222, 199, 142, 0.25) !important;
+  color: #f8f2e8 !important;
+  background: linear-gradient(100deg, #174a42 0%, #113747 58%, #60353a 100%) !important;
 }
 
 :deep(.mobile-drawer .p-sidebar-close),
@@ -3539,6 +4157,13 @@ const mobileMenuItems = computed(() => {
   background: rgba(214, 230, 223, 0.12);
 }
 
+:global(.mobile-drawer.mobile-drawer-christmas .p-drawer-close-button),
+:global(.mobile-drawer.mobile-drawer-christmas .p-sidebar-close) {
+  border-color: rgba(222, 199, 142, 0.38) !important;
+  color: #f5eedc !important;
+  background: rgba(96, 53, 58, 0.42) !important;
+}
+
 .mobile-upload-section {
   margin: 0 -0.9rem -0.9rem;
   padding: 0.9rem;
@@ -3569,6 +4194,84 @@ const mobileMenuItems = computed(() => {
   background: rgba(214, 230, 223, 0.12) !important;
   border-color: rgba(214, 230, 223, 0.4) !important;
   color: #f4fbf4 !important;
+}
+
+:global(.mobile-drawer.mobile-drawer-christmas .mobile-upload-section) {
+  border-top-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none;
+}
+
+:global(.mobile-drawer.mobile-drawer-christmas .mobile-upload-section .p-button-success) {
+  border-color: rgba(222, 199, 142, 0.46) !important;
+  color: #f8f2e8 !important;
+  background: linear-gradient(135deg, #793941, #60353a) !important;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    text-shadow 0.18s ease;
+}
+
+:global(.mobile-drawer.mobile-drawer-christmas .mobile-upload-section .p-button-success:hover),
+:global(
+  .mobile-drawer.mobile-drawer-christmas .mobile-upload-section .p-button-success:focus-visible
+) {
+  border-color: rgba(255, 226, 143, 0.9) !important;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34) !important;
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62) !important;
+}
+
+:global(
+  .mobile-drawer.mobile-drawer-christmas .mobile-upload-section .p-button-success:focus-visible
+) {
+  outline: 2px solid rgba(238, 211, 142, 0.72) !important;
+  outline-offset: 2px;
+}
+
+:global(
+  .mobile-drawer.mobile-drawer-christmas
+    .mobile-upload-section
+    .p-button.p-button-secondary.p-button-outlined.archive-sidebar-download-action
+) {
+  border-color: rgba(127, 188, 145, 0.82) !important;
+  color: #f5fff7 !important;
+  background: linear-gradient(135deg, #3d8a64, #2d6c52) !important;
+  transition:
+    border-color 0.18s ease,
+    color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease,
+    text-shadow 0.18s ease;
+}
+
+:global(
+  .mobile-drawer.mobile-drawer-christmas
+    .mobile-upload-section
+    .p-button.p-button-secondary.p-button-outlined.archive-sidebar-download-action:hover
+),
+:global(
+  .mobile-drawer.mobile-drawer-christmas
+    .mobile-upload-section
+    .p-button.p-button-secondary.p-button-outlined.archive-sidebar-download-action:focus-visible
+) {
+  border-color: rgba(255, 226, 143, 0.9) !important;
+  color: #ffffff !important;
+  background: linear-gradient(135deg, #479b70, #347b5c) !important;
+  box-shadow:
+    0 0 0.34rem rgba(255, 218, 94, 0.58),
+    0 0 0.72rem rgba(255, 201, 59, 0.34) !important;
+  text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.62) !important;
+}
+
+:global(
+  .mobile-drawer.mobile-drawer-christmas
+    .mobile-upload-section
+    .p-button.p-button-secondary.p-button-outlined.archive-sidebar-download-action:focus-visible
+) {
+  outline: 2px solid rgba(238, 211, 142, 0.72) !important;
+  outline-offset: 2px;
 }
 
 /* Ensure proper mobile responsiveness */
@@ -3793,6 +4496,122 @@ const mobileMenuItems = computed(() => {
     background: #080a0b !important;
     color: rgba(239, 247, 238, 0.94) !important;
     border-color: rgba(214, 230, 223, 0.22) !important;
+  }
+
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu),
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-panel),
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-header),
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-header-content),
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-item-content),
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-content) {
+    border-color: rgba(222, 199, 142, 0.12) !important;
+    background: rgba(7, 34, 44, 0.48) !important;
+  }
+
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-header-link),
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-item-link) {
+    color: #f5eedc !important;
+    background: transparent !important;
+  }
+
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-header-link:hover),
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-item-link:hover) {
+    color: #f8f2e8 !important;
+    background: transparent !important;
+    text-shadow: 0 0 0.2rem rgba(255, 209, 72, 0.5);
+  }
+
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-header-content:hover),
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-item-content:hover) {
+    background: rgba(20, 68, 67, 0.96) !important;
+    box-shadow:
+      inset 0 0 0 1px rgba(255, 226, 143, 0.34),
+      0 0 0.28rem rgba(255, 218, 94, 0.38),
+      0 0 0.58rem rgba(255, 201, 59, 0.2);
+  }
+
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-header-label),
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-item-label),
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-header-icon),
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-submenu-icon),
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-item-icon) {
+    color: #f5eedc !important;
+  }
+
+  :global(.mobile-drawer.mobile-drawer-christmas .active-course-menu-item),
+  :global(.mobile-drawer.mobile-drawer-christmas .active-course-search-result) {
+    overflow: hidden;
+    border: 1px solid rgba(222, 199, 142, 0.14);
+    border-radius: 7px;
+    background-color: var(--christmas-page-background-color) !important;
+    background-image: var(--christmas-page-background-gradient) !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    filter: none !important;
+    mix-blend-mode: normal;
+    opacity: 1;
+  }
+
+  :global(.mobile-drawer.mobile-drawer-christmas .active-course-menu-item::before),
+  :global(.mobile-drawer.mobile-drawer-christmas .active-course-menu-item::after) {
+    content: none !important;
+    background: none !important;
+    background-image: none !important;
+    box-shadow: none !important;
+  }
+
+  :global(
+    .mobile-drawer.mobile-drawer-christmas .active-course-menu-item .p-panelmenu-item-content
+  ),
+  :global(.mobile-drawer.mobile-drawer-christmas .active-course-menu-item .p-panelmenu-item-link) {
+    color: #f8f2e8 !important;
+    border: 0;
+    background: transparent !important;
+    background-image: none !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    filter: none !important;
+    mix-blend-mode: normal;
+    opacity: 1;
+  }
+
+  :global(
+    .mobile-drawer.mobile-drawer-christmas
+      .active-course-menu-item
+      .p-panelmenu-item-content::before
+  ),
+  :global(
+    .mobile-drawer.mobile-drawer-christmas .active-course-menu-item .p-panelmenu-item-content::after
+  ),
+  :global(
+    .mobile-drawer.mobile-drawer-christmas .active-course-menu-item .p-panelmenu-item-link::before
+  ),
+  :global(
+    .mobile-drawer.mobile-drawer-christmas .active-course-menu-item .p-panelmenu-item-link::after
+  ),
+  :global(.mobile-drawer.mobile-drawer-christmas .active-course-search-result::before),
+  :global(.mobile-drawer.mobile-drawer-christmas .active-course-search-result::after) {
+    content: none !important;
+    background: none !important;
+    background-image: none !important;
+    box-shadow: none !important;
+  }
+
+  :global(
+    .mobile-drawer.mobile-drawer-christmas .active-course-menu-item .christmas-button-snow-particle
+  ),
+  :global(
+    .mobile-drawer.mobile-drawer-christmas
+      .active-course-search-result
+      > .christmas-button-snow-particle
+  ) {
+    display: none !important;
+  }
+
+  :global(.mobile-drawer.mobile-drawer-christmas .p-inputtext) {
+    border-color: rgba(222, 199, 142, 0.3) !important;
+    color: #f8f2e8 !important;
+    background: rgba(5, 24, 27, 0.7) !important;
   }
 
   .upload-section,
