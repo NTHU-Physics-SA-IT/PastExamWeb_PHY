@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 import { mockAdminCourseEndpoints } from '../support/adminFixtures'
 import { JSON_HEADERS } from '../support/constants'
 import { buildJwt } from '../support/jwt'
+import { PDFDocument, StandardFonts } from 'pdf-lib'
 
 const json = (value: unknown) => ({
   status: 200,
@@ -101,6 +102,58 @@ const mockReviewCenter = async (page: Page) => {
     route.fulfill(json(buildSubmissionStatistics()))
   )
 }
+
+test('renders both comparison PDFs beyond page one and reopens at narrow width', async ({
+  page,
+}) => {
+  await mockReviewCenter(page)
+  const pdf = await PDFDocument.create()
+  const font = await pdf.embedFont(StandardFonts.Helvetica)
+  for (const label of ['Page 1', 'Page 2']) {
+    pdf.addPage([595, 842]).drawText(label, { x: 72, y: 770, font })
+  }
+  const body = Buffer.from(await pdf.save())
+  await page.route('**/api/archives/admin/submissions/*/comparisons', (route) =>
+    route.fulfill(json([{ ...reviewItems[1], review_revision: 'candidate-revision' }]))
+  )
+  await page.route('**/api/archives/admin/submissions/*/preview-file**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/pdf', body })
+  )
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/admin', { waitUntil: 'networkidle' })
+  await selectReviewFamily(page, 'New Course / Category Exam Requests')
+  await page
+    .locator('.review-section:visible')
+    .getByRole('button', { name: 'View / Edit', exact: true })
+    .click()
+  const compare = page.getByRole('button', { name: 'Side-by-Side Preview', exact: true })
+  await compare.click()
+  const grid = page.locator('.compare-preview-grid')
+  await expect(grid.locator('iframe')).toHaveCount(0)
+  for (const side of ['request', 'archive']) {
+    const pane = grid.locator(`[data-compare-side="${side}"]`)
+    await expect(pane.locator('[data-pdf-page="1"]')).toHaveAttribute('data-page-loaded', 'true')
+    await pane.locator('[data-pdf-page="2"]').scrollIntoViewIfNeeded()
+    await expect(pane.locator('[data-pdf-page="2"]')).toHaveAttribute('data-page-loaded', 'true')
+  }
+  await grid
+    .locator('xpath=ancestor::*[@role="dialog"]')
+    .getByRole('button', { name: 'Close', exact: true })
+    .click()
+  await expect(grid).toHaveCount(0)
+  await page.setViewportSize({ width: 600, height: 900 })
+  await compare.filter({ visible: true }).click()
+  await expect(grid.locator('[data-pdf-page="1"][data-page-loaded="true"]')).toHaveCount(2)
+  const panes = await grid
+    .locator('.pdf-document-viewer')
+    .evaluateAll((nodes) =>
+      nodes.map((node) => ({
+        height: node.clientHeight,
+        overflow: getComputedStyle(node).overflowY,
+      }))
+    )
+  expect(panes.every((pane) => pane.height > 100 && pane.overflow === 'auto')).toBe(true)
+})
 
 const readStatusGeometry = async (tag: Locator) =>
   tag.evaluate((element) => {

@@ -4095,30 +4095,38 @@
           <i class="pi pi-exclamation-circle"></i>
           {{ $t('無法載入比對 PDF，請稍後再試。') }}
         </div>
-        <div v-else class="compare-preview-grid">
-          <section class="compare-preview-pane">
+        <div v-else-if="showComparePreview" class="compare-preview-grid">
+          <section
+            v-for="pane in comparePreviewPanes"
+            :key="pane.side"
+            class="compare-preview-pane"
+            :data-compare-side="pane.side"
+            :aria-busy="pane.state === 'loading'"
+          >
             <header>
-              <span>{{ $t('申請考卷') }}</span>
-              <strong>{{ selectedArchiveRequest?.name }}</strong>
+              <span>{{ pane.label }}</span>
+              <strong>{{ pane.name }}</strong>
             </header>
-            <iframe
-              v-if="compareRequestPreviewUrl"
-              :src="compareRequestPreviewUrl"
-              :title="$t('申請考卷 PDF 預覽')"
-            ></iframe>
-            <ProgressSpinner v-else strokeWidth="4" />
-          </section>
-          <section class="compare-preview-pane">
-            <header>
-              <span>{{ $t('既有考卷') }}</span>
-              <strong>{{ comparePreviewArchive?.name }}</strong>
-            </header>
-            <iframe
-              v-if="compareArchivePreviewUrl"
-              :src="compareArchivePreviewUrl"
-              :title="$t('既有考卷 PDF 預覽')"
-            ></iframe>
-            <ProgressSpinner v-else strokeWidth="4" />
+            <div class="compare-preview-document">
+              <PdfDocumentViewer
+                v-if="pane.source && pane.state !== 'error'"
+                :key="pane.source"
+                :source="pane.source"
+                :aria-label="pane.title"
+                @load="setCompareRenderState(pane, 'loaded')"
+                @error="setCompareRenderState(pane, 'error')"
+              />
+              <div v-if="pane.state === 'error'" class="compare-preview-status" role="alert">
+                {{ $t('無法載入比對 PDF，請稍後再試。') }}
+              </div>
+              <div
+                v-else-if="pane.state === 'loading'"
+                class="compare-preview-status"
+                role="status"
+              >
+                <ProgressSpinner strokeWidth="4" :aria-label="$t('載入中...')" />
+              </div>
+            </div>
           </section>
         </div>
       </Dialog>
@@ -5079,6 +5087,7 @@ import {
 } from '../utils/localizedCatalog'
 import { ADMIN_PAGE_SIZE_OPTIONS } from '../constants/pagination'
 import PdfPreviewModal from '../components/PdfPreviewModal.vue'
+import PdfDocumentViewer from '../components/PdfDocumentViewer.vue'
 import ContributorLevelBadge from '../components/ContributorLevelBadge.vue'
 import UserOnlineDurationChart from '../components/UserOnlineDurationChart.vue'
 import ReportManagementPanel from '../components/admin/ReportManagementPanel.vue'
@@ -5451,6 +5460,33 @@ const compareRequestPreviewUrl = ref('')
 const compareArchivePreviewUrl = ref('')
 const comparePreviewLoading = ref(false)
 const comparePreviewError = ref(false)
+let comparePreviewGeneration = 0
+const compareRenderStates = ref({ request: 'loading', archive: 'loading' })
+const comparePreviewPanes = computed(() => [
+  {
+    side: 'request',
+    source: compareRequestPreviewUrl.value,
+    name: selectedArchiveRequest.value?.name,
+    label: t('申請考卷'),
+    title: t('申請考卷 PDF 預覽'),
+    state: compareRenderStates.value.request,
+    generation: comparePreviewGeneration,
+  },
+  {
+    side: 'archive',
+    source: compareArchivePreviewUrl.value,
+    name: comparePreviewArchive.value?.name,
+    label: t('既有考卷'),
+    title: t('既有考卷 PDF 預覽'),
+    state: compareRenderStates.value.archive,
+    generation: comparePreviewGeneration,
+  },
+])
+const setCompareRenderState = (pane, state) => {
+  if (!showComparePreview.value || pane.generation !== comparePreviewGeneration) return
+  compareRenderStates.value[pane.side] = state
+}
+
 const archiveRequestEditForm = ref({
   subject: '',
   category: '',
@@ -8856,6 +8892,8 @@ const revokeComparePreviewUrls = () => {
 
 const openComparePreview = async (comparison) => {
   if (!selectedArchiveRequest.value?.id || !comparison?.id) return
+  const generation = ++comparePreviewGeneration
+  compareRenderStates.value = { request: 'loading', archive: 'loading' }
   comparePreviewArchive.value = comparison
   comparePreviewLoading.value = true
   comparePreviewError.value = false
@@ -8870,6 +8908,7 @@ const openComparePreview = async (comparison) => {
       ),
       archiveService.getSubmissionPreviewFile(comparison.id, comparison.review_revision),
     ])
+    if (generation !== comparePreviewGeneration || !showComparePreview.value) return
     compareRequestPreviewUrl.value = URL.createObjectURL(
       new Blob([requestResponse.data], { type: 'application/pdf' })
     )
@@ -8877,6 +8916,7 @@ const openComparePreview = async (comparison) => {
       new Blob([comparisonResponse.data], { type: 'application/pdf' })
     )
   } catch (error) {
+    if (generation !== comparePreviewGeneration || !showComparePreview.value) return
     console.error(t('載入比對 PDF 失敗:'), error)
     if (error?.response?.data?.detail?.code === 'archive_submission_stale_revision') {
       showComparePreview.value = false
@@ -8893,11 +8933,13 @@ const openComparePreview = async (comparison) => {
       life: 3000,
     })
   } finally {
-    comparePreviewLoading.value = false
+    if (generation === comparePreviewGeneration) comparePreviewLoading.value = false
   }
 }
 
 const closeComparePreview = () => {
+  comparePreviewGeneration += 1
+  compareRenderStates.value = { request: 'loading', archive: 'loading' }
   showComparePreview.value = false
   comparePreviewArchive.value = null
   comparePreviewError.value = false
@@ -12572,6 +12614,7 @@ onBeforeUnmount(() => {
 
 .compare-preview-grid {
   display: grid;
+  grid-auto-rows: minmax(0, 1fr);
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1rem;
   flex: 1;
@@ -12590,6 +12633,7 @@ onBeforeUnmount(() => {
 }
 
 .compare-preview-pane header {
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
@@ -12602,12 +12646,23 @@ onBeforeUnmount(() => {
   font-size: 0.875rem;
 }
 
-.compare-preview-pane iframe {
+.compare-preview-document {
+  position: relative;
+  display: flex;
   flex: 1;
-  width: 100%;
   min-height: 0;
-  border: 0;
-  background: #52585b;
+  overflow: hidden;
+}
+
+.compare-preview-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
 }
 
 .compare-preview-error {
