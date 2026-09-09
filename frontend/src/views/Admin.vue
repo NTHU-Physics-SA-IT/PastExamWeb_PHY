@@ -544,7 +544,7 @@
                     <p>
                       {{
                         $t(
-                          '設定哪些清大學生可以透過 NTHU OAuth 登入網站。此設定不影響本機管理員帳號。'
+                          '設定哪些清大成員可以透過 NTHU OAuth 登入網站。此設定不影響本機管理員帳號。'
                         )
                       }}
                     </p>
@@ -580,6 +580,17 @@
                   </div>
                 </Message>
                 <div v-else class="nthu-access-policy__content">
+                  <div class="nthu-access-policy__inschool">
+                    <ToggleSwitch
+                      v-model="nthuAccessPolicyForm.require_inschool"
+                      inputId="nthu-require-inschool"
+                      name="nthu-require-inschool"
+                    />
+                    <label for="nthu-require-inschool">
+                      <strong>{{ $t('僅允許在校生登入') }}</strong>
+                      <small>{{ $t('啟用後，校方標示為非在校狀態的校友將無法登入。') }}</small>
+                    </label>
+                  </div>
                   <div
                     class="nthu-access-policy__modes"
                     role="radiogroup"
@@ -594,7 +605,7 @@
                       />
                       <span>
                         <strong>{{ $t('全校成員') }}</strong>
-                        <small>{{ $t('所有符合現有在校資格的清大使用者皆可登入。') }}</small>
+                        <small>{{ $t('所有符合目前登入政策的清大成員皆可登入。') }}</small>
                       </span>
                     </label>
                     <label for="nthu-access-selected" class="nthu-access-policy__mode">
@@ -5277,6 +5288,7 @@ const localizedNthuDepartments = computed(() =>
 )
 const nthuAccessPolicyForm = ref({
   mode: NTHU_ACCESS_MODES.ALL_NTHU,
+  require_inschool: false,
   allowed_department_codes: [],
   staff_access: NTHU_STAFF_ACCESS.NONE,
   allowed_staff_userids: [],
@@ -7573,6 +7585,7 @@ const loadCourses = async () => {
 
 const applyNthuAccessPolicyResponse = (data) => {
   const validMode = Object.values(NTHU_ACCESS_MODES).includes(data?.mode)
+  const validRequireInschool = typeof data?.require_inschool === 'boolean'
   const validCodes = Array.isArray(data?.allowed_department_codes)
   const validStaffAccess = Object.values(NTHU_STAFF_ACCESS).includes(data?.staff_access)
   const validStaffUserids =
@@ -7587,13 +7600,21 @@ const applyNthuAccessPolicyResponse = (data) => {
         typeof department?.college_code === 'string' &&
         typeof department?.college_name === 'string'
     )
-  if (!validMode || !validCodes || !validStaffAccess || !validStaffUserids || !validDepartments) {
+  if (
+    !validMode ||
+    !validRequireInschool ||
+    !validCodes ||
+    !validStaffAccess ||
+    !validStaffUserids ||
+    !validDepartments
+  ) {
     throw new TypeError('Invalid NTHU access policy response')
   }
 
   nthuDepartments.value = data.departments
   nthuAccessPolicyForm.value = {
     mode: data.mode,
+    require_inschool: data.require_inschool,
     allowed_department_codes: [...data.allowed_department_codes],
     staff_access: data.staff_access,
     allowed_staff_userids: [...data.allowed_staff_userids],
@@ -7648,6 +7669,7 @@ const saveNthuAccessPolicy = async () => {
   try {
     const payload = {
       mode: nthuAccessPolicyForm.value.mode,
+      require_inschool: nthuAccessPolicyForm.value.require_inschool,
       allowed_department_codes: [...nthuAccessPolicyForm.value.allowed_department_codes],
       staff_access: nthuAccessPolicyForm.value.staff_access,
       allowed_staff_userids:
@@ -10449,6 +10471,32 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.65rem;
   min-width: 0;
+}
+
+.nthu-access-policy__inschool {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.nthu-access-policy__inschool > :deep(.p-toggleswitch) {
+  flex: 0 0 auto;
+}
+
+.nthu-access-policy__inschool label {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 0.15rem;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.nthu-access-policy__inschool small {
+  color: var(--text-secondary);
 }
 
 .nthu-access-policy__mode {

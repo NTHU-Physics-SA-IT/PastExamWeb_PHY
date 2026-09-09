@@ -30,6 +30,7 @@ async def test_admin_reads_default_and_persists_selected_departments(
         assert default_response.status_code == 200
         default_body = default_response.json()
         assert default_body["mode"] == "all_nthu"
+        assert default_body["require_inschool"] is False
         assert default_body["allowed_department_codes"] == []
         assert LEGACY_SPECIAL_AFFILIATIONS_KEY not in default_body
         assert default_body["staff_access"] == "none"
@@ -44,6 +45,7 @@ async def test_admin_reads_default_and_persists_selected_departments(
             PATH,
             json={
                 "mode": "selected_departments",
+                "require_inschool": True,
                 "allowed_department_codes": ["025", "022", "022"],
                 LEGACY_SPECIAL_AFFILIATIONS_KEY: ["special_student"],
                 "staff_access": "allowlist",
@@ -51,6 +53,7 @@ async def test_admin_reads_default_and_persists_selected_departments(
             },
         )
         assert update_response.status_code == 200
+        assert update_response.json()["require_inschool"] is True
         assert update_response.json()["allowed_department_codes"] == ["022", "025"]
         assert LEGACY_SPECIAL_AFFILIATIONS_KEY not in update_response.json()
         assert update_response.json()["allowed_staff_userids"] == ["W90001"]
@@ -58,6 +61,7 @@ async def test_admin_reads_default_and_persists_selected_departments(
         reload_response = await client.get(PATH)
         assert reload_response.status_code == 200
         assert reload_response.json()["mode"] == "selected_departments"
+        assert reload_response.json()["require_inschool"] is True
         assert reload_response.json()["allowed_department_codes"] == ["022", "025"]
         assert LEGACY_SPECIAL_AFFILIATIONS_KEY not in reload_response.json()
         assert reload_response.json()["staff_access"] == "allowlist"
@@ -67,6 +71,7 @@ async def test_admin_reads_default_and_persists_selected_departments(
             PATH,
             json={
                 "mode": "all_nthu",
+                "require_inschool": False,
                 "allowed_department_codes": ["022", "025"],
                 "staff_access": "allowlist",
                 "allowed_staff_userids": ["W90001"],
@@ -74,6 +79,7 @@ async def test_admin_reads_default_and_persists_selected_departments(
         )
         assert all_nthu_response.status_code == 200
         assert all_nthu_response.json()["mode"] == "all_nthu"
+        assert all_nthu_response.json()["require_inschool"] is False
         assert all_nthu_response.json()["allowed_department_codes"] == ["022", "025"]
         assert all_nthu_response.json()["staff_access"] == "allowlist"
         assert all_nthu_response.json()["allowed_staff_userids"] == ["W90001"]
@@ -91,6 +97,7 @@ async def test_admin_reads_default_and_persists_selected_departments(
             )
             assert stored is not None
             assert LEGACY_SPECIAL_AFFILIATIONS_KEY not in stored.value
+            assert stored.value["require_inschool"] is False
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:

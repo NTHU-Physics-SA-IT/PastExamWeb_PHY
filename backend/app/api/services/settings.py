@@ -64,6 +64,7 @@ class NthuDepartmentRead(BaseModel):
 
 class NthuAccessPolicyRead(BaseModel):
     mode: str
+    require_inschool: bool
     allowed_department_codes: list[str]
     staff_access: str
     allowed_staff_userids: list[str]
@@ -81,6 +82,7 @@ def _require_admin(current_user: UserRoles) -> None:
 def _nthu_access_policy_response(policy: NthuAccessPolicy) -> NthuAccessPolicyRead:
     return NthuAccessPolicyRead(
         mode=policy.mode.value,
+        require_inschool=policy.require_inschool,
         allowed_department_codes=list(policy.allowed_department_codes),
         staff_access=policy.staff_access.value,
         allowed_staff_userids=list(policy.allowed_staff_userids),
