@@ -29,6 +29,13 @@ class FakeRedis:
 
 POLICIES = {
     "all_nthu": None,
+    "all_nthu_require_inschool": {
+        "mode": "all_nthu",
+        "require_inschool": True,
+        "allowed_department_codes": [],
+        "staff_access": "none",
+        "allowed_staff_userids": [],
+    },
     "selected_022": {
         "mode": "selected_departments",
         "allowed_department_codes": ["022"],
@@ -57,9 +64,18 @@ EXPECTED = {
         "missing_userid",
         "staff_allowed",
         "staff_unlisted",
+        "not_inschool",
     },
-    "selected_022": {"physics"},
-    "selected_022_staff": {"physics", "staff_allowed"},
+    "all_nthu_require_inschool": {
+        "physics",
+        "other_department",
+        "special_userid",
+        "missing_userid",
+        "staff_allowed",
+        "staff_unlisted",
+    },
+    "selected_022": {"physics", "not_inschool"},
+    "selected_022_staff": {"physics", "staff_allowed", "not_inschool"},
     "staff_only": {"staff_allowed"},
 }
 
@@ -154,6 +170,11 @@ async def test_dev_login_uses_real_callback_policy_and_user_lifecycle(
                 assert handoffs == [user.id]
             else:
                 assert "error" in callback_query
+                if (
+                    policy_name == "all_nthu_require_inschool"
+                    and profile_key == "not_inschool"
+                ):
+                    assert callback_query == {"error": ["oauth_not_in_school"]}
                 assert user is None
                 assert handoffs == []
         assert provider_calls == []
