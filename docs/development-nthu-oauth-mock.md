@@ -41,18 +41,22 @@ unresolved instead of receiving a special-student inference.
 Display classification is not authorization. In particular, a `STAFF` label
 does not grant login access: custom scope still requires that exact userid in
 the staff allowlist. `UNRESOLVED` profiles fail closed in custom scope, while
-`all_nthu` continues to allow them when `inschool=true`. `inschool=false`
-always denies first.
+`all_nthu` continues to allow them. The `not_inschool` profile is allowed when
+the independent in-school restriction is off and denied first when it is on.
 
 ## Policy checks
 
-- `all_nthu` allows every `inschool=true` profile and denies `not_inschool`.
+- `all_nthu` with the default in-school restriction off allows every fixed
+  profile, including `not_inschool`.
+- Enabling the in-school restriction denies `not_inschool` with
+  `oauth_not_in_school` while leaving the other access-scope checks unchanged.
 - custom `022` with staff disabled allows only `physics`.
 - custom `022` plus staff allowlist `W90001` allows `physics` and
   `staff_allowed`; unresolved profiles remain denied.
 - staff-only `W90001` allows only `staff_allowed` among the student/staff cases.
 
-Restore local QA policy to `all_nthu`, no departments, staff access `none`, and
+Restore local QA policy to `all_nthu`, in-school restriction off, no
+departments, staff access `none`, and
 no staff userids when testing is complete.
 
 ## Local administrator QA fixture

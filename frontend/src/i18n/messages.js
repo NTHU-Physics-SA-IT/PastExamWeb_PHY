@@ -55,13 +55,16 @@ const en = {
   篩選分類: 'Filter by category',
   刪除課程: 'Delete Course',
   登入範圍: 'Sign-in Access',
-  '設定哪些清大學生可以透過 NTHU OAuth 登入網站。此設定不影響本機管理員帳號。':
+  '設定哪些清大成員可以透過 NTHU OAuth 登入網站。此設定不影響本機管理員帳號。':
     'Choose which NTHU members can sign in through NTHU OAuth. This does not affect local administrator accounts.',
+  僅允許在校生登入: 'Only allow currently enrolled students to sign in',
+  '啟用後，校方標示為非在校狀態的校友將無法登入。':
+    'When enabled, alumni whom NTHU marks as not currently enrolled cannot sign in.',
   儲存登入範圍: 'Save Sign-in Access',
   開放範圍: 'Allowed Scope',
   全校成員: 'All NTHU Members',
-  '所有符合現有在校資格的清大使用者皆可登入。':
-    'All NTHU users who meet the current enrollment requirements may sign in.',
+  '所有符合目前登入政策的清大成員皆可登入。':
+    'All NTHU members who meet the current sign-in policy may sign in.',
   自訂範圍: 'Custom Scope',
   '允許指定系所學生與個別列入清單的教職員登入。':
     'Allow students from selected departments and individually allowlisted staff.',

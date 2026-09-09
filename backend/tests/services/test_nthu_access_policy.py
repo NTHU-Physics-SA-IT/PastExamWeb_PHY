@@ -104,9 +104,19 @@ def test_selected_department_denies_other_or_unknown_affiliation(
     assert exc_info.value.code == "oauth_department_not_allowed"
 
 
-def test_not_in_school_is_denied_before_department_policy() -> None:
+def test_not_in_school_is_allowed_when_restriction_is_off() -> None:
     policy = NthuAccessPolicy(
         mode=NthuAccessMode.SELECTED_DEPARTMENTS,
+        allowed_department_codes=("022",),
+    )
+
+    ensure_profile_matches_access_policy(_profile(inschool=False), policy)
+
+
+def test_not_in_school_is_denied_before_department_policy_when_required() -> None:
+    policy = NthuAccessPolicy(
+        mode=NthuAccessMode.SELECTED_DEPARTMENTS,
+        require_inschool=True,
         allowed_department_codes=("022",),
     )
 
@@ -125,6 +135,7 @@ def test_policy_normalization_deduplicates_and_orders_codes() -> None:
     )
 
     assert policy.allowed_department_codes == ("022", "025")
+    assert policy.require_inschool is False
     assert policy.staff_access is NthuStaffAccess.NONE
     assert policy.allowed_staff_userids == ()
 
@@ -143,6 +154,7 @@ def test_policy_normalization_supports_staff_only_and_trims_userids() -> None:
     assert policy.allowed_staff_userids == ("W90001", "W90002")
     assert policy.as_storage_value() == {
         "mode": "selected_departments",
+        "require_inschool": False,
         "allowed_department_codes": [],
         "staff_access": "allowlist",
         "allowed_staff_userids": ["W90001", "W90002"],
@@ -162,6 +174,7 @@ def test_policy_normalization_ignores_legacy_special_affiliation_key() -> None:
 
     assert policy.as_storage_value() == {
         "mode": "selected_departments",
+        "require_inschool": False,
         "allowed_department_codes": ["022"],
         "staff_access": "none",
         "allowed_staff_userids": [],
@@ -216,6 +229,11 @@ def test_all_nthu_preserves_but_ignores_inactive_custom_fields() -> None:
             "allowed_department_codes": [],
             "staff_access": "allowlist",
             "allowed_staff_userids": [123],
+        },
+        {
+            "mode": "all_nthu",
+            "require_inschool": "false",
+            "allowed_department_codes": [],
         },
     ],
 )

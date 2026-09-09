@@ -46,6 +46,7 @@ class NthuAccessPolicyValidationError(ValueError):
 @dataclass(frozen=True)
 class NthuAccessPolicy:
     mode: NthuAccessMode
+    require_inschool: bool = False
     allowed_department_codes: tuple[str, ...] = ()
     staff_access: NthuStaffAccess = NthuStaffAccess.NONE
     allowed_staff_userids: tuple[str, ...] = ()
@@ -53,6 +54,7 @@ class NthuAccessPolicy:
     def as_storage_value(self) -> dict[str, Any]:
         return {
             "mode": self.mode.value,
+            "require_inschool": self.require_inschool,
             "allowed_department_codes": list(self.allowed_department_codes),
             "staff_access": self.staff_access.value,
             "allowed_staff_userids": list(self.allowed_staff_userids),
@@ -68,6 +70,7 @@ def normalize_nthu_access_policy(value: object) -> NthuAccessPolicy:
     required_keys = {"mode", "allowed_department_codes"}
     optional_keys = {
         LEGACY_SPECIAL_AFFILIATIONS_KEY,
+        "require_inschool",
         "staff_access",
         "allowed_staff_userids",
     }
@@ -80,6 +83,10 @@ def normalize_nthu_access_policy(value: object) -> NthuAccessPolicy:
         mode = NthuAccessMode(value.get("mode"))
     except (TypeError, ValueError) as error:
         raise NthuAccessPolicyValidationError("登入範圍模式不正確") from error
+
+    require_inschool = value.get("require_inschool", False)
+    if not isinstance(require_inschool, bool):
+        raise NthuAccessPolicyValidationError("在校生登入限制格式不正確")
 
     raw_codes = value.get("allowed_department_codes")
     if not isinstance(raw_codes, list) or any(
@@ -128,6 +135,7 @@ def normalize_nthu_access_policy(value: object) -> NthuAccessPolicy:
 
     return NthuAccessPolicy(
         mode=mode,
+        require_inschool=require_inschool,
         allowed_department_codes=codes,
         staff_access=staff_access,
         allowed_staff_userids=tuple(staff_userids),
@@ -182,7 +190,7 @@ def ensure_profile_matches_access_policy(
     # the persistence-backed policy service it invokes during identity resolution.
     from app.services.nthu_oauth import NthuOAuthBusinessError
 
-    if profile.inschool is not True:
+    if policy.require_inschool and profile.inschool is not True:
         raise NthuOAuthBusinessError("oauth_not_in_school")
     if policy.mode is NthuAccessMode.ALL_NTHU:
         return

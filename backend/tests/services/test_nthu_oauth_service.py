@@ -260,6 +260,21 @@ async def test_fetch_nthu_profile_fails_closed_for_token_network_error(monkeypat
             "email": "n@example.com",
             "inschool": "true",
         },
+        {
+            "success": True,
+            "uuid": "id",
+            "userid": "u",
+            "name": "N",
+            "email": "n@example.com",
+        },
+        {
+            "success": True,
+            "uuid": "id",
+            "userid": "u",
+            "name": "N",
+            "email": "n@example.com",
+            "inschool": None,
+        },
     ],
 )
 async def test_fetch_nthu_profile_fails_closed_for_invalid_resource_payloads(
@@ -301,10 +316,21 @@ async def test_fetch_nthu_profile_fails_closed_for_resource_transport_errors(
 
 
 @pytest.mark.asyncio
-async def test_ineligible_profile_is_denied_without_account_mutation(session_maker):
+async def test_not_in_school_profile_is_denied_when_policy_requires_it(session_maker):
     profile = _profile(inschool=False)
 
     async with session_maker() as session:
+        session.add(
+            SystemSetting(
+                key=NTHU_ACCESS_POLICY_SETTING_KEY,
+                value={
+                    "mode": "all_nthu",
+                    "require_inschool": True,
+                    "allowed_department_codes": [],
+                },
+            )
+        )
+        await session.commit()
         before_user_ids = tuple(
             (await session.execute(select(User.id).order_by(User.id))).scalars()
         )

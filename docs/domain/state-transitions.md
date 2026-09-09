@@ -498,7 +498,11 @@ finalized retry remains a conflict.
 
 ## NTHU login authorization
 
-NTHU UUID remains the canonical external identity. Provider `userid` is a synchronized affiliation attribute and never an identity key. An `inschool=false` profile is always denied before any allow path.
+NTHU UUID remains the canonical external identity. Provider `userid` is a
+synchronized affiliation attribute and never an identity key. The required
+boolean `inschool` attribute is a configurable login-scope restriction rather
+than an identity key: `false` remains a valid alumni profile state and proceeds
+by default, while an administrator may require it to be exactly `true`.
 
 `all_nthu` preserves the existing eligible-member behavior and ignores
 department and staff lists. `selected_departments` authorizes through one of
@@ -1000,15 +1004,21 @@ all of these gates:
 2. token and resource responses satisfy the NTHU contract;
 3. the resource has `success=true` and a required valid `uuid`, `userid`,
    `name`, `email`, and boolean `inschool`;
-4. `inschool` is exactly `true`;
-5. the server-persisted NTHU access policy permits the affiliation;
+4. when the server-persisted access policy enables `require_inschool`,
+   `inschool` is exactly `true`;
+5. the same access policy permits the affiliation;
 6. the matching provider identity is active, or a new identity has no email or
    name collision; and
 7. the browser atomically consumes the short-lived login handoff.
 
-`inschool=false` returns `oauth_not_in_school` and mutates no User. A matching
-soft-deleted identity returns `oauth_account_deleted` and is never restored by
-login. A new UUID whose email is already owned returns
+With the default `require_inschool=false`, a valid `inschool=false` alumni
+profile continues to the existing affiliation and identity gates. With
+`require_inschool=true`, `inschool=false` returns `oauth_not_in_school` and
+mutates no User. A missing, null, or non-boolean `inschool` value remains a
+malformed provider response and fails as `oauth_provider_failed` before access
+policy evaluation. A matching soft-deleted identity returns
+`oauth_account_deleted` and is never restored by login. A new UUID whose email
+is already owned returns
 `oauth_account_link_required`; this milestone has no implicit or interactive
 account-linking transition. Profile synchronization collisions return
 `oauth_profile_conflict`. Duplicate provider identity or a database uniqueness
@@ -1016,18 +1026,21 @@ race fails closed as `oauth_identity_conflict`. These are stable,
 non-sensitive business errors and never expose provider payloads or the
 colliding User.
 
-The in-school decision is an authentication Domain policy independent of
-identity mapping. A future policy change may permit another population without
-changing `oauth_provider="nthu"` or the UUID subject.
+The in-school restriction is an authentication Domain policy independent of
+identity mapping. Changing it never changes `oauth_provider="nthu"` or the UUID
+subject.
 
-The access policy defaults to `all_nthu`, preserving the existing in-school
-eligibility rule. An administrator may persist `selected_departments` with any
-non-empty combination of canonical three-digit department codes and exact staff
-userids. Standard students require a selected parsed department; staff access
-always requires an exact allowlist match. A staff display classification never
-authorizes by itself. Missing, malformed, non-standard, and otherwise
-unverifiable `userid` values are `unresolved` and fail closed with
-the same friendly scope denial. The callback enforces this after
+The access policy defaults to `all_nthu` with `require_inschool=false`, so a
+valid alumni profile is not denied solely because `inschool=false`. Existing
+stored policy values that omit `require_inschool` resolve to that same default.
+An administrator may enable `require_inschool` independently of the affiliation
+mode, or persist `selected_departments` with any non-empty combination of
+canonical three-digit department codes and exact staff userids. Standard
+students require a selected parsed department; staff access always requires an
+exact allowlist match. A staff display classification never authorizes by
+itself. Missing, malformed, non-standard, and otherwise unverifiable `userid`
+values are `unresolved` and fail closed with the same friendly scope denial.
+The callback enforces this after
 provider-profile validation and before provider-identity lookup, profile
 synchronization, new User creation, PostgreSQL commit, Redis handoff, or
 application JWT issuance. Existing accounts are retained when later denied.
@@ -1039,8 +1052,9 @@ access mode, and exact staff userid allowlist in the persisted setting so that
 they can be restored when an administrator later selects
 `selected_departments`. While `all_nthu` is active, those preserved custom
 fields never participate in authorization: every profile that passes the
-existing in-school gate remains eligible. An older `all_nthu` setting with
-empty custom fields remains valid.
+configured in-school restriction and the remaining identity gates remains
+eligible. An older `all_nthu` setting with empty custom fields remains valid
+and defaults the in-school restriction to off.
 
 | Operation | Anonymous | Authenticated user | Owner | Administrator | System |
 | --- | --- | --- | --- | --- | --- |

@@ -76,6 +76,7 @@ const sampleUsers = [
 
 const sampleNthuAccessPolicy = {
   mode: 'all_nthu',
+  require_inschool: false,
   allowed_department_codes: [],
   staff_access: 'none',
   allowed_staff_userids: [],
@@ -1228,6 +1229,7 @@ describe('AdminView', () => {
     await wrapper.vm.loadNthuAccessPolicy()
     expect(getNthuAccessPolicyMock).toHaveBeenCalled()
     expect(wrapper.vm.nthuAccessPolicyForm.mode).toBe('all_nthu')
+    expect(wrapper.vm.nthuAccessPolicyForm.require_inschool).toBe(false)
     expect(wrapper.vm.nthuDepartmentGroups).toEqual([
       expect.objectContaining({
         college_code: '02',
@@ -1248,6 +1250,7 @@ describe('AdminView', () => {
     await wrapper.vm.saveNthuAccessPolicy()
     expect(updateNthuAccessPolicyMock).toHaveBeenCalledWith({
       mode: 'selected_departments',
+      require_inschool: false,
       allowed_department_codes: ['022', '025'],
       staff_access: 'none',
       allowed_staff_userids: [],
@@ -1256,9 +1259,11 @@ describe('AdminView', () => {
     wrapper.vm.nthuAccessPolicyForm.staff_access = 'allowlist'
     wrapper.vm.nthuAccessPolicyForm.allowed_staff_userids = ['W90001']
     wrapper.vm.nthuAccessPolicyForm.mode = 'all_nthu'
+    wrapper.vm.nthuAccessPolicyForm.require_inschool = true
     await wrapper.vm.saveNthuAccessPolicy()
     expect(updateNthuAccessPolicyMock).toHaveBeenLastCalledWith({
       mode: 'all_nthu',
+      require_inschool: true,
       allowed_department_codes: ['022', '025'],
       staff_access: 'allowlist',
       allowed_staff_userids: ['W90001'],
@@ -1281,7 +1286,8 @@ describe('AdminView', () => {
       expect.objectContaining({ severity: 'success', detail: 'NTHU 登入範圍已更新。' })
     )
 
-    expect(adminTemplateSource).toContain('設定哪些清大學生可以透過 NTHU OAuth 登入網站')
+    expect(adminTemplateSource).toContain('設定哪些清大成員可以透過 NTHU OAuth 登入網站')
+    expect(adminTemplateSource).toContain('僅允許在校生登入')
     expect(adminTemplateSource).toContain("user.student_id || '—'")
     expect(adminTemplateSource).toContain('getNthuIdentitySecondaryLine(user)')
     expect(adminTemplateSource).toContain(':filterPlaceholder="$t(\'搜尋中文系所名稱或代碼\')"')
@@ -1307,6 +1313,7 @@ describe('AdminView', () => {
     await wrapper.vm.saveNthuAccessPolicy()
     expect(updateNthuAccessPolicyMock).toHaveBeenCalledWith({
       mode: 'selected_departments',
+      require_inschool: false,
       allowed_department_codes: [],
       staff_access: 'allowlist',
       allowed_staff_userids: ['W90001'],
