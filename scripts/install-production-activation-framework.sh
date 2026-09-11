@@ -36,6 +36,8 @@ source_authorities=(
   scripts/postgres-logical-backup.sh
   scripts/minio-storage-preflight.sh
   scripts/minio-readonly-manifest.sh
+  scripts/pastexam-framework-maintenance-ssh-wrapper.sh
+  scripts/production-framework-maintenance.py
   docker/docker-compose.nginx-immutable.yml
 )
 for relative in "${source_authorities[@]}"; do
@@ -60,6 +62,16 @@ passwd_status="$(passwd -S pastexam-activate | awk '{print $2}')"
 case "$passwd_status" in L|LK) ;; *) echo "Activation account password is not locked." >&2; exit 2 ;; esac
 if id -nG pastexam-activate | tr ' ' '\n' | grep -Fxq docker; then
   echo "Activation account must not belong to the Docker group." >&2
+  exit 2
+fi
+id pastexam-framework-maintenance >/dev/null 2>&1
+maintenance_passwd_status="$(passwd -S pastexam-framework-maintenance | awk '{print $2}')"
+case "$maintenance_passwd_status" in L|LK) ;; *) echo "Maintenance account password is not locked." >&2; exit 2 ;; esac
+[ "$(id -nG pastexam-framework-maintenance)" = pastexam-framework-maintenance ]
+maintenance_shell="$(getent passwd pastexam-framework-maintenance | cut -d: -f7)"
+[ "$maintenance_shell" = /usr/local/sbin/pastexam-framework-maintenance-ssh-wrapper ]
+if id -nG pastexam-framework-maintenance | tr ' ' '\n' | grep -Fxq docker; then
+  echo "Maintenance account must not belong to the Docker group." >&2
   exit 2
 fi
 
@@ -100,6 +112,12 @@ atomic_install \
 atomic_install \
   "$source_root/docker/docker-compose.nginx-immutable.yml" \
   /usr/local/libexec/pastexam-nginx-image-override.yml 0600
+atomic_install \
+  "$source_root/scripts/pastexam-framework-maintenance-ssh-wrapper.sh" \
+  /usr/local/sbin/pastexam-framework-maintenance-ssh-wrapper 0755
+atomic_install \
+  "$source_root/scripts/production-framework-maintenance.py" \
+  /usr/local/libexec/pastexam-production-framework-maintenance 0700
 
 install -d -o root -g root -m 0700 \
   /var/lib/pastexam-deployments \
@@ -121,6 +139,20 @@ chown root:root "$sudoers_partial"
 chmod 0440 "$sudoers_partial"
 visudo -cf "$sudoers_partial"
 mv -fT -- "$sudoers_partial" "$sudoers"
+visudo -c
+trap - EXIT HUP INT TERM
+
+maintenance_helper=/usr/local/libexec/pastexam-production-framework-maintenance
+maintenance_digest="$(sha256sum "$maintenance_helper" | cut -d ' ' -f 1)"
+maintenance_sudoers=/etc/sudoers.d/pastexam-production-framework-maintenance
+maintenance_partial="$maintenance_sudoers.partial-$$"
+trap 'rm -f -- "$maintenance_partial"' EXIT HUP INT TERM
+printf 'pastexam-framework-maintenance ALL=(root) NOPASSWD: sha256:%s %s *\n' \
+  "$maintenance_digest" "$maintenance_helper" >"$maintenance_partial"
+chown root:root "$maintenance_partial"
+chmod 0440 "$maintenance_partial"
+visudo -cf "$maintenance_partial"
+mv -fT -- "$maintenance_partial" "$maintenance_sudoers"
 visudo -c
 trap - EXIT HUP INT TERM
 
