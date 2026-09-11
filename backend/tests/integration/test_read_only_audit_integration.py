@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.db.audit.models import AuditMode, AuditRequest
 from app.db.audit.registry import (
     ELIGIBILITY_AUDIT_ID,
+    NTHU_IDENTITY_PROFILE_REVISION,
     PERMANENT_DELETION_FOUNDATION_REVISION,
     get_audit_adapter,
 )
@@ -166,15 +167,20 @@ def _migration_module() -> dict[str, object]:
     )
 
 
-def test_permanent_deletion_head_passes_sealed_audit_schema_continuity(
+@pytest.mark.parametrize(
+    "expected_ledger",
+    [PERMANENT_DELETION_FOUNDATION_REVISION, NTHU_IDENTITY_PROFILE_REVISION],
+)
+def test_recent_heads_pass_sealed_audit_schema_continuity(
     audit_engine: Engine,
+    expected_ledger: str,
 ) -> None:
     command.upgrade(alembic_config(), "head")
     request = AuditRequest(
         audit_id=ELIGIBILITY_AUDIT_ID,
         audit_version=4,
         mode=AuditMode.ISOLATED_TEST,
-        expected_ledger=PERMANENT_DELETION_FOUNDATION_REVISION,
+        expected_ledger=expected_ledger,
         repository_revision="a" * 40,
     )
 

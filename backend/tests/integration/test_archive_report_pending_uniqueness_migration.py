@@ -25,6 +25,7 @@ NEXT_REVISION = "d1f5a9c3e7b2"
 PREVIOUS_PREVIOUS_HEAD = "e2c6a8f4b1d9"
 PREVIOUS_HEAD = "f6b8d2c4a9e1"
 CURRENT_HEAD = "a5f7c9d2e4b6"
+REPOSITORY_HEAD = "c3f8a1d6e9b2"
 INDEX_NAME = "uq_archive_reports_pending_reporter_archive"
 NOW = datetime(2026, 8, 22, 12, 0, tzinfo=UTC)
 
@@ -245,8 +246,9 @@ def _report_counts(engine: Engine) -> tuple[int, int]:
 def test_revision_is_the_sole_forward_head() -> None:
     script, heads = revision_graph()
 
-    assert HEAD_SCHEMA_REVISION == CURRENT_HEAD
+    assert HEAD_SCHEMA_REVISION == REPOSITORY_HEAD
     assert heads == [HEAD_SCHEMA_REVISION]
+    assert script.get_revision(REPOSITORY_HEAD).down_revision == CURRENT_HEAD
     assert script.get_revision(CURRENT_HEAD).down_revision == PREVIOUS_HEAD
     assert script.get_revision(PREVIOUS_HEAD).down_revision == PREVIOUS_PREVIOUS_HEAD
     assert script.get_revision(PREVIOUS_PREVIOUS_HEAD).down_revision == NEXT_REVISION

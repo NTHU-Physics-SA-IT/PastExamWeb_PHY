@@ -19,6 +19,7 @@ from app.db.audit.registry import (
     ARCHIVE_REPORT_UNIQUENESS_REVISION,
     ELIGIBILITY_AUDIT_ID,
     HOMEPAGE_SLOGAN_REVISION,
+    NTHU_IDENTITY_PROFILE_REVISION,
     PERMANENT_DELETION_FOUNDATION_REVISION,
     RETAINED_EVENT_REVISION,
     WISH_OPTIONAL_SEMESTER_REVISION,
@@ -189,6 +190,7 @@ def test_bilingual_head_audit_is_new_version_and_preserves_lifecycle_classifier(
             HOMEPAGE_SLOGAN_REVISION,
             RETAINED_EVENT_REVISION,
             PERMANENT_DELETION_FOUNDATION_REVISION,
+            NTHU_IDENTITY_PROFILE_REVISION,
         }
     )
     previous = get_audit_adapter(ELIGIBILITY_AUDIT_ID, 3)
@@ -211,6 +213,7 @@ def test_archive_report_audit_is_revision_bounded_aggregate_only_and_read_only()
             HOMEPAGE_SLOGAN_REVISION,
             RETAINED_EVENT_REVISION,
             PERMANENT_DELETION_FOUNDATION_REVISION,
+            NTHU_IDENTITY_PROFILE_REVISION,
         }
     )
     assert set(adapter.approved_aggregate_labels) == {
@@ -338,7 +341,11 @@ def test_a9_continuity_requires_course_submission_lifecycle_shape() -> None:
 
 @pytest.mark.parametrize(
     "expected_ledger",
-    [RETAINED_EVENT_REVISION, PERMANENT_DELETION_FOUNDATION_REVISION],
+    [
+        RETAINED_EVENT_REVISION,
+        PERMANENT_DELETION_FOUNDATION_REVISION,
+        NTHU_IDENTITY_PROFILE_REVISION,
+    ],
 )
 def test_recent_head_continuity_inherits_the_complete_previous_shape(
     expected_ledger: str,
