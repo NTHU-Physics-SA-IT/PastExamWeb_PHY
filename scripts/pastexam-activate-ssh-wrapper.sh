@@ -22,20 +22,20 @@ positive_integer='^[1-9][0-9]*$'
 case "${arguments[0]}:${#arguments[@]}" in
   status:1)
     ;;
-  preflight:4|rollback-preflight:4)
-    [[ "${arguments[1]}" =~ $sha ]]
-    [[ "${arguments[2]}" =~ $positive_integer ]]
-    [[ "${arguments[3]}" =~ $positive_integer ]]
+  observe:4|preflight:4|rollback-preflight:4)
+    [[ "${arguments[1]}" =~ $sha ]] || deny
+    [[ "${arguments[2]}" =~ $positive_integer ]] || deny
+    [[ "${arguments[3]}" =~ $positive_integer ]] || deny
     ;;
   start:7|rollback-start:7)
-    [[ "${arguments[1]}" =~ $sha ]]
-    [[ "${arguments[2]}" =~ $request_id ]]
+    [[ "${arguments[1]}" =~ $sha ]] || deny
+    [[ "${arguments[2]}" =~ $request_id ]] || deny
     for index in 3 4 5 6; do
-      [[ "${arguments[$index]}" =~ $positive_integer ]]
+      [[ "${arguments[$index]}" =~ $positive_integer ]] || deny
     done
     ;;
   request-status:2|receipt:2|resume:2)
-    [[ "${arguments[1]}" =~ $request_id ]]
+    [[ "${arguments[1]}" =~ $request_id ]] || deny
     ;;
   *)
     deny

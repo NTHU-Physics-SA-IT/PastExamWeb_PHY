@@ -157,6 +157,8 @@ jobs:
           ssh-keygen -F "$ACTIVATION_HOST" -f ~/.ssh/known_hosts >/dev/null
 
       - name: Run protected production preflight only
+        id: protected-preflight
+        continue-on-error: true
         env:
           ACTIVATION_HOST: ${{ secrets.PRODUCTION_ACTIVATION_HOST }}
           ACTIVATION_USER: ${{ secrets.PRODUCTION_ACTIVATION_USER }}
@@ -171,9 +173,22 @@ jobs:
             -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "$ACTIVATION_USER@$ACTIVATION_HOST")
           "${ssh_command[@]}" status >"$RUNNER_TEMP/production-status.json"
+          raw_preflight="$RUNNER_TEMP/production-preflight.raw.json"
+          set +e
           "${ssh_command[@]}" \
             "preflight $TARGET_SHA $SOURCE_RUN $SOURCE_ATTEMPT" \
-            >"$RUNNER_TEMP/production-preflight.json"
+            >"$raw_preflight"
+          preflight_exit=$?
+          set -e
+          if [ "$preflight_exit" -ne 0 ]; then
+            python3 scripts/production-activation-contract.py \
+              validate-observation \
+              --input "$raw_preflight" \
+              --output "$RUNNER_TEMP/production-preflight-failure.json" || true
+            rm -f -- "$raw_preflight"
+            exit "$preflight_exit"
+          fi
+          mv "$raw_preflight" "$RUNNER_TEMP/production-preflight.json"
           python3 - "$RUNNER_TEMP/production-preflight.json" \
             "$TARGET_SHA" "$EXPECTED_MANIFEST" "$EXPECTED_RECEIPT" <<'PY'
           import json
@@ -225,12 +240,26 @@ jobs:
           PY
 
       - name: Upload durable production preflight evidence
+        if: steps.protected-preflight.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: production-preflight-evidence-${{ needs.authority.outputs.release_sha }}
           path: ${{ runner.temp }}/production-preflight.json
           if-no-files-found: error
           retention-days: 365
+
+      - name: Upload sanitized production preflight failure evidence
+        if: steps.protected-preflight.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: production-preflight-failure-${{ needs.authority.outputs.release_sha }}
+          path: ${{ runner.temp }}/production-preflight-failure.json
+          if-no-files-found: ignore
+          retention-days: 365
+
+      - name: Preserve protected preflight failure
+        if: steps.protected-preflight.outcome == 'failure'
+        run: exit 2
 
       - name: Remove ephemeral activation key
         if: always()
