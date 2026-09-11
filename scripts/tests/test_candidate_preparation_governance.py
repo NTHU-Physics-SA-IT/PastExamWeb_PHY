@@ -38,6 +38,8 @@ FRAMEWORK_SOURCE_AUTHORITIES = (
     "scripts/postgres-logical-backup.sh",
     "scripts/minio-storage-preflight.sh",
     "scripts/minio-readonly-manifest.sh",
+    "scripts/pastexam-framework-maintenance-ssh-wrapper.sh",
+    "scripts/production-framework-maintenance.py",
     "docker/docker-compose.nginx-immutable.yml",
 )
 EXECUTABLE_FRAMEWORK_SOURCES = frozenset(

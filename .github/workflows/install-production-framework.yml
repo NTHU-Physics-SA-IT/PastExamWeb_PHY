@@ -1,0 +1,190 @@
+name: Install reviewed production framework
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact current main SHA whose framework should be installed
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: production-activation
+  cancel-in-progress: false
+
+jobs:
+  authority:
+    runs-on: ubuntu-latest
+    outputs:
+      release_sha: ${{ steps.full.outputs.release_sha }}
+      source_ci_run_id: ${{ steps.full.outputs.source_ci_run_id }}
+      source_ci_run_attempt: ${{ steps.full.outputs.source_ci_run_attempt }}
+    steps:
+      - name: Checkout the exact requested main authority
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.target_sha }}
+
+      - name: Require workflow source and target to be exact current main
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_SHA" = "$TARGET_SHA"
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = "$TARGET_SHA"
+
+      - name: Require production deploy authority
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AUTHORITY_SHA: ${{ inputs.target_sha }}
+          ORIGINAL_ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          python3 scripts/ci/validate_production_deploy_authority.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --authority-sha "$AUTHORITY_SHA" \
+            --base-branch main \
+            --actor "$ORIGINAL_ACTOR" \
+            --triggering-actor "$TRIGGERING_ACTOR" \
+            --authority-file .github/production-deploy-authority.json
+
+      - name: Resolve authoritative exact-SHA Main Full
+        id: full
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 scripts/ci/validate_candidate_source_run.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --release-sha '${{ inputs.target_sha }}' \
+            --output "$GITHUB_OUTPUT"
+
+      - name: Download exact Full image authority
+        uses: actions/download-artifact@v8
+        with:
+          name: production-image-authority-${{ inputs.target_sha }}
+          path: ${{ runner.temp }}/image-authority
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.full.outputs.source_ci_run_id }}
+
+      - name: Download exact candidate receipt
+        uses: actions/download-artifact@v8
+        with:
+          name: production-candidate-receipt-${{ inputs.target_sha }}
+          path: ${{ runner.temp }}/candidate-receipt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.full.outputs.source_ci_run_id }}
+
+      - name: Bind candidate, image, and Full authority
+        run: |
+          python3 scripts/ci/validate_activation_authority.py \
+            --receipt "$RUNNER_TEMP/candidate-receipt/candidate-receipt.json" \
+            --image-authority "$RUNNER_TEMP/image-authority/production-image-authority.env" \
+            --release-sha '${{ inputs.target_sha }}' \
+            --source-ci-run-id '${{ steps.full.outputs.source_ci_run_id }}' \
+            --source-ci-run-attempt '${{ steps.full.outputs.source_ci_run_attempt }}' \
+            --output "$RUNNER_TEMP/framework-authority.env"
+
+  install:
+    needs: authority
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - name: Checkout approved exact source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.authority.outputs.release_sha }}
+
+      - name: Re-lock current main and Main Full after approval
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ needs.authority.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = "$TARGET_SHA"
+          authority="$RUNNER_TEMP/fresh-main-full.env"
+          python3 scripts/ci/validate_candidate_source_run.py \
+            --repository "$GITHUB_REPOSITORY" --release-sha "$TARGET_SHA" \
+            --output "$authority"
+          test '${{ needs.authority.outputs.source_ci_run_id }}' = \
+            "$(sed -n 's/^source_ci_run_id=//p' "$authority")"
+          test '${{ needs.authority.outputs.source_ci_run_attempt }}' = \
+            "$(sed -n 's/^source_ci_run_attempt=//p' "$authority")"
+
+      - name: Revalidate production deploy authority after approval
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AUTHORITY_SHA: ${{ needs.authority.outputs.release_sha }}
+          ORIGINAL_ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          python3 scripts/ci/validate_production_deploy_authority.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --authority-sha "$AUTHORITY_SHA" \
+            --base-branch main \
+            --actor "$ORIGINAL_ACTOR" \
+            --triggering-actor "$TRIGGERING_ACTOR" \
+            --authority-file .github/production-deploy-authority.json
+
+      - name: Configure restricted framework-maintenance SSH identity
+        id: ssh_setup
+        env:
+          MAINTENANCE_HOST: ${{ secrets.PRODUCTION_FRAMEWORK_MAINTENANCE_HOST }}
+          MAINTENANCE_KNOWN_HOSTS: ${{ secrets.PRODUCTION_FRAMEWORK_MAINTENANCE_KNOWN_HOSTS }}
+          MAINTENANCE_PRIVATE_KEY: ${{ secrets.PRODUCTION_FRAMEWORK_MAINTENANCE_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$MAINTENANCE_HOST"
+          test -n "$MAINTENANCE_KNOWN_HOSTS"
+          test -n "$MAINTENANCE_PRIVATE_KEY"
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$MAINTENANCE_PRIVATE_KEY" >~/.ssh/pastexam-framework-maintenance
+          chmod 600 ~/.ssh/pastexam-framework-maintenance
+          printf '%s\n' "$MAINTENANCE_KNOWN_HOSTS" >~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          ssh-keygen -F "$MAINTENANCE_HOST" -f ~/.ssh/known_hosts >/dev/null
+
+      - name: Install exact reviewed framework and validate integrity
+        env:
+          MAINTENANCE_HOST: ${{ secrets.PRODUCTION_FRAMEWORK_MAINTENANCE_HOST }}
+          MAINTENANCE_USER: ${{ secrets.PRODUCTION_FRAMEWORK_MAINTENANCE_USER }}
+          TARGET_SHA: ${{ needs.authority.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          test -n "$MAINTENANCE_HOST"
+          test "$MAINTENANCE_USER" = pastexam-framework-maintenance
+          raw="$RUNNER_TEMP/framework-installation.raw.json"
+          validated="$RUNNER_TEMP/framework-installation.json"
+          ssh -i ~/.ssh/pastexam-framework-maintenance \
+            -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$MAINTENANCE_USER@$MAINTENANCE_HOST" \
+            "install $TARGET_SHA" >"$raw"
+          python3 scripts/validate-production-framework-installation.py \
+            --input "$raw" --output "$validated" --expected-sha "$TARGET_SHA"
+          rm -f -- "$raw"
+
+      - name: Upload validated framework installation evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: production-framework-installation-${{ needs.authority.outputs.release_sha }}
+          path: ${{ runner.temp }}/framework-installation.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Remove ephemeral framework-maintenance SSH identity
+        if: ${{ always() && steps.ssh_setup.outcome == 'success' }}
+        run: |
+          rm -f -- ~/.ssh/pastexam-framework-maintenance ~/.ssh/known_hosts

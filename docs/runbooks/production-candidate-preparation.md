@@ -58,7 +58,7 @@ run-specific staging directory atomically to `/opt/pastexam-releases/<SHA>`.
 Before upload, packaging applies a fixed `0022` archive umask to every tracked
 member. Git's tracked executable distinction is preserved while group/world
 write permission is removed; content checksums remain content-only. After safe
-extraction and before promotion, preparation requires each of the eight
+extraction and before promotion, preparation requires each of the ten
 framework source-authority files consumed by the canonical activation framework
 installer to remain a regular non-symlink owned by the candidate authority with
 no group/world write permission. The same verification applies when reusing an

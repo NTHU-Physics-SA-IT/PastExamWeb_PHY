@@ -20,7 +20,7 @@ without overwriting either candidate.
 Candidate packaging applies a fixed `0022` archive umask to all tracked members,
 preserving Git's executable distinction while removing group/world write
 permission without changing file content. Candidate verification additionally
-enforces the activation framework installer's source-mode boundary for its eight
+enforces the activation framework installer's source-mode boundary for its ten
 installer-consumed files before atomic promotion and during same-SHA reuse.
 Unsafe existing immutable candidates fail verification and are never repaired
 in place; the installer independently rechecks ownership,
@@ -337,6 +337,27 @@ production migration remains a separately authorized operation. Merging these
 sources does not update the root-installed host framework; a separately
 reviewed host-framework installation is required before the command is
 available in production.
+
+Framework installation uses the separate maintenance lane defined by the
+[production framework maintenance runbook](runbooks/production-framework-maintenance.md).
+It shares the `production-activation` concurrency group and protected
+`production` Environment with activation so framework replacement cannot race
+preflight or activation, but it uses a distinct locked, non-Docker SSH
+principal and forced command. The external interface is exactly
+`install <40-character-current-main-sha>`; the root helper derives the release
+directory from `/opt/pastexam-releases`, captures installer output, and returns
+only fixed component identifiers, digests, ownership, and modes. It never
+accepts a path, executable, shell fragment, database identity, or Docker
+identity.
+
+The maintenance lane is not operational merely because its source has merged.
+The first installation requires the runbook's separately authorized one-time
+bootstrap. That bootstrap installs only the maintenance wrapper/helper,
+dedicated digest-bound sudo rule, locked account, and forced authorized key; it
+does not install the activation framework. Only after bootstrap and required
+Environment secrets are independently verified may the manual install workflow
+be dispatched. Framework installation never implies preflight, activation,
+migration, application image replacement, or traffic change.
 
 ## GitHub activation and durable state
 
