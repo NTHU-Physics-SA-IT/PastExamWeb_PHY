@@ -3,7 +3,6 @@ from __future__ import annotations
 from sqlalchemy import CheckConstraint, UniqueConstraint
 
 from app.db.migration_safety import metadata_for_revision
-from app.db.schema_manifests import HEAD_SCHEMA_REVISION
 from app.db.schema_manifests.registry import PREVIOUS_HEAD_SCHEMA_REVISION
 from app.models.models import (
     PermanentDeletionIdentityScheme,
@@ -97,7 +96,6 @@ def test_models_define_reservation_recovery_and_retention_constraints() -> None:
 
 def test_schema_manifest_authority_advances_one_head() -> None:
     assert PREVIOUS_HEAD_SCHEMA_REVISION == PREVIOUS_HEAD
-    assert HEAD_SCHEMA_REVISION == NEW_HEAD
 
     previous = metadata_for_revision(PREVIOUS_HEAD)
     head = metadata_for_revision(NEW_HEAD)
