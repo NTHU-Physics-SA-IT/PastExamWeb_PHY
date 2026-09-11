@@ -29,6 +29,7 @@
       "tests/integration/test_archive_submission_self_delete_eligibility_migration.py",
       "tests/integration/test_archive_report_pending_uniqueness_migration.py",
       "tests/integration/test_migration_safety.py",
+      "tests/integration/test_nthu_identity_profile_migration.py",
       "tests/integration/test_nthu_student_id_migration.py",
       "tests/integration/test_read_only_audit_integration.py",
       "tests/integration/test_uvicorn_runtime.py",

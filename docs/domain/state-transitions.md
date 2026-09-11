@@ -498,11 +498,12 @@ finalized retry remains a conflict.
 
 ## NTHU login authorization
 
-NTHU UUID remains the canonical external identity. Provider `userid` is a
-synchronized affiliation attribute and never an identity key. The required
-boolean `inschool` attribute is a configurable login-scope restriction rather
-than an identity key: `false` remains a valid alumni profile state and proceeds
-by default, while an administrator may require it to be exactly `true`.
+NTHU UUID remains the canonical external identity. Provider `userid`, email,
+name, and the required boolean `inschool` are synchronized profile attributes,
+never identity keys. Persisted `nthu_inschool` is nullable: true and false are
+known provider states, while null means unknown or not yet synchronized.
+`inschool=false` remains a valid alumni profile state and proceeds by default,
+while an administrator may require it to be exactly true.
 
 `all_nthu` preserves the existing eligible-member behavior and ignores
 department and staff lists. `selected_departments` authorizes through one of
@@ -514,7 +515,15 @@ classification never grants access and never implies an organizational unit.
 
 Authorization runs after the provider profile is established and before local User creation or profile synchronization. A denial produces no User mutation, login handoff, exchange success, or application JWT. Existing users remain persisted and unchanged when a later policy denies a login.
 
-For a NTHU OAuth User, provider-synchronized `name` and `email` remain provider-owned profile attributes. An administrator may still update existing administrative metadata such as `is_admin`, but the admin user-update operation rejects an attempted change to either provider-owned field with `409` before applying any field mutation or commit. Local-account profile updates retain their existing behavior.
+For a NTHU OAuth User, provider-synchronized `student_id`, `name`, `email`, and
+`nthu_inschool` remain provider-owned profile attributes. Duplicate provider
+email or display-name values neither link accounts nor prevent synchronization.
+An administrator may still update existing administrative metadata such as
+`is_admin`, but the admin user-update operation rejects an attempted change to
+provider-owned name or email with `409` before applying any field mutation or
+commit. `User.name` remains the local-login username and is unique only among
+local accounts, including soft-deleted local rows. Email is non-identity contact
+data and may be shared by local or OAuth accounts.
 
 ## Public visibility
 
@@ -1007,8 +1016,8 @@ all of these gates:
 4. when the server-persisted access policy enables `require_inschool`,
    `inschool` is exactly `true`;
 5. the same access policy permits the affiliation;
-6. the matching provider identity is active, or a new identity has no email or
-   name collision; and
+6. the matching provider identity is active, or a new provider identity is
+   created without linking by email or name; and
 7. the browser atomically consumes the short-lived login handoff.
 
 With the default `require_inschool=false`, a valid `inschool=false` alumni
@@ -1017,14 +1026,11 @@ profile continues to the existing affiliation and identity gates. With
 mutates no User. A missing, null, or non-boolean `inschool` value remains a
 malformed provider response and fails as `oauth_provider_failed` before access
 policy evaluation. A matching soft-deleted identity returns
-`oauth_account_deleted` and is never restored by login. A new UUID whose email
-is already owned returns
-`oauth_account_link_required`; this milestone has no implicit or interactive
-account-linking transition. Profile synchronization collisions return
-`oauth_profile_conflict`. Duplicate provider identity or a database uniqueness
-race fails closed as `oauth_identity_conflict`. These are stable,
-non-sensitive business errors and never expose provider payloads or the
-colliding User.
+`oauth_account_deleted` and is never restored by login. Email and name matches
+never substitute for provider identity, link accounts, or block creation and
+profile synchronization. Duplicate provider identity or a database uniqueness
+race fails closed as `oauth_identity_conflict`; the error never exposes provider
+payloads or the colliding User.
 
 The in-school restriction is an authentication Domain policy independent of
 identity mapping. Changing it never changes `oauth_provider="nthu"` or the UUID
@@ -1042,8 +1048,9 @@ itself. Missing, malformed, non-standard, and otherwise unverifiable `userid`
 values are `unresolved` and fail closed with the same friendly scope denial.
 The callback enforces this after
 provider-profile validation and before provider-identity lookup, profile
-synchronization, new User creation, PostgreSQL commit, Redis handoff, or
-application JWT issuance. Existing accounts are retained when later denied.
+synchronization (including `nthu_inschool`), new User creation, PostgreSQL
+commit, Redis handoff, or application JWT issuance. Existing accounts and all
+previous profile values are retained unchanged when later denied.
 Local password authentication never reads this policy.
 
 The active mode and inactive custom configuration have separate lifecycles.

@@ -32,6 +32,7 @@ WISH_REPORT_TRASH_REVISION = "d1f5a9c3e7b2"
 HOMEPAGE_SLOGAN_REVISION = "e2c6a8f4b1d9"
 RETAINED_EVENT_REVISION = "f6b8d2c4a9e1"
 PERMANENT_DELETION_FOUNDATION_REVISION = "a5f7c9d2e4b6"
+NTHU_IDENTITY_PROFILE_REVISION = "c3f8a1d6e9b2"
 ABOUT_US_ORDERING_REVISION = "c7e4a9b2d6f1"
 
 
@@ -826,6 +827,7 @@ _ELIGIBILITY_V4 = AuditAdapter(
             HOMEPAGE_SLOGAN_REVISION,
             RETAINED_EVENT_REVISION,
             PERMANENT_DELETION_FOUNDATION_REVISION,
+            NTHU_IDENTITY_PROFILE_REVISION,
         }
     ),
     approved_aggregate_labels=tuple(OneToOneAggregateCounts.model_fields),
@@ -943,6 +945,7 @@ index_contract AS (
               WHEN 'e2c6a8f4b1d9' THEN 'status=''pending''anddeleted_atisnull'
               WHEN 'f6b8d2c4a9e1' THEN 'status=''pending''anddeleted_atisnull'
               WHEN 'a5f7c9d2e4b6' THEN 'status=''pending''anddeleted_atisnull'
+              WHEN 'c3f8a1d6e9b2' THEN 'status=''pending''anddeleted_atisnull'
               ELSE ''
           END
     ) AS matches
@@ -1002,6 +1005,7 @@ _ARCHIVE_REPORT_UNIQUENESS_V1 = AuditAdapter(
             HOMEPAGE_SLOGAN_REVISION,
             RETAINED_EVENT_REVISION,
             PERMANENT_DELETION_FOUNDATION_REVISION,
+            NTHU_IDENTITY_PROFILE_REVISION,
         }
     ),
     approved_aggregate_labels=tuple(

@@ -26,6 +26,7 @@ from app.db.test_database_guard import (
 
 PREVIOUS_HEAD = "f6b8d2c4a9e1"
 CURRENT_HEAD = "a5f7c9d2e4b6"
+REPOSITORY_HEAD = "c3f8a1d6e9b2"
 TABLES = (
     "permanent_deletion_operations",
     "permanent_deletion_targets",
@@ -110,7 +111,7 @@ def migration_engine(monkeypatch: pytest.MonkeyPatch) -> Engine:
         with engine.begin() as connection:
             connection.execute(text("DROP SCHEMA public CASCADE"))
             connection.execute(text("CREATE SCHEMA public"))
-        command.upgrade(config, CURRENT_HEAD)
+        command.upgrade(config, REPOSITORY_HEAD)
         for setting_name, setting_value in original_settings.items():
             setattr(settings, setting_name, setting_value)
         engine.dispose()
@@ -154,8 +155,9 @@ def test_revision_is_the_single_forward_head() -> None:
     script, heads = revision_graph()
 
     assert PREVIOUS_HEAD_SCHEMA_REVISION == PREVIOUS_HEAD
-    assert HEAD_SCHEMA_REVISION == CURRENT_HEAD
-    assert heads == [CURRENT_HEAD]
+    assert HEAD_SCHEMA_REVISION == REPOSITORY_HEAD
+    assert heads == [REPOSITORY_HEAD]
+    assert script.get_revision(REPOSITORY_HEAD).down_revision == CURRENT_HEAD
     assert script.get_revision(CURRENT_HEAD).down_revision == PREVIOUS_HEAD
 
 

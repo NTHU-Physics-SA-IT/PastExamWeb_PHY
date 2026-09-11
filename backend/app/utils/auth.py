@@ -45,11 +45,15 @@ async def authenticate_user(name: str, password: str, db: AsyncSession) -> User 
     Returns None if authentication fails or if the user is not a local user.
     """
     result = await db.execute(
-        select(User).where(User.name == name, User.deleted_at.is_(None))
+        select(User).where(
+            User.name == name,
+            User.is_local.is_(True),
+            User.deleted_at.is_(None),
+        )
     )
     user = result.scalar_one_or_none()
 
-    if not user or not user.is_local:
+    if not user:
         return None
 
     if not user.password_hash:

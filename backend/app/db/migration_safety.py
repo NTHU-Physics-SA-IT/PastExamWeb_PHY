@@ -53,6 +53,7 @@ COURSE_SUBMISSION_LIFECYCLE_CHECKS = {
     "ck_course_submissions_active_previous_status_null",
 }
 USER_OAUTH_IDENTITY_UNIQUE = "uq_users_oauth_provider_sub"
+USER_LOCAL_NAME_UNIQUE = "uq_users_local_name"
 ARCHIVE_REPORT_PENDING_UNIQUE = "uq_archive_reports_pending_reporter_archive"
 IDENTIFIER_TEXT_CAST = re.compile(
     r"\bcast\(\s*(?P<identifier>[a-z_]\w*(?:\.[a-z_]\w*)?)"
@@ -351,9 +352,23 @@ def _remove_about_us_ordering(metadata: MetaData) -> None:
     table._columns.remove(table.c.order_index)
 
 
+def _restore_pre_nthu_identity_profile_semantics(metadata: MetaData) -> None:
+    users = metadata.tables["users"]
+    users._columns.remove(users.c.nthu_inschool)
+    for index in list(users.indexes):
+        if index.name == USER_LOCAL_NAME_UNIQUE:
+            users.indexes.remove(index)
+        elif index.name in {"ix_users_email", "ix_users_name"}:
+            index.unique = True
+
+
 def _metadata_for_variant(variant: str) -> MetaData:
     metadata = head_metadata()
     if variant == "head":
+        return metadata
+
+    _restore_pre_nthu_identity_profile_semantics(metadata)
+    if variant == "pre_nthu_identity_profile_semantics":
         return metadata
 
     _remove_permanent_deletion_foundation(metadata)
@@ -371,6 +386,7 @@ def _metadata_for_variant(variant: str) -> MetaData:
         "pre_archive_wish_report_trash_metadata",
         "pre_archive_submission_event_detachment",
         "pre_permanent_deletion_foundation",
+        "pre_nthu_identity_profile_semantics",
         "pre_archive_report_active_pending_uniqueness",
         "pre_wish_optional_semester",
         "pre_about_us_ordering",

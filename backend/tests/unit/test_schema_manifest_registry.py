@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 
 from sqlalchemy import UniqueConstraint
+from sqlalchemy.dialects.postgresql import dialect as postgresql_dialect
 from sqlalchemy.dialects.sqlite import dialect as sqlite_dialect
-from sqlalchemy.schema import CreateTable
+from sqlalchemy.schema import CreateIndex, CreateTable
 
 from app.db.migration_safety import _normalize_predicate, metadata_for_revision
 from app.db.schema_manifests import (
@@ -16,7 +17,7 @@ from app.models.models import ArchiveSubmission, User
 
 
 def test_reviewed_manifest_registry_has_required_revisions() -> None:
-    assert HEAD_SCHEMA_REVISION == "a5f7c9d2e4b6"
+    assert HEAD_SCHEMA_REVISION == "c3f8a1d6e9b2"
     assert reviewed_manifest_revisions() == (
         "c4d8e2f1a6b9",
         "a4c7e9d2f6b1",
@@ -42,6 +43,7 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
         "e2c6a8f4b1d9",
         "f6b8d2c4a9e1",
         "a5f7c9d2e4b6",
+        "c3f8a1d6e9b2",
     )
     assert get_manifest_spec("d4b7e2a9c6f1").metadata_variant == (
         "pre_about_us_entries"
@@ -75,7 +77,10 @@ def test_reviewed_manifest_registry_has_required_revisions() -> None:
     assert get_manifest_spec("f6b8d2c4a9e1").metadata_variant == (
         "pre_permanent_deletion_foundation"
     )
-    assert get_manifest_spec("a5f7c9d2e4b6").metadata_variant == "head"
+    assert get_manifest_spec("a5f7c9d2e4b6").metadata_variant == (
+        "pre_nthu_identity_profile_semantics"
+    )
+    assert get_manifest_spec("c3f8a1d6e9b2").metadata_variant == "head"
 
 
 def test_compound_partial_index_predicate_normalizes_postgresql_parentheses() -> None:
@@ -100,7 +105,8 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     column_name = "owner_self_delete_consumed"
     previous_status_column = "previous_status"
     constraint_name = "uq_archive_submissions_created_archive_id"
-    head = metadata_for_revision("a5f7c9d2e4b6")
+    head = metadata_for_revision("c3f8a1d6e9b2")
+    previous_identity_profile_head = metadata_for_revision("a5f7c9d2e4b6")
     previous_permanent_deletion_head = metadata_for_revision("f6b8d2c4a9e1")
     previous_event_head = metadata_for_revision("e2c6a8f4b1d9")
     previous_slogan_head = metadata_for_revision("d1f5a9c3e7b2")
@@ -125,6 +131,7 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     a4 = metadata_for_revision("a4c7e9d2f6b1")
 
     assert head is not None
+    assert previous_identity_profile_head is not None
     assert previous_permanent_deletion_head is not None
     assert "permanent_deletion_operations" in head.tables
     assert "permanent_deletion_targets" in head.tables
@@ -183,6 +190,19 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
 
     assert column_name in head.tables["archive_submissions"].c
     assert "student_id" in head.tables["users"].c
+    assert "nthu_inschool" in head.tables["users"].c
+    assert "nthu_inschool" not in previous_identity_profile_head.tables["users"].c
+    head_user_indexes = {index.name: index for index in head.tables["users"].indexes}
+    previous_user_indexes = {
+        index.name: index
+        for index in previous_identity_profile_head.tables["users"].indexes
+    }
+    assert head_user_indexes["ix_users_email"].unique is False
+    assert head_user_indexes["ix_users_name"].unique is False
+    assert head_user_indexes["uq_users_local_name"].unique is True
+    assert previous_user_indexes["ix_users_email"].unique is True
+    assert previous_user_indexes["ix_users_name"].unique is True
+    assert "uq_users_local_name" not in previous_user_indexes
     assert "name_en" in head.tables["courses"].c
     assert "name_en" in head.tables["course_category_configs"].c
     assert "pre_delete_is_active" in head.tables["course_category_configs"].c
@@ -337,12 +357,13 @@ def test_model_derived_manifest_variants_are_cumulative_and_isolated() -> None:
     )
 
     # Building older variants must never mutate current SQLModel metadata.
-    rebuilt_head = metadata_for_revision("a5f7c9d2e4b6")
+    rebuilt_head = metadata_for_revision("c3f8a1d6e9b2")
     assert rebuilt_head is not None
     assert column_name in rebuilt_head.tables["archive_submissions"].c
     assert previous_status_column in rebuilt_head.tables["archive_submissions"].c
     assert "archive_reports" in rebuilt_head.tables
     assert "student_id" in rebuilt_head.tables["users"].c
+    assert "nthu_inschool" in rebuilt_head.tables["users"].c
     assert any(
         constraint.name == constraint_name
         for constraint in rebuilt_head.tables["archive_submissions"].constraints
@@ -354,6 +375,18 @@ def test_nthu_identity_constraint_compiles_for_nullable_local_accounts() -> None
 
     assert "CONSTRAINT uq_users_oauth_provider_sub" in statement
     assert "UNIQUE (oauth_provider, oauth_sub)" in statement
+
+
+def test_local_username_index_compiles_with_soft_deleted_rows_in_scope() -> None:
+    index = next(
+        index for index in User.__table__.indexes if index.name == "uq_users_local_name"
+    )
+    statement = str(CreateIndex(index).compile(dialect=postgresql_dialect()))
+
+    assert statement == (
+        "CREATE UNIQUE INDEX uq_users_local_name ON users (name) WHERE is_local IS TRUE"
+    )
+    assert "deleted_at" not in statement
 
 
 def test_one_to_one_constraint_compiles_for_sqlite_metadata_neighbors() -> None:

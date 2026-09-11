@@ -155,7 +155,7 @@ async def test_explicit_bootstrap_creates_admin_and_canonical_seed(monkeypatch):
         ],
         "memes": [{"content": "Study hard!", "language": "en"}],
     }
-    fake_session = FakeSession()
+    fake_session = FakeSession(query_values=[None, [], [], 0])
 
     @asynccontextmanager
     async def fake_session_factory():
@@ -479,7 +479,7 @@ async def test_existing_default_admin_credentials_are_not_changed(monkeypatch):
         name=settings.DEFAULT_ADMIN_NAME,
         email="administrator-managed@example.invalid",
         password_hash=original_hash,
-        is_local=False,
+        is_local=True,
         is_admin=True,
     )
     categories = _canonical_category_models()
@@ -497,7 +497,7 @@ async def test_existing_default_admin_credentials_are_not_changed(monkeypatch):
 
     assert admin.password_hash == original_hash
     assert admin.email == "administrator-managed@example.invalid"
-    assert admin.is_local is False
+    assert admin.is_local is True
 
 
 @pytest.mark.asyncio
@@ -509,7 +509,7 @@ async def test_soft_deleted_default_admin_is_restored_and_password_reset(
         name=settings.DEFAULT_ADMIN_NAME,
         email=settings.DEFAULT_ADMIN_EMAIL,
         password_hash=old_hash,
-        is_local=False,
+        is_local=True,
         is_admin=False,
         deleted_at=datetime(2025, 6, 1, tzinfo=UTC),
     )
@@ -538,7 +538,7 @@ async def test_missing_default_admin_is_created(monkeypatch):
     categories = _canonical_category_models()
     fake_session = FakeSession(
         category_configs=categories,
-        query_values=[None, None, categories, [], 1],
+        query_values=[None, categories, [], 1],
     )
     _configure_bootstrap_test(monkeypatch, fake_session)
 
@@ -556,8 +556,9 @@ async def test_missing_default_admin_is_created(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_renamed_admin_email_collision_fails_without_mutation(monkeypatch):
+async def test_default_admin_email_may_match_another_local_user(monkeypatch):
     original_hash = get_password_hash("renamed-admin-password")
+    categories = _canonical_category_models()
     email_owner = User(
         name="Renamed administrator",
         email=settings.DEFAULT_ADMIN_EMAIL,
@@ -567,19 +568,21 @@ async def test_renamed_admin_email_collision_fails_without_mutation(monkeypatch)
     )
     fake_session = FakeSession(
         email_owner=email_owner,
-        query_values=[None, email_owner],
+        category_configs=categories,
+        query_values=[None, categories, [], 1],
     )
     _configure_bootstrap_test(monkeypatch, fake_session)
 
-    with pytest.raises(RuntimeError, match="email is already used"):
-        await init_db.bootstrap_db(
-            confirmed_database_name=settings.DB_NAME,
-            bootstrap_password=BOOTSTRAP_PASSWORD,
-        )
+    await init_db.bootstrap_db(
+        confirmed_database_name=settings.DB_NAME,
+        bootstrap_password=BOOTSTRAP_PASSWORD,
+    )
 
     assert email_owner.password_hash == original_hash
-    assert fake_session.admin is None
-    assert fake_session.commits == 0
+    assert fake_session.admin is not None
+    assert fake_session.admin.name == settings.DEFAULT_ADMIN_NAME
+    assert fake_session.admin.email == email_owner.email
+    assert fake_session.commits == 1
 
 
 @pytest.mark.asyncio

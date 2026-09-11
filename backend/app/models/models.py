@@ -170,6 +170,13 @@ class User(SQLModel, table=True):
             "oauth_sub",
             name="uq_users_oauth_provider_sub",
         ),
+        Index(
+            "uq_users_local_name",
+            "name",
+            unique=True,
+            postgresql_where=text("is_local IS TRUE"),
+            sqlite_where=text("is_local IS TRUE"),
+        ),
     )
     id: int | None = Field(default=None, primary_key=True)
     oauth_provider: str | None = Field(default=None)
@@ -178,8 +185,12 @@ class User(SQLModel, table=True):
         default=None,
         sa_column=Column(String(255), nullable=True),
     )
-    email: str = Field(unique=True, index=True)
-    name: str = Field(unique=True, index=True)
+    nthu_inschool: bool | None = Field(
+        default=None,
+        sa_column=Column(Boolean, nullable=True),
+    )
+    email: str = Field(index=True)
+    name: str = Field(index=True)
     nickname: str | None = Field(default=None, index=True)
     show_level_title: bool = Field(
         default=True,

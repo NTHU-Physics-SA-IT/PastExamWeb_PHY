@@ -26,6 +26,7 @@ from app.db.migration_safety import (
 )
 from app.db.schema_manifests.registry import (
     HEAD_SCHEMA_REVISION,
+    NTHU_IDENTITY_PROFILE_PREVIOUS_SCHEMA_REVISION,
     PREVIOUS_HEAD_SCHEMA_REVISION,
     RETAINED_EVENT_PREVIOUS_SCHEMA_REVISION,
 )
@@ -610,14 +611,14 @@ def test_require_head_is_read_only_at_exact_head(clean_public_schema: Engine) ->
 
 
 def test_require_head_rejects_reviewed_nonzero_delta_without_upgrade() -> None:
-    upgrade(PREVIOUS_HEAD_SCHEMA_REVISION)
+    upgrade(NTHU_IDENTITY_PROFILE_PREVIOUS_SCHEMA_REVISION)
     before = inspect_database().to_dict()
 
     assert migrate.main(["require-head", "--json"]) == 2
 
     after = inspect_database().to_dict()
     assert after == before
-    assert after["current_revision"] == PREVIOUS_HEAD_SCHEMA_REVISION
+    assert after["current_revision"] == NTHU_IDENTITY_PROFILE_PREVIOUS_SCHEMA_REVISION
 
 
 def test_head_schema_matches_sqlmodel_autogenerate_contract() -> None:
@@ -744,6 +745,12 @@ def test_known_non_head_revision_has_validated_forward_upgrade() -> None:
     assert head_revision() == HEAD_SCHEMA_REVISION
     assert (
         script.get_revision(HEAD_SCHEMA_REVISION).down_revision
+        == NTHU_IDENTITY_PROFILE_PREVIOUS_SCHEMA_REVISION
+    )
+    assert (
+        script.get_revision(
+            NTHU_IDENTITY_PROFILE_PREVIOUS_SCHEMA_REVISION
+        ).down_revision
         == PREVIOUS_HEAD_SCHEMA_REVISION
     )
     assert (

@@ -580,14 +580,12 @@ async def create_user(
             status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions"
         )
 
-    result = await db.execute(select(User).where(User.email == user_data.email))
-    if result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User with this email already exists",
+    result = await db.execute(
+        select(User).where(
+            User.name == user_data.name,
+            User.is_local.is_(True),
         )
-
-    result = await db.execute(select(User).where(User.name == user_data.name))
+    )
     if result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -696,7 +694,11 @@ async def update_user(
 
     if user_data.name is not None:
         result = await db.execute(
-            select(User).where(User.name == user_data.name, User.id != user_id)
+            select(User).where(
+                User.name == user_data.name,
+                User.is_local.is_(True),
+                User.id != user_id,
+            )
         )
         if result.scalar_one_or_none():
             raise HTTPException(
@@ -706,14 +708,6 @@ async def update_user(
         user.name = user_data.name
 
     if user_data.email is not None:
-        result = await db.execute(
-            select(User).where(User.email == user_data.email, User.id != user_id)
-        )
-        if result.scalar_one_or_none():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User with this email already exists",
-            )
         user.email = user_data.email
 
     if user_data.password is not None:

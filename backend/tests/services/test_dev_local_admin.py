@@ -19,7 +19,10 @@ from app.services.dev_local_admin import (
 async def clean_dev_local_admin(session_maker):
     async with session_maker() as session:
         fixture_user = await session.scalar(
-            select(User).where(User.email == DEV_LOCAL_ADMIN_EMAIL)
+            select(User).where(
+                User.name == DEV_LOCAL_ADMIN_NAME,
+                User.is_local.is_(True),
+            )
         )
         if fixture_user is not None:
             await session.execute(
@@ -32,7 +35,10 @@ async def clean_dev_local_admin(session_maker):
     yield
     async with session_maker() as session:
         fixture_user = await session.scalar(
-            select(User).where(User.email == DEV_LOCAL_ADMIN_EMAIL)
+            select(User).where(
+                User.name == DEV_LOCAL_ADMIN_NAME,
+                User.is_local.is_(True),
+            )
         )
         if fixture_user is not None:
             await session.execute(
@@ -145,6 +151,34 @@ async def test_fixture_refuses_identity_collision_without_modifying_user(
         assert unchanged.password_hash == "unchanged-hash"
         assert unchanged.is_admin is False
         await session.delete(unchanged)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_fixture_ignores_same_profile_values_on_oauth_user(session_maker) -> None:
+    async with session_maker() as session:
+        oauth_user = User(
+            oauth_provider="nthu",
+            oauth_sub="dev-fixture-shared-profile",
+            name=DEV_LOCAL_ADMIN_NAME,
+            nickname="OAuth profile",
+            email=DEV_LOCAL_ADMIN_EMAIL,
+            is_local=False,
+        )
+        session.add(oauth_user)
+        await session.commit()
+
+        result = await ensure_dev_local_admin(
+            session,
+            environment="test",
+            password="Fixture-Password-123!",
+        )
+        await session.commit()
+
+        assert result.created is True
+        assert result.user.id != oauth_user.id
+        assert result.user.is_local is True
+        await session.delete(oauth_user)
         await session.commit()
 
 

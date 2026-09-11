@@ -332,7 +332,7 @@ async def test_update_nthu_user_rejects_provider_profile_mutation_but_allows_adm
 
 
 @pytest.mark.asyncio
-async def test_update_user_prevents_duplicate_email(client, session_maker):
+async def test_update_user_allows_duplicate_email(client, session_maker):
     unique = uuid.uuid4().hex[:8]
     other = uuid.uuid4().hex[:8]
     async with session_maker() as session:
@@ -363,8 +363,8 @@ async def test_update_user_prevents_duplicate_email(client, session_maker):
             f"{ADMIN_PATH}/{target_id}",
             json={"email": f"existing-{unique}@example.com"},
         )
-        assert response.status_code == 400
-        assert "already exists" in response.json()["detail"]
+        assert response.status_code == 200
+        assert response.json()["email"] == f"existing-{unique}@example.com"
     finally:
         app.dependency_overrides.pop(get_current_user, None)
         async with session_maker() as session:
@@ -444,7 +444,7 @@ async def test_get_users_direct_returns_users(session_maker):
 
 
 @pytest.mark.asyncio
-async def test_create_user_direct_duplicate_email(session_maker):
+async def test_create_user_direct_allows_duplicate_email(session_maker):
     async with session_maker() as session:
         existing = User(
             name="dup-email-existing",
@@ -455,19 +455,19 @@ async def test_create_user_direct_duplicate_email(session_maker):
         session.add(existing)
         await session.commit()
 
-        with pytest.raises(HTTPException) as exc:
-            await create_user(
-                user_data=UserCreate(
-                    name="dup-email-new",
-                    email="dup-email@example.com",
-                    password="irrelevant",
-                    is_admin=False,
-                ),
-                current_user=UserRoles(user_id=1, is_admin=True),
-                db=session,
-            )
-        assert exc.value.status_code == 400
+        created = await create_user(
+            user_data=UserCreate(
+                name="dup-email-new",
+                email="dup-email@example.com",
+                password="irrelevant",
+                is_admin=False,
+            ),
+            current_user=UserRoles(user_id=1, is_admin=True),
+            db=session,
+        )
+        assert created.email == existing.email
 
+        await session.delete(created)
         await session.delete(existing)
         await session.commit()
 
@@ -498,6 +498,70 @@ async def test_create_user_direct_duplicate_name(session_maker):
         assert exc.value.status_code == 400
 
         await session.delete(existing)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_create_user_direct_allows_oauth_name_and_email(session_maker):
+    async with session_maker() as session:
+        oauth_user = User(
+            oauth_provider="nthu",
+            oauth_sub=f"uuid-{uuid.uuid4().hex}",
+            name="shared-oauth-local-name",
+            email="shared-oauth-local@example.com",
+            is_admin=False,
+            is_local=False,
+        )
+        session.add(oauth_user)
+        await session.commit()
+
+        local_user = await create_user(
+            user_data=UserCreate(
+                name=oauth_user.name,
+                email=oauth_user.email,
+                password="irrelevant",
+                is_admin=False,
+            ),
+            current_user=UserRoles(user_id=1, is_admin=True),
+            db=session,
+        )
+
+        assert local_user.id != oauth_user.id
+        assert local_user.name == oauth_user.name
+        assert local_user.email == oauth_user.email
+
+        await session.delete(local_user)
+        await session.delete(oauth_user)
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_soft_deleted_local_user_reserves_name(session_maker):
+    async with session_maker() as session:
+        deleted = User(
+            name="reserved-local-name",
+            email="reserved-local@example.com",
+            is_admin=False,
+            is_local=True,
+            deleted_at=datetime.now(UTC),
+        )
+        session.add(deleted)
+        await session.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            await create_user(
+                user_data=UserCreate(
+                    name=deleted.name,
+                    email="replacement-local@example.com",
+                    password="irrelevant",
+                    is_admin=False,
+                ),
+                current_user=UserRoles(user_id=1, is_admin=True),
+                db=session,
+            )
+        assert exc.value.status_code == 400
+
+        await session.delete(deleted)
         await session.commit()
 
 
@@ -572,7 +636,7 @@ async def test_update_user_direct_duplicate_name(session_maker):
 
 
 @pytest.mark.asyncio
-async def test_update_user_direct_duplicate_email(session_maker):
+async def test_update_user_direct_allows_duplicate_email(session_maker):
     async with session_maker() as session:
         existing = User(
             name="existing-email",
@@ -590,14 +654,13 @@ async def test_update_user_direct_duplicate_email(session_maker):
         await session.commit()
         await session.refresh(target)
 
-        with pytest.raises(HTTPException) as exc:
-            await update_user(
-                user_id=target.id,
-                user_data=UserUpdate(email="existing-email@example.com"),
-                current_user=UserRoles(user_id=1, is_admin=True),
-                db=session,
-            )
-        assert exc.value.status_code == 400
+        updated = await update_user(
+            user_id=target.id,
+            user_data=UserUpdate(email="existing-email@example.com"),
+            current_user=UserRoles(user_id=1, is_admin=True),
+            db=session,
+        )
+        assert updated.email == existing.email
 
         await session.delete(existing)
         await session.delete(target)
