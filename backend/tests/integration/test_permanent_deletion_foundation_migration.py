@@ -111,7 +111,7 @@ def migration_engine(monkeypatch: pytest.MonkeyPatch) -> Engine:
         with engine.begin() as connection:
             connection.execute(text("DROP SCHEMA public CASCADE"))
             connection.execute(text("CREATE SCHEMA public"))
-        command.upgrade(config, CURRENT_HEAD)
+        command.upgrade(config, REPOSITORY_HEAD)
         for setting_name, setting_value in original_settings.items():
             setattr(settings, setting_name, setting_value)
         engine.dispose()
