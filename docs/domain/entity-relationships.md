@@ -44,13 +44,20 @@ current implementation separately from the intended product relation.
 
 `User.oauth_provider` and `User.oauth_sub` form the provider identity. For the
 NTHU integration the only valid mapping is `oauth_provider="nthu"` and
-`oauth_sub=<NTHU uuid>`. `userid`, email, and name are profile attributes and
-must never substitute for a missing, blank, or malformed `uuid`.
+`oauth_sub=<NTHU uuid>`. `userid`, email, name, and `nthu_inschool` are mutable
+profile attributes and must never substitute for a missing, blank, or malformed
+`uuid`.
 
 `User.student_id` is the single nullable persisted copy of the NTHU resource
 `userid`. It is an affiliation attribute, not an identity or account-linking
 key. Local accounts keep it null. A successful NTHU login synchronizes it from
 the current provider profile; a denied login does not mutate it.
+
+`User.nthu_inschool` is the nullable persisted copy of the provider's required
+boolean `inschool` value. `true` and `false` are known provider states; null
+means unknown or not yet synchronized. Existing and local rows are not guessed
+or backfilled. A successful NTHU login synchronizes it, while a policy-denied
+login leaves the previous value unchanged.
 
 The backend owns one parser, one derived affiliation classifier, and one
 Registrar-derived department catalog. A standard nine-digit value is split into
@@ -69,14 +76,17 @@ The named PostgreSQL unique constraint `uq_users_oauth_provider_sub` is the
 concurrency arbiter for provider identity. Both columns remain nullable so
 local users may keep `(NULL, NULL)`; application-created NTHU users require
 both values. Identity lookup is always by the provider/sub pair. Email is not
-an account-linking key, and a collision with any existing User fails closed
-with `oauth_account_link_required` rather than linking or revealing that User.
+an account-linking key. Equal provider email or display-name values never merge,
+link, or reject distinct provider identities.
 
 On first login, provider email and name initialize `email`, `name`, and
-`nickname`. Repeat login may synchronize email and name only when neither
-conflicts with another User. A later login never overwrites the user-managed
-nickname. A matching soft-deleted NTHU User remains the same identity but is
-denied; OAuth does not restore it or change its lifecycle metadata.
+`nickname`. Repeat login synchronizes email, name, student ID, and
+`nthu_inschool` on the same provider identity. A later login never overwrites
+the user-managed nickname. A matching soft-deleted NTHU User remains the same
+identity but is denied; OAuth does not restore it or change its lifecycle
+metadata. `User.name` remains the local-login username only for local accounts;
+it is unique across active and soft-deleted local rows, while OAuth display
+names may duplicate it.
 
 ## Independent approved files
 

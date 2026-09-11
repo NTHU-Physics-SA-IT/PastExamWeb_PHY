@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import or_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -42,10 +41,8 @@ async def ensure_dev_local_admin(
         (
             await session.execute(
                 select(User).where(
-                    or_(
-                        User.name == DEV_LOCAL_ADMIN_NAME,
-                        User.email == DEV_LOCAL_ADMIN_EMAIL,
-                    )
+                    User.name == DEV_LOCAL_ADMIN_NAME,
+                    User.is_local.is_(True),
                 )
             )
         )
@@ -74,7 +71,6 @@ async def ensure_dev_local_admin(
     user = matches[0]
     if (
         user.name != DEV_LOCAL_ADMIN_NAME
-        or user.email != DEV_LOCAL_ADMIN_EMAIL
         or user.nickname != DEV_LOCAL_ADMIN_NICKNAME
         or user.oauth_provider is not None
         or user.oauth_sub is not None
@@ -84,9 +80,11 @@ async def ensure_dev_local_admin(
         )
 
     user.password_hash = get_password_hash(password)
+    user.email = DEV_LOCAL_ADMIN_EMAIL
     user.is_local = True
     user.is_admin = True
     user.student_id = None
+    user.nthu_inschool = None
     user.deleted_at = None
     await session.flush()
     return DevLocalAdminResult(user=user, created=False)

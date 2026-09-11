@@ -182,19 +182,6 @@ async def fetch_nthu_profile(
             await client.aclose()
 
 
-async def _find_collision(
-    db: AsyncSession,
-    *,
-    field,
-    value: str,
-    excluding_user_id: int | None = None,
-) -> User | None:
-    statement = select(User).where(field == value)
-    if excluding_user_id is not None:
-        statement = statement.where(User.id != excluding_user_id)
-    return (await db.execute(statement.limit(1))).scalar_one_or_none()
-
-
 async def resolve_nthu_user(db: AsyncSession, profile: NthuProfile) -> User:
     """Resolve and synchronize the NTHU identity without committing."""
     try:
@@ -221,35 +208,18 @@ async def resolve_nthu_user(db: AsyncSession, profile: NthuProfile) -> User:
         user = identity_rows[0]
         if user.deleted_at is not None:
             raise NthuOAuthBusinessError("oauth_account_deleted")
-        email_collision = await _find_collision(
-            db,
-            field=User.email,
-            value=profile.email,
-            excluding_user_id=user.id,
-        )
-        name_collision = await _find_collision(
-            db,
-            field=User.name,
-            value=profile.name,
-            excluding_user_id=user.id,
-        )
-        if email_collision is not None or name_collision is not None:
-            raise NthuOAuthBusinessError("oauth_profile_conflict")
         user.email = profile.email
         user.name = profile.name
         user.student_id = profile.userid
+        user.nthu_inschool = profile.inschool
         await db.flush()
         return user
-
-    if await _find_collision(db, field=User.email, value=profile.email):
-        raise NthuOAuthBusinessError("oauth_account_link_required")
-    if await _find_collision(db, field=User.name, value=profile.name):
-        raise NthuOAuthBusinessError("oauth_profile_conflict")
 
     user = User(
         oauth_provider=NTHU_PROVIDER,
         oauth_sub=profile.uuid,
         student_id=profile.userid,
+        nthu_inschool=profile.inschool,
         email=profile.email,
         name=profile.name,
         nickname=profile.name,

@@ -10,7 +10,8 @@ WISH_REPORT_PREVIOUS_SCHEMA_REVISION = "c8e4a1f7b2d9"
 HOMEPAGE_SLOGAN_PREVIOUS_SCHEMA_REVISION = "d1f5a9c3e7b2"
 RETAINED_EVENT_PREVIOUS_SCHEMA_REVISION = "e2c6a8f4b1d9"
 PREVIOUS_HEAD_SCHEMA_REVISION = "f6b8d2c4a9e1"
-HEAD_SCHEMA_REVISION = "a5f7c9d2e4b6"
+NTHU_IDENTITY_PROFILE_PREVIOUS_SCHEMA_REVISION = "a5f7c9d2e4b6"
+HEAD_SCHEMA_REVISION = "c3f8a1d6e9b2"
 
 
 @dataclass(frozen=True)
@@ -161,6 +162,11 @@ MANIFESTS = {
         revision=PREVIOUS_HEAD_SCHEMA_REVISION,
         description="schema before permanent deletion foundation",
         metadata_variant="pre_permanent_deletion_foundation",
+    ),
+    NTHU_IDENTITY_PROFILE_PREVIOUS_SCHEMA_REVISION: ManifestSpec(
+        revision=NTHU_IDENTITY_PROFILE_PREVIOUS_SCHEMA_REVISION,
+        description="schema before NTHU identity profile semantics",
+        metadata_variant="pre_nthu_identity_profile_semantics",
     ),
     HEAD_SCHEMA_REVISION: ManifestSpec(
         revision=HEAD_SCHEMA_REVISION,

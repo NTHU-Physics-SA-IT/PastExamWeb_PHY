@@ -90,7 +90,9 @@ Reviewed manifests currently cover:
 - `e2c6a8f4b1d9`: the reviewed schema before retained event detachment; and
 - `f6b8d2c4a9e1`: the reviewed schema before the inert permanent-deletion
   foundation; and
-- `a5f7c9d2e4b6`: the current repository head and SQLModel metadata contract.
+- `a5f7c9d2e4b6`: the reviewed schema before NTHU identity/profile semantics;
+  and
+- `c3f8a1d6e9b2`: the current repository head and SQLModel metadata contract.
 
 These are not claims about a live production revision. An unrecognized
 production revision must remain blocked until a separately authorized,
@@ -209,6 +211,25 @@ unchanged. Upgrade verifies the exact reviewed source revision and source
 columns before DDL, then validates the new type and nullability. Downgrade
 removes only this attribute column and preserves all User rows and provider
 identity values.
+
+The NTHU identity/profile semantics migration adds nullable boolean
+`users.nthu_inschool` without a default or backfill. Existing and local rows
+therefore remain null until a successful NTHU login synchronizes a known
+provider value. It preserves the named `uq_users_oauth_provider_sub`
+constraint, replaces the global unique email and name indexes with ordinary
+non-unique indexes, and creates `uq_users_local_name` as a PostgreSQL partial
+unique index on `name WHERE is_local IS TRUE`. The local predicate intentionally
+does not exclude soft-deleted rows, so restore retains the same reserved local
+username. Upgrade creates this replacement protection before removing global
+name uniqueness and never rewrites User data.
+
+Downgrade first locks the User table and performs aggregate-only duplicate
+checks for exact global email and name values. If post-upgrade duplicates would
+prevent restoration of the former global unique indexes, it aborts the
+transaction with counts only and never deletes, merges, or renames a User.
+When the data is compatible, downgrade restores both global unique indexes,
+removes only the local-name index and `nthu_inschool` column, and preserves all
+User rows and provider identities.
 
 The bilingual course-catalog migration adds only nullable `courses.name_en`
 and nullable `course_category_configs.name_en` / `label_en`. It preserves the

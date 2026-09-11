@@ -74,6 +74,37 @@ async def test_authenticate_user_validates_credentials(session_maker):
 
 
 @pytest.mark.asyncio
+async def test_authenticate_user_ignores_same_name_oauth_user(session_maker):
+    password = "PlainPassword!"
+    shared_name = f"shared-login-{uuid.uuid4().hex[:8]}"
+    async with session_maker() as session:
+        oauth_user = User(
+            oauth_provider="nthu",
+            oauth_sub=f"uuid-{uuid.uuid4().hex}",
+            name=shared_name,
+            email=f"oauth-{uuid.uuid4().hex[:8]}@example.com",
+            password_hash=None,
+            is_local=False,
+        )
+        local_user = User(
+            name=shared_name,
+            email=f"local-{uuid.uuid4().hex[:8]}@example.com",
+            password_hash=auth_utils.get_password_hash(password),
+            is_local=True,
+        )
+        session.add_all([oauth_user, local_user])
+        await session.commit()
+        local_user_id = local_user.id
+
+    async with session_maker() as session:
+        found = await auth_utils.authenticate_user(shared_name, password, session)
+
+        assert found is not None
+        assert found.id == local_user_id
+        assert found.is_local is True
+
+
+@pytest.mark.asyncio
 async def test_get_current_user_success(monkeypatch, session_maker):
     fake_redis = FakeRedis()
     monkeypatch.setattr(auth_utils, "redis_client", fake_redis)

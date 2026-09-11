@@ -327,7 +327,10 @@ async def bootstrap_db(
     async with AsyncSessionLocal() as session:
         is_first_bootstrap = await _validate_bootstrap_contents(session)
         result = await session.execute(
-            select(User).where(User.name == settings.DEFAULT_ADMIN_NAME)
+            select(User).where(
+                User.name == settings.DEFAULT_ADMIN_NAME,
+                User.is_local.is_(True),
+            )
         )
         admin_user = result.scalar_one_or_none()
 
@@ -337,18 +340,6 @@ async def bootstrap_db(
             admin_user.is_local = True
             admin_user.is_admin = True
         elif not admin_user:
-            email_owner = (
-                await session.execute(
-                    select(User).where(
-                        User.email == settings.DEFAULT_ADMIN_EMAIL
-                    )
-                )
-            ).scalar_one_or_none()
-            if email_owner is not None:
-                raise RuntimeError(
-                    "Default administrator email is already used by a "
-                    "different account; refusing to create or reset users"
-                )
             admin_user = User(
                 name=settings.DEFAULT_ADMIN_NAME,
                 email=settings.DEFAULT_ADMIN_EMAIL,

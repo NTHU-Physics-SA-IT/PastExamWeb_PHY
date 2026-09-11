@@ -359,6 +359,7 @@ async def test_first_and_repeat_login_use_nthu_uuid_and_preserve_nickname(
     assert user.email == first.email
     assert user.name == first.name
     assert user.nickname == first.name
+    assert user.nthu_inschool is True
     assert user.is_local is False
 
     async with session_maker() as session:
@@ -371,6 +372,7 @@ async def test_first_and_repeat_login_use_nthu_uuid_and_preserve_nickname(
         userid="112022123",
         name=f"Updated {uuid.uuid4().hex[:8]}",
         email=f"updated-{uuid.uuid4().hex[:8]}@example.com",
+        inschool=False,
     )
     async with session_maker() as session:
         repeated = await resolve_nthu_user(session, updated)
@@ -381,6 +383,7 @@ async def test_first_and_repeat_login_use_nthu_uuid_and_preserve_nickname(
     assert repeated.email == updated.email
     assert repeated.nickname == "自訂暱稱"
     assert repeated.student_id == updated.userid
+    assert repeated.nthu_inschool is False
 
 
 @pytest.mark.asyncio
@@ -394,6 +397,7 @@ async def test_all_nthu_allows_any_in_school_affiliation(session_maker, userid):
 
         assert user.oauth_sub == profile.uuid
         assert user.student_id == userid
+        assert user.nthu_inschool is True
 
 
 @pytest.mark.asyncio
@@ -440,6 +444,7 @@ async def test_existing_user_is_preserved_when_policy_later_denies(session_maker
             user.student_id,
             user.name,
             user.email,
+            user.nthu_inschool,
             user.deleted_at,
         )
 
@@ -455,8 +460,15 @@ async def test_existing_user_is_preserved_when_policy_later_denies(session_maker
         )
         await session.commit()
 
+        denied_profile = _profile(
+            uuid=profile.uuid,
+            userid="112023999",
+            name=f"Denied {uuid.uuid4().hex[:8]}",
+            email=f"denied-{uuid.uuid4().hex[:8]}@example.com",
+            inschool=False,
+        )
         with pytest.raises(NthuOAuthBusinessError) as exc_info:
-            await resolve_nthu_user(session, profile)
+            await resolve_nthu_user(session, denied_profile)
         assert exc_info.value.code == "oauth_department_not_allowed"
         await session.rollback()
 
@@ -468,6 +480,7 @@ async def test_existing_user_is_preserved_when_policy_later_denies(session_maker
             stored.student_id,
             stored.name,
             stored.email,
+            stored.nthu_inschool,
             stored.deleted_at,
         ) == original
 
@@ -495,48 +508,70 @@ async def test_selected_department_allows_and_persists_physics_student(session_m
 
 
 @pytest.mark.asyncio
-async def test_new_identity_email_collision_requires_explicit_linking(
+async def test_new_identity_may_share_local_email_and_name(
     session_maker,
     make_user,
 ):
     existing = await make_user()
-    profile = _profile(email=existing.email)
+    profile = _profile(email=existing.email, name=existing.name)
 
     async with session_maker() as session:
-        with pytest.raises(NthuOAuthBusinessError) as exc_info:
-            await resolve_nthu_user(session, profile)
-        assert exc_info.value.code == "oauth_account_link_required"
+        created = await resolve_nthu_user(session, profile)
+        await session.commit()
+
+        assert created.id != existing.id
+        assert created.oauth_sub == profile.uuid
+        assert created.email == existing.email
+        assert created.name == existing.name
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("collision_field", ["name", "email"])
-async def test_repeat_profile_collision_fails_without_overwriting_user(
+async def test_distinct_nthu_identities_may_share_email_and_name(
+    session_maker,
+):
+    shared_name = f"Shared NTHU {uuid.uuid4().hex[:8]}"
+    shared_email = f"shared-nthu-{uuid.uuid4().hex[:8]}@example.com"
+    first = _profile(name=shared_name, email=shared_email)
+    second = _profile(name=shared_name, email=shared_email)
+
+    async with session_maker() as session:
+        first_user = await resolve_nthu_user(session, first)
+        await session.commit()
+        second_user = await resolve_nthu_user(session, second)
+        await session.commit()
+
+        assert first_user.id != second_user.id
+        assert first_user.oauth_sub != second_user.oauth_sub
+
+
+@pytest.mark.asyncio
+async def test_repeat_profile_sync_allows_shared_email_and_name(
     session_maker,
     make_user,
-    collision_field,
 ):
-    collision = await make_user()
+    shared = await make_user()
     first = _profile()
     async with session_maker() as session:
         user = await resolve_nthu_user(session, first)
         await session.commit()
         user_id = user.id
 
-    overrides = {
-        "uuid": first.uuid,
-        collision_field: getattr(collision, collision_field),
-    }
-    changed = _profile(**overrides)
+    changed = _profile(
+        uuid=first.uuid,
+        userid="112022999",
+        name=shared.name,
+        email=shared.email,
+        inschool=False,
+    )
     async with session_maker() as session:
-        with pytest.raises(NthuOAuthBusinessError) as exc_info:
-            await resolve_nthu_user(session, changed)
-        assert exc_info.value.code == "oauth_profile_conflict"
-        await session.rollback()
+        repeated = await resolve_nthu_user(session, changed)
+        await session.commit()
 
-    async with session_maker() as session:
-        stored = await session.get(User, user_id)
-        assert stored.name == first.name
-        assert stored.email == first.email
+        assert repeated.id == user_id
+        assert repeated.name == shared.name
+        assert repeated.email == shared.email
+        assert repeated.student_id == changed.userid
+        assert repeated.nthu_inschool is False
 
 
 @pytest.mark.asyncio
@@ -550,11 +585,22 @@ async def test_deleted_nthu_identity_is_denied_without_restore(session_maker):
         user_id = user.id
 
     async with session_maker() as session:
+        changed = _profile(
+            uuid=first.uuid,
+            userid="112022999",
+            name=f"Deleted change {uuid.uuid4().hex[:8]}",
+            email=f"deleted-change-{uuid.uuid4().hex[:8]}@example.com",
+            inschool=False,
+        )
         with pytest.raises(NthuOAuthBusinessError) as exc_info:
-            await resolve_nthu_user(session, first)
+            await resolve_nthu_user(session, changed)
         assert exc_info.value.code == "oauth_account_deleted"
         await session.rollback()
 
     async with session_maker() as session:
         stored = await session.get(User, user_id)
         assert stored.deleted_at is not None
+        assert stored.student_id == first.userid
+        assert stored.name == first.name
+        assert stored.email == first.email
+        assert stored.nthu_inschool is True
