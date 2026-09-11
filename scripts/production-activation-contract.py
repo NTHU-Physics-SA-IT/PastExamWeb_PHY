@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+ALEMBIC_REVISION = re.compile(r"^[0-9a-f]{12}$")
 REQUEST_ID = re.compile(r"^[a-z][a-z0-9-]{7,79}$")
 IMAGE_PATTERN = re.compile(r"^[A-Za-z0-9./_-]+:[A-Za-z0-9_.-]+@sha256:[0-9a-f]{64}$")
 SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9_.:-]+$")
@@ -46,6 +47,17 @@ ACTIVATION_FAILURE_STAGES = frozenset(
         "bounded-observation",
         "activation-marker",
         "engine-evidence",
+    }
+)
+OBSERVATION_KEYS = frozenset(
+    {
+        "schema_version",
+        "current_active_sha",
+        "db_current_revision",
+        "expected_revision",
+        "migration_delta",
+        "schema_match",
+        "failed_stage",
     }
 )
 LISTEN_PORT = re.compile(
@@ -273,6 +285,68 @@ def _load_json(path: Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise ContractError(f"Cannot read validated JSON input: {path.name}") from error
+
+
+def _load_strict_json(path: Path) -> Any:
+    def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ContractError("Observation evidence contains a duplicate key.")
+            result[key] = value
+        return result
+
+    try:
+        return json.loads(
+            path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicates
+        )
+    except (OSError, json.JSONDecodeError) as error:
+        raise ContractError("Cannot read observation evidence JSON.") from error
+
+
+def _validate_observation(input_path: Path, output: Path) -> None:
+    payload = _load_strict_json(input_path)
+    if not isinstance(payload, dict) or set(payload) != OBSERVATION_KEYS:
+        raise ContractError("Observation evidence has an unexpected schema.")
+    if type(payload["schema_version"]) is not int or payload["schema_version"] != 1:
+        raise ContractError("Observation evidence schema version is malformed.")
+    if (
+        not isinstance(payload["current_active_sha"], str)
+        or FULL_SHA.fullmatch(payload["current_active_sha"]) is None
+    ):
+        raise ContractError("Observation active SHA is malformed.")
+    expected = payload["expected_revision"]
+    current = payload["db_current_revision"]
+    if not isinstance(expected, str) or ALEMBIC_REVISION.fullmatch(expected) is None:
+        raise ContractError("Observation expected revision is malformed.")
+    if current is not None and (
+        not isinstance(current, str) or ALEMBIC_REVISION.fullmatch(current) is None
+    ):
+        raise ContractError("Observation database revision is malformed.")
+    delta = payload["migration_delta"]
+    if delta is not None and (
+        isinstance(delta, bool) or not isinstance(delta, int) or delta < 0
+    ):
+        raise ContractError("Observation migration delta is malformed.")
+    schema_match = payload["schema_match"]
+    if schema_match is not None and not isinstance(schema_match, bool):
+        raise ContractError("Observation schema-match state is malformed.")
+    failed_stage = payload["failed_stage"]
+    if failed_stage is not None and failed_stage not in ACTIVATION_FAILURE_STAGES:
+        raise ContractError("Observation failed stage is unsupported.")
+    if current is None and (delta is not None or schema_match is not None):
+        raise ContractError("Unavailable live revision must fail closed.")
+    if (
+        current == expected
+        and current is not None
+        and (delta != 0 or schema_match is not True)
+    ):
+        raise ContractError("Matching revision evidence is inconsistent.")
+    if current is not None and current != expected and schema_match is not False:
+        raise ContractError("Revision mismatch evidence is inconsistent.")
+    if delta == 0 and current != expected:
+        raise ContractError("Zero migration delta evidence is inconsistent.")
+    _write_json_atomic(output, payload)
 
 
 def _load_json_stream() -> Any:
@@ -1586,6 +1660,9 @@ def _parser() -> argparse.ArgumentParser:
     failure.add_argument("--target-sha", required=True)
     failure.add_argument("--stage", required=True)
     failure.add_argument("--exit-code", type=int, required=True)
+    observation = subparsers.add_parser("validate-observation")
+    observation.add_argument("--input", type=Path, required=True)
+    observation.add_argument("--output", type=Path, required=True)
     subparsers.add_parser("count-critical-log-lines")
     return parser
 
@@ -1635,6 +1712,8 @@ def main() -> int:
                 args.stage,
                 args.exit_code,
             )
+        elif args.command == "validate-observation":
+            _validate_observation(args.input, args.output)
         else:
             _write_engine_evidence(
                 args.output,

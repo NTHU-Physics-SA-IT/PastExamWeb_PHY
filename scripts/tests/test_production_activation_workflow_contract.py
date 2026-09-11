@@ -155,6 +155,8 @@ def test_preflight_workflow_is_protected_authoritative_and_preflight_only() -> N
         if step["name"] == "Run protected production preflight only"
     )
     host_commands = host_step["run"]
+    assert host_step["id"] == "protected-preflight"
+    assert host_step["continue-on-error"] == "true"
     assert host_commands.count('"${ssh_command[@]}"') == 2
     assert '"${ssh_command[@]}" status' in host_commands
     assert (
@@ -175,6 +177,11 @@ def test_preflight_workflow_is_protected_authoritative_and_preflight_only() -> N
         'data["current_active_sha"]',
     ):
         assert evidence_field in host_commands
+    assert "preflight_exit=$?" in host_commands
+    assert 'if [ "$preflight_exit" -ne 0 ]' in host_commands
+    assert "validate-observation" in host_commands
+    assert "production-preflight-failure.json" in host_commands
+    assert 'exit "$preflight_exit"' in host_commands
 
     all_runs = "\n".join(step.get("run", "") for step in protected_steps)
     assert all_runs.count('"${ssh_command[@]}"') == 2
@@ -198,6 +205,24 @@ def test_preflight_workflow_is_protected_authoritative_and_preflight_only() -> N
         if step["name"] == "Upload durable production preflight evidence"
     )
     assert upload["with"]["path"] == "${{ runner.temp }}/production-preflight.json"
+    assert upload["if"] == "steps.protected-preflight.outcome == 'success'"
+    failure_upload = next(
+        step
+        for step in protected_steps
+        if step["name"] == "Upload sanitized production preflight failure evidence"
+    )
+    assert failure_upload["if"] == "steps.protected-preflight.outcome == 'failure'"
+    assert failure_upload["with"]["path"] == (
+        "${{ runner.temp }}/production-preflight-failure.json"
+    )
+    assert failure_upload["with"]["if-no-files-found"] == "ignore"
+    failure_gate = next(
+        step
+        for step in protected_steps
+        if step["name"] == "Preserve protected preflight failure"
+    )
+    assert failure_gate["if"] == "steps.protected-preflight.outcome == 'failure'"
+    assert failure_gate["run"] == "exit 2"
     cleanup = protected_steps[-1]
     assert cleanup["name"] == "Remove ephemeral activation key"
     assert cleanup["if"] == "always()"

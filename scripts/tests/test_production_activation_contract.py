@@ -1130,6 +1130,104 @@ def test_failure_evidence_contract_rejects_unknown_stage(tmp_path: Path) -> None
     assert not evidence.exists()
 
 
+def test_observation_contract_accepts_only_fixed_sanitized_schema(
+    contract, tmp_path: Path
+) -> None:
+    source = tmp_path / "observation.json"
+    output = tmp_path / "validated.json"
+    payload = {
+        "schema_version": 1,
+        "current_active_sha": RELEASE_SHA,
+        "db_current_revision": "a5f7c9d2e4b6",
+        "expected_revision": "c3f8a1d6e9b2",
+        "migration_delta": 1,
+        "schema_match": False,
+        "failed_stage": "class-zero-before",
+    }
+    source.write_text(json.dumps(payload), encoding="utf-8")
+
+    contract._validate_observation(source, output)
+
+    assert json.loads(output.read_text(encoding="utf-8")) == payload
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"unexpected": "raw stderr"},
+        {"current_active_sha": "A" * 40},
+        {"db_current_revision": "ledger-history"},
+        {"expected_revision": None},
+        {"migration_delta": True},
+        {"schema_match": "false"},
+        {"failed_stage": "raw secret exception"},
+    ],
+)
+def test_observation_contract_rejects_extra_malformed_or_raw_fields(
+    contract, tmp_path: Path, change: dict[str, object]
+) -> None:
+    source = tmp_path / "observation.json"
+    output = tmp_path / "validated.json"
+    payload = {
+        "schema_version": 1,
+        "current_active_sha": RELEASE_SHA,
+        "db_current_revision": "a5f7c9d2e4b6",
+        "expected_revision": "c3f8a1d6e9b2",
+        "migration_delta": 1,
+        "schema_match": False,
+        "failed_stage": None,
+    }
+    payload.update(change)
+    source.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(contract.ContractError):
+        contract._validate_observation(source, output)
+
+    assert not output.exists()
+
+
+def test_observation_contract_requires_null_when_live_revision_is_unavailable(
+    contract, tmp_path: Path
+) -> None:
+    source = tmp_path / "observation.json"
+    output = tmp_path / "validated.json"
+    source.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "current_active_sha": RELEASE_SHA,
+                "db_current_revision": None,
+                "expected_revision": "c3f8a1d6e9b2",
+                "migration_delta": None,
+                "schema_match": None,
+                "failed_stage": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    contract._validate_observation(source, output)
+
+    assert json.loads(output.read_text(encoding="utf-8"))["db_current_revision"] is None
+
+
+def test_observation_contract_rejects_duplicate_keys(contract, tmp_path: Path) -> None:
+    source = tmp_path / "observation.json"
+    output = tmp_path / "validated.json"
+    source.write_text(
+        '{"schema_version":1,"schema_version":1,'
+        f'"current_active_sha":"{RELEASE_SHA}",'
+        '"db_current_revision":null,"expected_revision":"c3f8a1d6e9b2",'
+        '"migration_delta":null,"schema_match":null,"failed_stage":null}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(contract.ContractError, match="duplicate key"):
+        contract._validate_observation(source, output)
+
+    assert not output.exists()
+
+
 def test_failure_evidence_write_fsyncs_file_replace_then_directory(
     contract, tmp_path: Path, monkeypatch
 ) -> None:

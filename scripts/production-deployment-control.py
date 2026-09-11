@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -22,6 +23,7 @@ SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 REQUEST_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{7,79}$")
 REVISION_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+ALEMBIC_REVISION_PATTERN = re.compile(r"^[0-9a-f]{12}$")
 IMAGE_PATTERN = re.compile(r"^[A-Za-z0-9./_-]+:[A-Za-z0-9_.-]+@sha256:[0-9a-f]{64}$")
 ACTIVATION_FAILURE_STAGES = frozenset(
     {
@@ -51,6 +53,30 @@ ACTIVATION_FAILURE_STAGES = frozenset(
         "engine-evidence",
     }
 )
+OBSERVATION_KEYS = frozenset(
+    {
+        "schema_version",
+        "current_active_sha",
+        "db_current_revision",
+        "expected_revision",
+        "migration_delta",
+        "schema_match",
+        "failed_stage",
+    }
+)
+PRODUCTION_DATABASE_CONTAINER = "pastexam-postgres"
+LIVE_REVISION_MARKER = "__PASTEXAM_LIVE_REVISION__"
+LIVE_REVISION_MAX_OUTPUT_BYTES = 16 * 1024
+LIVE_REVISION_SQL = f"""\
+BEGIN TRANSACTION READ ONLY;
+SELECT '{LIVE_REVISION_MARKER}' || json_build_object(
+    'read_only', current_setting('transaction_read_only') = 'on',
+    'ledger_row_count', count(*)::integer,
+    'current_revision', CASE WHEN count(*) = 1 THEN min(version_num) END
+)::text
+FROM alembic_version;
+ROLLBACK;
+"""
 NGINX_DIGEST = "sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903"
 CANDIDATE_RECEIPT_KEYS = frozenset(
     {
@@ -123,6 +149,14 @@ REQUEST_STATE_KEYS = REQUEST_CONTRACT_KEYS | {
 
 class DeploymentError(RuntimeError):
     """Deployment authority, state, or transition is invalid."""
+
+
+class PreflightFailure(DeploymentError):
+    """A protected preflight failed with optional sanitized observation evidence."""
+
+    def __init__(self, evidence: dict[str, Any] | None = None):
+        super().__init__("Production activation preflight failed closed.")
+        self.evidence = evidence
 
 
 def utc_now() -> str:
@@ -405,6 +439,217 @@ def verify_candidate(
     }
 
 
+def _literal_assignment(module: ast.Module, name: str) -> Any:
+    values: list[Any] = []
+    for node in module.body:
+        value_node: ast.expr | None = None
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == name
+            for target in node.targets
+        ):
+            value_node = node.value
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == name
+        ):
+            value_node = node.value
+        if value_node is not None:
+            try:
+                values.append(ast.literal_eval(value_node))
+            except (ValueError, TypeError) as error:
+                raise DeploymentError(
+                    "Candidate migration authority is not literal."
+                ) from error
+    if len(values) != 1:
+        raise DeploymentError("Candidate migration authority is ambiguous.")
+    return values[0]
+
+
+def _candidate_migration_graph(release: Path) -> tuple[str, dict[str, tuple[str, ...]]]:
+    checksum_path = release / ".release-files.sha256"
+    try:
+        checksum_lines = checksum_path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise DeploymentError(
+            "Candidate migration authority is unavailable."
+        ) from error
+    prefix = "backend/alembic/versions/"
+    migration_paths: list[Path] = []
+    for line in checksum_lines:
+        match = re.fullmatch(r"[0-9a-f]{64}  ([^\r\n]+)", line)
+        if match is None:
+            raise DeploymentError("Candidate migration authority is malformed.")
+        relative = match.group(1)
+        if relative.startswith(prefix) and relative.endswith(".py"):
+            migration_paths.append(release / relative)
+    if not migration_paths:
+        raise DeploymentError("Candidate migration graph is unavailable.")
+
+    parents_by_revision: dict[str, tuple[str, ...]] = {}
+    for path in migration_paths:
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or not path.resolve().is_relative_to(release.resolve())
+        ):
+            raise DeploymentError("Candidate migration path is unsafe.")
+        try:
+            module = ast.parse(path.read_text(encoding="utf-8"), filename=path.name)
+        except (OSError, UnicodeDecodeError, SyntaxError) as error:
+            raise DeploymentError("Candidate migration graph is unreadable.") from error
+        revision = _literal_assignment(module, "revision")
+        down_revision = _literal_assignment(module, "down_revision")
+        if (
+            not isinstance(revision, str)
+            or ALEMBIC_REVISION_PATTERN.fullmatch(revision) is None
+            or revision in parents_by_revision
+        ):
+            raise DeploymentError("Candidate migration revision is malformed.")
+        if down_revision is None:
+            parents: tuple[str, ...] = ()
+        elif isinstance(down_revision, str):
+            parents = (down_revision,)
+        elif isinstance(down_revision, (tuple, list)):
+            parents = tuple(down_revision)
+        else:
+            raise DeploymentError("Candidate migration lineage is malformed.")
+        if any(
+            not isinstance(parent, str)
+            or ALEMBIC_REVISION_PATTERN.fullmatch(parent) is None
+            for parent in parents
+        ) or len(set(parents)) != len(parents):
+            raise DeploymentError("Candidate migration lineage is malformed.")
+        parents_by_revision[revision] = parents
+
+    referenced = {
+        parent for parents in parents_by_revision.values() for parent in parents
+    }
+    if not referenced.issubset(parents_by_revision):
+        raise DeploymentError("Candidate migration lineage is incomplete.")
+    heads = set(parents_by_revision) - referenced
+    if len(heads) != 1:
+        raise DeploymentError("Candidate migration graph does not have one head.")
+    head = next(iter(heads))
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def validate_lineage(revision: str) -> None:
+        if revision in visiting:
+            raise DeploymentError("Candidate migration graph contains a cycle.")
+        if revision in visited:
+            return
+        visiting.add(revision)
+        for parent in parents_by_revision[revision]:
+            validate_lineage(parent)
+        visiting.remove(revision)
+        visited.add(revision)
+
+    validate_lineage(head)
+    if visited != set(parents_by_revision):
+        raise DeploymentError("Candidate migration graph is disconnected.")
+    return head, parents_by_revision
+
+
+def _migration_delta(
+    current: str, expected: str, parents_by_revision: dict[str, tuple[str, ...]]
+) -> int | None:
+    if current == expected:
+        return 0
+    if current not in parents_by_revision or expected not in parents_by_revision:
+        return None
+    distances: list[int] = []
+
+    def visit(revision: str, distance: int, path: frozenset[str]) -> None:
+        if len(distances) > 1 or revision in path:
+            return
+        if revision == current:
+            distances.append(distance)
+            return
+        for parent in parents_by_revision[revision]:
+            visit(parent, distance + 1, path | {revision})
+
+    visit(expected, 0, frozenset())
+    return distances[0] if len(distances) == 1 else None
+
+
+def _live_database_revision(*, docker: str) -> str | None:
+    format_value = (
+        '{{.Name}}|{{index .Config.Labels "com.docker.compose.project"}}'
+        '|{{index .Config.Labels "com.docker.compose.service"}}'
+        "|{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}"
+    )
+    try:
+        identity = subprocess.run(
+            [
+                docker,
+                "inspect",
+                "--format",
+                format_value,
+                PRODUCTION_DATABASE_CONTAINER,
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+        if (
+            identity.returncode != 0
+            or identity.stdout.strip()
+            != f"/{PRODUCTION_DATABASE_CONTAINER}|pastexam|db|running|healthy"
+        ):
+            return None
+        process = subprocess.run(
+            [
+                docker,
+                "exec",
+                "-i",
+                PRODUCTION_DATABASE_CONTAINER,
+                "sh",
+                "-lc",
+                (
+                    "exec psql -X --no-psqlrc -v ON_ERROR_STOP=1 "
+                    '-U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+                ),
+            ],
+            input=LIVE_REVISION_SQL,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    output = process.stdout or ""
+    if (
+        process.returncode != 0
+        or len(output.encode("utf-8")) > LIVE_REVISION_MAX_OUTPUT_BYTES
+    ):
+        return None
+    marked = [
+        line[len(LIVE_REVISION_MARKER) :]
+        for line in output.splitlines()
+        if line.startswith(LIVE_REVISION_MARKER)
+    ]
+    if len(marked) != 1:
+        return None
+    try:
+        payload = json.loads(marked[0], object_pairs_hook=_reject_duplicate_keys)
+    except (json.JSONDecodeError, DeploymentError):
+        return None
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != {"read_only", "ledger_row_count", "current_revision"}
+        or payload["read_only"] is not True
+        or isinstance(payload["ledger_row_count"], bool)
+        or payload["ledger_row_count"] != 1
+        or not isinstance(payload["current_revision"], str)
+        or ALEMBIC_REVISION_PATTERN.fullmatch(payload["current_revision"]) is None
+    ):
+        return None
+    return payload["current_revision"]
+
+
 def verify_runtime(active: ActiveRecord) -> dict[str, Any]:
     release = Path(active.active_release_directory)
     manifest = read_env_file(release / "release-manifest.env")
@@ -604,6 +849,7 @@ class DeploymentConfig:
     backup_root: Path = Path("/opt/pastexam-backups")
     systemd_run: str = "systemd-run"
     systemctl: str = "systemctl"
+    docker: str = "docker"
     internal_health_url: str = "http://127.0.0.1:8080/api/health"
     external_health_url: str = "https://physarchive.com/api/health"
     runtime_verification: bool = True
@@ -1069,6 +1315,43 @@ class DeploymentController:
         runtime = self._verify_runtime(active)
         return {"schema_version": 1, "active": asdict(active), "runtime": runtime}
 
+    def _observation_evidence(
+        self,
+        active: ActiveRecord,
+        candidate: dict[str, Any],
+        *,
+        failed_stage: str | None = None,
+    ) -> dict[str, Any]:
+        if failed_stage is not None and failed_stage not in ACTIVATION_FAILURE_STAGES:
+            raise DeploymentError("Observation failure stage is unsupported.")
+        release = Path(candidate["release_directory"])
+        expected, graph = _candidate_migration_graph(release)
+        current = _live_database_revision(docker=self.config.docker)
+        delta = (
+            _migration_delta(current, expected, graph) if current is not None else None
+        )
+        evidence = {
+            "schema_version": 1,
+            "current_active_sha": active.active_sha,
+            "db_current_revision": current,
+            "expected_revision": expected,
+            "migration_delta": delta,
+            "schema_match": current == expected if current is not None else None,
+            "failed_stage": failed_stage,
+        }
+        if set(evidence) != OBSERVATION_KEYS:
+            raise DeploymentError("Observation evidence schema is invalid.")
+        return evidence
+
+    def observe(self, target_sha: str, request: RequestContract) -> dict[str, Any]:
+        active = self.store.load_active()
+        self.store.verify_active_views(active)
+        self._verify_runtime(active)
+        candidate = verify_candidate(
+            self.config, target_sha, request, allow_activated=True
+        )
+        return self._observation_evidence(active, candidate)
+
     def _systemd_dispatch(self, request_id: str, *, rollback: bool = False) -> None:
         unit = f"pastexam-deployment-{request_id}"
         command = [
@@ -1162,28 +1445,50 @@ class DeploymentController:
             request,
             allow_activated=request.operation == "rollback",
         )
-        environment = {
-            "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-            "PRODUCTION_DEPLOY_ENABLED": "true",
-            "ACTIVATION_CONFIRMATION": "activate-reviewed-production-release",
-            "ACTIVATION_PREFLIGHT_ONLY": "true",
-            "RELEASE_DIRECTORY": candidate["release_directory"],
-            "RELEASE_MANIFEST": str(
-                Path(candidate["release_directory"]) / "release-manifest.env"
-            ),
-            "RELEASE_MANIFEST_SHA256": candidate["manifest_sha256"],
-            "INTERNAL_HEALTH_URL": self.config.internal_health_url,
-            "EXTERNAL_HEALTH_URL": self.config.external_health_url,
-        }
-        process = subprocess.run(
-            [str(self.config.engine_path)],
-            text=True,
-            capture_output=True,
-            check=False,
-            env=environment,
-        )
-        if process.returncode != 0:
-            raise DeploymentError("Production activation preflight failed closed.")
+        with tempfile.TemporaryDirectory(prefix="pastexam-preflight-") as temporary:
+            failure_path = Path(temporary) / "failure.json"
+            environment = {
+                "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "PRODUCTION_DEPLOY_ENABLED": "true",
+                "ACTIVATION_CONFIRMATION": "activate-reviewed-production-release",
+                "ACTIVATION_PREFLIGHT_ONLY": "true",
+                "RELEASE_DIRECTORY": candidate["release_directory"],
+                "RELEASE_MANIFEST": str(
+                    Path(candidate["release_directory"]) / "release-manifest.env"
+                ),
+                "RELEASE_MANIFEST_SHA256": candidate["manifest_sha256"],
+                "INTERNAL_HEALTH_URL": self.config.internal_health_url,
+                "EXTERNAL_HEALTH_URL": self.config.external_health_url,
+                "ACTIVATION_FAILURE_EVIDENCE_PATH": str(failure_path),
+                "ACTIVATION_REQUEST_ID": "preflight-only",
+                "ACTIVATION_TARGET_SHA": target_sha,
+            }
+            process = subprocess.run(
+                [str(self.config.engine_path)],
+                text=True,
+                capture_output=True,
+                check=False,
+                env=environment,
+            )
+            if process.returncode != 0:
+                failure = self._load_engine_failure_evidence_path(
+                    failure_path,
+                    {
+                        "request_id": "preflight-only",
+                        "target_sha": target_sha,
+                    },
+                    expected_exit_code=process.returncode,
+                )
+                evidence = None
+                try:
+                    evidence = self._observation_evidence(
+                        active,
+                        candidate,
+                        failed_stage=failure["stage"] if failure is not None else None,
+                    )
+                except DeploymentError:
+                    pass
+                raise PreflightFailure(evidence)
         return candidate
 
     def rollback_start(self, request: RequestContract) -> dict[str, Any]:
@@ -1250,6 +1555,17 @@ class DeploymentController:
         self, request: dict[str, Any], *, expected_exit_code: int
     ) -> dict[str, Any] | None:
         path = self._engine_failure_evidence_path(request["request_id"])
+        return self._load_engine_failure_evidence_path(
+            path, request, expected_exit_code=expected_exit_code
+        )
+
+    def _load_engine_failure_evidence_path(
+        self,
+        path: Path,
+        request: dict[str, Any],
+        *,
+        expected_exit_code: int,
+    ) -> dict[str, Any] | None:
         try:
             if not path.is_file() or path.is_symlink():
                 return None
@@ -1568,6 +1884,10 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("status")
+    observe = subparsers.add_parser("observe")
+    observe.add_argument("target_sha")
+    observe.add_argument("source_ci_run_id", type=int)
+    observe.add_argument("source_ci_run_attempt", type=int)
     preflight = subparsers.add_parser("preflight")
     preflight.add_argument("target_sha")
     preflight.add_argument("source_ci_run_id", type=int)
@@ -1631,6 +1951,11 @@ def main() -> int:
     try:
         if args.command == "status":
             _print_json(controller.status())
+        elif args.command == "observe":
+            evidence = controller.observe(args.target_sha, _request_from_args(args))
+            _print_json(evidence)
+            if evidence["db_current_revision"] is None:
+                return 2
         elif args.command == "preflight":
             request = _request_from_args(args)
             active = store.load_active()
@@ -1716,6 +2041,11 @@ def main() -> int:
                     "active_sha": active.active_sha,
                 }
             )
+    except PreflightFailure as error:
+        if error.evidence is not None:
+            _print_json(error.evidence)
+        print(f"Production deployment control failed: {error}", file=sys.stderr)
+        return 2
     except DeploymentError as error:
         print(f"Production deployment control failed: {error}", file=sys.stderr)
         return 2

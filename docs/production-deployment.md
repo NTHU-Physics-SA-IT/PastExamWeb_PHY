@@ -287,6 +287,57 @@ traffic switching. An intentional ingress change therefore requires a
 separately reviewed edge-topology change; it cannot be smuggled through
 ordinary activation.
 
+## Read-only production observation
+
+The restricted host command surface includes one fixed diagnostic operation:
+
+```text
+observe <target-sha> <source-ci-run-id> <source-ci-run-attempt>
+```
+
+The controller validates those arguments with the same exact candidate and
+source-CI authority used by preflight. The expected Alembic revision is parsed
+without executing candidate code from the checksummed migration graph in that
+exact immutable release. The caller cannot supply a database name, container
+name, path, SQL statement, or shell fragment.
+
+`observe` checks the fixed `pastexam-postgres` container identity, Compose
+project/service labels, running state, and healthy state. It then uses
+`docker exec` against that already-running container to send one constant SQL
+transaction to `psql`. The transaction is declared read-only, selects only the
+Alembic ledger, and rolls back. The operation never uses `docker run`,
+`docker compose run`, pull, up, down, restart, start, stop, or recreate; it does
+not create a deployment request, backup, migration, or activation.
+
+Its entire stdout contract is one exact JSON object:
+
+```json
+{"schema_version":1,"current_active_sha":"<40-char-sha>","db_current_revision":"<12-char-revision-or-null>","expected_revision":"<12-char-revision>","migration_delta":0,"schema_match":true,"failed_stage":null}
+```
+
+`db_current_revision` is the independently queried live Alembic revision. It
+must never be replaced by `status.active.database_revision`, which is only the
+revision recorded by the last successful activation ledger. The live revision,
+delta, and match fields are null when the live query cannot prove exactly one
+valid revision. `migration_delta` is an integer only when the checksummed graph
+contains one unambiguous path from the live revision to its single expected
+head; otherwise it is null. `schema_match` states only whether the one live
+Alembic revision equals that expected head.
+
+On standalone preflight failure, the controller may return the same validated
+observation schema with `failed_stage` set to one allowlisted engine stage. Raw
+stdout, stderr, exception text, SQL, environment, and host paths never enter
+that evidence. The preflight workflow retains the failure JSON only after the
+repository contract validator accepts its exact keys and relationships, and
+the workflow remains failed whether evidence is available or not.
+
+Observation is not preflight, migration, deployment authorization, or
+activation. The migration Class-0 zero-delta rule is unchanged, and any
+production migration remains a separately authorized operation. Merging these
+sources does not update the root-installed host framework; a separately
+reviewed host-framework installation is required before the command is
+available in production.
+
 ## GitHub activation and durable state
 
 `.github/workflows/preflight-production.yml` is a separate manual protected

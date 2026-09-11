@@ -107,6 +107,18 @@ def _candidate(control, config, request, *, legacy_nginx: bool = False) -> Path:
             if legacy_nginx
             else "services: {}\n"
         ),
+        "backend/alembic/versions/111111111111_root.py": (
+            'revision: str = "111111111111"\n'
+            "down_revision = None\n"
+        ),
+        "backend/alembic/versions/9f1c2a7e4b63_current.py": (
+            'revision = "9f1c2a7e4b63"\n'
+            'down_revision = "111111111111"\n'
+        ),
+        "backend/alembic/versions/c3f8a1d6e9b2_head.py": (
+            'revision = "c3f8a1d6e9b2"\n'
+            'down_revision: str = "9f1c2a7e4b63"\n'
+        ),
     }
     for relative, content in files.items():
         path = release / relative
@@ -411,6 +423,222 @@ def test_preflight_engine_does_not_receive_controller_lock_authority(
 
     assert len(calls) == 1
     assert "ACTIVATION_CONTROLLER_LOCK_HELD" not in calls[0]["env"]
+
+
+def _live_revision_process(control, command, **kwargs):
+    if command[1:3] == ["inspect", "--format"]:
+        return control.subprocess.CompletedProcess(
+            command, 0, stdout="/pastexam-postgres|pastexam|db|running|healthy\n", stderr=""
+        )
+    assert command == [
+        "docker",
+        "exec",
+        "-i",
+        "pastexam-postgres",
+        "sh",
+        "-lc",
+        'exec psql -X --no-psqlrc -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"',
+    ]
+    assert kwargs["input"] == control.LIVE_REVISION_SQL
+    return control.subprocess.CompletedProcess(
+        command,
+        0,
+        stdout=(
+            "BEGIN\n"
+            f'{control.LIVE_REVISION_MARKER}'
+            '{"read_only":true,"ledger_row_count":1,'
+            '"current_revision":"9f1c2a7e4b63"}\n'
+            "ROLLBACK\n"
+        ),
+        stderr="secret raw database error must not escape",
+    )
+
+
+def test_observe_returns_fixed_live_source_bound_read_only_evidence(
+    control, config, monkeypatch
+) -> None:
+    store = control.DeploymentStore(config)
+    active = replace(_active(control, config), database_revision="111111111111")
+    store.seed_active(active)
+    request = _request(control)
+    _candidate(control, config, request)
+    calls: list[list[str]] = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return _live_revision_process(control, command, **kwargs)
+
+    monkeypatch.setattr(control.subprocess, "run", run)
+
+    evidence = control.DeploymentController(config).observe(request.target_sha, request)
+
+    assert evidence == {
+        "schema_version": 1,
+        "current_active_sha": active.active_sha,
+        "db_current_revision": "9f1c2a7e4b63",
+        "expected_revision": "c3f8a1d6e9b2",
+        "migration_delta": 1,
+        "schema_match": False,
+        "failed_stage": None,
+    }
+    assert evidence["db_current_revision"] != active.database_revision
+    assert len(calls) == 2
+    flattened = " ".join(" ".join(command) for command in calls)
+    for forbidden in (
+        "compose run",
+        "docker run",
+        "compose up",
+        "compose down",
+        "compose pull",
+        "restart",
+        " start",
+        " stop",
+        "recreate",
+        "upgrade",
+        "backup",
+        "systemctl",
+    ):
+        assert forbidden not in flattened
+    normalized_sql = control.LIVE_REVISION_SQL.lower()
+    assert "begin transaction read only" in normalized_sql
+    assert "from alembic_version" in normalized_sql
+    assert "rollback" in normalized_sql
+    for forbidden_sql in (
+        "insert ",
+        "update ",
+        "delete ",
+        "merge ",
+        "truncate ",
+        "alter ",
+        "create ",
+        "drop ",
+        "grant ",
+        "revoke ",
+        "copy ",
+        "vacuum ",
+        "reindex ",
+        "call ",
+        "do ",
+        "advisory_lock",
+    ):
+        assert forbidden_sql not in normalized_sql
+
+
+def test_observe_never_substitutes_ledger_revision_when_live_query_fails(
+    control, config, monkeypatch
+) -> None:
+    store = control.DeploymentStore(config)
+    active = _active(control, config)
+    store.seed_active(active)
+    request = _request(control)
+    _candidate(control, config, request)
+    monkeypatch.setattr(
+        control.subprocess,
+        "run",
+        lambda command, **kwargs: control.subprocess.CompletedProcess(
+            command, 1, stdout="", stderr="raw secret"
+        ),
+    )
+
+    evidence = control.DeploymentController(config).observe(request.target_sha, request)
+
+    assert evidence["db_current_revision"] is None
+    assert evidence["migration_delta"] is None
+    assert evidence["schema_match"] is None
+    assert active.database_revision == "9f1c2a7e4b63"
+
+
+def test_migration_delta_is_zero_only_at_exact_head_and_ambiguous_is_null(
+    control,
+) -> None:
+    graph = {
+        "111111111111": (),
+        "aaaaaaaaaaaa": ("111111111111",),
+        "bbbbbbbbbbbb": ("111111111111",),
+        "cccccccccccc": ("aaaaaaaaaaaa", "bbbbbbbbbbbb"),
+    }
+
+    assert control._migration_delta("cccccccccccc", "cccccccccccc", graph) == 0
+    assert control._migration_delta("111111111111", "cccccccccccc", graph) is None
+    assert control._migration_delta("dddddddddddd", "cccccccccccc", graph) is None
+
+
+def test_candidate_multiple_head_migration_graph_fails_closed(
+    control, config
+) -> None:
+    request = _request(control)
+    release = _candidate(control, config, request)
+    relative = "backend/alembic/versions/dddddddddddd_other_head.py"
+    migration = release / relative
+    migration.write_text(
+        'revision = "dddddddddddd"\ndown_revision = "111111111111"\n',
+        encoding="utf-8",
+    )
+    with (release / ".release-files.sha256").open("a", encoding="utf-8") as manifest:
+        manifest.write(f"{control.sha256_file(migration)}  {relative}\n")
+
+    with pytest.raises(control.DeploymentError, match="one head"):
+        control._candidate_migration_graph(release)
+
+
+def test_current_repository_migration_graph_resolves_exact_single_head(
+    control, tmp_path: Path
+) -> None:
+    release = tmp_path / ("b" * 40)
+    target = release / "backend" / "alembic" / "versions"
+    target.mkdir(parents=True)
+    lines: list[str] = []
+    source = REPOSITORY_ROOT / "backend" / "alembic" / "versions"
+    for migration in sorted(source.glob("*.py")):
+        copied = target / migration.name
+        copied.write_bytes(migration.read_bytes())
+        relative = copied.relative_to(release).as_posix()
+        lines.append(f"{control.sha256_file(copied)}  {relative}\n")
+    (release / ".release-files.sha256").write_text("".join(lines), encoding="utf-8")
+
+    head, graph = control._candidate_migration_graph(release)
+
+    assert head == "c3f8a1d6e9b2"
+    assert graph[head] == ("a5f7c9d2e4b6",)
+    assert control._migration_delta("a5f7c9d2e4b6", head, graph) == 1
+
+
+def test_failed_standalone_preflight_returns_only_allowlisted_stage_evidence(
+    control, config, monkeypatch
+) -> None:
+    store = control.DeploymentStore(config)
+    active = _active(control, config)
+    store.seed_active(active)
+    request = _request(control)
+    _candidate(control, config, request)
+
+    def run(command, **kwargs):
+        if command == [str(config.engine_path)]:
+            control.atomic_write_json(
+                Path(kwargs["env"]["ACTIVATION_FAILURE_EVIDENCE_PATH"]),
+                {
+                    "schema_version": 1,
+                    "request_id": "preflight-only",
+                    "target_sha": request.target_sha,
+                    "stage": "class-zero-before",
+                    "exit_code": 2,
+                    "observed_at": "2026-09-12T00:00:00Z",
+                },
+            )
+            return control.subprocess.CompletedProcess(
+                command, 2, stdout="raw secret stdout", stderr="raw secret stderr"
+            )
+        return _live_revision_process(control, command, **kwargs)
+
+    monkeypatch.setattr(control.subprocess, "run", run)
+
+    with pytest.raises(control.PreflightFailure) as raised:
+        control.DeploymentController(config).preflight(request.target_sha, request)
+
+    assert raised.value.evidence is not None
+    assert raised.value.evidence["failed_stage"] == "class-zero-before"
+    assert "secret" not in json.dumps(raised.value.evidence)
+    assert list(config.requests_dir.iterdir()) == []
 
 
 def test_controller_accepts_only_sanctioned_mutation_lock_failure_evidence(
