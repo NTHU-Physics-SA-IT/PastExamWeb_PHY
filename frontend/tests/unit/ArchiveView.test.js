@@ -983,6 +983,39 @@ describe('ArchiveView', () => {
     wrapper.unmount()
   })
 
+  it('uses the same-origin preview file for published archives on desktop', async () => {
+    window.innerWidth = 1400
+    const previewBlob = new Blob(['desktop-preview'])
+    getArchivePreviewFileMock.mockResolvedValueOnce({ data: previewBlob })
+
+    const wrapper = mount(ArchiveView, {
+      global: {
+        provide: {
+          toast: { add: toastAddMock },
+          confirm: { require: confirmRequireMock },
+          sidebarVisible: ref(true),
+        },
+        stubs: componentStubs,
+      },
+    })
+
+    await flushPromises()
+    wrapper.vm.filterBySubject({ label: 'Calculus I', id: 'c1' })
+    await flushPromises()
+
+    const archive = wrapper.vm.groupedArchives[0].list[0]
+    await wrapper.vm.previewArchive(archive)
+
+    expect(getArchivePreviewFileMock).toHaveBeenCalledWith('c1', 'a1')
+    expect(getArchivePreviewUrlMock).not.toHaveBeenCalled()
+    expect(window.URL.createObjectURL).toHaveBeenCalledWith(previewBlob)
+    expect(wrapper.vm.selectedArchive.previewUrl).toBe('blob:url')
+
+    wrapper.vm.closePreview()
+    expect(window.URL.revokeObjectURL).toHaveBeenCalledWith('blob:url')
+    wrapper.unmount()
+  })
+
   it('keeps the newest signed preview when requests resolve out of order', async () => {
     const wrapper = mount(ArchiveView, {
       global: {

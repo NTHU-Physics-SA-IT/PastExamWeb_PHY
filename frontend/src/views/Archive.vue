@@ -967,6 +967,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', checkDevice)
   revokePendingPreviewUrl()
+  revokePublishedPreviewUrl()
   if (searchDebounceTimer) {
     clearTimeout(searchDebounceTimer)
   }
@@ -1873,6 +1874,7 @@ const previewLoading = ref(false)
 const previewError = ref(false)
 const previewErrorMessage = ref(t('無法載入預覽'))
 const pendingPreviewUrl = ref('')
+const publishedPreviewUrl = ref('')
 let previewRequestId = 0
 
 async function previewArchive(archive) {
@@ -1893,6 +1895,15 @@ async function previewArchive(archive) {
       revokePendingPreviewUrl()
       pendingPreviewUrl.value = URL.createObjectURL(data)
       selectedArchive.value = { ...archive, previewUrl: pendingPreviewUrl.value }
+    } else if (typeof window !== 'undefined' && window.innerWidth >= 1400) {
+      const { data } = await archiveService.getArchivePreviewFile(
+        selectedCourse.value,
+        archive.archiveId
+      )
+      if (requestId !== previewRequestId || !showPreview.value) return
+      revokePublishedPreviewUrl()
+      publishedPreviewUrl.value = URL.createObjectURL(data)
+      selectedArchive.value = { ...archive, previewUrl: publishedPreviewUrl.value }
     } else {
       const { data } = await archiveService.getArchivePreviewUrl(
         selectedCourse.value,
@@ -1943,6 +1954,7 @@ function handlePreviewError() {
 function closePreview() {
   previewRequestId += 1
   revokePendingPreviewUrl()
+  revokePublishedPreviewUrl()
   showPreview.value = false
   selectedArchive.value = null
   previewError.value = false
@@ -1952,6 +1964,12 @@ function revokePendingPreviewUrl() {
   if (!pendingPreviewUrl.value) return
   URL.revokeObjectURL(pendingPreviewUrl.value)
   pendingPreviewUrl.value = ''
+}
+
+function revokePublishedPreviewUrl() {
+  if (!publishedPreviewUrl.value) return
+  URL.revokeObjectURL(publishedPreviewUrl.value)
+  publishedPreviewUrl.value = ''
 }
 
 function getCategoryName(code) {
