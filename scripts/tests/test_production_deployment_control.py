@@ -437,7 +437,10 @@ def _live_revision_process(control, command, **kwargs):
         "pastexam-postgres",
         "sh",
         "-lc",
-        'exec psql -X --no-psqlrc -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"',
+        (
+            'exec psql -X --no-psqlrc -q -A -t -v ON_ERROR_STOP=1 '
+            '-U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+        ),
     ]
     assert kwargs["input"] == control.LIVE_REVISION_SQL
     return control.subprocess.CompletedProcess(
@@ -452,6 +455,135 @@ def _live_revision_process(control, command, **kwargs):
         ),
         stderr="secret raw database error must not escape",
     )
+
+
+def _probe_live_revision(
+    control,
+    monkeypatch,
+    *,
+    stdout: str = "",
+    process_returncode: int = 0,
+    timeout_on_call: int | None = None,
+):
+    calls: list[list[str]] = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if timeout_on_call == len(calls):
+            raise control.subprocess.TimeoutExpired(command, kwargs.get("timeout", 1))
+        if command[1:3] == ["inspect", "--format"]:
+            return control.subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="/pastexam-postgres|pastexam|db|running|healthy\n",
+                stderr="",
+            )
+        return control.subprocess.CompletedProcess(
+            command,
+            process_returncode,
+            stdout=stdout,
+            stderr="secret raw database error must not escape",
+        )
+
+    monkeypatch.setattr(control.subprocess, "run", run)
+    return control._live_database_revision(docker="docker"), calls
+
+
+def test_live_revision_psql_output_is_deterministic(
+    control, monkeypatch
+) -> None:
+    revision = "a5f7c9d2e4b6"
+    stdout = (
+        f'{control.LIVE_REVISION_MARKER}'
+        '{"read_only":true,"ledger_row_count":1,'
+        f'"current_revision":"{revision}"}}\n'
+    )
+
+    result, calls = _probe_live_revision(control, monkeypatch, stdout=stdout)
+
+    assert result == revision
+    assert calls[1] == [
+        "docker",
+        "exec",
+        "-i",
+        "pastexam-postgres",
+        "sh",
+        "-lc",
+        (
+            'exec psql -X --no-psqlrc -q -A -t -v ON_ERROR_STOP=1 '
+            '-U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+        ),
+    ]
+
+
+def test_live_revision_strict_parser_rejects_aligned_psql_output(
+    control, monkeypatch
+) -> None:
+    stdout = (
+        "BEGIN\n"
+        "                            ?column?\n"
+        "----------------------------------------------------------------\n"
+        f' {control.LIVE_REVISION_MARKER}'
+        '{"read_only":true,"ledger_row_count":1,'
+        '"current_revision":"a5f7c9d2e4b6"}\n'
+        "(1 row)\n\n"
+        "ROLLBACK\n"
+    )
+
+    result, _ = _probe_live_revision(control, monkeypatch, stdout=stdout)
+
+    assert result is None
+
+
+def test_live_revision_parser_rejects_malformed_or_ambiguous_output(
+    control, monkeypatch
+) -> None:
+    marker = control.LIVE_REVISION_MARKER
+    valid = {
+        "read_only": True,
+        "ledger_row_count": 1,
+        "current_revision": "a5f7c9d2e4b6",
+    }
+    cases = (
+        "no marker\n",
+        (marker + json.dumps(valid) + "\n") * 2,
+        marker + "{malformed}\n",
+        marker
+        + '{"read_only":true,"read_only":true,"ledger_row_count":1,'
+        + '"current_revision":"a5f7c9d2e4b6"}\n',
+        marker + json.dumps({**valid, "unexpected": True}) + "\n",
+        marker + json.dumps({**valid, "read_only": False}) + "\n",
+        marker + json.dumps({**valid, "ledger_row_count": 0}) + "\n",
+        marker + json.dumps({**valid, "ledger_row_count": 2}) + "\n",
+        marker + json.dumps({**valid, "current_revision": None}) + "\n",
+        marker + json.dumps({**valid, "current_revision": "BAD"}) + "\n",
+    )
+
+    for stdout in cases:
+        result, _ = _probe_live_revision(control, monkeypatch, stdout=stdout)
+        assert result is None
+
+
+def test_live_revision_process_failures_and_output_limit_fail_closed(
+    control, monkeypatch
+) -> None:
+    result, _ = _probe_live_revision(
+        control,
+        monkeypatch,
+        stdout="x" * (control.LIVE_REVISION_MAX_OUTPUT_BYTES + 1),
+    )
+    assert result is None
+
+    result, _ = _probe_live_revision(
+        control, monkeypatch, process_returncode=1
+    )
+    assert result is None
+
+    result, _ = _probe_live_revision(control, monkeypatch, timeout_on_call=1)
+    assert result is None
+
+    result, _ = _probe_live_revision(control, monkeypatch, timeout_on_call=2)
+    assert result is None
 
 
 def test_observe_returns_fixed_live_source_bound_read_only_evidence(
