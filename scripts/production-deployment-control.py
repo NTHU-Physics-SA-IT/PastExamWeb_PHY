@@ -608,7 +608,7 @@ def _live_database_revision(*, docker: str) -> str | None:
                 "sh",
                 "-lc",
                 (
-                    "exec psql -X --no-psqlrc -v ON_ERROR_STOP=1 "
+                    "exec psql -X --no-psqlrc -q -A -t -v ON_ERROR_STOP=1 "
                     '-U "$POSTGRES_USER" -d "$POSTGRES_DB"'
                 ),
             ],
