@@ -87,26 +87,13 @@ services:
   minio-init:
     image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     restart: "no"
-    entrypoint: ["/bin/sh", "-eu", "-c"]
-    command:
-      - >-
-        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER"
-        "$$MINIO_ROOT_PASSWORD" >/dev/null &&
-        mc mb --ignore-existing "local/$$MINIO_BUCKET_NAME" &&
-        mc version enable "local/$$MINIO_BUCKET_NAME" &&
-        while IFS= read -r policy_line || [ -n "$$policy_line" ]; do
-        printf '%s\n' "$${policy_line//<bucket>/$$MINIO_BUCKET_NAME}";
-        done </policies/application-policy.template.json
-        >/tmp/application-policy.json &&
-        mc admin policy create local pastexam-application
-        /tmp/application-policy.json &&
-        mc admin user add local "$$MINIO_ACCESS_KEY" "$$MINIO_SECRET_KEY" &&
-        mc admin policy attach local pastexam-application
-        --user "$$MINIO_ACCESS_KEY"
+    entrypoint: ["/bin/sh", "/policies/init-local.sh"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD}
       MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME:?Set MINIO_BUCKET_NAME}
+      MINIO_APPLICATION_PARENT_USER: ${MINIO_APPLICATION_PARENT_USER:?Set MINIO_APPLICATION_PARENT_USER}
+      MINIO_APPLICATION_PARENT_PASSWORD: ${MINIO_APPLICATION_PARENT_PASSWORD:-}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?Set MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?Set MINIO_SECRET_KEY}
     volumes:

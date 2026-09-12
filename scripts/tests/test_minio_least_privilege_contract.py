@@ -10,6 +10,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 APPLICATION_POLICY = (
     REPOSITORY_ROOT / "docker" / "minio" / "application-policy.template.json"
 )
+INIT_LOCAL = REPOSITORY_ROOT / "docker" / "minio" / "init-local.sh"
 ROLLBACK_POLICY = (
     REPOSITORY_ROOT
     / "docker"
@@ -105,13 +106,16 @@ def test_compose_keeps_root_only_on_server_and_scoped_backend_contract() -> None
     development = (
         REPOSITORY_ROOT / "docker" / "docker-compose.dev.yml"
     ).read_text(encoding="utf-8")
+    init_local = INIT_LOCAL.read_text(encoding="utf-8")
 
     assert "MINIO_ROOT_USER=${MINIO_ROOT_USER}" in production
     assert "MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}" in production
     assert "MINIO_ACCESS_KEY" in development
     assert "MINIO_SECRET_KEY" in development
     assert "sed " not in development
-    assert "policy_line//<bucket>" in development
+    assert 'entrypoint: ["/bin/sh", "/policies/init-local.sh"]' in development
+    assert "./minio:/policies:ro" in development
+    assert "policy_line//<bucket>/$MINIO_BUCKET_NAME" in init_local
 
 
 def test_rollback_policy_grants_only_legacy_head_bucket() -> None:

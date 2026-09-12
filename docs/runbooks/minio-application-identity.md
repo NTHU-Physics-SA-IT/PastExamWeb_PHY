@@ -20,6 +20,16 @@ bucket-wide orphan audit/cleanup requires separate
 only to that explicit maintenance process. It never falls back to backend or
 root credentials.
 
+Local development preserves the same split. `MINIO_ROOT_USER` and
+`MINIO_ROOT_PASSWORD` authenticate the `minio-init` control-plane work;
+`MINIO_APPLICATION_PARENT_USER` and `MINIO_APPLICATION_PARENT_PASSWORD` are
+bootstrap-only inputs for creating the dedicated parent when it is absent; and
+`MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY` identify the backend child access
+key. The parent bootstrap password may be empty when that parent already
+exists; `minio-init` requires it only before creating an absent parent. An
+existing parent is verified without changing its secret. Root and
+parent-bootstrap variables are never passed to the backend.
+
 ## Production cutover stop gate
 
 Production activation remains blocked until a separately authorized operation
