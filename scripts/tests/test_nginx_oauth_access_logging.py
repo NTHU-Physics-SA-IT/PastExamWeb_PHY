@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 NGINX_CONFIG = REPOSITORY_ROOT / "proxy" / "nginx.conf"
+FRONTEND_NGINX_CONFIG = REPOSITORY_ROOT / "frontend" / "nginx.conf"
 DEVELOPMENT_LISTENERS = REPOSITORY_ROOT / "proxy" / "nginx.development-listeners.conf"
 PRODUCTION_LISTENERS = REPOSITORY_ROOT / "proxy" / "nginx.production-listeners.conf"
 PRODUCTION_COMPOSE = REPOSITORY_ROOT / "docker" / "docker-compose.prod.yml"
@@ -41,6 +42,23 @@ OFFICIAL_CLOUDFLARE_NETWORKS = {
 
 def _config() -> str:
     return NGINX_CONFIG.read_text(encoding="utf-8")
+
+
+def test_frontend_mjs_assets_keep_module_mime_and_static_security_contract() -> None:
+    config = FRONTEND_NGINX_CONFIG.read_text(encoding="utf-8")
+    location = re.search(
+        r"location\s+~\*\s+\\\.mjs\$\s*\{(?P<body>.*?)\n\s*\}",
+        config,
+        re.DOTALL,
+    )
+
+    assert location is not None
+    body = location.group("body")
+    assert "default_type application/javascript;" in body
+    assert 'add_header Cache-Control "public, immutable";' in body
+    assert 'add_header X-Content-Type-Options "nosniff" always;' in body
+    assert "location ~* \\.(js|css)$" in config
+    assert re.search(r"^\s*types\s*\{", config, re.MULTILINE) is None
 
 
 def _access_log_map(config: str) -> tuple[str, set[str]]:
