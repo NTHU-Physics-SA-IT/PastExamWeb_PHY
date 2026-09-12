@@ -34,7 +34,7 @@ case "${arguments[0]}:${#arguments[@]}" in
       [[ "${arguments[$index]}" =~ $positive_integer ]] || deny
     done
     ;;
-  request-status:2|receipt:2|resume:2)
+  request-status:2|receipt:2|resume:2|reconcile-activation:2)
     [[ "${arguments[1]}" =~ $request_id ]] || deny
     ;;
   *)

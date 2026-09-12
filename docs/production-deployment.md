@@ -448,12 +448,28 @@ checksum, and release-identity validation. Historical `candidate-contract`
 failure evidence produced before this stage split may include the former lock
 placement and must be interpreted against the exact installed engine version.
 
-`FAILED` remains terminal. Sanitized failure evidence does not make the failed
-request resumable, authorize rollback, or prove whether production cut over.
-Operators must still reconcile the canonical ledger, compatibility views,
-runtime images and container identities, database revision, request state, and
-successful engine/receipt evidence. Any new deployment attempt requires fresh
-authority and separate authorization rather than reuse of the failed request.
+`FAILED` remains terminal for normal `resume` and deployment operations.
+Sanitized failure evidence does not by itself make a failed request resumable,
+authorize rollback, or prove whether production cut over. A separately
+authorized `reconcile-activation <request-id>` operation exists only for the
+exact controller-finalization failure in which the activation engine already
+completed successfully but the historical active ledger retained the database
+revision from before a separately authorized external migration. It revalidates
+the immutable candidate and marker, complete engine evidence, exact candidate
+migration head and live revision, unchanged old canonical views, absence of a
+newer request, exact healthy candidate runtime, zero restarts, and receipt
+identity while holding the production mutation lock. It then reuses the normal
+receipt and active-finalization primitives without invoking the engine, backup,
+migration, image pull, or application cutover. All other failed requests remain
+terminal and require fresh authority and separate authorization.
+
+For normal activation finalization, the engine's unchanged before/after
+database revision must equal the exact head parsed from the checksummed
+candidate migration graph. The historical active ledger remains deployment
+history after an explicitly external migration and is not substituted for live
+activation-time Class 0 evidence. Rollback retains the stricter historical
+active-ledger equality rule, and any unexpected revision change or non-head
+revision still fails closed.
 
 Rollback is a separate manual protected workflow. It accepts only the
 canonical previous exact SHA, requires the database revision to remain

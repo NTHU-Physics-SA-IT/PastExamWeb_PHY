@@ -15,6 +15,7 @@ import tempfile
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import asdict, dataclass
+from dataclasses import replace as dataclass_replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Self
@@ -1231,6 +1232,31 @@ class DeploymentStore:
         )
         return self._write_request(payload)
 
+    def begin_activation_reconciliation(self, request_id: str) -> dict[str, Any]:
+        payload = self.load_request(request_id)
+        if (
+            payload["state"] != "FAILED"
+            or payload["operation"] != "activate"
+            or payload["phase"] != "activation"
+            or payload["failure"]
+            != {
+                "code": "activation-failed",
+                "message": "Canonical ledger database revision disagrees.",
+            }
+        ):
+            raise DeploymentError(
+                "Request is not an externally migrated activation finalization failure."
+            )
+        payload.update(
+            {
+                "state": "ACTIVATING",
+                "phase": "finalization-reconciliation",
+                "updated_at": utc_now(),
+                "failure": None,
+            }
+        )
+        return self._write_request(payload)
+
     def finalize_active(self, request_id: str, active: ActiveRecord) -> None:
         request = self.load_request(request_id)
         if request["state"] != "ACTIVATING":
@@ -1308,6 +1334,82 @@ class DeploymentController:
         if not self.config.runtime_verification:
             return {}
         return verify_runtime(active)
+
+    def _verify_current_health(self) -> None:
+        if not self.config.runtime_verification:
+            return
+        for url in (self.config.internal_health_url, self.config.external_health_url):
+            try:
+                process = subprocess.run(
+                    [
+                        "curl",
+                        "--fail",
+                        "--silent",
+                        "--show-error",
+                        "--connect-timeout",
+                        "5",
+                        "--max-time",
+                        "10",
+                        url,
+                    ],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=15,
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                raise DeploymentError(
+                    "Candidate runtime health is unavailable."
+                ) from error
+            if process.returncode != 0:
+                raise DeploymentError("Candidate runtime health is not green.")
+
+    def _require_no_newer_request(self, request: dict[str, Any]) -> None:
+        for path in self.config.requests_dir.glob("*.json"):
+            if path.is_symlink() or not path.is_file():
+                raise DeploymentError("Deployment request inventory is unsafe.")
+            other_id = path.stem
+            if REQUEST_ID_PATTERN.fullmatch(other_id) is None:
+                continue
+            if other_id == request["request_id"]:
+                continue
+            other = self.store.load_request(other_id)
+            other_created = datetime.fromisoformat(
+                other["created_at"].replace("Z", "+00:00")
+            )
+            request_created = datetime.fromisoformat(
+                request["created_at"].replace("Z", "+00:00")
+            )
+            if other_created >= request_created:
+                raise DeploymentError(
+                    "A newer production deployment request supersedes reconciliation."
+                )
+
+    @staticmethod
+    def _expected_candidate_revision(candidate: dict[str, Any]) -> str:
+        expected, _ = _candidate_migration_graph(Path(candidate["release_directory"]))
+        return expected
+
+    def _validate_engine_database_authority(
+        self,
+        evidence: dict[str, Any],
+        candidate: dict[str, Any],
+        active: ActiveRecord,
+        *,
+        rollback: bool,
+    ) -> str:
+        revision = _require_revision(evidence["database_revision_after"])
+        if rollback:
+            if revision != active.database_revision:
+                raise DeploymentError(
+                    "Canonical ledger database revision disagrees."
+                )
+            return revision
+        if revision != self._expected_candidate_revision(candidate):
+            raise DeploymentError(
+                "Engine database revision is not the candidate repository head."
+            )
+        return revision
 
     def status(self) -> dict[str, Any]:
         active = self.store.load_active()
@@ -1543,6 +1645,96 @@ class DeploymentController:
             raise
         return self.store.mark_worker_dispatched(request_id)
 
+    def reconcile_activation(self, request_id: str) -> dict[str, Any]:
+        with MutationLock(self.config.mutation_lock):
+            request = self.store.load_request(request_id)
+            if (
+                request["state"] != "FAILED"
+                or request["operation"] != "activate"
+                or request["phase"] != "activation"
+                or request["failure"]
+                != {
+                    "code": "activation-failed",
+                    "message": "Canonical ledger database revision disagrees.",
+                }
+            ):
+                raise DeploymentError(
+                    "Request is not an externally migrated activation "
+                    "finalization failure."
+                )
+            active = self.store.load_active()
+            self.store.verify_active_views(active)
+            if active.active_sha != request["previous_active_sha"]:
+                raise DeploymentError(
+                    "Active production changed after the failed activation."
+                )
+            self._require_no_newer_request(request)
+            contract = RequestContract(
+                **{key: request[key] for key in REQUEST_CONTRACT_KEYS}
+            )
+            candidate = verify_candidate(
+                self.config, request["target_sha"], contract, allow_activated=True
+            )
+            marker = Path(candidate["release_directory"]) / ".activated"
+            if marker.is_symlink() or not marker.is_file():
+                raise DeploymentError("Candidate activation marker is unsafe.")
+            failure_path = self._engine_failure_evidence_path(request_id)
+            if failure_path.exists():
+                raise DeploymentError(
+                    "Successful activation reconciliation has engine failure evidence."
+                )
+            evidence = self._load_engine_evidence(request, candidate)
+            expected_revision = self._validate_engine_database_authority(
+                evidence, candidate, active, rollback=False
+            )
+            live_revision = _live_database_revision(docker=self.config.docker)
+            if live_revision != expected_revision:
+                raise DeploymentError(
+                    "Live database revision is not the candidate repository head."
+                )
+            prospective = ActiveRecord(
+                schema_version=1,
+                active_sha=request["target_sha"],
+                active_release_directory=candidate["release_directory"],
+                manifest_sha256=candidate["manifest_sha256"],
+                activation_request_id=request_id,
+                activation_workflow={
+                    "run_id": request["workflow_run_id"],
+                    "run_attempt": request["workflow_run_attempt"],
+                },
+                activated_at=evidence["completed_at"],
+                database_revision=expected_revision,
+                previous_active_sha=active.active_sha,
+                receipt_reference=None,
+                receipt_sha256=None,
+            )
+            runtime = self._verify_runtime(prospective)
+            if any(item.get("restart_count") != 0 for item in runtime.values()):
+                raise DeploymentError(
+                    "Candidate runtime restarted after successful activation."
+                )
+            self._verify_current_health()
+            receipt_path, receipt_digest = self._write_receipt(
+                request, active, candidate, evidence
+            )
+            prospective = dataclass_replace(
+                prospective,
+                receipt_reference=str(receipt_path),
+                receipt_sha256=receipt_digest,
+            )
+            self.store.begin_activation_reconciliation(request_id)
+            try:
+                self.store.finalize_active(request_id, prospective)
+            except DeploymentError as error:
+                self.store.mark_recoverable(
+                    request_id,
+                    phase="finalization-retry-required",
+                    code="finalization-failed",
+                    message=str(error),
+                )
+                raise
+            return self.store.load_request(request_id)
+
     def _engine_evidence_path(self, request_id: str) -> Path:
         _require_request_id(request_id)
         return self.config.requests_dir / f"{request_id}.engine.json"
@@ -1649,9 +1841,12 @@ class DeploymentController:
     def _load_engine_evidence(
         self, request: dict[str, Any], candidate: dict[str, Any]
     ) -> dict[str, Any]:
-        payload = _load_json(
-            self._engine_evidence_path(request["request_id"]), label="engine evidence"
-        )
+        evidence_path = self._engine_evidence_path(request["request_id"])
+        if evidence_path.is_symlink() or not evidence_path.is_file():
+            raise DeploymentError(
+                "Activation engine evidence is unavailable or unsafe."
+            )
+        payload = _load_json(evidence_path, label="engine evidence")
         expected_keys = {
             "schema_version",
             "target_sha",
@@ -1743,7 +1938,13 @@ class DeploymentController:
             "rollback_to_sha": request["target_sha"] if rollback else None,
             "outcome": "rolled-back" if rollback else "active",
         }
-        atomic_write_json(receipt_path, receipt)
+        if receipt_path.exists():
+            if receipt_path.is_symlink() or not receipt_path.is_file():
+                raise DeploymentError("Deployment receipt path is unsafe.")
+            if _load_json(receipt_path, label="deployment receipt") != receipt:
+                raise DeploymentError("Existing deployment receipt conflicts.")
+        else:
+            atomic_write_json(receipt_path, receipt)
         return receipt_path, sha256_file(receipt_path)
 
     def worker(self, request_id: str) -> dict[str, Any]:
@@ -1802,10 +2003,9 @@ class DeploymentController:
                         )
                     self._invoke_engine(request, candidate)
                 evidence = self._load_engine_evidence(request, candidate)
-                if evidence["database_revision_before"] != active.database_revision:
-                    raise DeploymentError(
-                        "Canonical ledger database revision disagrees."
-                    )
+                self._validate_engine_database_authority(
+                    evidence, candidate, active, rollback=rollback
+                )
                 finalization_started = True
                 receipt_path, receipt_digest = self._write_receipt(
                     request, active, candidate, evidence
@@ -1905,6 +2105,8 @@ def _parser() -> argparse.ArgumentParser:
     receipt.add_argument("request_id")
     resume = subparsers.add_parser("resume")
     resume.add_argument("request_id")
+    reconcile = subparsers.add_parser("reconcile-activation")
+    reconcile.add_argument("request_id")
     rollback_preflight = subparsers.add_parser("rollback-preflight")
     rollback_preflight.add_argument("target_sha")
     rollback_preflight.add_argument("source_ci_run_id", type=int)
@@ -2010,6 +2212,8 @@ def main() -> int:
             _print_json(_load_json(receipt_path, label="deployment receipt"))
         elif args.command == "resume":
             _print_json(controller.resume(args.request_id))
+        elif args.command == "reconcile-activation":
+            _print_json(controller.reconcile_activation(args.request_id))
         elif args.command == "worker":
             _print_json(controller.worker(args.request_id))
         elif args.command == "rollback-worker":

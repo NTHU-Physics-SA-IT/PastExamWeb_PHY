@@ -180,7 +180,7 @@ def _candidate(control, config, request, *, legacy_nginx: bool = False) -> Path:
 
 
 def _fake_engine_success(
-    control, controller, request, candidate, *, database_revision="9f1c2a7e4b63"
+    control, controller, request, candidate, *, database_revision="c3f8a1d6e9b2"
 ) -> None:
     backup_root = controller.config.backup_root
     backup_root.mkdir(parents=True, exist_ok=True)
@@ -210,6 +210,38 @@ def _fake_engine_success(
     (Path(candidate["release_directory"]) / ".activated").write_text(
         f"{candidate['manifest_sha256']}\n", encoding="utf-8"
     )
+
+
+def _failed_external_migration_finalization(control, config):
+    config = replace(config, backup_root=config.state_root.parent / "backups")
+    store = control.DeploymentStore(config)
+    active = _active(control, config)
+    store.seed_active(active)
+    request = _request(control)
+    _candidate(control, config, request)
+    store.prepare_request(request, previous_active_sha=active.active_sha)
+    store.transition(request.request_id, "ACTIVATING", phase="engine")
+    controller = control.DeploymentController(config)
+    candidate = control.verify_candidate(
+        config, request.target_sha, request, allow_activated=False
+    )
+    _fake_engine_success(
+        control,
+        controller,
+        control.asdict(request),
+        candidate,
+        database_revision="c3f8a1d6e9b2",
+    )
+    store.transition(
+        request.request_id,
+        "FAILED",
+        phase="activation",
+        failure={
+            "code": "activation-failed",
+            "message": "Canonical ledger database revision disagrees.",
+        },
+    )
+    return config, store, active, request, controller
 
 
 def test_atomic_active_ledger_write_has_no_partial_residue(control, config) -> None:
@@ -929,7 +961,9 @@ def test_candidate_verifier_rejects_wrong_source_ci_authority(control, config) -
 def test_worker_finalizes_receipt_ledger_and_views_once(control, config) -> None:
     config = replace(config, backup_root=config.state_root.parent / "backups")
     store = control.DeploymentStore(config)
-    active = _active(control, config)
+    active = replace(
+        _active(control, config), database_revision="c3f8a1d6e9b2"
+    )
     store.seed_active(active)
     request = _request(control)
     _candidate(control, config, request)
@@ -960,6 +994,333 @@ def test_worker_finalizes_receipt_ledger_and_views_once(control, config) -> None
     )
     assert config.active_link.resolve() == config.releases_root / request.target_sha
     assert control.read_env_file(config.active_env)["release_sha"] == request.target_sha
+
+
+def test_worker_accepts_external_migration_only_at_exact_candidate_head(
+    control, config
+) -> None:
+    config = replace(config, backup_root=config.state_root.parent / "backups")
+    store = control.DeploymentStore(config)
+    active = _active(control, config)
+    store.seed_active(active)
+    request = _request(control)
+    _candidate(control, config, request)
+    store.prepare_request(request, previous_active_sha=active.active_sha)
+    controller = control.DeploymentController(config)
+    controller._invoke_engine = lambda payload, candidate: _fake_engine_success(
+        control,
+        controller,
+        payload,
+        candidate,
+        database_revision="c3f8a1d6e9b2",
+    )
+
+    result = controller.worker(request.request_id)
+
+    assert result["state"] == "ACTIVE"
+    assert store.load_active().database_revision == "c3f8a1d6e9b2"
+
+
+def test_worker_rejects_external_migration_not_at_candidate_head(
+    control, config
+) -> None:
+    config = replace(config, backup_root=config.state_root.parent / "backups")
+    store = control.DeploymentStore(config)
+    active = _active(control, config)
+    store.seed_active(active)
+    request = _request(control)
+    _candidate(control, config, request)
+    store.prepare_request(request, previous_active_sha=active.active_sha)
+    controller = control.DeploymentController(config)
+    controller._invoke_engine = lambda payload, candidate: _fake_engine_success(
+        control,
+        controller,
+        payload,
+        candidate,
+        database_revision="111111111111",
+    )
+
+    with pytest.raises(control.DeploymentError, match="candidate repository head"):
+        controller.worker(request.request_id)
+
+    assert store.load_active() == active
+    assert store.load_request(request.request_id)["state"] == "FAILED"
+
+
+def test_reconcile_external_migration_finalization_without_engine_or_cutover(
+    control, config, monkeypatch
+) -> None:
+    config, store, active, request, controller = (
+        _failed_external_migration_finalization(control, config)
+    )
+    monkeypatch.setattr(
+        control, "_live_database_revision", lambda **_: "c3f8a1d6e9b2"
+    )
+    controller._invoke_engine = lambda *_: pytest.fail("engine must not run")
+
+    result = controller.reconcile_activation(request.request_id)
+
+    assert result["state"] == "ACTIVE"
+    assert result["phase"] == "finalized"
+    reconciled = store.load_active()
+    assert reconciled.active_sha == request.target_sha
+    assert reconciled.previous_active_sha == active.active_sha
+    assert reconciled.database_revision == "c3f8a1d6e9b2"
+    assert config.active_link.resolve() == config.releases_root / request.target_sha
+    assert Path(reconciled.receipt_reference).is_file()
+
+
+def test_reconcile_reuses_exact_existing_receipt(control, config, monkeypatch) -> None:
+    config, store, active, request, controller = (
+        _failed_external_migration_finalization(control, config)
+    )
+    request_payload = store.load_request(request.request_id)
+    candidate = control.verify_candidate(
+        config, request.target_sha, request, allow_activated=True
+    )
+    evidence = controller._load_engine_evidence(request_payload, candidate)
+    receipt_path, receipt_digest = controller._write_receipt(
+        request_payload, active, candidate, evidence
+    )
+    original = receipt_path.read_bytes()
+    monkeypatch.setattr(
+        control, "_live_database_revision", lambda **_: "c3f8a1d6e9b2"
+    )
+
+    result = controller.reconcile_activation(request.request_id)
+
+    assert result["receipt_sha256"] == receipt_digest
+    assert receipt_path.read_bytes() == original
+
+
+def test_reconcile_rejects_changed_active_authority_without_mutation(
+    control, config, monkeypatch
+) -> None:
+    config, store, active, request, controller = (
+        _failed_external_migration_finalization(control, config)
+    )
+    changed = replace(active, active_sha="d" * 40)
+    changed_release = config.releases_root / changed.active_sha
+    changed_release.mkdir()
+    manifest = changed_release / "release-manifest.env"
+    manifest.write_text(f"release_sha={changed.active_sha}\n", encoding="utf-8")
+    changed = replace(
+        changed,
+        active_release_directory=str(changed_release),
+        manifest_sha256=control.sha256_file(manifest),
+    )
+    (changed_release / ".activated").write_text(
+        f"{changed.manifest_sha256}\n", encoding="utf-8"
+    )
+    control.atomic_write_json(config.active_ledger, control.asdict(changed))
+    store._write_compatibility_views(changed)
+    monkeypatch.setattr(
+        control, "_live_database_revision", lambda **_: "c3f8a1d6e9b2"
+    )
+
+    with pytest.raises(control.DeploymentError, match="changed after"):
+        controller.reconcile_activation(request.request_id)
+
+    assert store.load_active() == changed
+    assert store.load_request(request.request_id)["state"] == "FAILED"
+    assert not (config.receipts_dir / f"{request.request_id}.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("state", "ACTIVE"),
+        ("phase", "internal-health"),
+        ("operation", "rollback"),
+        ("target_sha", "d" * 40),
+        ("failure", {"code": "activation-failed", "message": "Other failure."}),
+    ],
+)
+def test_reconcile_rejects_unrelated_failed_requests_without_mutation(
+    control, config, monkeypatch, field, value
+) -> None:
+    config, store, active, request, controller = (
+        _failed_external_migration_finalization(control, config)
+    )
+    payload = store.load_request(request.request_id)
+    payload[field] = value
+    control.atomic_write_json(store._request_path(request.request_id), payload)
+    monkeypatch.setattr(
+        control, "_live_database_revision", lambda **_: "c3f8a1d6e9b2"
+    )
+
+    with pytest.raises(control.DeploymentError):
+        controller.reconcile_activation(request.request_id)
+
+    assert store.load_active() == active
+    assert not (config.receipts_dir / f"{request.request_id}.json").exists()
+
+
+def test_reconcile_rejects_newer_request_without_mutation(
+    control, config, monkeypatch
+) -> None:
+    config, store, active, request, controller = (
+        _failed_external_migration_finalization(control, config)
+    )
+    newer = _request(control, target="d" * 40, request_id="activation-101-1")
+    store.prepare_request(newer, previous_active_sha=active.active_sha)
+    payload = store.load_request(newer.request_id)
+    payload["created_at"] = "2099-01-01T00:00:00Z"
+    control.atomic_write_json(store._request_path(newer.request_id), payload)
+    monkeypatch.setattr(
+        control, "_live_database_revision", lambda **_: "c3f8a1d6e9b2"
+    )
+
+    with pytest.raises(control.DeploymentError, match="newer production"):
+        controller.reconcile_activation(request.request_id)
+
+    assert store.load_active() == active
+    assert not (config.receipts_dir / f"{request.request_id}.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("kind", "message"),
+    [
+        ("missing-evidence", "engine evidence"),
+        ("missing-marker", "marker"),
+        ("symlink-marker", "marker"),
+        ("partial-evidence", "unexpected schema"),
+        ("target-mismatch", "target disagrees"),
+        ("changed-database", "changed during activation"),
+        ("wrong-head", "candidate repository head"),
+        ("health-red", "not green and stable"),
+        ("restart-unstable", "not green and stable"),
+        ("critical-errors", "not green and stable"),
+        ("engine-failure", "engine failure evidence"),
+        ("live-drift", "Live database revision"),
+        ("conflicting-receipt", "receipt conflicts"),
+    ],
+)
+def test_reconcile_evidence_failures_are_non_mutating(
+    control, config, monkeypatch, kind, message
+) -> None:
+    config, store, active, request, controller = (
+        _failed_external_migration_finalization(control, config)
+    )
+    evidence_path = controller._engine_evidence_path(request.request_id)
+    marker = config.releases_root / request.target_sha / ".activated"
+    if kind == "missing-evidence":
+        evidence_path.unlink()
+    elif kind == "missing-marker":
+        marker.unlink()
+    elif kind == "symlink-marker":
+        marker_value = marker.read_text(encoding="utf-8")
+        marker.unlink()
+        marker_target = marker.with_name("marker-target")
+        marker_target.write_text(marker_value, encoding="utf-8")
+        marker.symlink_to(marker_target)
+    elif kind in {
+        "partial-evidence",
+        "target-mismatch",
+        "changed-database",
+        "wrong-head",
+        "health-red",
+        "restart-unstable",
+        "critical-errors",
+    }:
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        if kind == "partial-evidence":
+            del evidence["completed_at"]
+        elif kind == "target-mismatch":
+            evidence["target_sha"] = "d" * 40
+        elif kind == "changed-database":
+            evidence["database_revision_after"] = "111111111111"
+        elif kind == "wrong-head":
+            evidence["database_revision_before"] = "111111111111"
+            evidence["database_revision_after"] = "111111111111"
+        elif kind == "health-red":
+            evidence["health_outcome"] = "red"
+        elif kind == "restart-unstable":
+            evidence["restart_stability"] = "unstable"
+        else:
+            evidence["critical_error_count"] = 1
+        control.atomic_write_json(evidence_path, evidence)
+    elif kind == "engine-failure":
+        controller._engine_failure_evidence_path(request.request_id).write_text(
+            "present\n", encoding="utf-8"
+        )
+    elif kind == "conflicting-receipt":
+        config.receipts_dir.mkdir(parents=True, exist_ok=True)
+        control.atomic_write_json(
+            config.receipts_dir / f"{request.request_id}.json", {"conflict": True}
+        )
+    live_revision = "111111111111" if kind == "live-drift" else "c3f8a1d6e9b2"
+    monkeypatch.setattr(
+        control, "_live_database_revision", lambda **_: live_revision
+    )
+
+    with pytest.raises(control.DeploymentError, match=message):
+        controller.reconcile_activation(request.request_id)
+
+    assert store.load_active() == active
+    assert store.load_request(request.request_id)["state"] == "FAILED"
+
+
+def test_reconcile_rejects_runtime_or_health_instability_before_writes(
+    control, config, monkeypatch
+) -> None:
+    config, store, active, request, controller = (
+        _failed_external_migration_finalization(control, config)
+    )
+    monkeypatch.setattr(
+        control, "_live_database_revision", lambda **_: "c3f8a1d6e9b2"
+    )
+    controller._verify_runtime = lambda _: {
+        "pastexam-backend": {"restart_count": 1}
+    }
+
+    with pytest.raises(control.DeploymentError, match="restarted"):
+        controller.reconcile_activation(request.request_id)
+
+    assert store.load_active() == active
+    assert store.load_request(request.request_id)["state"] == "FAILED"
+    assert not (config.receipts_dir / f"{request.request_id}.json").exists()
+
+
+@pytest.mark.parametrize("failure", ["runtime", "health"])
+def test_reconcile_rejects_candidate_runtime_or_health_failure_before_writes(
+    control, config, monkeypatch, failure
+) -> None:
+    config, store, active, request, controller = (
+        _failed_external_migration_finalization(control, config)
+    )
+    monkeypatch.setattr(
+        control, "_live_database_revision", lambda **_: "c3f8a1d6e9b2"
+    )
+    if failure == "runtime":
+        controller._verify_runtime = lambda _: (_ for _ in ()).throw(
+            control.DeploymentError("candidate runtime image mismatch")
+        )
+    else:
+        controller._verify_current_health = lambda: (_ for _ in ()).throw(
+            control.DeploymentError("candidate runtime health red")
+        )
+
+    with pytest.raises(control.DeploymentError, match=failure):
+        controller.reconcile_activation(request.request_id)
+
+    assert store.load_active() == active
+    assert store.load_request(request.request_id)["state"] == "FAILED"
+    assert not (config.receipts_dir / f"{request.request_id}.json").exists()
+
+
+def test_reconcile_lock_contention_is_non_mutating(control, config) -> None:
+    config, store, active, request, controller = (
+        _failed_external_migration_finalization(control, config)
+    )
+
+    with control.MutationLock(config.mutation_lock), pytest.raises(
+        control.DeploymentError, match="Another production mutation"
+    ):
+        controller.reconcile_activation(request.request_id)
+
+    assert store.load_active() == active
+    assert store.load_request(request.request_id)["state"] == "FAILED"
 
 
 def test_worker_failure_is_durable_and_does_not_update_active(control, config) -> None:
@@ -1142,7 +1503,13 @@ def test_separate_rollback_worker_is_exact_previous_sha_and_revision_safe(
     prepared = controller.rollback_start(request)
 
     def invoke(payload, candidate):
-        _fake_engine_success(control, controller, payload, candidate)
+        _fake_engine_success(
+            control,
+            controller,
+            payload,
+            candidate,
+            database_revision=active.database_revision,
+        )
 
     controller._invoke_engine = invoke
     result = controller.rollback_worker(request.request_id)
