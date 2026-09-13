@@ -99,6 +99,14 @@ class MigrationReport:
         return _redact_payload(payload)
 
 
+class MigrationAdvisoryLockUnavailableError(RuntimeError):
+    """The database-scoped migration lock is already held."""
+
+
+class MigrationAdvisoryLockReleaseError(RuntimeError):
+    """The database-scoped migration lock could not be released."""
+
+
 def database_url() -> URL:
     """Build a structured URL so callers never need to format credentials."""
     return URL.create(
@@ -186,24 +194,31 @@ def migration_advisory_lock(engine: Engine):
             )
         )
         if not acquired:
-            raise RuntimeError(
+            raise MigrationAdvisoryLockUnavailableError(
                 "Another migration process holds the advisory lock for "
                 f"database {database_name!r}"
             )
         try:
             yield database_name
         finally:
-            released = bool(
-                connection.scalar(
-                    text("SELECT pg_advisory_unlock(:class_id, :database_oid)"),
-                    {
-                        "class_id": MIGRATION_LOCK_CLASS_ID,
-                        "database_oid": database_oid,
-                    },
+            try:
+                released = bool(
+                    connection.scalar(
+                        text("SELECT pg_advisory_unlock(:class_id, :database_oid)"),
+                        {
+                            "class_id": MIGRATION_LOCK_CLASS_ID,
+                            "database_oid": database_oid,
+                        },
+                    )
                 )
-            )
+            except Exception as exc:
+                raise MigrationAdvisoryLockReleaseError(
+                    "Migration advisory lock could not be released"
+                ) from exc
             if not released:
-                raise RuntimeError("Migration advisory lock could not be released")
+                raise MigrationAdvisoryLockReleaseError(
+                    "Migration advisory lock could not be released"
+                )
 
 
 def revision_graph(

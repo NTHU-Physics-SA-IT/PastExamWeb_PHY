@@ -15,6 +15,7 @@ Run from `backend/`:
 uv run python migrate.py preflight
 uv run python migrate.py preflight --json
 uv run python migrate.py require-head --json
+uv run python migrate.py diagnose-head --json
 uv run python migrate.py upgrade
 uv run python migrate.py reconcile --check
 uv run python migrate.py reconcile --check --json
@@ -39,6 +40,15 @@ head, the production ledger already equals that head, and the complete schema
 comparison passes. It never upgrades, stamps, reconciles, or writes data. The
 first GitHub activation framework treats any non-zero delta as an explicit
 human-review stop before backup or application mutation.
+
+`diagnose-head --json` is separate read-only instrumentation for the bounded
+production diagnostic surface. It uses the same advisory lock, inspection, and
+Class-0 eligibility predicate as `require-head`, but emits one sealed versioned
+envelope so trusted framework code can distinguish finite initialization,
+lock, inspection, identity, release, and cleanup failure stages. The envelope
+contains no exception text, SQL, database URL, host path, credential, or
+environment value. It performs no upgrade, stamp, downgrade, reconciliation,
+or data write and is not the authoritative preflight gate.
 
 `upgrade` is allowed only when:
 

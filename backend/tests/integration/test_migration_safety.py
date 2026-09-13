@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote, quote_plus
 
@@ -17,6 +18,10 @@ import migrate
 from alembic import command
 from app.core.config import settings
 from app.db.migration_safety import (
+    CheckResult,
+    MigrationAdvisoryLockReleaseError,
+    MigrationAdvisoryLockUnavailableError,
+    MigrationReport,
     alembic_config,
     database_url,
     inspect_database,
@@ -619,6 +624,178 @@ def test_require_head_rejects_reviewed_nonzero_delta_without_upgrade() -> None:
     after = inspect_database().to_dict()
     assert after == before
     assert after["current_revision"] == NTHU_IDENTITY_PROFILE_PREVIOUS_SCHEMA_REVISION
+
+
+class _DiagnosticEngine:
+    def __init__(self, *, dispose_error: Exception | None = None) -> None:
+        self.dispose_error = dispose_error
+
+    def dispose(self) -> None:
+        if self.dispose_error is not None:
+            raise self.dispose_error
+
+
+def _diagnostic_report(*, eligible: bool = True) -> MigrationReport:
+    return MigrationReport(
+        database_connected=True,
+        database_name="pastexam_test_diagnostic",
+        database_empty=False,
+        alembic_version_exists=True,
+        alembic_versions=[CURRENT_HEAD],
+        current_revision=CURRENT_HEAD,
+        current_revision_known=True,
+        repository_heads=[CURRENT_HEAD],
+        multiple_heads=False,
+        schema_candidate_revision=CURRENT_HEAD if eligible else None,
+        reviewed_manifest_revisions=[CURRENT_HEAD],
+        schema_checks=[CheckResult(name="tables", passed=eligible, message="safe")],
+        upgrade_allowed=eligible,
+        errors=[] if eligible else ["structural mismatch"],
+    )
+
+
+def _diagnostic_payload(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
+    output = capsys.readouterr()
+    assert output.err == ""
+    assert len(output.out.strip().splitlines()) == 1
+    return json.loads(output.out)
+
+
+@pytest.mark.parametrize(
+    ("eligible", "expected_outcome", "expected_exit"),
+    [
+        (True, "eligible", 0),
+        (False, "ineligible", 2),
+    ],
+)
+def test_diagnose_head_emits_one_report_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    eligible: bool,
+    expected_outcome: str,
+    expected_exit: int,
+) -> None:
+    engine = _DiagnosticEngine()
+
+    @contextmanager
+    def lock(_engine):
+        yield "pastexam_test_diagnostic"
+
+    monkeypatch.setattr(migrate, "create_engine", lambda *_args, **_kwargs: engine)
+    monkeypatch.setattr(migrate, "migration_advisory_lock", lock)
+    monkeypatch.setattr(
+        migrate,
+        "inspect_database",
+        lambda _engine: _diagnostic_report(eligible=eligible),
+    )
+
+    assert migrate.main(["diagnose-head", "--json"]) == expected_exit
+    payload = _diagnostic_payload(capsys)
+    assert payload["schema_version"] == 1
+    assert payload["kind"] == "migration-class-zero-probe"
+    assert payload["probe_outcome"] == expected_outcome
+    assert payload["failure_code"] is None
+    assert isinstance(payload["report"], dict)
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected_code", "report_expected"),
+    [
+        ("initialization", "migrator_initialization_failed", False),
+        ("lock_setup", "database_or_lock_setup_failed", False),
+        ("lock_unavailable", "advisory_lock_unavailable", False),
+        ("inspection", "database_inspection_failed", False),
+        ("identity", "database_identity_mismatch", False),
+        ("release", "advisory_lock_release_failed", True),
+        ("cleanup", "migrator_cleanup_failed", False),
+    ],
+)
+def test_diagnose_head_classifies_failures_without_leaking_exception_text(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    scenario: str,
+    expected_code: str,
+    report_expected: bool,
+) -> None:
+    secret = "postgresql://private-user:private-password@private-host/private-db"
+    engine = _DiagnosticEngine(
+        dispose_error=RuntimeError(secret) if scenario == "cleanup" else None
+    )
+    if scenario == "initialization":
+        monkeypatch.setattr(
+            migrate,
+            "create_engine",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError(secret)),
+        )
+    else:
+        monkeypatch.setattr(migrate, "create_engine", lambda *_args, **_kwargs: engine)
+
+    @contextmanager
+    def lock(_engine):
+        if scenario == "lock_setup":
+            raise RuntimeError(secret)
+        if scenario == "lock_unavailable":
+            raise MigrationAdvisoryLockUnavailableError(secret)
+        yield (
+            "different_database"
+            if scenario == "identity"
+            else "pastexam_test_diagnostic"
+        )
+        if scenario == "release":
+            raise MigrationAdvisoryLockReleaseError(secret)
+
+    monkeypatch.setattr(migrate, "migration_advisory_lock", lock)
+
+    def inspect(_engine):
+        if scenario == "inspection":
+            raise RuntimeError(secret)
+        return _diagnostic_report()
+
+    monkeypatch.setattr(migrate, "inspect_database", inspect)
+
+    assert migrate.main(["diagnose-head", "--json"]) == 2
+    payload = _diagnostic_payload(capsys)
+    assert payload["probe_outcome"] == "failed"
+    assert payload["failure_code"] == expected_code
+    assert (payload["report"] is not None) is report_expected
+    assert secret not in json.dumps(payload)
+
+
+def test_require_head_and_diagnose_head_share_class_zero_predicate() -> None:
+    assert migrate.class_zero_eligible(_diagnostic_report()) is True
+    assert migrate.class_zero_eligible(_diagnostic_report(eligible=False)) is False
+
+
+def test_diagnose_head_falls_back_to_safe_envelope_if_report_encoding_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    engine = _DiagnosticEngine()
+
+    @contextmanager
+    def lock(_engine):
+        yield "pastexam_test_diagnostic"
+
+    monkeypatch.setattr(migrate, "create_engine", lambda *_args, **_kwargs: engine)
+    monkeypatch.setattr(migrate, "migration_advisory_lock", lock)
+    monkeypatch.setattr(
+        migrate, "inspect_database", lambda _engine: _diagnostic_report()
+    )
+    monkeypatch.setattr(
+        MigrationReport,
+        "to_dict",
+        lambda _self: (_ for _ in ()).throw(RuntimeError("private exception")),
+    )
+
+    assert migrate.main(["diagnose-head", "--json"]) == 2
+    payload = _diagnostic_payload(capsys)
+    assert payload == {
+        "schema_version": 1,
+        "kind": "migration-class-zero-probe",
+        "probe_outcome": "failed",
+        "failure_code": "diagnostic_envelope_failed",
+        "report": None,
+    }
 
 
 def test_head_schema_matches_sqlmodel_autogenerate_contract() -> None:
@@ -1252,12 +1429,44 @@ def test_concurrent_migration_advisory_lock_fails_closed(
     try:
         with (
             migration_advisory_lock(clean_public_schema),
-            pytest.raises(RuntimeError, match="advisory lock"),
+            pytest.raises(MigrationAdvisoryLockUnavailableError, match="advisory lock"),
             migration_advisory_lock(second_engine),
         ):
             pass
     finally:
         second_engine.dispose()
+
+
+def test_migration_advisory_lock_release_failure_is_typed() -> None:
+    class _Result:
+        def one(self):
+            return ("pastexam_test_lock", 123)
+
+    class _Connection:
+        def __init__(self) -> None:
+            self.scalar_results = iter((True, False))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, *_args, **_kwargs):
+            return _Result()
+
+        def scalar(self, *_args, **_kwargs):
+            return next(self.scalar_results)
+
+    class _Engine:
+        def connect(self):
+            return _Connection()
+
+    with (
+        pytest.raises(MigrationAdvisoryLockReleaseError, match="could not be released"),
+        migration_advisory_lock(_Engine()),
+    ):
+        pass
 
 
 def test_multiple_repository_heads_fail_closed(

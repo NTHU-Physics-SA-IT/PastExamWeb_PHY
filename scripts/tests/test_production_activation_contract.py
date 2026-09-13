@@ -510,6 +510,19 @@ def _activation_environment(
         ),
         encoding="utf-8",
     )
+    migration_diagnostic = tmp_path / "migration-diagnostic.json"
+    migration_diagnostic.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "migration-class-zero-probe",
+                "probe_outcome": "eligible",
+                "failure_code": None,
+                "report": json.loads(migration_report.read_text(encoding="utf-8")),
+            }
+        ),
+        encoding="utf-8",
+    )
     docker_log = tmp_path / "docker.log"
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -529,6 +542,9 @@ def _activation_environment(
         "elif [[ \"$1\" == 'compose' && \"$*\" == *'config --quiet'* ]]; then\n"
         "  printf '%s' \"$FAKE_COMPOSE_QUIET_STDERR\" >&2\n"
         "  exit \"$FAKE_COMPOSE_QUIET_EXIT\"\n"
+        "elif [[ \"$1\" == 'compose' && \"$*\" == *'diagnose-head --json'* ]]; then\n"
+        '  cat "$FAKE_MIGRATION_DIAGNOSTIC"\n'
+        "  exit \"$FAKE_MIGRATION_EXIT\"\n"
         "elif [[ \"$1\" == 'compose' && \"$*\" == *'require-head --json'* ]]; then\n"
         '  cat "$FAKE_MIGRATION_REPORT"\n'
         "  exit \"$FAKE_MIGRATION_EXIT\"\n"
@@ -605,6 +621,9 @@ def _activation_environment(
         "  elif [[ \"$1\" == 'compose' && \"$*\" == *'config --quiet'* ]]; then\n"
         "    printf '%s' \"$FAKE_COMPOSE_QUIET_STDERR\" >&2\n"
         "    return \"$FAKE_COMPOSE_QUIET_EXIT\"\n"
+        "  elif [[ \"$1\" == 'compose' && \"$*\" == *'diagnose-head --json'* ]]; then\n"
+        '    cat "$FAKE_MIGRATION_DIAGNOSTIC"\n'
+        "    return \"$FAKE_MIGRATION_EXIT\"\n"
         "  elif [[ \"$1\" == 'compose' && \"$*\" == *'require-head --json'* ]]; then\n"
         '    cat "$FAKE_MIGRATION_REPORT"\n'
         "    return \"$FAKE_MIGRATION_EXIT\"\n"
@@ -718,6 +737,7 @@ def _activation_environment(
             ),
             "FAKE_CURRENT_PORTS_JSON": _bash_path(ports_json),
             "FAKE_MIGRATION_REPORT": _bash_path(migration_report),
+            "FAKE_MIGRATION_DIAGNOSTIC": _bash_path(migration_diagnostic),
             "FAKE_MIGRATION_EXIT": "0",
             "FAKE_DOCKER_LOG": _bash_path(docker_log),
             "FAKE_NGINX_IMAGE": NGINX_IMAGE,
@@ -833,17 +853,36 @@ def _complete_migration_report(**overrides: object) -> dict[str, object]:
     return report
 
 
+def _migration_probe(
+    report: dict[str, object] | None,
+    *,
+    outcome: str,
+    failure_code: str | None = None,
+) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "kind": "migration-class-zero-probe",
+        "probe_outcome": outcome,
+        "failure_code": failure_code,
+        "report": report,
+    }
+
+
 def test_class_zero_diagnostic_eligible_uses_shared_gate(contract, tmp_path: Path) -> None:
     report_path = tmp_path / "report.json"
+    class_zero_report_path = tmp_path / "class-zero-report.json"
     report = _complete_migration_report()
-    report_path.write_text(json.dumps(report), encoding="utf-8")
+    report_path.write_text(
+        json.dumps(_migration_probe(report, outcome="eligible")), encoding="utf-8"
+    )
+    class_zero_report_path.write_text(json.dumps(report), encoding="utf-8")
 
     diagnostic = contract._build_class_zero_diagnostic(
         _diagnostic_args(report_path)
     )
 
     assert contract._class_zero_report_eligible(report) is True
-    contract._verify_class_zero(report_path)
+    contract._verify_class_zero(class_zero_report_path)
     assert diagnostic["probe_outcome"] == "eligible"
     assert diagnostic["class_zero_eligible"] is True
     assert diagnostic["failure_codes"] == []
@@ -868,7 +907,10 @@ def test_class_zero_diagnostic_validator_rejects_unbounded_evidence(
 ) -> None:
     report_path = tmp_path / "report.json"
     report_path.write_text(
-        json.dumps(_complete_migration_report()), encoding="utf-8"
+        json.dumps(
+            _migration_probe(_complete_migration_report(), outcome="eligible")
+        ),
+        encoding="utf-8",
     )
     diagnostic = contract._build_class_zero_diagnostic(
         _diagnostic_args(report_path)
@@ -972,7 +1014,9 @@ def test_class_zero_diagnostic_classifies_without_raw_text(
 ) -> None:
     report_path = tmp_path / "report.json"
     report = _complete_migration_report(**overrides)
-    report_path.write_text(json.dumps(report), encoding="utf-8")
+    report_path.write_text(
+        json.dumps(_migration_probe(report, outcome="ineligible")), encoding="utf-8"
+    )
 
     diagnostic = contract._build_class_zero_diagnostic(
         _diagnostic_args(report_path, probe_exit_code=2)
@@ -1021,12 +1065,102 @@ def test_class_zero_diagnostic_fails_closed_for_unusable_report(
     assert diagnostic["class_zero_eligible"] is None
 
 
+@pytest.mark.parametrize(
+    "failure_code",
+    [
+        "migrator_initialization_failed",
+        "database_or_lock_setup_failed",
+        "advisory_lock_unavailable",
+        "database_inspection_failed",
+        "database_identity_mismatch",
+        "migrator_cleanup_failed",
+        "diagnostic_envelope_failed",
+    ],
+)
+def test_class_zero_diagnostic_maps_safe_pre_report_failure_codes(
+    contract, tmp_path: Path, failure_code: str
+) -> None:
+    report_path = tmp_path / "report.json"
+    report_path.write_text(
+        json.dumps(
+            _migration_probe(None, outcome="failed", failure_code=failure_code)
+        ),
+        encoding="utf-8",
+    )
+
+    diagnostic = contract._build_class_zero_diagnostic(
+        _diagnostic_args(report_path, probe_exit_code=2)
+    )
+
+    assert diagnostic["probe_outcome"] == "unavailable"
+    assert diagnostic["failure_codes"] == [failure_code]
+    assert diagnostic["report_produced"] is False
+    assert diagnostic["report_json_valid"] is False
+    assert diagnostic["class_zero_eligible"] is None
+
+
+def test_class_zero_diagnostic_preserves_safe_report_after_lock_release_failure(
+    contract, tmp_path: Path
+) -> None:
+    report_path = tmp_path / "report.json"
+    report_path.write_text(
+        json.dumps(
+            _migration_probe(
+                _complete_migration_report(),
+                outcome="failed",
+                failure_code="advisory_lock_release_failed",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    diagnostic = contract._build_class_zero_diagnostic(
+        _diagnostic_args(report_path, probe_exit_code=2)
+    )
+
+    assert diagnostic["probe_outcome"] == "unavailable"
+    assert diagnostic["failure_codes"] == ["advisory_lock_release_failed"]
+    assert diagnostic["report_produced"] is True
+    assert diagnostic["report_json_valid"] is True
+    assert diagnostic["structural_schema_matches_head"] is True
+    assert diagnostic["class_zero_eligible"] is False
+
+
+@pytest.mark.parametrize(
+    "probe",
+    [
+        _migration_probe(None, outcome="failed", failure_code="raw exception text"),
+        _migration_probe(None, outcome="eligible"),
+        _migration_probe(
+            _complete_migration_report(),
+            outcome="failed",
+            failure_code="database_inspection_failed",
+        ),
+    ],
+)
+def test_class_zero_diagnostic_rejects_invalid_raw_probe_envelopes(
+    contract, tmp_path: Path, probe: dict[str, object]
+) -> None:
+    report_path = tmp_path / "report.json"
+    report_path.write_text(json.dumps(probe), encoding="utf-8")
+
+    diagnostic = contract._build_class_zero_diagnostic(
+        _diagnostic_args(report_path, probe_exit_code=2)
+    )
+
+    assert diagnostic["probe_outcome"] == "invalid"
+    assert diagnostic["failure_codes"] == ["report_invalid"]
+
+
 def test_class_zero_diagnostic_rejects_report_exit_disagreement(
     contract, tmp_path: Path
 ) -> None:
     report_path = tmp_path / "report.json"
     report_path.write_text(
-        json.dumps(_complete_migration_report()), encoding="utf-8"
+        json.dumps(
+            _migration_probe(_complete_migration_report(), outcome="eligible")
+        ),
+        encoding="utf-8",
     )
 
     diagnostic = contract._build_class_zero_diagnostic(
@@ -1061,9 +1195,10 @@ def test_diagnostic_engine_runs_only_exact_one_shot_probe(tmp_path: Path) -> Non
     diagnostic = json.loads(process.stdout)
     assert diagnostic["probe_outcome"] == "eligible"
     commands = docker_log.read_text(encoding="utf-8").splitlines()
-    probe = [command for command in commands if "require-head --json" in command]
+    probe = [command for command in commands if "diagnose-head --json" in command]
     assert len(probe) == 1
-    assert "run --rm --no-deps migrate python migrate.py require-head --json" in probe[0]
+    assert "run --rm --no-deps migrate python migrate.py diagnose-head --json" in probe[0]
+    assert not any("require-head --json" in command for command in commands)
     assert not backup_log.exists()
     assert not (tmp_path / "activation-contract").exists()
     forbidden = (" up ", " start ", " restart ", " stop ", " down ", " pull ", " build ")
