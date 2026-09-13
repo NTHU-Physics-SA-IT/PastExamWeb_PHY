@@ -847,6 +847,9 @@ class DeploymentConfig:
     active_env: Path = Path("/opt/pastexam-current-release.env")
     mutation_lock: Path = Path("/run/lock/pastexam-production-activation.lock")
     engine_path: Path = Path("/usr/local/libexec/pastexam-activate-production-release")
+    activation_contract_path: Path = Path(
+        "/usr/local/libexec/pastexam-production-activation-contract.py"
+    )
     backup_root: Path = Path("/opt/pastexam-backups")
     systemd_run: str = "systemd-run"
     systemctl: str = "systemctl"
@@ -1453,6 +1456,93 @@ class DeploymentController:
             self.config, target_sha, request, allow_activated=True
         )
         return self._observation_evidence(active, candidate)
+
+    def diagnose_class_zero(
+        self, target_sha: str, request: RequestContract
+    ) -> dict[str, Any]:
+        """Return one exact-authority, sanitized Class-0 diagnostic."""
+        active = self.store.load_active()
+        self.store.verify_active_views(active)
+        self._verify_runtime(active)
+        candidate = verify_candidate(
+            self.config, target_sha, request, allow_activated=True
+        )
+        expected_revision = self._expected_candidate_revision(candidate)
+        with tempfile.TemporaryDirectory(prefix="pastexam-class-zero-") as temporary:
+            unvalidated = Path(temporary) / "diagnostic.unvalidated.json"
+            validated = Path(temporary) / "diagnostic.json"
+            environment = {
+                "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "PRODUCTION_DEPLOY_ENABLED": "true",
+                "ACTIVATION_CONFIRMATION": "activate-reviewed-production-release",
+                "ACTIVATION_CLASS_ZERO_DIAGNOSTIC_ONLY": "true",
+                "RELEASE_DIRECTORY": candidate["release_directory"],
+                "RELEASE_MANIFEST": str(
+                    Path(candidate["release_directory"]) / "release-manifest.env"
+                ),
+                "RELEASE_MANIFEST_SHA256": candidate["manifest_sha256"],
+                "INTERNAL_HEALTH_URL": self.config.internal_health_url,
+                "EXTERNAL_HEALTH_URL": self.config.external_health_url,
+                "ACTIVATION_TARGET_SHA": target_sha,
+                "ACTIVATION_SOURCE_CI_RUN_ID": str(request.source_ci_run_id),
+                "ACTIVATION_SOURCE_CI_RUN_ATTEMPT": str(
+                    request.source_ci_run_attempt
+                ),
+                "ACTIVATION_CURRENT_ACTIVE_SHA": active.active_sha,
+                "ACTIVATION_EXPECTED_REVISION": expected_revision,
+            }
+            try:
+                process = subprocess.run(
+                    [str(self.config.engine_path)],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    env=environment,
+                    timeout=240,
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                raise DeploymentError(
+                    "The Class-0 diagnostic probe failed closed."
+                ) from error
+            if (
+                process.returncode != 0
+                or len(process.stdout.encode("utf-8")) > 64 * 1024
+            ):
+                raise DeploymentError("The Class-0 diagnostic probe failed closed.")
+            unvalidated.write_text(process.stdout, encoding="utf-8")
+            validation = subprocess.run(
+                [
+                    "python3",
+                    str(self.config.activation_contract_path),
+                    "validate-class-zero-diagnostic",
+                    "--input",
+                    str(unvalidated),
+                    "--output",
+                    str(validated),
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=15,
+            )
+            if validation.returncode != 0:
+                raise DeploymentError(
+                    "The Class-0 diagnostic contract failed closed."
+                )
+            payload = json.loads(
+                validated.read_text(encoding="utf-8"),
+                object_pairs_hook=_reject_duplicate_keys,
+            )
+        if (
+            payload.get("target_sha") != target_sha
+            or payload.get("source_ci_run_id") != request.source_ci_run_id
+            or payload.get("source_ci_run_attempt")
+            != request.source_ci_run_attempt
+            or payload.get("current_active_sha") != active.active_sha
+            or payload.get("expected_revision") != expected_revision
+        ):
+            raise DeploymentError("Class-0 diagnostic authority disagrees.")
+        return payload
 
     def _systemd_dispatch(self, request_id: str, *, rollback: bool = False) -> None:
         unit = f"pastexam-deployment-{request_id}"
@@ -2088,6 +2178,10 @@ def _parser() -> argparse.ArgumentParser:
     observe.add_argument("target_sha")
     observe.add_argument("source_ci_run_id", type=int)
     observe.add_argument("source_ci_run_attempt", type=int)
+    diagnose = subparsers.add_parser("diagnose-class-zero")
+    diagnose.add_argument("target_sha")
+    diagnose.add_argument("source_ci_run_id", type=int)
+    diagnose.add_argument("source_ci_run_attempt", type=int)
     preflight = subparsers.add_parser("preflight")
     preflight.add_argument("target_sha")
     preflight.add_argument("source_ci_run_id", type=int)
@@ -2158,6 +2252,12 @@ def main() -> int:
             _print_json(evidence)
             if evidence["db_current_revision"] is None:
                 return 2
+        elif args.command == "diagnose-class-zero":
+            _print_json(
+                controller.diagnose_class_zero(
+                    args.target_sha, _request_from_args(args)
+                )
+            )
         elif args.command == "preflight":
             request = _request_from_args(args)
             active = store.load_active()

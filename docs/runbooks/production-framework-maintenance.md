@@ -130,6 +130,16 @@ Installation does not authorize `observe`. A subsequent separately authorized
 read-only task may run `status` and `observe` through the activation principal.
 Only that live evidence may classify production migration drift.
 
+The same installed wrapper, controller, activation engine, and contract helper
+also carry the fixed `diagnose-class-zero <target-sha> <source-run> <attempt>`
+surface when that reviewed source is installed; no additional privileged helper
+is introduced. The command permits only the exact one-shot, `--rm --no-deps`
+migrator `require-head --json` probe and returns a revalidated sanitized
+summary. Installation alone does not authorize the probe. Each live diagnostic
+requires separate authorization, and it grants no preflight, activation,
+rollback, general Docker, SQL, or migration authority. `observe` remains
+unchanged and intentionally narrower.
+
 ## Rotation and revocation
 
 Key rotation is a separately authorized bootstrap-governance operation: replace

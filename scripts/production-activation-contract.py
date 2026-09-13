@@ -60,6 +60,47 @@ OBSERVATION_KEYS = frozenset(
         "failed_stage",
     }
 )
+CLASS_ZERO_DIAGNOSTIC_KIND = "production-class-zero-diagnostic"
+CLASS_ZERO_DIAGNOSTIC_KEYS = frozenset(
+    {
+        "schema_version", "kind", "target_sha", "source_ci_run_id",
+        "source_ci_run_attempt", "current_active_sha", "report_produced",
+        "report_json_valid", "probe_outcome", "database_connected",
+        "repository_head_count", "multiple_heads", "ledger_revision_count",
+        "current_revision", "expected_revision", "current_revision_known",
+        "current_equals_head", "structural_schema_matches_head",
+        "upgrade_allowed", "class_zero_eligible", "failed_schema_checks",
+        "migration_error_categories", "migration_error_count", "failure_codes",
+    }
+)
+MIGRATION_REPORT_KEYS = frozenset(
+    {
+        "database_connected", "database_name", "database_empty",
+        "alembic_version_exists", "alembic_versions", "current_revision",
+        "current_revision_known", "repository_heads", "multiple_heads",
+        "schema_candidate_revision", "reviewed_manifest_revisions",
+        "schema_checks", "schema_matches_head", "upgrade_allowed", "warnings",
+        "errors",
+    }
+)
+CLASS_ZERO_FAILURE_CODES = frozenset(
+    {
+        "database_unavailable", "report_unavailable", "report_invalid",
+        "repository_head_count_invalid", "multiple_repository_heads",
+        "ledger_revision_count_invalid", "current_revision_unknown",
+        "current_not_repository_head", "structural_schema_mismatch",
+        "report_errors_present", "upgrade_disallowed", "probe_failed",
+        "verifier_rejected",
+    }
+)
+MIGRATION_ERROR_CATEGORIES = frozenset(
+    {"database", "repository_heads", "ledger", "revision", "schema", "other"}
+)
+CLASS_ZERO_PROBE_OUTCOMES = frozenset(
+    {"eligible", "ineligible", "invalid", "unavailable"}
+)
+CLASS_ZERO_MAX_ITEMS = 128
+CLASS_ZERO_MAX_CHECK_NAME_LENGTH = 128
 LISTEN_PORT = re.compile(
     r"\blisten\s+(?:\[[^\]]+\]:|[A-Za-z0-9_.-]+:)?"
     r"(?P<port>[0-9]{1,5})(?=[\s;])"
@@ -302,6 +343,338 @@ def _load_strict_json(path: Path) -> Any:
         )
     except (OSError, json.JSONDecodeError) as error:
         raise ContractError("Cannot read observation evidence JSON.") from error
+
+
+def _class_zero_report_eligible(report: dict[str, Any]) -> bool:
+    """Keep the activation verifier and diagnostic on one Class-0 predicate."""
+    heads = report.get("repository_heads")
+    current = report.get("current_revision")
+    errors = report.get("errors")
+    return bool(
+        report.get("database_connected") is True
+        and report.get("current_revision_known") is True
+        and report.get("multiple_heads") is False
+        and isinstance(heads, list)
+        and len(heads) == 1
+        and isinstance(current, str)
+        and current == heads[0]
+        and report.get("schema_matches_head") is True
+        and report.get("upgrade_allowed") is True
+        and isinstance(errors, list)
+        and not errors
+    )
+
+
+def _diagnostic_identity(args: argparse.Namespace) -> dict[str, Any]:
+    if FULL_SHA.fullmatch(args.target_sha) is None or FULL_SHA.fullmatch(
+        args.current_active_sha
+    ) is None:
+        raise ContractError("Class-0 diagnostic SHA authority is malformed.")
+    if args.source_ci_run_id < 1 or args.source_ci_run_attempt < 1:
+        raise ContractError("Class-0 diagnostic Source Full authority is malformed.")
+    if ALEMBIC_REVISION.fullmatch(args.expected_revision) is None:
+        raise ContractError("Class-0 diagnostic expected revision is malformed.")
+    return {
+        "schema_version": 1,
+        "kind": CLASS_ZERO_DIAGNOSTIC_KIND,
+        "target_sha": args.target_sha,
+        "source_ci_run_id": args.source_ci_run_id,
+        "source_ci_run_attempt": args.source_ci_run_attempt,
+        "current_active_sha": args.current_active_sha,
+        "expected_revision": args.expected_revision,
+    }
+
+
+def _empty_diagnostic(
+    identity: dict[str, Any], *, produced: bool, outcome: str, code: str
+) -> dict[str, Any]:
+    payload = {
+        **identity,
+        "report_produced": produced,
+        "report_json_valid": False,
+        "probe_outcome": outcome,
+        "database_connected": None,
+        "repository_head_count": None,
+        "multiple_heads": None,
+        "ledger_revision_count": None,
+        "current_revision": None,
+        "current_revision_known": None,
+        "current_equals_head": None,
+        "structural_schema_matches_head": None,
+        "upgrade_allowed": None,
+        "class_zero_eligible": None,
+        "failed_schema_checks": [],
+        "migration_error_categories": [],
+        "migration_error_count": None,
+        "failure_codes": [code],
+    }
+    _validate_class_zero_diagnostic(payload)
+    return payload
+
+
+def _load_diagnostic_report(path: Path) -> tuple[dict[str, Any] | None, str]:
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None, "unavailable"
+    if not raw:
+        return None, "unavailable"
+    if len(raw) > 1024 * 1024:
+        return None, "invalid"
+
+    def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ContractError("Migration report contains a duplicate key.")
+            result[key] = value
+        return result
+
+    try:
+        report = json.loads(raw, object_pairs_hook=reject_duplicates)
+    except (UnicodeDecodeError, json.JSONDecodeError, ContractError):
+        return None, "invalid"
+    if not isinstance(report, dict) or set(report) != MIGRATION_REPORT_KEYS:
+        return None, "invalid"
+    booleans = (
+        "database_connected", "alembic_version_exists", "current_revision_known",
+        "multiple_heads", "schema_matches_head", "upgrade_allowed",
+    )
+    lists = (
+        "alembic_versions", "repository_heads", "reviewed_manifest_revisions",
+        "schema_checks", "warnings", "errors",
+    )
+    if any(type(report[key]) is not bool for key in booleans) or any(
+        not isinstance(report[key], list) or len(report[key]) > CLASS_ZERO_MAX_ITEMS
+        for key in lists
+    ):
+        return None, "invalid"
+    for key in ("alembic_versions", "repository_heads", "reviewed_manifest_revisions"):
+        if any(
+            not isinstance(value, str) or ALEMBIC_REVISION.fullmatch(value) is None
+            for value in report[key]
+        ):
+            return None, "invalid"
+    current = report["current_revision"]
+    if current is not None and (
+        not isinstance(current, str) or ALEMBIC_REVISION.fullmatch(current) is None
+    ):
+        return None, "invalid"
+    if report["database_name"] is not None and not isinstance(
+        report["database_name"], str
+    ):
+        return None, "invalid"
+    if report["database_empty"] is not None and type(report["database_empty"]) is not bool:
+        return None, "invalid"
+    candidate = report["schema_candidate_revision"]
+    if candidate is not None and (
+        not isinstance(candidate, str) or ALEMBIC_REVISION.fullmatch(candidate) is None
+    ):
+        return None, "invalid"
+    check_names: set[str] = set()
+    for check in report["schema_checks"]:
+        if (
+            not isinstance(check, dict)
+            or set(check) != {"name", "passed", "message", "details"}
+            or not isinstance(check["name"], str)
+            or len(check["name"]) > CLASS_ZERO_MAX_CHECK_NAME_LENGTH
+            or SAFE_IDENTIFIER.fullmatch(check["name"]) is None
+            or type(check["passed"]) is not bool
+            or not isinstance(check["message"], str)
+            or not isinstance(check["details"], dict)
+        ):
+            return None, "invalid"
+        if check["name"] in check_names:
+            return None, "invalid"
+        check_names.add(check["name"])
+    if any(not isinstance(value, str) for key in ("warnings", "errors") for value in report[key]):
+        return None, "invalid"
+    return report, "valid"
+
+
+def _build_class_zero_diagnostic(args: argparse.Namespace) -> dict[str, Any]:
+    identity = _diagnostic_identity(args)
+    if not 0 <= args.probe_exit_code <= 255:
+        raise ContractError("Class-0 diagnostic probe status is malformed.")
+    report, state = _load_diagnostic_report(args.report)
+    if state == "unavailable":
+        code = "probe_failed" if args.probe_exit_code != 0 else "report_unavailable"
+        return _empty_diagnostic(
+            identity, produced=False, outcome="unavailable", code=code
+        )
+    if state == "invalid" or report is None:
+        return _empty_diagnostic(
+            identity, produced=True, outcome="invalid", code="report_invalid"
+        )
+
+    heads = report["repository_heads"]
+    ledger = report["alembic_versions"]
+    current = report["current_revision"]
+    failed_checks = sorted(
+        check["name"] for check in report["schema_checks"] if not check["passed"]
+    )
+    codes: list[str] = []
+    categories: list[str] = []
+    if not report["database_connected"]:
+        codes.append("database_unavailable")
+        categories.append("database")
+    if len(heads) != 1:
+        codes.append("repository_head_count_invalid")
+        categories.append("repository_heads")
+    if report["multiple_heads"]:
+        codes.append("multiple_repository_heads")
+    if len(ledger) != 1:
+        codes.append("ledger_revision_count_invalid")
+        categories.append("ledger")
+    if not report["current_revision_known"]:
+        codes.append("current_revision_unknown")
+        categories.append("revision")
+    current_equals_head = bool(
+        len(heads) == 1
+        and heads[0] == args.expected_revision
+        and current == heads[0]
+    )
+    if not current_equals_head:
+        codes.append("current_not_repository_head")
+    if not report["schema_matches_head"]:
+        codes.append("structural_schema_mismatch")
+        categories.append("schema")
+    if report["errors"]:
+        codes.append("report_errors_present")
+        if not categories:
+            categories.append("other")
+    if not report["upgrade_allowed"]:
+        codes.append("upgrade_disallowed")
+
+    eligible = _class_zero_report_eligible(report) and current == args.expected_revision
+    expected_exit = 0 if eligible else 2
+    outcome = "eligible" if eligible else "ineligible"
+    if args.probe_exit_code != expected_exit:
+        codes.append("verifier_rejected")
+        outcome = "unavailable"
+        eligible = False
+    payload = {
+        **identity,
+        "report_produced": True,
+        "report_json_valid": True,
+        "probe_outcome": outcome,
+        "database_connected": report["database_connected"],
+        "repository_head_count": len(heads),
+        "multiple_heads": report["multiple_heads"],
+        "ledger_revision_count": len(ledger),
+        "current_revision": current,
+        "current_revision_known": report["current_revision_known"],
+        "current_equals_head": current_equals_head,
+        "structural_schema_matches_head": report["schema_matches_head"],
+        "upgrade_allowed": report["upgrade_allowed"],
+        "class_zero_eligible": eligible,
+        "failed_schema_checks": failed_checks,
+        "migration_error_categories": sorted(set(categories)),
+        "migration_error_count": len(report["errors"]),
+        "failure_codes": codes,
+    }
+    _validate_class_zero_diagnostic(payload)
+    return payload
+
+
+def _validate_class_zero_diagnostic(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict) or set(payload) != CLASS_ZERO_DIAGNOSTIC_KEYS:
+        raise ContractError("Class-0 diagnostic has an unexpected schema.")
+    if type(payload["schema_version"]) is not int or payload["schema_version"] != 1:
+        raise ContractError("Class-0 diagnostic version is malformed.")
+    if payload["kind"] != CLASS_ZERO_DIAGNOSTIC_KIND:
+        raise ContractError("Class-0 diagnostic kind is malformed.")
+    if FULL_SHA.fullmatch(payload["target_sha"]) is None or FULL_SHA.fullmatch(
+        payload["current_active_sha"]
+    ) is None:
+        raise ContractError("Class-0 diagnostic SHA authority is malformed.")
+    if type(payload["source_ci_run_id"]) is not int or payload["source_ci_run_id"] < 1:
+        raise ContractError("Class-0 diagnostic run authority is malformed.")
+    if type(payload["source_ci_run_attempt"]) is not int or payload["source_ci_run_attempt"] < 1:
+        raise ContractError("Class-0 diagnostic attempt authority is malformed.")
+    if ALEMBIC_REVISION.fullmatch(payload["expected_revision"]) is None:
+        raise ContractError("Class-0 diagnostic expected revision is malformed.")
+    if payload["probe_outcome"] not in CLASS_ZERO_PROBE_OUTCOMES:
+        raise ContractError("Class-0 diagnostic outcome is unsupported.")
+    if any(type(payload[key]) is not bool for key in ("report_produced", "report_json_valid")):
+        raise ContractError("Class-0 diagnostic report state is malformed.")
+    if payload["report_json_valid"] and not payload["report_produced"]:
+        raise ContractError("Class-0 diagnostic report state is inconsistent.")
+    nullable_booleans = (
+        "database_connected", "multiple_heads", "current_revision_known",
+        "current_equals_head", "structural_schema_matches_head", "upgrade_allowed",
+        "class_zero_eligible",
+    )
+    if any(payload[key] is not None and type(payload[key]) is not bool for key in nullable_booleans):
+        raise ContractError("Class-0 diagnostic boolean state is malformed.")
+    for key in ("repository_head_count", "ledger_revision_count", "migration_error_count"):
+        if payload[key] is not None and (type(payload[key]) is not int or payload[key] < 0):
+            raise ContractError("Class-0 diagnostic count is malformed.")
+    current = payload["current_revision"]
+    if current is not None and (
+        not isinstance(current, str) or ALEMBIC_REVISION.fullmatch(current) is None
+    ):
+        raise ContractError("Class-0 diagnostic current revision is malformed.")
+    codes = payload["failure_codes"]
+    categories = payload["migration_error_categories"]
+    checks = payload["failed_schema_checks"]
+    if (
+        not isinstance(codes, list) or len(codes) > len(CLASS_ZERO_FAILURE_CODES)
+        or len(codes) != len(set(codes))
+        or any(code not in CLASS_ZERO_FAILURE_CODES for code in codes)
+    ):
+        raise ContractError("Class-0 diagnostic failure codes are malformed.")
+    if (
+        not isinstance(categories, list) or categories != sorted(set(categories))
+        or any(category not in MIGRATION_ERROR_CATEGORIES for category in categories)
+    ):
+        raise ContractError("Class-0 diagnostic error categories are malformed.")
+    if (
+        not isinstance(checks, list) or len(checks) > CLASS_ZERO_MAX_ITEMS
+        or checks != sorted(set(checks))
+        or any(
+            not isinstance(name, str)
+            or len(name) > CLASS_ZERO_MAX_CHECK_NAME_LENGTH
+            or SAFE_IDENTIFIER.fullmatch(name) is None
+            for name in checks
+        )
+    ):
+        raise ContractError("Class-0 diagnostic check names are malformed.")
+    if payload["probe_outcome"] == "eligible" and (
+        payload["class_zero_eligible"] is not True
+        or codes
+        or checks
+        or categories
+        or payload["migration_error_count"] != 0
+    ):
+        raise ContractError("Eligible Class-0 diagnostic evidence is inconsistent.")
+    if payload["class_zero_eligible"] is True and payload["probe_outcome"] != "eligible":
+        raise ContractError("Class-0 diagnostic eligibility is inconsistent.")
+    report_fields = (
+        "database_connected", "repository_head_count", "multiple_heads",
+        "ledger_revision_count", "current_revision_known", "current_equals_head",
+        "structural_schema_matches_head", "upgrade_allowed", "class_zero_eligible",
+        "migration_error_count",
+    )
+    if payload["report_json_valid"]:
+        if payload["probe_outcome"] == "invalid" or any(
+            payload[key] is None for key in report_fields
+        ):
+            raise ContractError("Valid Class-0 diagnostic report state is incomplete.")
+        if payload["probe_outcome"] == "ineligible" and not codes:
+            raise ContractError("Ineligible Class-0 diagnostic evidence has no failure code.")
+        if payload["probe_outcome"] == "unavailable" and "verifier_rejected" not in codes:
+            raise ContractError("Unavailable Class-0 diagnostic report was not rejected.")
+    elif (
+        any(payload[key] is not None for key in (*report_fields, "current_revision"))
+        or checks
+        or categories
+        or len(codes) != 1
+        or codes[0] not in {"report_unavailable", "report_invalid", "probe_failed"}
+        or payload["probe_outcome"] not in {"invalid", "unavailable"}
+    ):
+        raise ContractError("Unavailable Class-0 diagnostic evidence exposes report fields.")
+    return payload
 
 
 def _validate_observation(input_path: Path, output: Path) -> None:
@@ -1273,27 +1646,11 @@ def _runtime_image_values(manifest: Path) -> None:
 
 def _verify_class_zero(report_path: Path) -> None:
     report = _load_json(report_path)
-    if not isinstance(report, dict):
-        raise ContractError("Migration report root must be an object.")
-    heads = report.get("repository_heads")
-    current = report.get("current_revision")
-    errors = report.get("errors")
-    if (
-        report.get("database_connected") is not True
-        or report.get("current_revision_known") is not True
-        or report.get("multiple_heads") is not False
-        or not isinstance(heads, list)
-        or len(heads) != 1
-        or not isinstance(current, str)
-        or current != heads[0]
-        or report.get("schema_matches_head") is not True
-        or report.get("upgrade_allowed") is not True
-        or not isinstance(errors, list)
-        or errors
-    ):
+    if not isinstance(report, dict) or not _class_zero_report_eligible(report):
         raise ContractError(
             "Production migration delta is non-zero or database head authority is incomplete."
         )
+    current = report["current_revision"]
     if SAFE_IDENTIFIER.fullmatch(current) is None:
         raise ContractError("Production database revision is malformed.")
     print(current)
@@ -1643,6 +2000,17 @@ def _parser() -> argparse.ArgumentParser:
     ingress.add_argument("--compose-env", type=Path, required=True)
     class_zero = subparsers.add_parser("verify-class-zero")
     class_zero.add_argument("--report", type=Path, required=True)
+    diagnostic = subparsers.add_parser("build-class-zero-diagnostic")
+    diagnostic.add_argument("--report", type=Path, required=True)
+    diagnostic.add_argument("--probe-exit-code", type=int, required=True)
+    diagnostic.add_argument("--target-sha", required=True)
+    diagnostic.add_argument("--source-ci-run-id", type=int, required=True)
+    diagnostic.add_argument("--source-ci-run-attempt", type=int, required=True)
+    diagnostic.add_argument("--current-active-sha", required=True)
+    diagnostic.add_argument("--expected-revision", required=True)
+    validate_diagnostic = subparsers.add_parser("validate-class-zero-diagnostic")
+    validate_diagnostic.add_argument("--input", type=Path, required=True)
+    validate_diagnostic.add_argument("--output", type=Path, required=True)
     evidence = subparsers.add_parser("write-engine-evidence")
     evidence.add_argument("--output", type=Path, required=True)
     evidence.add_argument("--target-sha", required=True)
@@ -1702,6 +2070,17 @@ def main() -> int:
             )
         elif args.command == "verify-class-zero":
             _verify_class_zero(args.report)
+        elif args.command == "build-class-zero-diagnostic":
+            print(
+                json.dumps(
+                    _build_class_zero_diagnostic(args),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+        elif args.command == "validate-class-zero-diagnostic":
+            payload = _validate_class_zero_diagnostic(_load_strict_json(args.input))
+            _write_json_atomic(args.output, payload)
         elif args.command == "count-critical-log-lines":
             _count_critical_log_lines()
         elif args.command == "write-engine-failure-evidence":

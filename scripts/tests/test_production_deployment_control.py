@@ -51,6 +51,7 @@ def config(control, tmp_path: Path):
         active_env=active_env,
         mutation_lock=tmp_path / "activation.lock",
         engine_path=tmp_path / "engine",
+        activation_contract_path=tmp_path / "activation-contract",
         systemd_run="systemd-run",
         systemctl="systemctl",
         internal_health_url="http://127.0.0.1/api/health",
@@ -686,6 +687,121 @@ def test_observe_returns_fixed_live_source_bound_read_only_evidence(
         "advisory_lock",
     ):
         assert forbidden_sql not in normalized_sql
+
+
+def test_class_zero_diagnostic_binds_authority_without_deployment_state(
+    control, config, monkeypatch
+) -> None:
+    store = control.DeploymentStore(config)
+    active = _active(control, config)
+    store.seed_active(active)
+    request = _request(control)
+    _candidate(control, config, request)
+    calls: list[tuple[list[str], dict]] = []
+    payload = {
+        "schema_version": 1,
+        "kind": "production-class-zero-diagnostic",
+        "target_sha": request.target_sha,
+        "source_ci_run_id": request.source_ci_run_id,
+        "source_ci_run_attempt": request.source_ci_run_attempt,
+        "current_active_sha": active.active_sha,
+        "report_produced": True,
+        "report_json_valid": True,
+        "probe_outcome": "ineligible",
+        "database_connected": True,
+        "repository_head_count": 1,
+        "multiple_heads": False,
+        "ledger_revision_count": 1,
+        "current_revision": "c3f8a1d6e9b2",
+        "expected_revision": "c3f8a1d6e9b2",
+        "current_revision_known": True,
+        "current_equals_head": True,
+        "structural_schema_matches_head": False,
+        "upgrade_allowed": False,
+        "class_zero_eligible": False,
+        "failed_schema_checks": ["archives.indexes"],
+        "migration_error_categories": ["schema"],
+        "migration_error_count": 1,
+        "failure_codes": [
+            "structural_schema_mismatch",
+            "report_errors_present",
+            "upgrade_disallowed",
+        ],
+    }
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        if command == [str(config.engine_path)]:
+            return control.subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps(payload),
+                stderr="raw secret must not escape",
+            )
+        assert command[:3] == [
+            "python3",
+            str(config.activation_contract_path),
+            "validate-class-zero-diagnostic",
+        ]
+        input_path = Path(command[command.index("--input") + 1])
+        output_path = Path(command[command.index("--output") + 1])
+        output_path.write_text(input_path.read_text(encoding="utf-8"), encoding="utf-8")
+        return control.subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(control.subprocess, "run", run)
+    before = sorted(config.state_root.rglob("*"))
+
+    result = control.DeploymentController(config).diagnose_class_zero(
+        request.target_sha, request
+    )
+
+    after = sorted(config.state_root.rglob("*"))
+    assert result == payload
+    assert before == after
+    assert len(calls) == 2
+    engine_environment = calls[0][1]["env"]
+    assert engine_environment["ACTIVATION_CLASS_ZERO_DIAGNOSTIC_ONLY"] == "true"
+    assert engine_environment["ACTIVATION_TARGET_SHA"] == request.target_sha
+    assert engine_environment["ACTIVATION_SOURCE_CI_RUN_ID"] == "99"
+    assert engine_environment["ACTIVATION_SOURCE_CI_RUN_ATTEMPT"] == "1"
+    assert engine_environment["ACTIVATION_CURRENT_ACTIVE_SHA"] == active.active_sha
+    assert engine_environment["ACTIVATION_EXPECTED_REVISION"] == "c3f8a1d6e9b2"
+    assert "ACTIVATION_PREFLIGHT_ONLY" not in engine_environment
+    assert "ACTIVATION_EVIDENCE_PATH" not in engine_environment
+    assert "ACTIVATION_FAILURE_EVIDENCE_PATH" not in engine_environment
+
+
+def test_class_zero_diagnostic_never_returns_raw_engine_failure(
+    control, config, monkeypatch
+) -> None:
+    store = control.DeploymentStore(config)
+    active = _active(control, config)
+    store.seed_active(active)
+    request = _request(control)
+    _candidate(control, config, request)
+    monkeypatch.setattr(
+        control.subprocess,
+        "run",
+        lambda command, **kwargs: control.subprocess.CompletedProcess(
+            command,
+            2,
+            stdout="raw stdout /private/path SELECT secret",
+            stderr="raw stderr password",
+        ),
+    )
+
+    with pytest.raises(
+        control.DeploymentError,
+        match=r"^The Class-0 diagnostic probe failed closed\.$",
+    ) as failure:
+        control.DeploymentController(config).diagnose_class_zero(
+            request.target_sha, request
+        )
+
+    rendered = str(failure.value)
+    assert "private" not in rendered
+    assert "SELECT" not in rendered
+    assert "password" not in rendered
 
 
 def test_observe_never_substitutes_ledger_revision_when_live_query_fails(
