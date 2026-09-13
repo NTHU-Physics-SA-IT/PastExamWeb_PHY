@@ -138,14 +138,21 @@ image is locally present and never pulls it. If present, fixed shell and Python
 literal-output sentinels run through the same `migrate` service before the
 trusted `diagnose-head --json` probe; every ephemeral run retains `--rm
 --no-deps`. The resulting finite stage code distinguishes local image absence,
-container execution, Python execution, and missing-envelope boundaries without
-returning Docker/registry stderr, exception text, SQL, paths, container IDs, or
-secrets. `diagnose-head` shares the `require-head` Class-0 predicate, and
+container execution, and Python execution. A missing trusted envelope is
+further classified only as empty or invalid stdout with a zero, two, or other
+exit class, without returning the output, exact abnormal exit code,
+Docker/registry stderr, exception text, SQL, paths, container IDs, or secrets.
+`diagnose-head` shares the `require-head` Class-0 predicate, and
 production preflight remains on `require-head`. Installation alone
 does not authorize the probe. Each live diagnostic
 requires separate authorization, and it grants no preflight, activation,
 rollback, general Docker, SQL, or migration authority. `observe` remains
 unchanged and intentionally narrower.
+
+Merging this source does not update the root-installed framework. A separately
+authorized framework installation and a later separately authorized live
+diagnostic are required before these classifications can be observed in
+production.
 
 ## Rotation and revocation
 

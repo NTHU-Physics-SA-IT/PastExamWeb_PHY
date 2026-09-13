@@ -206,8 +206,11 @@ image. When present, the engine runs fixed shell and Python literal-output
 sentinels through the same `migrate` service before the trusted
 `docker compose run --rm --no-deps migrate python migrate.py diagnose-head
 --json` probe. Each failed stage maps to one finite code for image absence,
-container command failure, Python command failure, or a missing trusted
-diagnostic envelope. `diagnose-head` shares the authoritative `require-head`
+container command failure, or Python command failure. If `diagnose-head` does
+not produce a trusted envelope, the sanitized code distinguishes empty from
+invalid stdout and classifies its exit as zero, two, or other; it never retains
+the output, stderr, or exact abnormal exit value. `diagnose-head` shares the
+authoritative `require-head`
 eligibility predicate while adding a sealed, finite pre-report failure
 envelope; normal preflight continues to use `require-head`. Every ephemeral
 run uses `--no-deps` to prevent dependency startup and `--rm` to remove only
