@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -483,12 +484,27 @@ def _activation_environment(
         json.dumps(
             {
                 "database_connected": True,
+                "database_name": "archive_db",
+                "database_empty": False,
+                "alembic_version_exists": True,
+                "alembic_versions": [migration_revision],
                 "current_revision": migration_revision,
                 "current_revision_known": True,
                 "repository_heads": [repository_head],
                 "multiple_heads": False,
+                "schema_candidate_revision": migration_revision,
+                "reviewed_manifest_revisions": [repository_head],
+                "schema_checks": [
+                    {
+                        "name": "tables",
+                        "passed": True,
+                        "message": "OK",
+                        "details": {},
+                    }
+                ],
                 "schema_matches_head": True,
                 "upgrade_allowed": True,
+                "warnings": [],
                 "errors": [],
             }
         ),
@@ -515,6 +531,7 @@ def _activation_environment(
         "  exit \"$FAKE_COMPOSE_QUIET_EXIT\"\n"
         "elif [[ \"$1\" == 'compose' && \"$*\" == *'require-head --json'* ]]; then\n"
         '  cat "$FAKE_MIGRATION_REPORT"\n'
+        "  exit \"$FAKE_MIGRATION_EXIT\"\n"
         "elif [[ \"$1\" == 'exec' && \"$*\" == *'redis-cli ping'* ]]; then\n"
         "  printf '%s\\n' \"$FAKE_REDIS_PING\"\n"
         "elif [[ \"$1\" == 'inspect' && \"$*\" == *'RestartCount'* ]]; then\n"
@@ -590,6 +607,7 @@ def _activation_environment(
         "    return \"$FAKE_COMPOSE_QUIET_EXIT\"\n"
         "  elif [[ \"$1\" == 'compose' && \"$*\" == *'require-head --json'* ]]; then\n"
         '    cat "$FAKE_MIGRATION_REPORT"\n'
+        "    return \"$FAKE_MIGRATION_EXIT\"\n"
         "  elif [[ \"$1\" == 'exec' && \"$*\" == *'redis-cli ping'* ]]; then\n"
         "    printf '%s\\n' \"$FAKE_REDIS_PING\"\n"
         "  elif [[ \"$1\" == 'inspect' && \"$*\" == *'RestartCount'* ]]; then\n"
@@ -700,6 +718,7 @@ def _activation_environment(
             ),
             "FAKE_CURRENT_PORTS_JSON": _bash_path(ports_json),
             "FAKE_MIGRATION_REPORT": _bash_path(migration_report),
+            "FAKE_MIGRATION_EXIT": "0",
             "FAKE_DOCKER_LOG": _bash_path(docker_log),
             "FAKE_NGINX_IMAGE": NGINX_IMAGE,
             "FAKE_BACKEND_IMAGE": BACKEND_IMAGE,
@@ -773,6 +792,283 @@ def _activate(environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
         check=False,
         env=environment,
     )
+
+
+def _diagnostic_args(report: Path, **overrides: object) -> SimpleNamespace:
+    values: dict[str, object] = {
+        "report": report,
+        "probe_exit_code": 0,
+        "target_sha": RELEASE_SHA,
+        "source_ci_run_id": 77,
+        "source_ci_run_attempt": 1,
+        "current_active_sha": "a" * 40,
+        "expected_revision": "c3f8a1d6e9b2",
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def _complete_migration_report(**overrides: object) -> dict[str, object]:
+    report: dict[str, object] = {
+        "database_connected": True,
+        "database_name": "must-not-leave-the-contract",
+        "database_empty": False,
+        "alembic_version_exists": True,
+        "alembic_versions": ["c3f8a1d6e9b2"],
+        "current_revision": "c3f8a1d6e9b2",
+        "current_revision_known": True,
+        "repository_heads": ["c3f8a1d6e9b2"],
+        "multiple_heads": False,
+        "schema_candidate_revision": "c3f8a1d6e9b2",
+        "reviewed_manifest_revisions": ["c3f8a1d6e9b2"],
+        "schema_checks": [
+            {"name": "tables", "passed": True, "message": "OK", "details": {}}
+        ],
+        "schema_matches_head": True,
+        "upgrade_allowed": True,
+        "warnings": [],
+        "errors": [],
+    }
+    report.update(overrides)
+    return report
+
+
+def test_class_zero_diagnostic_eligible_uses_shared_gate(contract, tmp_path: Path) -> None:
+    report_path = tmp_path / "report.json"
+    report = _complete_migration_report()
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    diagnostic = contract._build_class_zero_diagnostic(
+        _diagnostic_args(report_path)
+    )
+
+    assert contract._class_zero_report_eligible(report) is True
+    contract._verify_class_zero(report_path)
+    assert diagnostic["probe_outcome"] == "eligible"
+    assert diagnostic["class_zero_eligible"] is True
+    assert diagnostic["failure_codes"] == []
+    assert diagnostic["failed_schema_checks"] == []
+    assert "must-not-leave-the-contract" not in json.dumps(diagnostic)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload.update({"unexpected": True}),
+        lambda payload: payload.update({"probe_outcome": "unknown"}),
+        lambda payload: payload.update({"failed_schema_checks": ["bad path /secret"]}),
+        lambda payload: payload.update({"failure_codes": ["raw exception text"]}),
+        lambda payload: payload.update(
+            {"report_json_valid": False, "database_connected": True}
+        ),
+    ],
+)
+def test_class_zero_diagnostic_validator_rejects_unbounded_evidence(
+    contract, tmp_path: Path, mutation
+) -> None:
+    report_path = tmp_path / "report.json"
+    report_path.write_text(
+        json.dumps(_complete_migration_report()), encoding="utf-8"
+    )
+    diagnostic = contract._build_class_zero_diagnostic(
+        _diagnostic_args(report_path)
+    )
+    mutation(diagnostic)
+
+    with pytest.raises(contract.ContractError):
+        contract._validate_class_zero_diagnostic(diagnostic)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected_codes"),
+    [
+        (
+            {
+                "schema_checks": [
+                    {
+                        "name": "archives.indexes",
+                        "passed": False,
+                        "message": f"raw SQL {SECRET_SENTINEL}",
+                        "details": {"host_path": "/private/path"},
+                    }
+                ],
+                "schema_matches_head": False,
+                "upgrade_allowed": False,
+                "errors": [f"raw error {SECRET_SENTINEL}"],
+            },
+            {
+                "structural_schema_mismatch",
+                "report_errors_present",
+                "upgrade_disallowed",
+            },
+        ),
+        (
+            {
+                "errors": [f"driver error {SECRET_SENTINEL}"],
+                "upgrade_allowed": False,
+            },
+            {"report_errors_present", "upgrade_disallowed"},
+        ),
+        (
+            {
+                "alembic_versions": [],
+                "upgrade_allowed": False,
+                "errors": ["ledger missing"],
+            },
+            {
+                "ledger_revision_count_invalid",
+                "report_errors_present",
+                "upgrade_disallowed",
+            },
+        ),
+        (
+            {
+                "current_revision": "111111111111",
+                "current_revision_known": False,
+                "alembic_versions": ["111111111111"],
+                "upgrade_allowed": False,
+                "errors": ["unknown revision"],
+            },
+            {
+                "current_revision_unknown",
+                "current_not_repository_head",
+                "report_errors_present",
+                "upgrade_disallowed",
+            },
+        ),
+        (
+            {
+                "repository_heads": ["111111111111", "c3f8a1d6e9b2"],
+                "multiple_heads": True,
+                "upgrade_allowed": False,
+                "errors": ["multiple heads"],
+            },
+            {
+                "repository_head_count_invalid",
+                "multiple_repository_heads",
+                "current_not_repository_head",
+                "report_errors_present",
+                "upgrade_disallowed",
+            },
+        ),
+        (
+            {
+                "repository_heads": ["111111111111"],
+                "current_revision": "111111111111",
+                "alembic_versions": ["111111111111"],
+                "upgrade_allowed": False,
+                "errors": ["candidate head disagreement"],
+            },
+            {
+                "current_not_repository_head",
+                "report_errors_present",
+                "upgrade_disallowed",
+            },
+        ),
+    ],
+)
+def test_class_zero_diagnostic_classifies_without_raw_text(
+    contract, tmp_path: Path, overrides: dict[str, object], expected_codes: set[str]
+) -> None:
+    report_path = tmp_path / "report.json"
+    report = _complete_migration_report(**overrides)
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    diagnostic = contract._build_class_zero_diagnostic(
+        _diagnostic_args(report_path, probe_exit_code=2)
+    )
+    serialized = json.dumps(diagnostic)
+
+    assert contract._class_zero_report_eligible(report) is False
+    with pytest.raises(contract.ContractError):
+        contract._verify_class_zero(report_path)
+    assert diagnostic["probe_outcome"] == "ineligible"
+    assert set(diagnostic["failure_codes"]) == expected_codes
+    assert SECRET_SENTINEL not in serialized
+    assert "/private/path" not in serialized
+    assert "raw SQL" not in serialized
+
+
+@pytest.mark.parametrize(
+    ("contents", "probe_exit", "outcome", "code", "produced"),
+    [
+        (None, 2, "unavailable", "probe_failed", False),
+        (None, 0, "unavailable", "report_unavailable", False),
+        ("not-json", 125, "invalid", "report_invalid", True),
+        ('{"schema_version":1,"schema_version":1}', 125, "invalid", "report_invalid", True),
+    ],
+)
+def test_class_zero_diagnostic_fails_closed_for_unusable_report(
+    contract,
+    tmp_path: Path,
+    contents: str | None,
+    probe_exit: int,
+    outcome: str,
+    code: str,
+    produced: bool,
+) -> None:
+    report_path = tmp_path / "report.json"
+    if contents is not None:
+        report_path.write_text(contents, encoding="utf-8")
+
+    diagnostic = contract._build_class_zero_diagnostic(
+        _diagnostic_args(report_path, probe_exit_code=probe_exit)
+    )
+
+    assert diagnostic["probe_outcome"] == outcome
+    assert diagnostic["failure_codes"] == [code]
+    assert diagnostic["report_produced"] is produced
+    assert diagnostic["class_zero_eligible"] is None
+
+
+def test_class_zero_diagnostic_rejects_report_exit_disagreement(
+    contract, tmp_path: Path
+) -> None:
+    report_path = tmp_path / "report.json"
+    report_path.write_text(
+        json.dumps(_complete_migration_report()), encoding="utf-8"
+    )
+
+    diagnostic = contract._build_class_zero_diagnostic(
+        _diagnostic_args(report_path, probe_exit_code=2)
+    )
+
+    assert diagnostic["probe_outcome"] == "unavailable"
+    assert diagnostic["class_zero_eligible"] is False
+    assert diagnostic["failure_codes"] == ["verifier_rejected"]
+
+
+def test_diagnostic_engine_runs_only_exact_one_shot_probe(tmp_path: Path) -> None:
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path,
+        migration_revision="c3f8a1d6e9b2",
+        repository_head="c3f8a1d6e9b2",
+    )
+    environment.update(
+        {
+            "ACTIVATION_CLASS_ZERO_DIAGNOSTIC_ONLY": "true",
+            "ACTIVATION_TARGET_SHA": RELEASE_SHA,
+            "ACTIVATION_SOURCE_CI_RUN_ID": "77",
+            "ACTIVATION_SOURCE_CI_RUN_ATTEMPT": "1",
+            "ACTIVATION_CURRENT_ACTIVE_SHA": "a" * 40,
+            "ACTIVATION_EXPECTED_REVISION": "c3f8a1d6e9b2",
+        }
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode == 0, process.stderr
+    diagnostic = json.loads(process.stdout)
+    assert diagnostic["probe_outcome"] == "eligible"
+    commands = docker_log.read_text(encoding="utf-8").splitlines()
+    probe = [command for command in commands if "require-head --json" in command]
+    assert len(probe) == 1
+    assert "run --rm --no-deps migrate python migrate.py require-head --json" in probe[0]
+    assert not backup_log.exists()
+    assert not (tmp_path / "activation-contract").exists()
+    forbidden = (" up ", " start ", " restart ", " stop ", " down ", " pull ", " build ")
+    assert not any(token in f" {command} " for command in commands for token in forbidden)
+    assert not any(command.startswith("exec ") for command in commands)
 
 
 def _validate_resolved_mounts(

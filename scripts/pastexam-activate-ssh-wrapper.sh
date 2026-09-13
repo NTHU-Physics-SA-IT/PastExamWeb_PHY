@@ -22,7 +22,7 @@ positive_integer='^[1-9][0-9]*$'
 case "${arguments[0]}:${#arguments[@]}" in
   status:1)
     ;;
-  observe:4|preflight:4|rollback-preflight:4)
+  observe:4|diagnose-class-zero:4|preflight:4|rollback-preflight:4)
     [[ "${arguments[1]}" =~ $sha ]] || deny
     [[ "${arguments[2]}" =~ $positive_integer ]] || deny
     [[ "${arguments[3]}" =~ $positive_integer ]] || deny

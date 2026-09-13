@@ -66,6 +66,7 @@ fi
 : "${ACTIVATION_EVIDENCE_PATH:=}"
 : "${ACTIVATION_FAILURE_EVIDENCE_PATH:=}"
 : "${ACTIVATION_PREFLIGHT_ONLY:=false}"
+: "${ACTIVATION_CLASS_ZERO_DIAGNOSTIC_ONLY:=false}"
 : "${ACTIVATION_CONTROLLER_LOCK_HELD:=false}"
 
 activation_started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -82,6 +83,25 @@ fi
 if [ "$ACTIVATION_PREFLIGHT_ONLY" != "true" ] && [ "$ACTIVATION_PREFLIGHT_ONLY" != "false" ]; then
   echo "ACTIVATION_PREFLIGHT_ONLY must be true or false." >&2
   exit 2
+fi
+if [ "$ACTIVATION_CLASS_ZERO_DIAGNOSTIC_ONLY" != "true" ] && \
+  [ "$ACTIVATION_CLASS_ZERO_DIAGNOSTIC_ONLY" != "false" ]
+then
+  echo "Class-0 diagnostic mode must be true or false." >&2
+  exit 2
+fi
+if [ "$ACTIVATION_CLASS_ZERO_DIAGNOSTIC_ONLY" = "true" ]; then
+  if [ "$ACTIVATION_PREFLIGHT_ONLY" = "true" ] || \
+    [ "$ACTIVATION_CONTROLLER_LOCK_HELD" = "true" ] || \
+    [[ ! "${ACTIVATION_TARGET_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || \
+    [[ ! "${ACTIVATION_CURRENT_ACTIVE_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || \
+    [[ ! "${ACTIVATION_SOURCE_CI_RUN_ID:-}" =~ ^[1-9][0-9]*$ ]] || \
+    [[ ! "${ACTIVATION_SOURCE_CI_RUN_ATTEMPT:-}" =~ ^[1-9][0-9]*$ ]] || \
+    [[ ! "${ACTIVATION_EXPECTED_REVISION:-}" =~ ^[0-9a-f]{12}$ ]]
+  then
+    echo "Class-0 diagnostic authority is invalid." >&2
+    exit 2
+  fi
 fi
 if [ "$ACTIVATION_CONTROLLER_LOCK_HELD" != "true" ] && \
   [ "$ACTIVATION_CONTROLLER_LOCK_HELD" != "false" ]
@@ -389,6 +409,28 @@ current_stage="runtime-compose-config"
 if ! "${compose[@]}" config --quiet >/dev/null 2>&1; then
   echo "Production Compose runtime configuration is invalid." >&2
   exit 2
+fi
+
+if [ "$ACTIVATION_CLASS_ZERO_DIAGNOSTIC_ONLY" = "true" ]; then
+  current_stage="class-zero-before"
+  diagnostic_report="$contract_directory/class-zero-diagnostic.raw.json"
+  set +e
+  "${compose[@]}" run --rm --no-deps migrate \
+    python migrate.py require-head --json \
+    >"$diagnostic_report" 2>/dev/null
+  diagnostic_exit=$?
+  set -e
+  python3 "$contract_helper" build-class-zero-diagnostic \
+    --report "$diagnostic_report" \
+    --probe-exit-code "$diagnostic_exit" \
+    --target-sha "$ACTIVATION_TARGET_SHA" \
+    --source-ci-run-id "$ACTIVATION_SOURCE_CI_RUN_ID" \
+    --source-ci-run-attempt "$ACTIVATION_SOURCE_CI_RUN_ATTEMPT" \
+    --current-active-sha "$ACTIVATION_CURRENT_ACTIVE_SHA" \
+    --expected-revision "$ACTIVATION_EXPECTED_REVISION"
+  cleanup_contract
+  trap - EXIT HUP INT TERM
+  exit 0
 fi
 
 current_stage="ingress-contract"

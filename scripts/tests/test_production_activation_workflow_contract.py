@@ -12,6 +12,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 ACTIVATE = ROOT / ".github" / "workflows" / "activate-production.yml"
 PREFLIGHT = ROOT / ".github" / "workflows" / "preflight-production.yml"
+DIAGNOSE = ROOT / ".github" / "workflows" / "diagnose-production-class-zero.yml"
 ROLLBACK = ROOT / ".github" / "workflows" / "rollback-production.yml"
 AUTHORITY = ROOT / "scripts" / "ci" / "validate_activation_authority.py"
 DEPLOY_AUTHORITY = (
@@ -64,6 +65,10 @@ def _load_classifier():
         ),
         (
             PREFLIGHT,
+            {"actions": "read", "contents": "read", "pull-requests": "read"},
+        ),
+        (
+            DIAGNOSE,
             {"actions": "read", "contents": "read", "pull-requests": "read"},
         ),
         (
@@ -223,6 +228,66 @@ def test_preflight_workflow_is_protected_authoritative_and_preflight_only() -> N
     )
     assert failure_gate["if"] == "steps.protected-preflight.outcome == 'failure'"
     assert failure_gate["run"] == "exit 2"
+    cleanup = protected_steps[-1]
+    assert cleanup["name"] == "Remove ephemeral activation key"
+    assert cleanup["if"] == "always()"
+
+
+def test_class_zero_diagnostic_workflow_is_fixed_read_only_and_sanitized() -> None:
+    source = DIAGNOSE.read_text(encoding="utf-8")
+    workflow = yaml.load(source, Loader=yaml.BaseLoader)
+    trigger = workflow.get("on", workflow.get(True))
+    authority_steps = workflow["jobs"]["authority"]["steps"]
+    diagnostic = workflow["jobs"]["diagnose"]
+    protected_steps = diagnostic["steps"]
+
+    assert set(trigger) == {"workflow_dispatch"}
+    assert trigger["workflow_dispatch"]["inputs"]["target_sha"] == {
+        "description": "Exact current main SHA to diagnose",
+        "required": "true",
+        "type": "string",
+    }
+    assert diagnostic["environment"] == "production"
+    assert source.count("validate_candidate_source_run.py") == 2
+    assert source.count("validate_production_deploy_authority.py") == 2
+    assert any(
+        step["name"] == "Require workflow source and target to be exact current main"
+        for step in authority_steps
+    )
+    command_step = next(
+        step
+        for step in protected_steps
+        if step["name"] == "Run fixed production Class-0 diagnostic"
+    )
+    command = command_step["run"]
+    assert command.count(
+        '"diagnose-class-zero $TARGET_SHA $SOURCE_RUN $SOURCE_ATTEMPT"'
+    ) == 1
+    assert "validate-class-zero-diagnostic" in command
+    assert "production-class-zero-diagnostic.unvalidated.json" in command
+    assert "rm -f --" in command
+    for option in ("IdentitiesOnly=yes", "BatchMode=yes", "StrictHostKeyChecking=yes"):
+        assert option in command
+    all_runs = "\n".join(step.get("run", "") for step in protected_steps)
+    for forbidden in (
+        "preflight $TARGET_SHA",
+        "start $TARGET_SHA",
+        "resume ",
+        "rollback-start ",
+        "rollback-preflight ",
+        "request-status ",
+        "docker ",
+        "psql ",
+    ):
+        assert forbidden not in all_runs
+    upload = next(
+        step
+        for step in protected_steps
+        if step["name"] == "Upload sanitized Class-0 diagnostic evidence"
+    )
+    assert upload["with"]["path"] == (
+        "${{ runner.temp }}/production-class-zero-diagnostic.json"
+    )
     cleanup = protected_steps[-1]
     assert cleanup["name"] == "Remove ephemeral activation key"
     assert cleanup["if"] == "always()"

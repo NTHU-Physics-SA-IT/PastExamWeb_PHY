@@ -197,6 +197,30 @@ and pass the complete schema comparison. `migrate.py require-head --json` is a
 read-only, advisory-lock-protected gate. Any non-zero delta fails before backup
 or application mutation; this framework never runs `migrate.py upgrade`.
 
+The separately named `diagnose-class-zero <target-sha> <source-run> <attempt>`
+command closes the Class-0 observability gap without changing `observe`. It
+binds the same immutable candidate and exact Main Full authority, then permits
+the root-installed activation engine to run exactly one ephemeral
+`docker compose run --rm --no-deps migrate python migrate.py require-head
+--json` probe. `--no-deps` prevents dependency startup and `--rm` removes only
+the probe container; the diagnostic path exits before ingress checks, backup,
+service recreation, cutover, marker creation, or activation state changes.
+It never invokes upgrade, stamp, downgrade, arbitrary SQL, `docker exec`, or a
+caller-selected Docker command.
+
+Raw migration JSON remains in a root-controlled temporary directory and raw
+stderr is suppressed inside that boundary. The installed contract helper emits
+only a strict allowlisted summary: authority identifiers, bounded revision and
+eligibility facts, failed schema-check names, stable error categories, and
+finite failure codes. It excludes raw messages, SQL, schema diffs, database and
+user names, credentials, host paths, environment values, container IDs, and
+exceptions, and removes the raw report on exit. The manual diagnostic workflow
+validates that summary again before uploading only the sanitized artifact.
+Merging source does not update the root-installed framework; framework
+installation and each live diagnostic invocation require separate production
+authorization. A diagnostic does not authorize preflight, activation,
+migration, rollback, or any general Docker lifecycle operation.
+
 The production Compose definition has no bootstrap profile or `seed_db.py`
 command, and backend startup performs only its read-only schema readiness
 check. `DEFAULT_ADMIN_PASSWORD` is forbidden in the production runtime and
