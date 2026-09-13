@@ -96,12 +96,23 @@ MIGRATION_PROBE_FAILURE_CODES = frozenset(
         "migrator_cleanup_failed", "diagnostic_envelope_failed",
     }
 )
+DIAGNOSE_HEAD_STDOUT_FAILURE_CODES = frozenset(
+    {
+        "diagnose_head_stdout_empty_exit_zero",
+        "diagnose_head_stdout_empty_exit_two",
+        "diagnose_head_stdout_empty_exit_other",
+        "diagnose_head_stdout_invalid_exit_zero",
+        "diagnose_head_stdout_invalid_exit_two",
+        "diagnose_head_stdout_invalid_exit_other",
+    }
+)
 OUTER_DIAGNOSTIC_FAILURE_CODES = frozenset(
     {
         "candidate_backend_image_missing",
         "migrator_container_start_failed",
         "migrator_python_start_failed",
         "diagnose_head_envelope_missing",
+        *DIAGNOSE_HEAD_STDOUT_FAILURE_CODES,
     }
 )
 CLASS_ZERO_FAILURE_CODES = frozenset(
@@ -440,7 +451,7 @@ def _load_diagnostic_probe(path: Path) -> tuple[dict[str, Any] | None, str]:
     except OSError:
         return None, "unavailable"
     if not raw:
-        return None, "unavailable"
+        return None, "empty"
     if len(raw) > 1024 * 1024:
         return None, "invalid"
 
@@ -542,6 +553,14 @@ def _load_diagnostic_probe(path: Path) -> tuple[dict[str, Any] | None, str]:
     return probe, "valid"
 
 
+def _diagnose_head_stdout_failure_code(state: str, probe_exit_code: int) -> str:
+    exit_class = {0: "zero", 2: "two"}.get(probe_exit_code, "other")
+    code = f"diagnose_head_stdout_{state}_exit_{exit_class}"
+    if code not in DIAGNOSE_HEAD_STDOUT_FAILURE_CODES:
+        raise ContractError("Class-0 diagnostic stdout state is malformed.")
+    return code
+
+
 def _build_class_zero_diagnostic(args: argparse.Namespace) -> dict[str, Any]:
     identity = _diagnostic_identity(args)
     if not 0 <= args.probe_exit_code <= 255:
@@ -553,7 +572,14 @@ def _build_class_zero_diagnostic(args: argparse.Namespace) -> dict[str, Any]:
     ):
         raise ContractError("Class-0 outer diagnostic failure code is malformed.")
     probe, state = _load_diagnostic_probe(args.report)
-    if state == "unavailable":
+    if (
+        outer_failure_code == "diagnose_head_envelope_missing"
+        and state in {"empty", "invalid"}
+    ):
+        outer_failure_code = _diagnose_head_stdout_failure_code(
+            state, args.probe_exit_code
+        )
+    if state in {"empty", "unavailable"}:
         code = outer_failure_code or (
             "probe_failed" if args.probe_exit_code != 0 else "report_unavailable"
         )

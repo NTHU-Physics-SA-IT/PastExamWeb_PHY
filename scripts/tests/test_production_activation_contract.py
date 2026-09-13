@@ -1140,6 +1140,86 @@ def test_class_zero_diagnostic_maps_safe_outer_failure_codes(
     assert diagnostic["class_zero_eligible"] is None
 
 
+@pytest.mark.parametrize(
+    ("contents", "probe_exit", "expected_code"),
+    [
+        ("", 0, "diagnose_head_stdout_empty_exit_zero"),
+        ("", 2, "diagnose_head_stdout_empty_exit_two"),
+        ("", 125, "diagnose_head_stdout_empty_exit_other"),
+        ("not-json", 0, "diagnose_head_stdout_invalid_exit_zero"),
+        ("not-json", 2, "diagnose_head_stdout_invalid_exit_two"),
+        ("not-json", 125, "diagnose_head_stdout_invalid_exit_other"),
+        (
+            f"docker failed {OUTER_RAW_ERROR}",
+            2,
+            "diagnose_head_stdout_invalid_exit_two",
+        ),
+        (
+            '{"schema_version":1,"schema_version":1}',
+            2,
+            "diagnose_head_stdout_invalid_exit_two",
+        ),
+    ],
+)
+def test_class_zero_diagnostic_classifies_diagnose_head_stdout_without_leakage(
+    contract,
+    tmp_path: Path,
+    contents: str,
+    probe_exit: int,
+    expected_code: str,
+) -> None:
+    report_path = tmp_path / "report.json"
+    report_path.write_text(contents, encoding="utf-8")
+
+    diagnostic = contract._build_class_zero_diagnostic(
+        _diagnostic_args(
+            report_path,
+            probe_exit_code=probe_exit,
+            outer_failure_code="diagnose_head_envelope_missing",
+        )
+    )
+    serialized = json.dumps(diagnostic)
+
+    assert diagnostic["schema_version"] == 1
+    assert set(diagnostic) == contract.CLASS_ZERO_DIAGNOSTIC_KEYS
+    assert diagnostic["probe_outcome"] == "unavailable"
+    assert diagnostic["failure_codes"] == [expected_code]
+    assert diagnostic["report_produced"] is False
+    assert diagnostic["report_json_valid"] is False
+    assert diagnostic["class_zero_eligible"] is None
+    assert OUTER_RAW_ERROR not in serialized
+    assert all(marker not in serialized for marker in OUTER_ERROR_SENTINELS)
+
+
+@pytest.mark.parametrize(("prefix", "suffix"), [("\n", ""), (" \t\r\n", "\n")])
+def test_class_zero_diagnostic_accepts_json_whitespace_without_outer_override(
+    contract, tmp_path: Path, prefix: str, suffix: str
+) -> None:
+    report_path = tmp_path / "report.json"
+    report_path.write_text(
+        prefix
+        + json.dumps(
+            _migration_probe(
+                None,
+                outcome="failed",
+                failure_code="database_or_lock_setup_failed",
+            )
+        )
+        + suffix,
+        encoding="utf-8",
+    )
+
+    diagnostic = contract._build_class_zero_diagnostic(
+        _diagnostic_args(
+            report_path,
+            probe_exit_code=2,
+            outer_failure_code="diagnose_head_envelope_missing",
+        )
+    )
+
+    assert diagnostic["failure_codes"] == ["database_or_lock_setup_failed"]
+
+
 def test_class_zero_diagnostic_rejects_unbounded_outer_failure_code(
     contract, tmp_path: Path
 ) -> None:
@@ -1390,9 +1470,43 @@ def test_diagnostic_engine_stops_at_first_outer_failure_without_leakage(
     assert not backup_log.exists()
 
 
-@pytest.mark.parametrize("contents", ["", "not-json"])
-def test_diagnostic_engine_classifies_missing_trusted_envelope(
-    tmp_path: Path, contents: str
+@pytest.mark.parametrize(
+    ("contents", "probe_exit", "expected_code"),
+    [
+        ("", "0", "diagnose_head_stdout_empty_exit_zero"),
+        ("", "2", "diagnose_head_stdout_empty_exit_two"),
+        ("", "125", "diagnose_head_stdout_empty_exit_other"),
+        ("not-json", "0", "diagnose_head_stdout_invalid_exit_zero"),
+        ("not-json", "2", "diagnose_head_stdout_invalid_exit_two"),
+        ("not-json", "125", "diagnose_head_stdout_invalid_exit_other"),
+        (
+            "leading text\n"
+            + json.dumps(
+                _migration_probe(
+                    None,
+                    outcome="failed",
+                    failure_code="database_or_lock_setup_failed",
+                )
+            ),
+            "2",
+            "diagnose_head_stdout_invalid_exit_two",
+        ),
+        (
+            json.dumps(
+                _migration_probe(
+                    None,
+                    outcome="failed",
+                    failure_code="database_or_lock_setup_failed",
+                )
+            )
+            + "\ntrailing text",
+            "2",
+            "diagnose_head_stdout_invalid_exit_two",
+        ),
+    ],
+)
+def test_diagnostic_engine_classifies_untrusted_diagnose_head_stdout(
+    tmp_path: Path, contents: str, probe_exit: str, expected_code: str
 ) -> None:
     environment, backup_log, docker_log = _diagnostic_activation_environment(tmp_path)
     raw_report = tmp_path / "untrusted-diagnostic.json"
@@ -1400,7 +1514,7 @@ def test_diagnostic_engine_classifies_missing_trusted_envelope(
     environment.update(
         {
             "FAKE_MIGRATION_DIAGNOSTIC": _bash_path(raw_report),
-            "FAKE_MIGRATION_EXIT": "2",
+            "FAKE_MIGRATION_EXIT": probe_exit,
             "FAKE_MIGRATION_DIAGNOSTIC_STDERR": OUTER_RAW_ERROR,
         }
     )
@@ -1409,7 +1523,7 @@ def test_diagnostic_engine_classifies_missing_trusted_envelope(
 
     assert process.returncode == 0, process.stderr
     diagnostic = json.loads(process.stdout)
-    assert diagnostic["failure_codes"] == ["diagnose_head_envelope_missing"]
+    assert diagnostic["failure_codes"] == [expected_code]
     assert diagnostic["probe_outcome"] == "unavailable"
     assert diagnostic["report_produced"] is False
     assert diagnostic["report_json_valid"] is False
