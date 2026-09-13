@@ -199,17 +199,22 @@ or application mutation; this framework never runs `migrate.py upgrade`.
 
 The separately named `diagnose-class-zero <target-sha> <source-run> <attempt>`
 command closes the Class-0 observability gap without changing `observe`. It
-binds the same immutable candidate and exact Main Full authority, then permits
-the root-installed activation engine to run exactly one ephemeral
+binds the same immutable candidate and exact Main Full authority. The
+root-installed activation engine first checks whether the manifest-validated,
+digest-pinned backend image is already present locally; it never pulls an
+image. When present, the engine runs fixed shell and Python literal-output
+sentinels through the same `migrate` service before the trusted
 `docker compose run --rm --no-deps migrate python migrate.py diagnose-head
---json` probe. `diagnose-head` shares the authoritative `require-head`
+--json` probe. Each failed stage maps to one finite code for image absence,
+container command failure, Python command failure, or a missing trusted
+diagnostic envelope. `diagnose-head` shares the authoritative `require-head`
 eligibility predicate while adding a sealed, finite pre-report failure
-envelope; normal preflight continues to use `require-head`. `--no-deps`
-prevents dependency startup and `--rm` removes only
-the probe container; the diagnostic path exits before ingress checks, backup,
-service recreation, cutover, marker creation, or activation state changes.
-It never invokes upgrade, stamp, downgrade, arbitrary SQL, `docker exec`, or a
-caller-selected Docker command.
+envelope; normal preflight continues to use `require-head`. Every ephemeral
+run uses `--no-deps` to prevent dependency startup and `--rm` to remove only
+its probe container. The diagnostic path exits before ingress checks, backup,
+service recreation, cutover, marker creation, or activation state changes. It
+never invokes pull, upgrade, stamp, downgrade, arbitrary SQL, `docker exec`,
+or a caller-selected Docker command.
 
 Raw migration JSON remains in a root-controlled temporary directory and raw
 stderr is suppressed inside that boundary. The installed contract helper emits
@@ -217,8 +222,9 @@ only a strict allowlisted summary: authority identifiers, bounded revision and
 eligibility facts, failed schema-check names, stable error categories, and
 finite failure codes. It excludes raw messages, SQL, schema diffs, database and
 user names, credentials, host paths, environment values, container IDs, and
-exceptions, and removes the raw report on exit. The manual diagnostic workflow
-validates that summary again before uploading only the sanitized artifact.
+exceptions, Docker or registry errors, and removes the raw report on exit. The
+manual diagnostic workflow validates that summary again before uploading only
+the sanitized artifact.
 Merging source does not update the root-installed framework; framework
 installation and each live diagnostic invocation require separate production
 authorization. A diagnostic does not authorize preflight, activation,
