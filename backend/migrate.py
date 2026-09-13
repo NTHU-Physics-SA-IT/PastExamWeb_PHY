@@ -7,18 +7,32 @@ import argparse
 import json
 import sys
 
-from sqlalchemy import create_engine
+try:
+    from sqlalchemy import create_engine
 
-from alembic import command
-from app.db.migration_safety import (
-    MigrationReport,
-    alembic_config,
-    database_url,
-    inspect_database,
-    migration_advisory_lock,
-    redact_text,
-    safe_error,
-)
+    from alembic import command
+    from app.db.migration_safety import (
+        MigrationAdvisoryLockReleaseError,
+        MigrationAdvisoryLockUnavailableError,
+        MigrationReport,
+        alembic_config,
+        database_url,
+        inspect_database,
+        migration_advisory_lock,
+        redact_text,
+        safe_error,
+    )
+except Exception:  # noqa: BLE001 - diagnostic mode must classify import/config failure.
+    MIGRATOR_INITIALIZATION_FAILED = True
+else:
+    MIGRATOR_INITIALIZATION_FAILED = False
+
+DIAGNOSTIC_SCHEMA_VERSION = 1
+DIAGNOSTIC_KIND = "migration-class-zero-probe"
+
+
+class DatabaseIdentityMismatchError(RuntimeError):
+    """The inspection target differs from the advisory-lock target."""
 
 
 def parser() -> argparse.ArgumentParser:
@@ -42,6 +56,9 @@ def parser() -> argparse.ArgumentParser:
 
     require_head = subcommands.add_parser("require-head")
     require_head.add_argument("--json", action="store_true")
+
+    diagnose_head = subcommands.add_parser("diagnose-head")
+    diagnose_head.add_argument("--json", action="store_true", required=True)
 
     reconcile = subcommands.add_parser("reconcile")
     reconcile.add_argument(
@@ -89,8 +106,132 @@ def print_report(report: MigrationReport, *, json_output: bool) -> None:
         print(f"ERROR: {redact_text(error)}")
 
 
+def class_zero_eligible(report: MigrationReport) -> bool:
+    """Return the single authoritative Class-0 eligibility decision."""
+    return bool(
+        report.upgrade_allowed
+        and not report.multiple_heads
+        and len(report.repository_heads) == 1
+        and report.current_revision == report.repository_heads[0]
+        and report.current_revision_known
+        and report.schema_matches_head
+    )
+
+
+def _diagnostic_envelope(
+    *,
+    outcome: str,
+    failure_code: str | None,
+    report: MigrationReport | None,
+) -> dict[str, object]:
+    return {
+        "schema_version": DIAGNOSTIC_SCHEMA_VERSION,
+        "kind": DIAGNOSTIC_KIND,
+        "probe_outcome": outcome,
+        "failure_code": failure_code,
+        "report": report.to_dict() if report is not None else None,
+    }
+
+
+def _emit_diagnostic_envelope(
+    *, outcome: str, failure_code: str | None, report: MigrationReport | None
+) -> bool:
+    encoded = True
+    try:
+        serialized = json.dumps(
+            _diagnostic_envelope(
+                outcome=outcome,
+                failure_code=failure_code,
+                report=report,
+            ),
+            sort_keys=True,
+            default=str,
+        )
+    except Exception:  # noqa: BLE001 - emit a fixed safe envelope if encoding fails.
+        encoded = False
+        serialized = json.dumps(
+            _diagnostic_envelope(
+                outcome="failed",
+                failure_code="diagnostic_envelope_failed",
+                report=None,
+            ),
+            sort_keys=True,
+        )
+    print(serialized)
+    return encoded
+
+
+def diagnose_head() -> int:
+    """Run the read-only Class-0 probe and always emit one safe envelope."""
+    if MIGRATOR_INITIALIZATION_FAILED:
+        _emit_diagnostic_envelope(
+            outcome="failed",
+            failure_code="migrator_initialization_failed",
+            report=None,
+        )
+        return 2
+    report: MigrationReport | None = None
+    engine = None
+    stage = "migrator_initialization"
+    outcome = "failed"
+    failure_code: str | None = None
+    exit_code = 2
+    try:
+        engine = create_engine(database_url(), pool_pre_ping=True)
+        stage = "database_or_lock_setup"
+        with migration_advisory_lock(engine) as locked_database:
+            stage = "database_inspection"
+            report = inspect_database(engine)
+            stage = "database_identity"
+            if report.database_name != locked_database:
+                raise DatabaseIdentityMismatchError
+            outcome = "eligible" if class_zero_eligible(report) else "ineligible"
+            exit_code = 0 if outcome == "eligible" else 2
+            stage = "advisory_lock_release"
+    except MigrationAdvisoryLockUnavailableError:
+        failure_code = "advisory_lock_unavailable"
+    except MigrationAdvisoryLockReleaseError:
+        failure_code = "advisory_lock_release_failed"
+    except DatabaseIdentityMismatchError:
+        failure_code = "database_identity_mismatch"
+        report = None
+    except Exception:  # noqa: BLE001 - map only the trusted stage, never exception text.
+        failure_code = {
+            "migrator_initialization": "migrator_initialization_failed",
+            "database_or_lock_setup": "database_or_lock_setup_failed",
+            "database_inspection": "database_inspection_failed",
+            "database_identity": "database_inspection_failed",
+            "advisory_lock_release": "advisory_lock_release_failed",
+        }[stage]
+    finally:
+        if engine is not None:
+            try:
+                engine.dispose()
+            except Exception:  # noqa: BLE001 - cleanup failure must remain fail-closed.
+                outcome = "failed"
+                failure_code = "migrator_cleanup_failed"
+                report = None
+                exit_code = 2
+    if failure_code is not None:
+        outcome = "failed"
+        exit_code = 2
+    emitted = _emit_diagnostic_envelope(
+        outcome=outcome,
+        failure_code=failure_code,
+        report=report,
+    )
+    return exit_code if emitted else 2
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    if args.command == "diagnose-head":
+        return diagnose_head()
+    if MIGRATOR_INITIALIZATION_FAILED:
+        print(
+            "Migration command failed: migrator initialization failed", file=sys.stderr
+        )
+        return 2
     config = alembic_config()
     try:
         if args.command == "create":
@@ -140,14 +281,7 @@ def main(argv: list[str] | None = None) -> int:
                         raise RuntimeError(
                             "Migration lock and head check targeted different databases"
                         )
-                    if (
-                        not report.upgrade_allowed
-                        or report.multiple_heads
-                        or len(report.repository_heads) != 1
-                        or report.current_revision != report.repository_heads[0]
-                        or not report.current_revision_known
-                        or not report.schema_matches_head
-                    ):
+                    if not class_zero_eligible(report):
                         print(
                             "Production Class 0 requires the database to match the exact repository head",
                             file=sys.stderr,

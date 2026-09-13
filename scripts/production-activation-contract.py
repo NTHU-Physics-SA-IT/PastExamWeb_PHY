@@ -83,6 +83,19 @@ MIGRATION_REPORT_KEYS = frozenset(
         "errors",
     }
 )
+MIGRATION_PROBE_KIND = "migration-class-zero-probe"
+MIGRATION_PROBE_KEYS = frozenset(
+    {"schema_version", "kind", "probe_outcome", "failure_code", "report"}
+)
+MIGRATION_PROBE_OUTCOMES = frozenset({"eligible", "ineligible", "failed"})
+MIGRATION_PROBE_FAILURE_CODES = frozenset(
+    {
+        "migrator_initialization_failed", "database_or_lock_setup_failed",
+        "advisory_lock_unavailable", "database_inspection_failed",
+        "database_identity_mismatch", "advisory_lock_release_failed",
+        "migrator_cleanup_failed", "diagnostic_envelope_failed",
+    }
+)
 CLASS_ZERO_FAILURE_CODES = frozenset(
     {
         "database_unavailable", "report_unavailable", "report_invalid",
@@ -90,7 +103,7 @@ CLASS_ZERO_FAILURE_CODES = frozenset(
         "ledger_revision_count_invalid", "current_revision_unknown",
         "current_not_repository_head", "structural_schema_mismatch",
         "report_errors_present", "upgrade_disallowed", "probe_failed",
-        "verifier_rejected",
+        "verifier_rejected", *MIGRATION_PROBE_FAILURE_CODES,
     }
 )
 MIGRATION_ERROR_CATEGORIES = frozenset(
@@ -412,7 +425,7 @@ def _empty_diagnostic(
     return payload
 
 
-def _load_diagnostic_report(path: Path) -> tuple[dict[str, Any] | None, str]:
+def _load_diagnostic_probe(path: Path) -> tuple[dict[str, Any] | None, str]:
     try:
         raw = path.read_bytes()
     except OSError:
@@ -426,14 +439,42 @@ def _load_diagnostic_report(path: Path) -> tuple[dict[str, Any] | None, str]:
         result: dict[str, Any] = {}
         for key, value in pairs:
             if key in result:
-                raise ContractError("Migration report contains a duplicate key.")
+                raise ContractError("Migration diagnostic contains a duplicate key.")
             result[key] = value
         return result
 
     try:
-        report = json.loads(raw, object_pairs_hook=reject_duplicates)
+        probe = json.loads(raw, object_pairs_hook=reject_duplicates)
     except (UnicodeDecodeError, json.JSONDecodeError, ContractError):
         return None, "invalid"
+    if not isinstance(probe, dict) or set(probe) != MIGRATION_PROBE_KEYS:
+        return None, "invalid"
+    if type(probe["schema_version"]) is not int or probe["schema_version"] != 1:
+        return None, "invalid"
+    if probe["kind"] != MIGRATION_PROBE_KIND:
+        return None, "invalid"
+    outcome = probe["probe_outcome"]
+    failure_code = probe["failure_code"]
+    report = probe["report"]
+    if not isinstance(outcome, str) or outcome not in MIGRATION_PROBE_OUTCOMES:
+        return None, "invalid"
+    if outcome in {"eligible", "ineligible"}:
+        if failure_code is not None or not isinstance(report, dict):
+            return None, "invalid"
+    elif (
+        not isinstance(failure_code, str)
+        or failure_code not in MIGRATION_PROBE_FAILURE_CODES
+        or (
+            report is not None
+            and (
+                failure_code != "advisory_lock_release_failed"
+                or not isinstance(report, dict)
+            )
+        )
+    ):
+        return None, "invalid"
+    if report is None:
+        return probe, "valid"
     if not isinstance(report, dict) or set(report) != MIGRATION_REPORT_KEYS:
         return None, "invalid"
     booleans = (
@@ -489,22 +530,36 @@ def _load_diagnostic_report(path: Path) -> tuple[dict[str, Any] | None, str]:
         check_names.add(check["name"])
     if any(not isinstance(value, str) for key in ("warnings", "errors") for value in report[key]):
         return None, "invalid"
-    return report, "valid"
+    return probe, "valid"
 
 
 def _build_class_zero_diagnostic(args: argparse.Namespace) -> dict[str, Any]:
     identity = _diagnostic_identity(args)
     if not 0 <= args.probe_exit_code <= 255:
         raise ContractError("Class-0 diagnostic probe status is malformed.")
-    report, state = _load_diagnostic_report(args.report)
+    probe, state = _load_diagnostic_probe(args.report)
     if state == "unavailable":
         code = "probe_failed" if args.probe_exit_code != 0 else "report_unavailable"
         return _empty_diagnostic(
             identity, produced=False, outcome="unavailable", code=code
         )
-    if state == "invalid" or report is None:
+    if state == "invalid" or probe is None:
         return _empty_diagnostic(
             identity, produced=True, outcome="invalid", code="report_invalid"
+        )
+
+    report = probe["report"]
+    raw_outcome = probe["probe_outcome"]
+    raw_failure_code = probe["failure_code"]
+    expected_exit = 0 if raw_outcome == "eligible" else 2
+    if report is None:
+        code = (
+            raw_failure_code
+            if args.probe_exit_code == expected_exit
+            else "verifier_rejected"
+        )
+        return _empty_diagnostic(
+            identity, produced=False, outcome="unavailable", code=code
         )
 
     heads = report["repository_heads"]
@@ -546,9 +601,19 @@ def _build_class_zero_diagnostic(args: argparse.Namespace) -> dict[str, Any]:
     if not report["upgrade_allowed"]:
         codes.append("upgrade_disallowed")
 
-    eligible = _class_zero_report_eligible(report) and current == args.expected_revision
-    expected_exit = 0 if eligible else 2
+    report_eligible = (
+        _class_zero_report_eligible(report) and current == args.expected_revision
+    )
+    eligible = report_eligible and raw_outcome == "eligible"
     outcome = "eligible" if eligible else "ineligible"
+    if raw_outcome == "failed":
+        codes.append(raw_failure_code)
+        outcome = "unavailable"
+        eligible = False
+    elif raw_outcome != ("eligible" if report_eligible else "ineligible"):
+        codes.append("verifier_rejected")
+        outcome = "unavailable"
+        eligible = False
     if args.probe_exit_code != expected_exit:
         codes.append("verifier_rejected")
         outcome = "unavailable"
@@ -571,7 +636,7 @@ def _build_class_zero_diagnostic(args: argparse.Namespace) -> dict[str, Any]:
         "failed_schema_checks": failed_checks,
         "migration_error_categories": sorted(set(categories)),
         "migration_error_count": len(report["errors"]),
-        "failure_codes": codes,
+        "failure_codes": list(dict.fromkeys(codes)),
     }
     _validate_class_zero_diagnostic(payload)
     return payload
@@ -620,13 +685,21 @@ def _validate_class_zero_diagnostic(payload: Any) -> dict[str, Any]:
     checks = payload["failed_schema_checks"]
     if (
         not isinstance(codes, list) or len(codes) > len(CLASS_ZERO_FAILURE_CODES)
+        or any(
+            not isinstance(code, str) or code not in CLASS_ZERO_FAILURE_CODES
+            for code in codes
+        )
         or len(codes) != len(set(codes))
-        or any(code not in CLASS_ZERO_FAILURE_CODES for code in codes)
     ):
         raise ContractError("Class-0 diagnostic failure codes are malformed.")
     if (
-        not isinstance(categories, list) or categories != sorted(set(categories))
-        or any(category not in MIGRATION_ERROR_CATEGORIES for category in categories)
+        not isinstance(categories, list)
+        or any(
+            not isinstance(category, str)
+            or category not in MIGRATION_ERROR_CATEGORIES
+            for category in categories
+        )
+        or categories != sorted(set(categories))
     ):
         raise ContractError("Class-0 diagnostic error categories are malformed.")
     if (
@@ -663,14 +736,20 @@ def _validate_class_zero_diagnostic(payload: Any) -> dict[str, Any]:
             raise ContractError("Valid Class-0 diagnostic report state is incomplete.")
         if payload["probe_outcome"] == "ineligible" and not codes:
             raise ContractError("Ineligible Class-0 diagnostic evidence has no failure code.")
-        if payload["probe_outcome"] == "unavailable" and "verifier_rejected" not in codes:
+        if payload["probe_outcome"] == "unavailable" and not (
+            "verifier_rejected" in codes
+            or any(code in MIGRATION_PROBE_FAILURE_CODES for code in codes)
+        ):
             raise ContractError("Unavailable Class-0 diagnostic report was not rejected.")
     elif (
         any(payload[key] is not None for key in (*report_fields, "current_revision"))
         or checks
         or categories
         or len(codes) != 1
-        or codes[0] not in {"report_unavailable", "report_invalid", "probe_failed"}
+        or codes[0] not in {
+            "report_unavailable", "report_invalid", "probe_failed",
+            "verifier_rejected", *MIGRATION_PROBE_FAILURE_CODES,
+        }
         or payload["probe_outcome"] not in {"invalid", "unavailable"}
     ):
         raise ContractError("Unavailable Class-0 diagnostic evidence exposes report fields.")

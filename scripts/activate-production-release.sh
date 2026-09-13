@@ -416,7 +416,7 @@ if [ "$ACTIVATION_CLASS_ZERO_DIAGNOSTIC_ONLY" = "true" ]; then
   diagnostic_report="$contract_directory/class-zero-diagnostic.raw.json"
   set +e
   "${compose[@]}" run --rm --no-deps migrate \
-    python migrate.py require-head --json \
+    python migrate.py diagnose-head --json \
     >"$diagnostic_report" 2>/dev/null
   diagnostic_exit=$?
   set -e

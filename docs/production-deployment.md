@@ -201,8 +201,11 @@ The separately named `diagnose-class-zero <target-sha> <source-run> <attempt>`
 command closes the Class-0 observability gap without changing `observe`. It
 binds the same immutable candidate and exact Main Full authority, then permits
 the root-installed activation engine to run exactly one ephemeral
-`docker compose run --rm --no-deps migrate python migrate.py require-head
---json` probe. `--no-deps` prevents dependency startup and `--rm` removes only
+`docker compose run --rm --no-deps migrate python migrate.py diagnose-head
+--json` probe. `diagnose-head` shares the authoritative `require-head`
+eligibility predicate while adding a sealed, finite pre-report failure
+envelope; normal preflight continues to use `require-head`. `--no-deps`
+prevents dependency startup and `--rm` removes only
 the probe container; the diagnostic path exits before ingress checks, backup,
 service recreation, cutover, marker creation, or activation state changes.
 It never invokes upgrade, stamp, downgrade, arbitrary SQL, `docker exec`, or a

@@ -134,8 +134,11 @@ The same installed wrapper, controller, activation engine, and contract helper
 also carry the fixed `diagnose-class-zero <target-sha> <source-run> <attempt>`
 surface when that reviewed source is installed; no additional privileged helper
 is introduced. The command permits only the exact one-shot, `--rm --no-deps`
-migrator `require-head --json` probe and returns a revalidated sanitized
-summary. Installation alone does not authorize the probe. Each live diagnostic
+migrator `diagnose-head --json` probe and returns a revalidated sanitized
+summary. `diagnose-head` shares the `require-head` Class-0 predicate but seals
+typed/stage failure codes without returning exception text, SQL, paths, or
+secrets; production preflight remains on `require-head`. Installation alone
+does not authorize the probe. Each live diagnostic
 requires separate authorization, and it grants no preflight, activation,
 rollback, general Docker, SQL, or migration authority. `observe` remains
 unchanged and intentionally narrower.
