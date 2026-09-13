@@ -96,6 +96,14 @@ MIGRATION_PROBE_FAILURE_CODES = frozenset(
         "migrator_cleanup_failed", "diagnostic_envelope_failed",
     }
 )
+OUTER_DIAGNOSTIC_FAILURE_CODES = frozenset(
+    {
+        "candidate_backend_image_missing",
+        "migrator_container_start_failed",
+        "migrator_python_start_failed",
+        "diagnose_head_envelope_missing",
+    }
+)
 CLASS_ZERO_FAILURE_CODES = frozenset(
     {
         "database_unavailable", "report_unavailable", "report_invalid",
@@ -104,6 +112,7 @@ CLASS_ZERO_FAILURE_CODES = frozenset(
         "current_not_repository_head", "structural_schema_mismatch",
         "report_errors_present", "upgrade_disallowed", "probe_failed",
         "verifier_rejected", *MIGRATION_PROBE_FAILURE_CODES,
+        *OUTER_DIAGNOSTIC_FAILURE_CODES,
     }
 )
 MIGRATION_ERROR_CATEGORIES = frozenset(
@@ -537,11 +546,26 @@ def _build_class_zero_diagnostic(args: argparse.Namespace) -> dict[str, Any]:
     identity = _diagnostic_identity(args)
     if not 0 <= args.probe_exit_code <= 255:
         raise ContractError("Class-0 diagnostic probe status is malformed.")
+    outer_failure_code = getattr(args, "outer_failure_code", None)
+    if (
+        outer_failure_code is not None
+        and outer_failure_code not in OUTER_DIAGNOSTIC_FAILURE_CODES
+    ):
+        raise ContractError("Class-0 outer diagnostic failure code is malformed.")
     probe, state = _load_diagnostic_probe(args.report)
     if state == "unavailable":
-        code = "probe_failed" if args.probe_exit_code != 0 else "report_unavailable"
+        code = outer_failure_code or (
+            "probe_failed" if args.probe_exit_code != 0 else "report_unavailable"
+        )
         return _empty_diagnostic(
             identity, produced=False, outcome="unavailable", code=code
+        )
+    if state == "invalid" and outer_failure_code is not None:
+        return _empty_diagnostic(
+            identity,
+            produced=False,
+            outcome="unavailable",
+            code=outer_failure_code,
         )
     if state == "invalid" or probe is None:
         return _empty_diagnostic(
@@ -746,10 +770,11 @@ def _validate_class_zero_diagnostic(payload: Any) -> dict[str, Any]:
         or checks
         or categories
         or len(codes) != 1
-        or codes[0] not in {
-            "report_unavailable", "report_invalid", "probe_failed",
-            "verifier_rejected", *MIGRATION_PROBE_FAILURE_CODES,
-        }
+            or codes[0] not in {
+                "report_unavailable", "report_invalid", "probe_failed",
+                "verifier_rejected", *MIGRATION_PROBE_FAILURE_CODES,
+                *OUTER_DIAGNOSTIC_FAILURE_CODES,
+            }
         or payload["probe_outcome"] not in {"invalid", "unavailable"}
     ):
         raise ContractError("Unavailable Class-0 diagnostic evidence exposes report fields.")
@@ -2082,6 +2107,7 @@ def _parser() -> argparse.ArgumentParser:
     diagnostic = subparsers.add_parser("build-class-zero-diagnostic")
     diagnostic.add_argument("--report", type=Path, required=True)
     diagnostic.add_argument("--probe-exit-code", type=int, required=True)
+    diagnostic.add_argument("--outer-failure-code")
     diagnostic.add_argument("--target-sha", required=True)
     diagnostic.add_argument("--source-ci-run-id", type=int, required=True)
     diagnostic.add_argument("--source-ci-run-attempt", type=int, required=True)

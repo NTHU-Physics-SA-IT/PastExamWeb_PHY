@@ -414,13 +414,49 @@ fi
 if [ "$ACTIVATION_CLASS_ZERO_DIAGNOSTIC_ONLY" = "true" ]; then
   current_stage="class-zero-before"
   diagnostic_report="$contract_directory/class-zero-diagnostic.raw.json"
-  set +e
-  "${compose[@]}" run --rm --no-deps migrate \
-    python migrate.py diagnose-head --json \
-    >"$diagnostic_report" 2>/dev/null
-  diagnostic_exit=$?
-  set -e
-  python3 "$contract_helper" build-class-zero-diagnostic \
+  : >"$diagnostic_report"
+  diagnostic_exit=2
+  outer_failure_code=""
+  backend_image="${expected_runtime_images[pastexam-backend]}"
+  if ! docker image inspect "$backend_image" >/dev/null 2>&1; then
+    outer_failure_code="candidate_backend_image_missing"
+  else
+    set +e
+    container_sentinel="$(
+      "${compose[@]}" run --rm --no-deps migrate \
+        /bin/sh -c 'printf "%s\n" PASTEXAM_MIGRATOR_CONTAINER_OK' 2>/dev/null
+    )"
+    container_sentinel_exit=$?
+    set -e
+    if [ "$container_sentinel_exit" -ne 0 ] || \
+      [ "$container_sentinel" != "PASTEXAM_MIGRATOR_CONTAINER_OK" ]
+    then
+      outer_failure_code="migrator_container_start_failed"
+    else
+      set +e
+      python_sentinel="$(
+        "${compose[@]}" run --rm --no-deps migrate \
+          python -c 'print("PASTEXAM_MIGRATOR_PYTHON_OK")' 2>/dev/null
+      )"
+      python_sentinel_exit=$?
+      set -e
+      if [ "$python_sentinel_exit" -ne 0 ] || \
+        [ "$python_sentinel" != "PASTEXAM_MIGRATOR_PYTHON_OK" ]
+      then
+        outer_failure_code="migrator_python_start_failed"
+      else
+        set +e
+        "${compose[@]}" run --rm --no-deps migrate \
+          python migrate.py diagnose-head --json \
+          >"$diagnostic_report" 2>/dev/null
+        diagnostic_exit=$?
+        set -e
+        outer_failure_code="diagnose_head_envelope_missing"
+      fi
+    fi
+  fi
+  diagnostic_command=(
+    python3 "$contract_helper" build-class-zero-diagnostic
     --report "$diagnostic_report" \
     --probe-exit-code "$diagnostic_exit" \
     --target-sha "$ACTIVATION_TARGET_SHA" \
@@ -428,6 +464,11 @@ if [ "$ACTIVATION_CLASS_ZERO_DIAGNOSTIC_ONLY" = "true" ]; then
     --source-ci-run-attempt "$ACTIVATION_SOURCE_CI_RUN_ATTEMPT" \
     --current-active-sha "$ACTIVATION_CURRENT_ACTIVE_SHA" \
     --expected-revision "$ACTIVATION_EXPECTED_REVISION"
+  )
+  if [ -n "$outer_failure_code" ]; then
+    diagnostic_command+=(--outer-failure-code "$outer_failure_code")
+  fi
+  "${diagnostic_command[@]}"
   cleanup_contract
   trap - EXIT HUP INT TERM
   exit 0

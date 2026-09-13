@@ -26,6 +26,14 @@ FRONTEND_IMAGE = f"ghcr.io/example/pastexam:frontend-{RELEASE_SHA}@sha256:{'1' *
 BACKEND_IMAGE = f"ghcr.io/example/pastexam:backend-{RELEASE_SHA}@sha256:{'2' * 64}"
 NGINX_IMAGE = "nginx:1.29.2@sha256:029d4461bd98f124e531380505ceea2072418fdf28752aa73b7b273ba3048903"
 SECRET_SENTINEL = "THIS_MUST_NEVER_APPEAR_IN_DEPLOYMENT_EVIDENCE_DSMD_2026"
+OUTER_ERROR_SENTINELS = (
+    SECRET_SENTINEL,
+    "registry.example.invalid/private-token",
+    "postgresql://diagnostic:password@db/archive",
+    "/opt/pastexam/private/runtime",
+    "container-id-0123456789abcdef",
+)
+OUTER_RAW_ERROR = " ".join(OUTER_ERROR_SENTINELS)
 FRONTEND_IMAGE_EXPRESSION = (
     "${FRONTEND_IMAGE:-ghcr.io/nthu-physics-sa-it/pastexam:frontend}"
 )
@@ -542,8 +550,20 @@ def _activation_environment(
         "elif [[ \"$1\" == 'compose' && \"$*\" == *'config --quiet'* ]]; then\n"
         "  printf '%s' \"$FAKE_COMPOSE_QUIET_STDERR\" >&2\n"
         "  exit \"$FAKE_COMPOSE_QUIET_EXIT\"\n"
+        "elif [[ \"$1\" == 'image' && \"$2\" == 'inspect' ]]; then\n"
+        "  printf '%s' \"$FAKE_IMAGE_INSPECT_STDERR\" >&2\n"
+        "  exit \"$FAKE_IMAGE_INSPECT_EXIT\"\n"
+        "elif [[ \"$1\" == 'compose' && \"$*\" == *'PASTEXAM_MIGRATOR_CONTAINER_OK'* ]]; then\n"
+        "  printf '%s' \"$FAKE_CONTAINER_SENTINEL_OUTPUT\"\n"
+        "  printf '%s' \"$FAKE_CONTAINER_SENTINEL_STDERR\" >&2\n"
+        "  exit \"$FAKE_CONTAINER_SENTINEL_EXIT\"\n"
+        "elif [[ \"$1\" == 'compose' && \"$*\" == *'PASTEXAM_MIGRATOR_PYTHON_OK'* ]]; then\n"
+        "  printf '%s' \"$FAKE_PYTHON_SENTINEL_OUTPUT\"\n"
+        "  printf '%s' \"$FAKE_PYTHON_SENTINEL_STDERR\" >&2\n"
+        "  exit \"$FAKE_PYTHON_SENTINEL_EXIT\"\n"
         "elif [[ \"$1\" == 'compose' && \"$*\" == *'diagnose-head --json'* ]]; then\n"
         '  cat "$FAKE_MIGRATION_DIAGNOSTIC"\n'
+        "  printf '%s' \"$FAKE_MIGRATION_DIAGNOSTIC_STDERR\" >&2\n"
         "  exit \"$FAKE_MIGRATION_EXIT\"\n"
         "elif [[ \"$1\" == 'compose' && \"$*\" == *'require-head --json'* ]]; then\n"
         '  cat "$FAKE_MIGRATION_REPORT"\n'
@@ -621,8 +641,20 @@ def _activation_environment(
         "  elif [[ \"$1\" == 'compose' && \"$*\" == *'config --quiet'* ]]; then\n"
         "    printf '%s' \"$FAKE_COMPOSE_QUIET_STDERR\" >&2\n"
         "    return \"$FAKE_COMPOSE_QUIET_EXIT\"\n"
+        "  elif [[ \"$1\" == 'image' && \"$2\" == 'inspect' ]]; then\n"
+        "    printf '%s' \"$FAKE_IMAGE_INSPECT_STDERR\" >&2\n"
+        "    return \"$FAKE_IMAGE_INSPECT_EXIT\"\n"
+        "  elif [[ \"$1\" == 'compose' && \"$*\" == *'PASTEXAM_MIGRATOR_CONTAINER_OK'* ]]; then\n"
+        "    printf '%s' \"$FAKE_CONTAINER_SENTINEL_OUTPUT\"\n"
+        "    printf '%s' \"$FAKE_CONTAINER_SENTINEL_STDERR\" >&2\n"
+        "    return \"$FAKE_CONTAINER_SENTINEL_EXIT\"\n"
+        "  elif [[ \"$1\" == 'compose' && \"$*\" == *'PASTEXAM_MIGRATOR_PYTHON_OK'* ]]; then\n"
+        "    printf '%s' \"$FAKE_PYTHON_SENTINEL_OUTPUT\"\n"
+        "    printf '%s' \"$FAKE_PYTHON_SENTINEL_STDERR\" >&2\n"
+        "    return \"$FAKE_PYTHON_SENTINEL_EXIT\"\n"
         "  elif [[ \"$1\" == 'compose' && \"$*\" == *'diagnose-head --json'* ]]; then\n"
         '    cat "$FAKE_MIGRATION_DIAGNOSTIC"\n'
+        "    printf '%s' \"$FAKE_MIGRATION_DIAGNOSTIC_STDERR\" >&2\n"
         "    return \"$FAKE_MIGRATION_EXIT\"\n"
         "  elif [[ \"$1\" == 'compose' && \"$*\" == *'require-head --json'* ]]; then\n"
         '    cat "$FAKE_MIGRATION_REPORT"\n'
@@ -739,6 +771,15 @@ def _activation_environment(
             "FAKE_MIGRATION_REPORT": _bash_path(migration_report),
             "FAKE_MIGRATION_DIAGNOSTIC": _bash_path(migration_diagnostic),
             "FAKE_MIGRATION_EXIT": "0",
+            "FAKE_MIGRATION_DIAGNOSTIC_STDERR": "",
+            "FAKE_IMAGE_INSPECT_EXIT": "0",
+            "FAKE_IMAGE_INSPECT_STDERR": "",
+            "FAKE_CONTAINER_SENTINEL_OUTPUT": "PASTEXAM_MIGRATOR_CONTAINER_OK\n",
+            "FAKE_CONTAINER_SENTINEL_STDERR": "",
+            "FAKE_CONTAINER_SENTINEL_EXIT": "0",
+            "FAKE_PYTHON_SENTINEL_OUTPUT": "PASTEXAM_MIGRATOR_PYTHON_OK\n",
+            "FAKE_PYTHON_SENTINEL_STDERR": "",
+            "FAKE_PYTHON_SENTINEL_EXIT": "0",
             "FAKE_DOCKER_LOG": _bash_path(docker_log),
             "FAKE_NGINX_IMAGE": NGINX_IMAGE,
             "FAKE_BACKEND_IMAGE": BACKEND_IMAGE,
@@ -818,6 +859,7 @@ def _diagnostic_args(report: Path, **overrides: object) -> SimpleNamespace:
     values: dict[str, object] = {
         "report": report,
         "probe_exit_code": 0,
+        "outer_failure_code": None,
         "target_sha": RELEASE_SHA,
         "source_ci_run_id": 77,
         "source_ci_run_attempt": 1,
@@ -1068,6 +1110,52 @@ def test_class_zero_diagnostic_fails_closed_for_unusable_report(
 @pytest.mark.parametrize(
     "failure_code",
     [
+        "candidate_backend_image_missing",
+        "migrator_container_start_failed",
+        "migrator_python_start_failed",
+        "diagnose_head_envelope_missing",
+    ],
+)
+def test_class_zero_diagnostic_maps_safe_outer_failure_codes(
+    contract, tmp_path: Path, failure_code: str
+) -> None:
+    report_path = tmp_path / "report.json"
+
+    diagnostic = contract._build_class_zero_diagnostic(
+        _diagnostic_args(
+            report_path,
+            probe_exit_code=2,
+            outer_failure_code=failure_code,
+        )
+    )
+
+    assert diagnostic["probe_outcome"] == "unavailable"
+    assert diagnostic["failure_codes"] == [failure_code]
+    assert diagnostic["report_produced"] is False
+    assert diagnostic["report_json_valid"] is False
+    assert diagnostic["database_connected"] is None
+    assert diagnostic["current_equals_head"] is None
+    assert diagnostic["structural_schema_matches_head"] is None
+    assert diagnostic["upgrade_allowed"] is None
+    assert diagnostic["class_zero_eligible"] is None
+
+
+def test_class_zero_diagnostic_rejects_unbounded_outer_failure_code(
+    contract, tmp_path: Path
+) -> None:
+    with pytest.raises(contract.ContractError, match="outer diagnostic"):
+        contract._build_class_zero_diagnostic(
+            _diagnostic_args(
+                tmp_path / "report.json",
+                probe_exit_code=2,
+                outer_failure_code="registry failed at /private/path with secret",
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "failure_code",
+    [
         "migrator_initialization_failed",
         "database_or_lock_setup_failed",
         "advisory_lock_unavailable",
@@ -1172,7 +1260,7 @@ def test_class_zero_diagnostic_rejects_report_exit_disagreement(
     assert diagnostic["failure_codes"] == ["verifier_rejected"]
 
 
-def test_diagnostic_engine_runs_only_exact_one_shot_probe(tmp_path: Path) -> None:
+def test_diagnostic_engine_runs_only_bounded_staged_probes(tmp_path: Path) -> None:
     environment, backup_log, docker_log = _activation_environment(
         tmp_path,
         migration_revision="c3f8a1d6e9b2",
@@ -1195,6 +1283,18 @@ def test_diagnostic_engine_runs_only_exact_one_shot_probe(tmp_path: Path) -> Non
     diagnostic = json.loads(process.stdout)
     assert diagnostic["probe_outcome"] == "eligible"
     commands = docker_log.read_text(encoding="utf-8").splitlines()
+    image_checks = [command for command in commands if command.startswith("image inspect ")]
+    assert image_checks == [f"image inspect {BACKEND_IMAGE}"]
+    container_sentinels = [
+        command for command in commands if "PASTEXAM_MIGRATOR_CONTAINER_OK" in command
+    ]
+    assert len(container_sentinels) == 1
+    assert "run --rm --no-deps migrate /bin/sh -c" in container_sentinels[0]
+    python_sentinels = [
+        command for command in commands if "PASTEXAM_MIGRATOR_PYTHON_OK" in command
+    ]
+    assert len(python_sentinels) == 1
+    assert "run --rm --no-deps migrate python -c" in python_sentinels[0]
     probe = [command for command in commands if "diagnose-head --json" in command]
     assert len(probe) == 1
     assert "run --rm --no-deps migrate python migrate.py diagnose-head --json" in probe[0]
@@ -1204,6 +1304,158 @@ def test_diagnostic_engine_runs_only_exact_one_shot_probe(tmp_path: Path) -> Non
     forbidden = (" up ", " start ", " restart ", " stop ", " down ", " pull ", " build ")
     assert not any(token in f" {command} " for command in commands for token in forbidden)
     assert not any(command.startswith("exec ") for command in commands)
+
+
+def _diagnostic_activation_environment(
+    tmp_path: Path,
+) -> tuple[dict[str, str], Path, Path]:
+    environment, backup_log, docker_log = _activation_environment(
+        tmp_path,
+        migration_revision="c3f8a1d6e9b2",
+        repository_head="c3f8a1d6e9b2",
+    )
+    environment.update(
+        {
+            "ACTIVATION_CLASS_ZERO_DIAGNOSTIC_ONLY": "true",
+            "ACTIVATION_TARGET_SHA": RELEASE_SHA,
+            "ACTIVATION_SOURCE_CI_RUN_ID": "77",
+            "ACTIVATION_SOURCE_CI_RUN_ATTEMPT": "1",
+            "ACTIVATION_CURRENT_ACTIVE_SHA": "a" * 40,
+            "ACTIVATION_EXPECTED_REVISION": "c3f8a1d6e9b2",
+        }
+    )
+    return environment, backup_log, docker_log
+
+
+@pytest.mark.parametrize(
+    ("environment_overrides", "expected_code", "forbidden_markers"),
+    [
+        (
+            {
+                "FAKE_IMAGE_INSPECT_EXIT": "1",
+                "FAKE_IMAGE_INSPECT_STDERR": OUTER_RAW_ERROR,
+            },
+            "candidate_backend_image_missing",
+            (
+                "PASTEXAM_MIGRATOR_CONTAINER_OK",
+                "PASTEXAM_MIGRATOR_PYTHON_OK",
+                "diagnose-head",
+            ),
+        ),
+        (
+            {
+                "FAKE_CONTAINER_SENTINEL_EXIT": "125",
+                "FAKE_CONTAINER_SENTINEL_STDERR": OUTER_RAW_ERROR,
+            },
+            "migrator_container_start_failed",
+            ("PASTEXAM_MIGRATOR_PYTHON_OK", "diagnose-head"),
+        ),
+        (
+            {
+                "FAKE_PYTHON_SENTINEL_OUTPUT": "",
+                "FAKE_PYTHON_SENTINEL_STDERR": OUTER_RAW_ERROR,
+            },
+            "migrator_python_start_failed",
+            ("diagnose-head",),
+        ),
+    ],
+)
+def test_diagnostic_engine_stops_at_first_outer_failure_without_leakage(
+    tmp_path: Path,
+    environment_overrides: dict[str, str],
+    expected_code: str,
+    forbidden_markers: tuple[str, ...],
+) -> None:
+    environment, backup_log, docker_log = _diagnostic_activation_environment(tmp_path)
+    environment.update(environment_overrides)
+
+    process = _activate(environment)
+
+    assert process.returncode == 0, process.stderr
+    diagnostic = json.loads(process.stdout)
+    assert diagnostic["failure_codes"] == [expected_code]
+    assert diagnostic["probe_outcome"] == "unavailable"
+    assert diagnostic["report_produced"] is False
+    assert diagnostic["report_json_valid"] is False
+    assert diagnostic["class_zero_eligible"] is None
+    _assert_sentinel_absent(process.stdout, process.stderr)
+    assert all(
+        marker not in process.stdout and marker not in process.stderr
+        for marker in OUTER_ERROR_SENTINELS
+    )
+    commands = docker_log.read_text(encoding="utf-8").splitlines()
+    assert commands.count(f"image inspect {BACKEND_IMAGE}") == 1
+    for marker in forbidden_markers:
+        assert not any(marker in command for command in commands)
+    assert not backup_log.exists()
+
+
+@pytest.mark.parametrize("contents", ["", "not-json"])
+def test_diagnostic_engine_classifies_missing_trusted_envelope(
+    tmp_path: Path, contents: str
+) -> None:
+    environment, backup_log, docker_log = _diagnostic_activation_environment(tmp_path)
+    raw_report = tmp_path / "untrusted-diagnostic.json"
+    raw_report.write_text(contents, encoding="utf-8")
+    environment.update(
+        {
+            "FAKE_MIGRATION_DIAGNOSTIC": _bash_path(raw_report),
+            "FAKE_MIGRATION_EXIT": "2",
+            "FAKE_MIGRATION_DIAGNOSTIC_STDERR": OUTER_RAW_ERROR,
+        }
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode == 0, process.stderr
+    diagnostic = json.loads(process.stdout)
+    assert diagnostic["failure_codes"] == ["diagnose_head_envelope_missing"]
+    assert diagnostic["probe_outcome"] == "unavailable"
+    assert diagnostic["report_produced"] is False
+    assert diagnostic["report_json_valid"] is False
+    _assert_sentinel_absent(process.stdout, process.stderr)
+    assert all(
+        marker not in process.stdout and marker not in process.stderr
+        for marker in OUTER_ERROR_SENTINELS
+    )
+    commands = docker_log.read_text(encoding="utf-8").splitlines()
+    assert any("PASTEXAM_MIGRATOR_CONTAINER_OK" in command for command in commands)
+    assert any("PASTEXAM_MIGRATOR_PYTHON_OK" in command for command in commands)
+    assert sum("diagnose-head --json" in command for command in commands) == 1
+    assert not backup_log.exists()
+
+
+def test_diagnostic_engine_preserves_valid_inner_failure_envelope(
+    tmp_path: Path,
+) -> None:
+    environment, backup_log, docker_log = _diagnostic_activation_environment(tmp_path)
+    inner_report = tmp_path / "inner-failure.json"
+    inner_report.write_text(
+        json.dumps(
+            _migration_probe(
+                None,
+                outcome="failed",
+                failure_code="database_or_lock_setup_failed",
+            )
+        ),
+        encoding="utf-8",
+    )
+    environment.update(
+        {
+            "FAKE_MIGRATION_DIAGNOSTIC": _bash_path(inner_report),
+            "FAKE_MIGRATION_EXIT": "2",
+        }
+    )
+
+    process = _activate(environment)
+
+    assert process.returncode == 0, process.stderr
+    diagnostic = json.loads(process.stdout)
+    assert diagnostic["failure_codes"] == ["database_or_lock_setup_failed"]
+    assert diagnostic["probe_outcome"] == "unavailable"
+    commands = docker_log.read_text(encoding="utf-8").splitlines()
+    assert sum("diagnose-head --json" in command for command in commands) == 1
+    assert not backup_log.exists()
 
 
 def _validate_resolved_mounts(

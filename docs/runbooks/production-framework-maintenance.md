@@ -133,11 +133,15 @@ Only that live evidence may classify production migration drift.
 The same installed wrapper, controller, activation engine, and contract helper
 also carry the fixed `diagnose-class-zero <target-sha> <source-run> <attempt>`
 surface when that reviewed source is installed; no additional privileged helper
-is introduced. The command permits only the exact one-shot, `--rm --no-deps`
-migrator `diagnose-head --json` probe and returns a revalidated sanitized
-summary. `diagnose-head` shares the `require-head` Class-0 predicate but seals
-typed/stage failure codes without returning exception text, SQL, paths, or
-secrets; production preflight remains on `require-head`. Installation alone
+is introduced. The command checks only whether the exact digest-pinned backend
+image is locally present and never pulls it. If present, fixed shell and Python
+literal-output sentinels run through the same `migrate` service before the
+trusted `diagnose-head --json` probe; every ephemeral run retains `--rm
+--no-deps`. The resulting finite stage code distinguishes local image absence,
+container execution, Python execution, and missing-envelope boundaries without
+returning Docker/registry stderr, exception text, SQL, paths, container IDs, or
+secrets. `diagnose-head` shares the `require-head` Class-0 predicate, and
+production preflight remains on `require-head`. Installation alone
 does not authorize the probe. Each live diagnostic
 requires separate authorization, and it grants no preflight, activation,
 rollback, general Docker, SQL, or migration authority. `observe` remains
