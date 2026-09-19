@@ -596,17 +596,17 @@ function handleDownload() {
   border-radius: 0;
 }
 
+:global(
+  body
+    .p-dialog.pdf-preview-dialog--downloadable:not(.pdf-preview-dialog-christmas)
+    .p-dialog-content
+) {
+  min-height: 0;
+  max-height: none;
+}
+
 /* Mobile responsive adjustments */
 @media (width < 768px) {
-  :global(
-    body
-      .p-dialog.pdf-preview-dialog--downloadable:not(.pdf-preview-dialog-christmas)
-      .p-dialog-content
-  ) {
-    min-height: 0;
-    max-height: none;
-  }
-
   :deep(.p-dialog .p-dialog-header) {
     font-size: 1rem;
   }
