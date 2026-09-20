@@ -61,7 +61,7 @@ const CHRISTMAS_BACKGROUND_SNOWFLAKES = Object.freeze(
         '--snow-drift-return': `${(driftMid * -0.35).toFixed(2)}vw`,
         '--snow-drift-end': `${driftEnd.toFixed(2)}vw`,
         '--snow-opacity': (0.42 + ((index * 17) % 43) * 0.012).toFixed(2),
-        '--snow-blur': `${(((index * 5) % 4) * 0.24).toFixed(2)}px`,
+        '--snow-core': `${100 - ((index * 5) % 4) * 22}%`,
         '--snow-rotation-mid': `${(rotation * 0.42).toFixed(2)}deg`,
         '--snow-rotation-late': `${(rotation * 0.76).toFixed(2)}deg`,
         '--snow-rotation': `${rotation}deg`,
@@ -97,7 +97,6 @@ const CHRISTMAS_DECORATIVE_SNOWFLAKES = Object.freeze(
         '--flake-rotation': `${rotation}deg`,
         '--flake-opacity-low': (0.38 + ((index * 7) % 4) * 0.06).toFixed(2),
         '--flake-opacity-high': (0.7 + ((index * 11) % 4) * 0.07).toFixed(2),
-        '--flake-blur': `${[0, 0.16, 0.34][sizeTier]}px`,
       }),
     })
   })

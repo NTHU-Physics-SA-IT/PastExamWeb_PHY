@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount, shallowMount } from '@vue/test-utils'
+import { enableAutoUnmount, flushPromises, mount, shallowMount } from '@vue/test-utils'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import PrimeVue from 'primevue/config'
@@ -12,6 +12,32 @@ import archiveSource from '@/views/Archive.vue?raw'
 import { useTheme } from '@/utils/useTheme'
 
 const globalStyles = readFileSync(resolve('src/style.css'), 'utf8')
+enableAutoUnmount(afterEach)
+
+// jsdom does not negotiate viewport / reduced-motion media queries. Exercise
+// the real selectors and declarations from the selected CSSOM branch; actual
+// browser media negotiation and visual density remain preview acceptance.
+function mountSnowStyles(activeMedia = []) {
+  const source = document.createElement('style')
+  source.textContent = globalStyles.slice(
+    globalStyles.indexOf('.app-christmas-frosted-window > .christmas-snowfall {'),
+    globalStyles.indexOf('.p-error {')
+  )
+  document.head.append(source)
+  const styles = document.createElement('style')
+  styles.dataset.snowTest = ''
+  styles.textContent = [...source.sheet.cssRules]
+    .flatMap((rule) =>
+      rule.media
+        ? activeMedia.includes(rule.media.mediaText)
+          ? [...rule.cssRules].map((child) => child.cssText)
+          : []
+        : [rule.cssText]
+    )
+    .join('\n')
+  source.remove()
+  document.head.append(styles)
+}
 
 const getActiveMock = vi.hoisted(() => vi.fn())
 const snowEngineStartMock = vi.hoisted(() => vi.fn())
@@ -55,6 +81,7 @@ describe('App shared Christmas background', () => {
     ConfirmationEventBus.emit('close')
     document.documentElement.classList.remove('admin-page-active')
     document.documentElement.removeAttribute('data-effective-theme')
+    document.querySelectorAll('style[data-snow-test]').forEach((style) => style.remove())
   })
 
   it('hosts the frosted-window state and existing varied snowfall once for Christmas', async () => {
@@ -81,6 +108,88 @@ describe('App shared Christmas background', () => {
     expect(wrapper.get('#app').classes()).not.toContain('app-christmas-frosted-window')
     expect(wrapper.find('.christmas-snowfall').exists()).toBe(false)
 
+    wrapper.unmount()
+  })
+
+  it.each([false, true])(
+    'removes snow on return to Classic (dark=%s) and disposes its watcher',
+    async (dark) => {
+      getActiveMock.mockResolvedValueOnce({ data: { active_theme: 'christmas' } })
+      const wrapper = mountApp()
+      await flushPromises()
+      const theme = useTheme()
+      theme.isDarkTheme.value = dark
+      theme.applyActiveSiteTheme('general')
+      await flushPromises()
+      expect(theme.effectiveTheme.value).toBe(dark ? 'dark' : 'light')
+      expect(wrapper.find('.christmas-snowfall').exists()).toBe(false)
+      expect(snowEngineStopMock).toHaveBeenCalled()
+
+      theme.applyActiveSiteTheme('christmas')
+      await flushPromises()
+      expect(wrapper.findAll('.christmas-snowfall')).toHaveLength(1)
+      expect(wrapper.findAll('.christmas-background-snowflake')).toHaveLength(72)
+      expect(wrapper.findAll('.christmas-decorative-snowflake')).toHaveLength(18)
+      wrapper.unmount()
+      const startCount = snowEngineStartMock.mock.calls.length
+      const stopCount = snowEngineStopMock.mock.calls.length
+      theme.applyActiveSiteTheme('general')
+      await flushPromises()
+      theme.applyActiveSiteTheme('christmas')
+      await flushPromises()
+      expect(snowEngineStartMock).toHaveBeenCalledTimes(startCount)
+      expect(snowEngineStopMock).toHaveBeenCalledTimes(stopCount)
+    }
+  )
+
+  it('retains the full moving snow field without per-flake filter surfaces', async () => {
+    getActiveMock.mockResolvedValueOnce({ data: { active_theme: 'christmas' } })
+    mountSnowStyles()
+    const wrapper = mountApp()
+    document.body.append(wrapper.element)
+    await flushPromises()
+    expect(wrapper.get('.christmas-snowfall').attributes('aria-hidden')).toBe('true')
+    const dots = wrapper.findAll('.christmas-background-snowflake')
+    const glyphs = wrapper.findAll('.christmas-decorative-snowflake')
+    expect(dots).toHaveLength(72)
+    expect(glyphs).toHaveLength(18)
+    for (const flake of [...dots, ...glyphs]) {
+      const style = getComputedStyle(flake.element)
+      expect(['', 'none']).toContain(style.filter)
+      expect(style.display).not.toBe('none')
+      expect(style.pointerEvents).toBe('none')
+      expect(style.animation).toContain('infinite')
+    }
+    expect(
+      new Set(dots.map((flake) => flake.element.style.getPropertyValue('--snow-duration'))).size
+    ).toBeGreaterThan(10)
+    expect(
+      new Set(dots.map((flake) => flake.element.style.getPropertyValue('--snow-left'))).size
+    ).toBeGreaterThan(40)
+    expect(new Set(glyphs.map((flake) => flake.text()))).toEqual(new Set(['❄︎', '❅', '❆']))
+    expect(getComputedStyle(glyphs[0].element).animation).toContain('christmasSnowflakeFlicker')
+    wrapper.unmount()
+  })
+
+  it.each([
+    [[], 72, 18],
+    [['(max-width: 767px)'], 48, 12],
+    [['(prefers-reduced-motion: reduce)'], 0, 0],
+    [['(max-width: 767px)', '(prefers-reduced-motion: reduce)'], 0, 0],
+  ])('preserves snow visibility for selected media %j', async (media, dots, glyphs) => {
+    getActiveMock.mockResolvedValueOnce({ data: { active_theme: 'christmas' } })
+    mountSnowStyles(media)
+    const wrapper = mountApp()
+    document.body.append(wrapper.element)
+    await flushPromises()
+    const visible = (selector) =>
+      wrapper
+        .findAll(selector)
+        .filter((flake) => getComputedStyle(flake.element).display !== 'none').length
+    expect(visible('.christmas-background-snowflake')).toBe(dots)
+    expect(visible('.christmas-decorative-snowflake')).toBe(glyphs)
+    // Accessibility mode only suppresses the environmental particles, not the theme.
+    expect(wrapper.get('#app').classes()).toContain('app-christmas-frosted-window')
     wrapper.unmount()
   })
 

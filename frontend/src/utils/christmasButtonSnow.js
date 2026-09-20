@@ -99,26 +99,28 @@ function createBrowserSeed() {
   return Math.floor(Math.random() * 4294967296)
 }
 
-function isExplicitlyHidden(element) {
+function isHiddenOrTinyControl(element) {
   if (element.hidden || element.closest('[hidden],[inert]')) return true
   if (element.getAttribute('aria-hidden') === 'true') return true
 
-  if (typeof globalThis.getComputedStyle !== 'function') return false
-  const styles = globalThis.getComputedStyle(element)
-  if (styles.display === 'none' || styles.visibility === 'hidden') return true
+  let styles = null
+  if (typeof globalThis.getComputedStyle === 'function') {
+    styles = globalThis.getComputedStyle(element)
+    if (styles.display === 'none' || styles.visibility === 'hidden') return true
+  }
 
+  // Both predicates use the same current geometry; no DOM writes separate them.
   const rect = element.getBoundingClientRect?.()
-  return Boolean(
+  if (
     rect &&
     rect.width === 0 &&
     rect.height === 0 &&
-    styles.width === '0px' &&
-    styles.height === '0px'
-  )
-}
+    styles?.width === '0px' &&
+    styles?.height === '0px'
+  ) {
+    return true
+  }
 
-function isTinyNonActionControl(element) {
-  const rect = element.getBoundingClientRect?.()
   return Boolean(rect && rect.width > 0 && rect.height > 0 && rect.width < 16 && rect.height < 16)
 }
 
@@ -128,7 +130,7 @@ export function isEligibleChristmasSnowButton(element) {
   if (element.matches(EXCLUDED_CONTROL_SELECTOR) || element.closest(EXCLUDED_CONTROL_SELECTOR)) {
     return false
   }
-  if (isExplicitlyHidden(element) || isTinyNonActionControl(element)) return false
+  if (isHiddenOrTinyControl(element)) return false
   return true
 }
 
@@ -267,7 +269,11 @@ export function createChristmasButtonSnowEngine({
   }
 
   function decorateTree(node) {
-    forEachEligibleButton(node, decorateButton)
+    forEachEligibleButton(node, (button) => {
+      // A scan cannot change existing ownership. Hover/direct calls still check
+      // current eligibility in decorateButton, including hidden and opt-out state.
+      if (!decoratedButtons.has(button)) decorateButton(button)
+    })
   }
 
   function cleanupTree(node) {
