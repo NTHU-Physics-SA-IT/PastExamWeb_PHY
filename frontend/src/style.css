@@ -188,8 +188,12 @@ html[data-effective-theme='christmas'] {
   width: var(--snow-size);
   height: var(--snow-size);
   border-radius: 50%;
-  background: rgba(248, 253, 255, 0.98);
-  filter: blur(var(--snow-blur));
+  /* Paint the soft edge into the dot, without a per-particle filter surface. */
+  background: radial-gradient(
+    closest-side,
+    rgba(248, 253, 255, 0.98) var(--snow-core),
+    transparent 100%
+  );
   opacity: 0;
   pointer-events: none;
   animation: christmasBackgroundSnowfall var(--snow-duration) linear var(--snow-delay) infinite;
@@ -206,7 +210,6 @@ html[data-effective-theme='christmas'] {
   font-weight: 400;
   line-height: 1;
   text-shadow: 0 0 0.42rem rgba(218, 243, 250, 0.42);
-  filter: blur(var(--flake-blur));
   opacity: var(--flake-opacity-high);
   pointer-events: none;
   animation:

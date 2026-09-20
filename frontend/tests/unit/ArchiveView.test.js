@@ -515,6 +515,68 @@ describe('ArchiveView', () => {
     wrapper.unmount()
   })
 
+  it.each(['light', 'dark', 'christmas'])(
+    'preserves the outer scroll owner and scopes the Christmas card overflow contract in %s',
+    (theme) => {
+      const archiveViewSource = readFileSync(
+        resolve(globalThis.process.cwd(), 'src/views/Archive.vue'),
+        'utf8'
+      )
+      const primeFlexSource = readFileSync(
+        resolve(globalThis.process.cwd(), 'node_modules/primeflex/primeflex.css'),
+        'utf8'
+      )
+      const cardRule = archiveViewSource.match(
+        /\.archive-christmas \.card \{\n\s*isolation:[\s\S]*?\n\}/
+      )
+      const mainRule = archiveViewSource.match(/\n\.main-content \{[\s\S]*?\n\}/)
+      const scrollRule = primeFlexSource.match(/\.overflow-auto \{[\s\S]*?\n\}/)
+      expect(cardRule).not.toBeNull()
+      expect(mainRule).not.toBeNull()
+      expect(scrollRule).not.toBeNull()
+
+      // CSS/selector contract only: jsdom does not measure layout or scroll range.
+      const styles = document.createElement('style')
+      styles.textContent = `${cardRule[0]}\n${scrollRule[0]}\n${mainRule[0]}`
+      document.head.appendChild(styles)
+      archiveEffectiveThemeMock.value = theme
+      archiveIsDarkThemeMock.value = theme === 'dark'
+      const wrapper = mount(ArchiveView, {
+        attachTo: document.body,
+        global: {
+          provide: {
+            toast: { add: toastAddMock },
+            confirm: { require: confirmRequireMock },
+            sidebarVisible: ref(true),
+          },
+          stubs: componentStubs,
+        },
+      })
+
+      try {
+        const main = wrapper.get('.main-content')
+        const card = main.get(':scope > .card').element
+        const cardStyle = window.getComputedStyle(card)
+        expect(card.matches(styles.sheet.cssRules[0].selectorText)).toBe(theme === 'christmas')
+        if (theme === 'christmas') {
+          expect(cardStyle.overflow).toBe('visible')
+          expect(cardStyle.isolation).toBe('isolate')
+          expect(cardStyle.overflowX).toBe('visible')
+          expect(cardStyle.overflowY).toBe('visible')
+        } else {
+          expect(cardStyle.overflow).toBe('')
+          expect(cardStyle.isolation).toBe('auto')
+        }
+        expect(main.classes()).toContain('overflow-auto')
+        expect(window.getComputedStyle(main.element).overflow).toBe('auto')
+        expect(styles.sheet.cssRules[1].style.getPropertyPriority('overflow')).toBe('important')
+      } finally {
+        wrapper.unmount()
+        styles.remove()
+      }
+    }
+  )
+
   it('uses the Route 1 information-card and unified action semantics for Christmas archives', async () => {
     archiveEffectiveThemeMock.value = 'christmas'
     const wrapper = mount(ArchiveView, {

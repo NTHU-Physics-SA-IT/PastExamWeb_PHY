@@ -320,3 +320,395 @@ describe('Christmas button snow engine', () => {
     }
   })
 })
+
+describe('Christmas button snow redundant-work and lifecycle contracts', () => {
+  const engines = []
+
+  function createEngine(root, options = {}) {
+    const engine = createChristmasButtonSnowEngine({
+      root,
+      seedFactory: () => 42,
+      matchMedia: createMediaMatcher(),
+      ...options,
+    })
+    engines.push(engine)
+    return engine
+  }
+
+  function measureButton(button) {
+    const rect = vi
+      .spyOn(button, 'getBoundingClientRect')
+      .mockReturnValue({ width: 100, height: 32 })
+    const styles = vi.spyOn(globalThis, 'getComputedStyle')
+    return { rect, styles }
+  }
+
+  afterEach(() => {
+    engines.splice(0).forEach((engine) => engine.stop())
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+
+  it('reads one current rect for both hidden and tiny eligibility checks', () => {
+    const button = mountRoot('<button>Semester</button>').querySelector('button')
+    const { rect, styles } = measureButton(button)
+
+    expect(isEligibleChristmasSnowButton(button)).toBe(true)
+    expect(styles).toHaveBeenCalledOnce()
+    expect(rect).toHaveBeenCalledOnce()
+  })
+
+  it('rescans an already-owned moved subtree without reading style or geometry again', async () => {
+    const root = mountRoot('<button>Semester</button>')
+    const button = root.querySelector('button')
+    const { rect, styles } = measureButton(button)
+    const seedFactory = vi.fn(() => 42)
+    const engine = createEngine(root, { seedFactory })
+    engine.start()
+    const before = button.outerHTML
+    rect.mockClear()
+    styles.mockClear()
+
+    const container = document.createElement('section')
+    root.appendChild(container)
+    container.appendChild(button)
+    await flushMutationObserver()
+
+    expect(button.outerHTML).toBe(before)
+    expect(engine.getDebugState().decoratedButtonCount).toBe(1)
+    expect(seedFactory).toHaveBeenCalledOnce()
+    expect(styles).not.toHaveBeenCalled()
+    expect(rect).not.toHaveBeenCalled()
+  })
+
+  it('still reads fresh hover geometry once and does not reuse an old eligibility result', () => {
+    const root = mountRoot('<button>Semester</button>')
+    const button = root.querySelector('button')
+    const { rect, styles } = measureButton(button)
+    const engine = createEngine(root)
+    engine.start()
+    rect.mockClear()
+    styles.mockClear()
+
+    rect.mockReturnValue({ width: 8, height: 8 })
+    dispatchPointerEnter(button)
+    expect(engine.getDebugState().activeParticleCount).toBe(0)
+    expect(rect).toHaveBeenCalledOnce()
+    expect(styles).toHaveBeenCalledOnce()
+
+    rect.mockClear()
+    rect.mockReturnValue({ width: 100, height: 32 })
+    dispatchPointerEnter(button)
+    expect(rect).toHaveBeenCalledOnce()
+    expect(engine.getDebugState().activeParticleCount).toBeGreaterThanOrEqual(2)
+  })
+
+  it.each([
+    ['non-control', '<div id="target">Text</div>'],
+    ['opt-out', '<button id="target" data-christmas-snow="off">No snow</button>'],
+    ['excluded owner', '<div class="p-checkbox"><button id="target">Check</button></div>'],
+    ['hidden', '<button id="target" hidden>Hidden</button>'],
+    ['hidden ancestor', '<div hidden><button id="target">Hidden</button></div>'],
+    ['inert ancestor', '<div inert><button id="target">Inert</button></div>'],
+    ['ARIA hidden', '<button id="target" aria-hidden="true">Hidden</button>'],
+  ])('rejects %s before computed style or rect reads', (_name, markup) => {
+    const button = mountRoot(markup).querySelector('#target')
+    const { rect, styles } = measureButton(button)
+    expect(isEligibleChristmasSnowButton(button)).toBe(false)
+    expect(styles).not.toHaveBeenCalled()
+    expect(rect).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['display none', 'none', 'visible', '100px', '32px', 100, 32, false, 0],
+    ['visibility hidden', 'block', 'hidden', '100px', '32px', 100, 32, false, 0],
+    ['explicit zero box', 'block', 'visible', '0px', '0px', 0, 0, false, 1],
+    ['unmeasured auto box', 'block', 'visible', 'auto', 'auto', 0, 0, true, 1],
+    ['tiny action', 'block', 'visible', '15px', '15px', 15, 15, false, 1],
+    ['width boundary', 'block', 'visible', '16px', '15px', 16, 15, true, 1],
+    ['height boundary', 'block', 'visible', '15px', '16px', 15, 16, true, 1],
+    ['one zero dimension', 'block', 'visible', '0px', '15px', 0, 15, true, 1],
+  ])(
+    'preserves geometry semantics for %s',
+    (_name, display, visibility, width, height, rectWidth, rectHeight, eligible, reads) => {
+      const button = mountRoot('<button>Action</button>').querySelector('button')
+      const { rect, styles } = measureButton(button)
+      styles.mockReturnValue({ display, visibility, width, height })
+      rect.mockReturnValue({ width: rectWidth, height: rectHeight })
+      expect(isEligibleChristmasSnowButton(button)).toBe(eligible)
+      expect(rect).toHaveBeenCalledTimes(reads)
+    }
+  )
+
+  it('still rejects tiny controls when computed style is unavailable', () => {
+    const button = mountRoot('<button>Tiny</button>').querySelector('button')
+    const { rect } = measureButton(button)
+    vi.stubGlobal('getComputedStyle', undefined)
+    rect.mockReturnValue({ width: 8, height: 8 })
+    expect(isEligibleChristmasSnowButton(button)).toBe(false)
+    rect.mockReturnValue({ width: 100, height: 32 })
+    expect(isEligibleChristmasSnowButton(button)).toBe(true)
+  })
+
+  it.each(['hidden', 'display', 'visibility'])(
+    'can decorate initially %s controls after they become visible',
+    async (kind) => {
+      const root = mountRoot('<button>Initially hidden</button>')
+      const button = root.querySelector('button')
+      if (kind === 'hidden') button.hidden = true
+      else button.style[kind] = kind === 'display' ? 'none' : 'hidden'
+      const engine = createEngine(root)
+      engine.start()
+      expect(button.dataset.christmasButtonSnow).toBeUndefined()
+
+      if (kind === 'hidden') button.hidden = false
+      else button.style.removeProperty(kind)
+      await flushMutationObserver()
+      // Attribute-only visibility changes remain outside the childList observer.
+      expect(button.dataset.christmasButtonSnow).toBeUndefined()
+      dispatchPointerEnter(button)
+      expect(button.dataset.christmasButtonSnow).toBe('true')
+      expect(engine.getDebugState().activeParticleCount).toBeGreaterThanOrEqual(2)
+    }
+  )
+
+  it.each([
+    [
+      'disabled',
+      (button, _root, blocked) => {
+        button.disabled = blocked
+      },
+    ],
+    [
+      'ARIA disabled',
+      (button, _root, blocked) => {
+        button.setAttribute('aria-disabled', String(blocked))
+      },
+    ],
+    [
+      'hidden',
+      (button, _root, blocked) => {
+        button.hidden = blocked
+      },
+    ],
+    [
+      'display',
+      (button, _root, blocked) => {
+        button.style.display = blocked ? 'none' : ''
+      },
+    ],
+    [
+      'visibility',
+      (button, _root, blocked) => {
+        button.style.visibility = blocked ? 'hidden' : ''
+      },
+    ],
+    [
+      'opt-out',
+      (button, _root, blocked) => {
+        button.setAttribute('data-christmas-snow', blocked ? 'off' : 'on')
+      },
+    ],
+    [
+      'excluded owner',
+      (_button, root, blocked) => {
+        root.classList.toggle('p-checkbox', blocked)
+      },
+    ],
+  ])('preserves dynamic %s checks for already-decorated hover', (_name, change) => {
+    const root = mountRoot('<button>Dynamic action</button>')
+    const button = root.querySelector('button')
+    const engine = createEngine(root)
+    engine.start()
+    const pattern = button.dataset.christmasSnowPattern
+    change(button, root, true)
+    dispatchPointerEnter(button)
+    expect(engine.getDebugState().activeParticleCount).toBe(0)
+    expect(button.dataset.christmasSnowPattern).toBe(pattern)
+    change(button, root, false)
+    dispatchPointerEnter(button)
+    expect(engine.getDebugState().activeParticleCount).toBeGreaterThanOrEqual(2)
+  })
+
+  it('retains full eligibility for direct decoration calls, not just pointer entry', () => {
+    const root = mountRoot('<button>Action</button>')
+    const button = root.querySelector('button')
+    const engine = createEngine(root)
+    engine.start()
+    button.hidden = true
+    expect(engine.decorateButton(button)).toBeNull()
+    button.hidden = false
+    button.setAttribute('data-christmas-snow', 'off')
+    expect(engine.decorateButton(button)).toBeNull()
+    button.removeAttribute('data-christmas-snow')
+    expect(engine.decorateButton(button)).toEqual(generateSnowPattern(42))
+  })
+
+  it('already suppresses nested-child pointer movement but allows genuine re-entry', () => {
+    const root = mountRoot(
+      '<button><span>Semester</span><i class="pi pi-angle-down"></i></button><div id="outside"></div>'
+    )
+    const button = root.querySelector('button')
+    const label = button.querySelector('span')
+    const icon = button.querySelector('i')
+    const outside = root.querySelector('#outside')
+    const { rect, styles } = measureButton(button)
+    const seedFactory = vi.fn(() => 42)
+    const engine = createEngine(root, { seedFactory })
+    engine.start()
+    dispatchPointerEnter(label, outside)
+    const initialParticles = [...button.querySelectorAll('.christmas-button-snow-particle')]
+    expect(initialParticles.length).toBeGreaterThanOrEqual(2)
+    expect(seedFactory).toHaveBeenCalledTimes(2)
+    rect.mockClear()
+    styles.mockClear()
+    dispatchPointerEnter(icon, label)
+    dispatchPointerEnter(label, icon)
+    expect([...button.querySelectorAll('.christmas-button-snow-particle')]).toEqual(
+      initialParticles
+    )
+    expect(rect).not.toHaveBeenCalled()
+    expect(styles).not.toHaveBeenCalled()
+    expect(seedFactory).toHaveBeenCalledTimes(2)
+    dispatchPointerEnter(outside, label)
+    dispatchPointerEnter(icon, outside)
+    expect(seedFactory).toHaveBeenCalledTimes(3)
+    expect(engine.getDebugState().activeParticleCount).toBe(
+      Math.min(initialParticles.length * 2, 8)
+    )
+  })
+
+  it('does not mistake v-show styles or non-control toggle-icon replacement for a button rescan', async () => {
+    const root = mountRoot(
+      '<button>Semester<svg></svg></button><section><button>Preview</button></section>'
+    )
+    const header = root.querySelector('button')
+    const content = root.querySelector('section')
+    const { rect, styles } = measureButton(header)
+    const engine = createEngine(root)
+    engine.start()
+    rect.mockClear()
+    styles.mockClear()
+    content.style.display = 'none'
+    content.style.display = ''
+    header
+      .querySelector('svg')
+      .replaceWith(document.createElementNS('http://www.w3.org/2000/svg', 'svg'))
+    await flushMutationObserver()
+    expect(engine.getDebugState().decoratedButtonCount).toBe(2)
+    expect(styles).not.toHaveBeenCalled()
+    expect(rect).not.toHaveBeenCalled()
+  })
+
+  it('decorates body-level dialog subtrees and releases removed/reinserted controls', async () => {
+    const app = mountRoot('<button>App action</button>')
+    let seed = 100
+    const engine = createEngine(document.body, { seedFactory: () => seed++ })
+    engine.start()
+    const portal = mountRoot('<div role="dialog"><button>Dialog save</button></div>')
+    const button = portal.querySelector('button')
+    await flushMutationObserver()
+    expect(app.contains(button)).toBe(false)
+    expect(button.dataset.christmasButtonSnow).toBe('true')
+    const firstPattern = button.dataset.christmasSnowPattern
+    dispatchPointerEnter(button)
+    expect(engine.getDebugState().activeParticleCount).toBeGreaterThanOrEqual(2)
+    portal.remove()
+    await flushMutationObserver()
+    expect(engine.getDebugState().decoratedButtonCount).toBe(1)
+    expect(engine.getDebugState().activeParticleCount).toBe(0)
+    expect(button.dataset.christmasButtonSnow).toBeUndefined()
+    document.body.appendChild(portal)
+    await flushMutationObserver()
+    expect(button.dataset.christmasButtonSnow).toBe('true')
+    expect(button.dataset.christmasSnowPattern).not.toBe(firstPattern)
+  })
+
+  it('keeps deterministic particle styles, duration ranges, the cap and animation cleanup', () => {
+    function burst() {
+      const root = mountRoot('<button>Save</button>')
+      const button = root.querySelector('button')
+      let seed = 300
+      const engine = createEngine(root, { seedFactory: () => seed++ })
+      engine.start()
+      dispatchPointerEnter(button)
+      const particles = [...button.querySelectorAll('.christmas-button-snow-particle')]
+      const styles = particles.map((particle) => particle.getAttribute('style'))
+      expect(particles.length).toBeGreaterThanOrEqual(2)
+      expect(particles.length).toBeLessThanOrEqual(5)
+      for (const particle of particles) {
+        const duration = parseFloat(
+          particle.style.getPropertyValue('--christmas-particle-duration')
+        )
+        const delay = parseFloat(particle.style.getPropertyValue('--christmas-particle-delay'))
+        expect(duration).toBeGreaterThanOrEqual(350)
+        expect(duration).toBeLessThanOrEqual(850)
+        expect(delay).toBeGreaterThanOrEqual(0)
+        expect(delay).toBeLessThanOrEqual(70)
+      }
+      for (let i = 0; i < 20; i += 1) dispatchPointerEnter(button)
+      expect(engine.getDebugState().activeParticleCount).toBe(8)
+      ;[...button.querySelectorAll('.christmas-button-snow-particle')].forEach(
+        (particle, index) => {
+          particle.dispatchEvent(new Event(index % 2 ? 'animationcancel' : 'animationend'))
+        }
+      )
+      expect(engine.getDebugState().activeParticleCount).toBe(0)
+      return styles
+    }
+    expect(burst()).toEqual(burst())
+  })
+
+  it('rechecks changing fine-pointer and reduced-motion settings without removing static snow', () => {
+    const root = mountRoot('<button>Save</button>')
+    const button = root.querySelector('button')
+    const matchMedia = createMediaMatcher()
+    const engine = createEngine(root, { matchMedia })
+    engine.start()
+    for (const media of [{ finePointer: false }, { reducedMotion: true }]) {
+      matchMedia.mockImplementation(createMediaMatcher(media))
+      dispatchPointerEnter(button)
+      expect(engine.getDebugState().activeParticleCount).toBe(0)
+      expect(button.dataset.christmasButtonSnow).toBe('true')
+    }
+    matchMedia.mockImplementation(createMediaMatcher())
+    dispatchPointerEnter(button)
+    expect(engine.getDebugState().activeParticleCount).toBeGreaterThanOrEqual(2)
+  })
+
+  it('restores owned state, removes listeners/observer/particles and retains unrelated style changes', async () => {
+    const root = mountRoot(
+      '<button data-christmas-button-snow="prior" data-christmas-snow-pattern="original" style="--christmas-snow-depth: 0.7rem !important; color: red">Save</button>'
+    )
+    const button = root.querySelector('button')
+    const disconnect = vi.spyOn(MutationObserver.prototype, 'disconnect')
+    const removeListener = vi.spyOn(root, 'removeEventListener')
+    const engine = createEngine(root)
+    engine.start()
+    dispatchPointerEnter(button)
+    const activePattern = button.dataset.christmasSnowPattern
+    button.style.color = 'blue'
+    engine.stop()
+    expect(disconnect).toHaveBeenCalledOnce()
+    expect(removeListener).toHaveBeenCalledWith('pointerover', expect.any(Function))
+    expect(engine.getDebugState()).toEqual({
+      active: false,
+      observerCount: 0,
+      decoratedButtonCount: 0,
+      activeParticleCount: 0,
+    })
+    expect(button.style.getPropertyValue('--christmas-snow-depth')).toBe('0.7rem')
+    expect(button.style.getPropertyPriority('--christmas-snow-depth')).toBe('important')
+    expect(button.style.color).toBe('blue')
+    expect(button.dataset.christmasButtonSnow).toBe('prior')
+    expect(button.dataset.christmasSnowPattern).toBe('original')
+    expect(button.querySelector('.christmas-button-snow-particle')).toBeNull()
+    root.appendChild(document.createElement('button'))
+    dispatchPointerEnter(button)
+    await flushMutationObserver()
+    expect(engine.getDebugState().activeParticleCount).toBe(0)
+    expect(engine.getDebugState().decoratedButtonCount).toBe(0)
+    engine.start()
+    expect(button.dataset.christmasSnowPattern).toBe(activePattern)
+  })
+})
