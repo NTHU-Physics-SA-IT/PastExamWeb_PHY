@@ -3226,7 +3226,7 @@ const mobileMenuItems = computed(() => {
 
 .archive-christmas .card {
   isolation: isolate;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .archive-christmas .card > * {
