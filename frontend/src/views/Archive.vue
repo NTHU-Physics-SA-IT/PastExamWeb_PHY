@@ -4136,7 +4136,7 @@ const mobileMenuItems = computed(() => {
 :global(.mobile-drawer.mobile-drawer-christmas .p-sidebar-header) {
   border-bottom-color: rgba(222, 199, 142, 0.25) !important;
   color: #f8f2e8 !important;
-  background: linear-gradient(100deg, #174a42 0%, #113747 58%, #60353a 100%) !important;
+  background: transparent !important;
 }
 
 :deep(.mobile-drawer .p-sidebar-close),
@@ -4516,14 +4516,20 @@ const mobileMenuItems = computed(() => {
     border-color: rgba(214, 230, 223, 0.22) !important;
   }
 
+  /* Match the desktop sidebar: paint the translucent surface once per category panel so
+     nested PanelMenu layers do not stack into darker blocks with lighter gaps. */
+  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-panel) {
+    border-color: rgba(222, 199, 142, 0.12) !important;
+    background: rgba(7, 34, 44, 0.5) !important;
+  }
+
   :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu),
-  :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-panel),
   :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-header),
   :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-header-content),
   :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-item-content),
   :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-content) {
     border-color: rgba(222, 199, 142, 0.12) !important;
-    background: rgba(7, 34, 44, 0.48) !important;
+    background: transparent !important;
   }
 
   :global(.mobile-drawer.mobile-drawer-christmas .p-panelmenu-header-link),
@@ -4629,7 +4635,7 @@ const mobileMenuItems = computed(() => {
   :global(.mobile-drawer.mobile-drawer-christmas .p-inputtext) {
     border-color: rgba(222, 199, 142, 0.3) !important;
     color: #f8f2e8 !important;
-    background: rgba(5, 24, 27, 0.7) !important;
+    background: rgba(7, 30, 42, 0.7) !important;
   }
 
   .upload-section,

@@ -788,6 +788,62 @@ describe('ArchiveView', () => {
     expect(mobileUploadSectionRule?.[1]).toContain('box-shadow: none;')
   })
 
+  it('lets the Christmas mobile drawer header share the drawer page background', () => {
+    const archiveViewSource = readFileSync(
+      resolve(globalThis.process.cwd(), 'src/views/Archive.vue'),
+      'utf8'
+    )
+    const mobileHeaderRule = archiveViewSource.match(
+      /:global\(\.mobile-drawer\.mobile-drawer-christmas \.p-drawer-header\),\s*:global\(\.mobile-drawer\.mobile-drawer-christmas \.p-sidebar-header\) \{([\s\S]*?)\n\}/
+    )
+
+    // The drawer shell already paints the page gradient, so a transparent header continues
+    // the same surface as the course list below instead of a separate banner gradient.
+    expect(mobileHeaderRule?.[1]).toContain('background: transparent !important;')
+    expect(mobileHeaderRule?.[1]).not.toContain('gradient')
+    expect(mobileHeaderRule?.[1]).toContain(
+      'border-bottom-color: rgba(222, 199, 142, 0.25) !important;'
+    )
+    expect(mobileHeaderRule?.[1]).toContain('color: #f8f2e8 !important;')
+  })
+
+  it('paints the Christmas mobile drawer course list with the single desktop panel surface', () => {
+    const archiveViewSource = readFileSync(
+      resolve(globalThis.process.cwd(), 'src/views/Archive.vue'),
+      'utf8'
+    )
+    const backgroundOf = (rule) =>
+      rule?.[1].match(/\n\s*background: ([^;!]+?)(?: !important)?;/)?.[1]
+    const desktopPanelRule = archiveViewSource.match(
+      /\.archive-christmas :deep\(\.p-panelmenu-panel\) \{([\s\S]*?)\n\}/
+    )
+    const desktopSearchInputRule = archiveViewSource.match(
+      /\.archive-christmas \.sidebar :deep\(\.p-inputtext\) \{([\s\S]*?)\n\}/
+    )
+    const mobilePanelRule = archiveViewSource.match(
+      /\n {2}:global\(\.mobile-drawer\.mobile-drawer-christmas \.p-panelmenu-panel\) \{([\s\S]*?)\n {2}\}/
+    )
+    const mobileNestedLayerRule = archiveViewSource.match(
+      /\n {2}:global\(\.mobile-drawer\.mobile-drawer-christmas \.p-panelmenu\),\s*:global\(\.mobile-drawer\.mobile-drawer-christmas \.p-panelmenu-header\),\s*:global\(\.mobile-drawer\.mobile-drawer-christmas \.p-panelmenu-header-content\),\s*:global\(\.mobile-drawer\.mobile-drawer-christmas \.p-panelmenu-item-content\),\s*:global\(\.mobile-drawer\.mobile-drawer-christmas \.p-panelmenu-content\) \{([\s\S]*?)\n {2}\}/
+    )
+    const mobileSearchInputRule = archiveViewSource.match(
+      /:global\(\.mobile-drawer\.mobile-drawer-christmas \.p-inputtext\) \{([\s\S]*?)\n {2}\}/
+    )
+
+    // The translucent desktop surface is painted once per category panel; repeating it on
+    // nested PanelMenu layers stacks into dark blocks separated by lighter gaps.
+    expect(backgroundOf(desktopPanelRule)).toBe('rgba(7, 34, 44, 0.5)')
+    expect(backgroundOf(mobilePanelRule)).toBe(backgroundOf(desktopPanelRule))
+    expect(mobilePanelRule?.[1]).toContain('border-color: rgba(222, 199, 142, 0.12) !important;')
+    expect(backgroundOf(mobileNestedLayerRule)).toBe('transparent')
+    expect(archiveViewSource.match(/rgba\(7, 34, 44, 0\.\d+\)/g)).toHaveLength(2)
+    expect(backgroundOf(desktopSearchInputRule)).toBe('rgba(7, 30, 42, 0.7)')
+    expect(backgroundOf(mobileSearchInputRule)).toBe(backgroundOf(desktopSearchInputRule))
+    expect(mobileSearchInputRule?.[1]).toContain(
+      'border-color: rgba(222, 199, 142, 0.3) !important;'
+    )
+  })
+
   it('lets the course title bar share the continuous Christmas page background', () => {
     const archiveViewSource = readFileSync(
       resolve(globalThis.process.cwd(), 'src/views/Archive.vue'),
